@@ -332,6 +332,11 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 "paper_code",
                 "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_code VARCHAR(16)",
             )
+            execute_migration_step(
+                "papers",
+                "journal_id",
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS journal_id UUID REFERENCES journals(id) ON DELETE SET NULL",
+            )
             try:
                 connection.execute(
                     text(
@@ -341,6 +346,22 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 )
             except Exception:
                 logger.exception("Automatic database migration failed while indexing papers.paper_code")
+            try:
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_papers_journal_id ON papers (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_normalized_name ON journals (normalized_name)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_print_issn ON journals (print_issn)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_electronic_issn ON journals (electronic_issn)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_status ON journals (status)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_aliases_journal_id ON journal_aliases (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_aliases_normalized_alias ON journal_aliases (normalized_alias)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_journal_id ON journal_metrics (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_metric_type ON journal_metrics (metric_type)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_metric_value ON journal_metrics (metric_value)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_data_year ON journal_metrics (data_year)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_release_year ON journal_metrics (release_year)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_source_name ON journal_metrics (source_name)"))
+            except Exception:
+                logger.exception("Automatic database migration failed while indexing journal metadata tables")
             execute_migration_step(
                 "papers",
                 "type_confidence",

@@ -83,6 +83,9 @@ class Paper(Base):
     title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     journal: Mapped[str | None] = mapped_column(sa.String(512), nullable=True)
+    journal_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("journals.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     authors: Mapped[list] = mapped_column(json_type(), default=list)
     abstract: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     pdf_path: Mapped[str] = mapped_column(sa.Text)
@@ -136,6 +139,116 @@ class PaperImpactMetadata(Base):
     impact_factor_source: Mapped[str] = mapped_column(sa.String(64), default="unknown", nullable=False)
     impact_factor_year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
+class Journal(Base):
+    __tablename__ = "journals"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    canonical_name: Mapped[str] = mapped_column(sa.String(512), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(sa.String(512), nullable=False, unique=True, index=True)
+    print_issn: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    electronic_issn: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    publisher: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="active", server_default="active", nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
+class JournalAlias(Base):
+    __tablename__ = "journal_aliases"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    journal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("journals.id", ondelete="CASCADE"), index=True)
+    alias: Mapped[str] = mapped_column(sa.String(512), nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(sa.String(512), nullable=False, unique=True, index=True)
+    source: Mapped[str] = mapped_column(sa.String(64), default="manual", server_default="manual", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class JournalMetric(Base):
+    __tablename__ = "journal_metrics"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    journal_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("journals.id", ondelete="CASCADE"), index=True)
+    metric_type: Mapped[str] = mapped_column(sa.String(32), default="JIF", server_default="JIF", nullable=False, index=True)
+    metric_value: Mapped[float] = mapped_column(sa.Float, nullable=False, index=True)
+    data_year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    release_year: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    source_name: Mapped[str] = mapped_column(sa.String(128), nullable=False, index=True)
+    source_url: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    retrieved_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    source_snapshot_hash: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "journal_id",
+            "metric_type",
+            "data_year",
+            "release_year",
+            "source_name",
+            name="uq_journal_metric_identity",
+        ),
+    )
+
+
+class ElementProperty(Base):
+    __tablename__ = "element_properties"
+
+    symbol: Mapped[str] = mapped_column(sa.String(3), primary_key=True)
+    name: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    atomic_number: Mapped[int] = mapped_column(sa.Integer, nullable=False, unique=True, index=True)
+    atomic_mass: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    period: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    group_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
+    block: Mapped[str | None] = mapped_column(sa.String(1), nullable=True, index=True)
+    electronegativity_pauling: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    electronegativity_allen: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    covalent_radius_pyykko_pm: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    covalent_radius_cordero_pm: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    vdw_radius_pm: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    atomic_radius_pm: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    valence_electron_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    common_oxidation_states: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+    data_source: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    data_version: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    license: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    source_snapshot_hash: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+
+class ElementIonicRadius(Base):
+    __tablename__ = "element_ionic_radii"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    symbol: Mapped[str] = mapped_column(sa.ForeignKey("element_properties.symbol", ondelete="CASCADE"), index=True)
+    oxidation_state: Mapped[int] = mapped_column(sa.Integer, nullable=False, index=True)
+    coordination_number: Mapped[str] = mapped_column(sa.String(16), nullable=False, index=True)
+    spin_state: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    ionic_radius_pm: Mapped[float] = mapped_column(sa.Float, nullable=False)
+    data_source: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    data_version: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    license: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    source_url: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    source_snapshot_hash: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "symbol",
+            "oxidation_state",
+            "coordination_number",
+            "spin_state",
+            "data_source",
+            "data_version",
+            name="uq_element_ionic_radius_identity",
+        ),
+    )
 
 
 class PaperSection(Base):
@@ -229,6 +342,43 @@ class CatalystSample(Base):
     support: Mapped[str | None] = mapped_column(sa.String(255), nullable=True)
     synthesis_method: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     evidence_strength: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+
+
+class ActiveSiteMetal(Base):
+    __tablename__ = "active_site_metals"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    catalyst_sample_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("catalyst_samples.id", ondelete="CASCADE"), index=True
+    )
+    active_site_key: Mapped[str] = mapped_column(sa.String(255), nullable=False, index=True)
+    site_type: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
+    site_role: Mapped[str] = mapped_column(sa.String(16), nullable=False, index=True)
+    element_symbol: Mapped[str] = mapped_column(sa.String(3), nullable=False, index=True)
+    element_order: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    order_source: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    normalized_pair_key: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
+    confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    evidence_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    enrichment_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        default="system_enriched",
+        server_default="system_enriched",
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "catalyst_sample_id",
+            "active_site_key",
+            "site_role",
+            name="uq_active_site_metal_role",
+        ),
+    )
 
 
 class DFTSetting(Base):

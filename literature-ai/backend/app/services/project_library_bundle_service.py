@@ -711,7 +711,10 @@ def _export_record_for_task(
     _, task_blockers = _task_match_reasons(prop, task)
     blockers = sorted(set(prop["blockers"] + task_blockers))
     ml_ready = not blockers
-    descriptor_payload = build_metal_descriptor_payload(catalyst["metal_centers"])
+    descriptor_payload = build_metal_descriptor_payload(
+        catalyst["metal_centers"],
+        catalyst_type=catalyst.get("catalyst_type"),
+    )
     return {
         "record_id": prop["record_id"],
         "paper_id": bundle["paper_id"],
@@ -944,7 +947,10 @@ def _export_sample_record_for_task(
     task_records: list[dict[str, Any]],
     task: str,
 ) -> dict[str, Any]:
-    descriptor_payload = build_metal_descriptor_payload(catalyst["metal_centers"])
+    descriptor_payload = build_metal_descriptor_payload(
+        catalyst["metal_centers"],
+        catalyst_type=catalyst.get("catalyst_type"),
+    )
     all_props = _instance_properties(instance)
     safe_props = [prop for prop in all_props if prop.get("ml_ready")]
     property_groups = {

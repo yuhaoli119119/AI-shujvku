@@ -107,6 +107,7 @@ class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
     dft_result_ids: list[UUID] = Field(min_length=1)
 
 from app.services.codex_context_service import CodexContextService
+from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
 from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
@@ -598,6 +599,8 @@ async def update_catalyst_sample_basic_info(
         "evidence_strength": sample.evidence_strength,
     }
     session.add(sample)
+    session.flush()
+    active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
     session.add(
         AuditLog(
             paper_id=paper_id,
@@ -616,6 +619,7 @@ async def update_catalyst_sample_basic_info(
                     "normalization_source": normalized["normalization_source"],
                 },
                 "metal_descriptors": normalized["metal_descriptors"],
+                "active_site_refresh": active_site_refresh,
                 "evidence_payload": payload.evidence_payload or {},
                 "note": payload.note,
             },
@@ -646,6 +650,7 @@ async def update_catalyst_sample_basic_info(
             **detail_payload["metal_descriptors"],
         },
         "allowed_values": detail_payload["allowed_values"],
+        "active_site_refresh": active_site_refresh,
     }
 
 
@@ -732,6 +737,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
         row.catalyst_sample_id = sample.id
         session.add(row)
 
+    active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
     source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
     after = {
         "name": sample.name,
@@ -761,6 +767,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
                     "normalization_source": normalized["normalization_source"],
                 },
                 "metal_descriptors": normalized["metal_descriptors"],
+                "active_site_refresh": active_site_refresh,
                 "evidence_payload": payload.evidence_payload or {},
                 "note": payload.note,
             },
@@ -773,6 +780,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
         "catalyst_sample_id": str(sample.id),
         "bound_dft_result_ids": [str(row.id) for row in rows],
         "created": created,
+        "active_site_refresh": active_site_refresh,
     }
 
 
