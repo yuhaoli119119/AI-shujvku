@@ -1264,22 +1264,16 @@ class PaperIngestionService:
     def _embed_text(self, text: str) -> list[float]:
         try:
             vector = self.embedding.embed_text(text)
-        except EmbeddingUnavailableError:
-            logger.exception("Embedding generation failed; using deterministic fallback vector")
-            vector = get_embedding_service(
-                provider="deterministic",
-                dimension=self.settings.embedding_dimension,
-            ).embed_text(text)
+        except EmbeddingUnavailableError as exc:
+            raise RuntimeError(
+                "Real embedding generation failed. Configure a valid embedding_api_key before parsing so "
+                "retrieval vectors are not silently replaced by deterministic fallback values."
+            ) from exc
         if len(vector) != self.settings.embedding_dimension:
-            logger.warning(
-                "Embedding dimension mismatch: expected %s, got %s; using deterministic fallback vector",
-                self.settings.embedding_dimension,
-                len(vector),
+            raise RuntimeError(
+                f"Embedding dimension mismatch: expected {self.settings.embedding_dimension}, got {len(vector)}. "
+                "Refusing to store incompatible retrieval vectors."
             )
-            vector = get_embedding_service(
-                provider="deterministic",
-                dimension=self.settings.embedding_dimension,
-            ).embed_text(text)
         return vector
 
     @staticmethod

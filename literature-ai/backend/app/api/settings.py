@@ -278,6 +278,14 @@ def _apply_settings_to_runtime(kv_pairs: dict[str, str | None]) -> None:
     object.__setattr__(settings, "embedding_dimension", DATABASE_V1_EMBEDDING_DIMENSION)
 
 
+def apply_persisted_settings_to_runtime() -> int:
+    """Apply database-persisted settings to this process' cached Settings object."""
+
+    persisted = _read_persisted_settings()
+    _apply_settings_to_runtime(persisted)
+    return len(persisted)
+
+
 def sync_writer_settings_from_session(session, settings) -> dict[str, str]:
     """Compatibility no-op: deprecated web-side writer settings stay disabled."""
     return {}

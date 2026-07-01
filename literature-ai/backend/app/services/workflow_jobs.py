@@ -161,17 +161,29 @@ def build_job_runtime_context(settings: Settings) -> dict[str, Any]:
     return {
         "database_url": settings.database_url,
         "storage_root": str(settings.storage_root),
+        "embedding_provider": settings.embedding_provider,
+        "embedding_api_base": settings.embedding_api_base,
+        "embedding_model": settings.embedding_model,
+        "embedding_dimension": settings.embedding_dimension,
     }
 
 
 def build_runtime_settings(base_settings: Settings, runtime_context: dict[str, Any] | None) -> Settings:
     context = runtime_context or {}
-    return base_settings.model_copy(
-        update={
-            "database_url": context.get("database_url", base_settings.database_url),
-            "storage_root": Path(context["storage_root"]) if context.get("storage_root") else base_settings.storage_root,
-        }
-    )
+    update = {
+        "database_url": context.get("database_url", base_settings.database_url),
+        "storage_root": Path(context["storage_root"]) if context.get("storage_root") else base_settings.storage_root,
+    }
+    for key in ("embedding_provider", "embedding_api_base", "embedding_model", "embedding_dimension"):
+        if key in context:
+            update[key] = context.get(key)
+    return base_settings.model_copy(update=update)
+
+
+def _refresh_persisted_runtime_settings() -> None:
+    from app.api.settings import apply_persisted_settings_to_runtime
+
+    apply_persisted_settings_to_runtime()
 
 
 def serialize_job(job: WorkflowJob) -> dict[str, Any]:
@@ -1657,6 +1669,7 @@ def _get_fallback_executor() -> ThreadPoolExecutor:
 
 
 def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None) -> None:
+    _refresh_persisted_runtime_settings()
     base_settings = get_settings()
     job_database_url = control_database_url or base_settings.database_url
     with session_scope(job_database_url) as session:

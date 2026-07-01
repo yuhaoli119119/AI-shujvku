@@ -40,8 +40,20 @@ class RetrievalService:
             model=settings.embedding_model,
             dimension=settings.embedding_dimension,
         )
+        self.embedding_provider = settings.embedding_provider
+        self.embedding_model = settings.embedding_model
+        self.embedding_dimension = settings.embedding_dimension
         self.retriever = Retriever(session, embedding_dimension=settings.embedding_dimension, embedding=embedding)
         self.reranker = reranker or NoopReranker()
+
+    def _vector_recall_status(self) -> str:
+        provider = (self.embedding_provider or "deterministic").lower()
+        if provider == "openai_compatible":
+            return (
+                f"enabled: {self.embedding_model} via openai_compatible "
+                f"({self.embedding_dimension} dimensions)"
+            )
+        return f"enabled: deterministic embedding cosine fallback ({self.embedding_dimension} dimensions)"
 
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
         is_full_context = payload.mode == "full_context" and bool(payload.paper_ids)
@@ -75,7 +87,7 @@ class RetrievalService:
             mode=payload.mode,
             recall={
                 "bm25": "enabled: deterministic lexical overlap over section/fact/card text",
-                "vector": "enabled: deterministic embedding cosine fallback",
+                "vector": self._vector_recall_status(),
             },
             reranker={
                 "enabled": actually_reranked,

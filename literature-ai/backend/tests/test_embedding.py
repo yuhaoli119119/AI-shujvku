@@ -13,6 +13,7 @@ from app.services.embedding import (
     OpenAICompatibleEmbeddingService,
     get_embedding_service,
 )
+from app.rag.retriever import Retriever
 
 
 def test_default_embedding_config_is_database_v1_contract():
@@ -146,3 +147,33 @@ def test_bge_m3_embedding_does_not_send_dimensions_payload():
     )
 
     assert service._resolve_dimensions_payload() is None
+
+
+def test_hybrid_score_does_not_embed_uncached_structured_rows():
+    class NoExternalRowEmbedding:
+        dimension = 2
+
+        def __init__(self):
+            self.embed_calls = 0
+
+        def embed_text(self, text: str):
+            self.embed_calls += 1
+            raise AssertionError("structured rows without stored vectors must not call external embeddings")
+
+        def cosine_similarity(self, left, right):
+            return 1.0
+
+    embedding = NoExternalRowEmbedding()
+    retriever = Retriever(session=None, embedding_dimension=2, embedding=embedding)
+
+    score, breakdown = retriever._hybrid_score(
+        {"li2s", "adsorption"},
+        [1.0, 0.0],
+        "Li2S adsorption energy on catalyst",
+        None,
+        allow_paper_fallback=False,
+    )
+
+    assert embedding.embed_calls == 0
+    assert breakdown["semantic"] == 0.0
+    assert score == breakdown["lexical"]

@@ -125,6 +125,7 @@ class Retriever:
                 {
                     "type": "section",
                     "paper_id": row.paper_id,
+                    "paper_code": paper_code_for(self.session, row.paper_id),
                     "object_id": row.id,
                     "section_id": row.id,
                     "score": score,
@@ -163,6 +164,7 @@ class Retriever:
                 {
                     "type": "section",
                     "paper_id": row.paper_id,
+                    "paper_code": paper_code_for(self.session, row.paper_id),
                     "object_id": row.id,
                     "section_id": row.section_id,
                     "score": score,
@@ -786,9 +788,11 @@ class Retriever:
     ) -> tuple[float, dict[str, float]]:
         lexical = self._score_text(query_tokens, text)
         semantic = 0.0
+        # Semantic retrieval must use persisted vectors.  Calling the external
+        # embedding API once per structured candidate makes a single search slow,
+        # expensive, and easy to rate-limit.  Rows without stored vectors keep
+        # their lexical score until their own embeddings are materialized.
         effective_embedding = stored_embedding if self._semantic_enabled else None
-        if not effective_embedding and query_embedding and self._semantic_enabled:
-            effective_embedding = self._safe_text_embedding(text)
         if query_embedding and effective_embedding:
             semantic = max(0.0, self.embedding.cosine_similarity(query_embedding, effective_embedding))
         if lexical <= 0 and semantic <= 0 and allow_paper_fallback:

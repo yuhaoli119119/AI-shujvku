@@ -22,7 +22,10 @@ from app.api.papers import router as papers_router
 from app.api.references import router as references_router
 from app.api.retrieval import router as retrieval_router
 from app.api.share import router as share_router
-from app.api.settings import router as settings_router
+from app.api.settings import (
+    apply_persisted_settings_to_runtime,
+    router as settings_router,
+)
 from app.api.system import router as system_router
 from app.api.verification import router as verification_router
 from app.api.visuals import router as visuals_router
@@ -52,6 +55,10 @@ async def lifespan(_: FastAPI):
         info["active_library"] or "(none)",
         info["db_url_masked"],
     )
+    try:
+        apply_persisted_settings_to_runtime()
+    except Exception:
+        startup_logger.exception("Failed to apply persisted runtime settings during startup")
     settings = get_settings()
     try:
         with session_scope(settings.database_url) as session:

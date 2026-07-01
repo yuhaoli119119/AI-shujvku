@@ -1,6 +1,7 @@
 from pathlib import Path
 from uuid import UUID
 
+from app.api.settings import apply_persisted_settings_to_runtime
 from app.config import get_settings
 from app.db.models import Paper
 from app.db.session import session_scope
@@ -12,6 +13,7 @@ from app.workers.celery_app import celery_app
 
 @celery_app.task(name="papers.ingest_path")
 def ingest_pdf_path_task(pdf_path: str) -> str:
+    apply_persisted_settings_to_runtime()
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = PaperIngestionService(session=session, settings=settings)
@@ -20,6 +22,7 @@ def ingest_pdf_path_task(pdf_path: str) -> str:
 
 
 def _prepare_external_ai_context_task(paper_id: str) -> dict[str, int | str | bool | list[str] | dict]:
+    apply_persisted_settings_to_runtime()
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         paper = session.get(Paper, UUID(paper_id))
