@@ -1626,6 +1626,7 @@
       params.set("y_property", yProperty);
       params.set("x_property", xProperty);
       params.set("min_n", filters.minN);
+      params.set("allow_exploratory", "true");
       if (filters.reaction) params.set("reaction_category", filters.reaction);
       if (filters.adsorbate) params.set("adsorbate", filters.adsorbate);
       if (filters.family) params.set("material_family", filters.family);
@@ -1894,6 +1895,7 @@
       if (section === "matrix") params.set("matrix_status", "reviewed");
       if (section === "correlation") {
         params.set("corr_min_n", filters.minN);
+        params.set("corr_allow_exploratory", "true");
         if (filters.reaction) params.set("corr_reaction", filters.reaction);
         if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
         if (filters.family) params.set("corr_family", filters.family);

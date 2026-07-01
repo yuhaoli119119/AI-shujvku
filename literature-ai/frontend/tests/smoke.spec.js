@@ -1838,7 +1838,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('.tab-btn[data-view="correlation"]');
     await correlationResponse;
     expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(1);
-    expect(visualRequests.some(url => url.includes('corr_allow_exploratory=true'))).toBe(false);
+    expect(visualRequests.some(url => url.includes('corr_allow_exploratory=true'))).toBe(true);
     expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
     await expect(page.locator('#view-correlation .panel-title')).toContainText('DFT 总相关性热力图');
     await expect(page.locator('#correlationHeadMeta')).toContainText('2 个 DFT 数值变量');
@@ -1858,7 +1858,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('.correlation-cell:not(.identity)').first().click();
     await scatterResponse;
     expect(visualRequests.filter(url => url.includes('correlation-pairs'))).toHaveLength(1);
-    expect(visualRequests.some(url => url.includes('allow_exploratory=true'))).toBe(false);
+    const scatterRequests = visualRequests.filter(url => url.includes('correlation-pairs'));
+    expect(scatterRequests.some(url => url.includes('allow_exploratory=true'))).toBe(true);
   });
 
   for (const pageInfo of PAGES) {
