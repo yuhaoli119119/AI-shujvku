@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -7,19 +8,102 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const systemRoot = path.resolve(scriptDir, "..");
+const repoRoot = path.resolve(systemRoot, "..");
 const defaultOutputDir = path.join(systemRoot, "deliverables", "impact_metadata_20260621");
 const outputDir = process.env.LITAI_IMPACT_METADATA_OUTPUT_DIR
   ? path.resolve(process.env.LITAI_IMPACT_METADATA_OUTPUT_DIR)
   : defaultOutputDir;
 const composeFile = path.join(systemRoot, "docker-compose.yml");
 const composeArgs = ["compose", "--project-directory", systemRoot, "-f", composeFile, "exec", "-T", "postgres"];
-const artifactToolSpecifier = process.env.LITAI_ARTIFACT_TOOL_MODULE?.trim() || "@oai/artifact-tool";
-const artifactToolImportTarget = artifactToolSpecifier.startsWith("file://")
-  ? artifactToolSpecifier
-  : artifactToolSpecifier.includes(path.sep) || artifactToolSpecifier.endsWith(".mjs")
-    ? pathToFileURL(path.resolve(artifactToolSpecifier)).href
-    : artifactToolSpecifier;
-const { SpreadsheetFile, Workbook } = await import(artifactToolImportTarget);
+
+function normalizeImportTarget(value) {
+  if (value.startsWith("file://")) return value;
+  if (value.includes(path.sep) || value.endsWith(".mjs")) return pathToFileURL(path.resolve(value)).href;
+  return value;
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function artifactToolModulePath(nodeModulesDir) {
+  return path.join(nodeModulesDir, "@oai", "artifact-tool", "dist", "artifact_tool.mjs");
+}
+
+function nodePathDirectories() {
+  return (process.env.NODE_PATH || "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+async function codexRuntimeNodeModuleDirs() {
+  const runtimesRoot = path.join(os.homedir(), ".cache", "codex-runtimes");
+  if (!(await pathExists(runtimesRoot))) return [];
+
+  try {
+    const entries = await fs.readdir(runtimesRoot, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(runtimesRoot, entry.name, "dependencies", "node", "node_modules"));
+  } catch {
+    return [];
+  }
+}
+
+function currentRuntimeNodeModulesDir() {
+  return path.resolve(path.dirname(process.execPath), "..", "node_modules");
+}
+
+async function loadArtifactTool() {
+  const explicitOverride = process.env.LITAI_ARTIFACT_TOOL_MODULE?.trim();
+  if (explicitOverride) {
+    return import(normalizeImportTarget(explicitOverride));
+  }
+
+  try {
+    return await import("@oai/artifact-tool");
+  } catch (error) {
+    if (error?.code !== "ERR_MODULE_NOT_FOUND") {
+      throw error;
+    }
+  }
+
+  const nodeModulesDirs = unique([
+    currentRuntimeNodeModulesDir(),
+    path.join(repoRoot, "node_modules"),
+    path.join(systemRoot, "node_modules"),
+    path.join(systemRoot, "frontend", "node_modules"),
+    ...nodePathDirectories(),
+    ...(await codexRuntimeNodeModuleDirs()),
+  ]);
+
+  for (const nodeModulesDir of nodeModulesDirs) {
+    const candidate = artifactToolModulePath(nodeModulesDir);
+    if (await pathExists(candidate)) {
+      return import(pathToFileURL(candidate).href);
+    }
+  }
+
+  throw new Error(
+    [
+      "Could not locate @oai/artifact-tool automatically.",
+      "Set LITAI_ARTIFACT_TOOL_MODULE to an explicit module path if your environment is non-standard.",
+      `Checked node_modules roots: ${nodeModulesDirs.join(", ") || "(none)"}`,
+    ].join(" "),
+  );
+}
+
+const { SpreadsheetFile, Workbook } = await loadArtifactTool();
 
 const punctuationRegex = /[\s\.,;:!?'"]+|[()\[\]{}\-_/\\]+/g;
 
@@ -784,4 +868,13 @@ async function main() {
   );
 }
 
-await main();
+try {
+  await main();
+  // `@oai/artifact-tool` can leave the process with a non-zero native exit on
+  // Windows even after all outputs are successfully written. Exit explicitly so
+  // CLI callers get a stable success code.
+  process.exit(0);
+} catch (error) {
+  console.error(error);
+  process.exit(1);
+}
