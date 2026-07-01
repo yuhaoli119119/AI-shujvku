@@ -395,122 +395,187 @@
     .correlation-layout {
       display: grid;
       gap: 14px;
+      width: 100%;
+      min-width: 0;
+    }
+    #view-correlation {
+      width: max-content;
+      min-width: 100%;
     }
     .correlation-panel {
-      background: #f7f4ef;
-      border: 1px solid #e7ddd0;
-      box-shadow: none;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      box-shadow: var(--shadow);
+      width: max-content;
+      min-width: 100%;
     }
     .correlation-toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 16px;
-      padding: 18px 20px;
-      border: 1px solid #e3d7c8;
-      border-radius: 28px;
-      background: #fbf8f3;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface-alt);
       margin-bottom: 12px;
     }
     .correlation-toolbar-group {
       display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
+      flex-direction: column;
+      gap: 5px;
+      align-items: stretch;
     }
     .correlation-toolbar-label {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 900;
-      color: #60594f;
+      color: var(--color-text-secondary);
     }
     .correlation-toolbar select,
     .correlation-toolbar input {
-      min-width: 120px;
-      height: 50px;
-      padding: 0 20px;
-      border-radius: 20px;
-      border: 1.5px solid #dbcdbb;
-      background: #fffdfa;
-      color: #33403d;
-      font-size: 14px;
+      width: 100%;
+      min-width: 0;
+      height: 38px;
+      padding: 0 10px;
+      border-radius: 6px;
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-surface);
+      color: var(--color-text);
+      font-size: 13px;
       font-weight: 800;
     }
     .correlation-caption {
-      padding: 0 2px 14px;
-      color: #7f8c89;
+      padding: 0 2px 10px;
+      color: var(--color-text-secondary);
       font-size: 13px;
       line-height: 1.6;
-      border-bottom: 1px solid #eadfce;
+      border-bottom: 1px solid var(--color-border);
     }
     .correlation-board {
-      overflow: auto;
-      padding: 34px 8px 6px 8px;
-      background: #fffdfa;
+      --corr-cell-size: 50px;
+      --corr-row-head-width: var(--corr-cell-size);
+      overflow: visible;
+      max-height: none;
+      max-width: none;
+      width: max-content;
+      min-width: 100%;
+      padding: 0 0 10px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
     }
     .correlation-grid {
       display: grid;
       min-width: max-content;
-      gap: 5px;
-      align-items: start;
+      gap: 2px;
+      align-items: stretch;
+      padding: 6px;
     }
     .correlation-corner,
     .correlation-col-head,
     .correlation-row-head {
-      color: #5d625e;
+      color: var(--color-text);
       font-weight: 900;
     }
     .correlation-corner {
-      min-height: 152px;
-      padding: 6px 10px;
-      border-radius: 0;
-      background: transparent;
-      border: 0;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
-      text-align: left;
+      width: var(--corr-row-head-width);
+      height: var(--corr-cell-size);
+      min-height: var(--corr-cell-size);
+      padding: 0;
+      border-radius: 6px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      display: block;
+      align-self: end;
       box-shadow: none;
+      position: sticky;
+      left: 6px;
+      top: 6px;
+      z-index: 5;
+    }
+    .correlation-axis-y,
+    .correlation-axis-x {
+      position: absolute;
+      z-index: 1;
+      font-size: 14px;
+      line-height: 1;
+      font-weight: 900;
+    }
+    .correlation-axis-y {
+      left: 6px;
+      bottom: 5px;
+    }
+    .correlation-axis-x {
+      right: 6px;
+      top: 5px;
+    }
+    .correlation-axis-slash {
+      position: absolute;
+      inset: 2px;
+      pointer-events: none;
+    }
+    .correlation-axis-slash::before {
+      content: "";
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: calc(141.421% - 4px);
+      height: 2px;
+      background: var(--color-border-strong);
+      transform: translate(-50%, -50%) rotate(45deg);
+      transform-origin: center;
     }
     .correlation-col-head {
-      min-height: 152px;
-      width: 44px;
-      padding: 0 0 18px;
-      display: flex;
-      align-items: flex-end;
-      justify-content: center;
-      text-align: center;
-      font-size: 11px;
-      line-height: 1.1;
-      transform: rotate(-48deg);
-      transform-origin: bottom left;
-      translate: 8px -14px;
-      white-space: nowrap;
-      position: relative;
-      z-index: 1;
-    }
-    .correlation-row-head {
-      min-height: 44px;
-      padding: 0 12px 0 0;
+      width: var(--corr-cell-size);
+      height: var(--corr-cell-size);
+      min-height: var(--corr-cell-size);
+      padding: 3px;
       display: flex;
       align-items: center;
-      justify-content: flex-end;
-      text-align: right;
-      border-radius: 0;
-      background: transparent;
-      border: 0;
-      font-size: 12px;
+      justify-content: center;
+      text-align: center;
+      font-size: 9px;
+      line-height: 1.08;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      border-radius: 6px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      position: sticky;
+      top: 6px;
+      z-index: 4;
+    }
+    .correlation-row-head {
+      width: var(--corr-row-head-width);
+      height: var(--corr-cell-size);
+      min-height: var(--corr-cell-size);
+      padding: 3px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border-radius: 6px;
+      background: var(--color-surface-alt);
+      border: 1px solid var(--color-border);
+      font-size: 9px;
+      line-height: 1.12;
+      overflow-wrap: anywhere;
       box-shadow: none;
+      position: sticky;
+      left: 6px;
+      z-index: 3;
     }
     .correlation-cell {
-      width: 44px;
-      min-height: 44px;
-      padding: 0;
-      border: 1px solid rgba(223, 216, 205, 0.8);
-      border-radius: 4px;
-      background: #e7e2d9;
-      font-size: 10px;
+      width: var(--corr-cell-size);
+      height: var(--corr-cell-size);
+      min-height: var(--corr-cell-size);
+      padding: 3px;
+      border: 1px solid rgba(17, 24, 39, 0.08);
+      border-radius: 6px;
+      background: #eef0f3;
+      color: #172033;
+      font-size: 9px;
       display: grid;
-      gap: 0;
+      gap: 1px;
       align-content: center;
       text-align: center;
       justify-items: center;
@@ -518,43 +583,44 @@
       box-shadow: none;
     }
     .correlation-cell.insufficient {
-      color: transparent;
-      background: #e5e0d7;
+      color: #8a94a6;
+      background:
+        repeating-linear-gradient(135deg, #f0f2f5 0, #f0f2f5 6px, #e7eaf0 6px, #e7eaf0 12px);
     }
     .correlation-cell.ready {
       cursor: pointer;
-      color: #33403d;
-      background: #e7e2d9;
+      color: #172033;
     }
-    .correlation-cell.positive {
-      background: #d6b29a;
-    }
-    .correlation-cell.negative {
-      background: #9fb7c8;
-    }
-    .correlation-cell.neutral {
-      background: #d9d8d0;
+    .correlation-cell.identity {
+      color: #1c3b54;
+      background: #dbeafe;
     }
     .correlation-cell.ready:hover {
-      transform: translateY(-4px) scale(1.08);
-      border-color: #8f8577;
-      box-shadow: 0 12px 22px rgba(112, 98, 78, 0.18);
+      transform: translateY(-2px);
+      border-color: rgba(17, 24, 39, 0.35);
+      box-shadow: 0 10px 18px rgba(15, 23, 42, 0.16);
       z-index: 2;
     }
     .correlation-cell.selected {
-      border-color: #4f5e5b;
-      box-shadow: 0 0 0 1px #4f5e5b inset, 0 10px 18px rgba(79, 94, 91, 0.16);
-      transform: translateY(-2px) scale(1.06);
+      border-color: #111827;
+      box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.22) inset, 0 10px 18px rgba(15, 23, 42, 0.16);
+      transform: translateY(-1px);
     }
     .correlation-cell strong {
-      font-size: 0;
+      font-size: 12px;
       line-height: 1;
     }
     .correlation-cell small {
-      display: none;
+      display: block;
+      font-size: 8px;
+      line-height: 1.05;
+      opacity: 0.82;
     }
     .correlation-cell-status {
-      display: none;
+      display: block;
+      font-size: 8px;
+      line-height: 1.05;
+      opacity: 0.72;
     }
     .scatter-shell {
       border: 1px solid #e7ddd0;
@@ -849,15 +915,17 @@
       .grid-2 { grid-template-columns: 1fr; }
       .donut-row { grid-template-columns: 1fr; }
       .bar-row { grid-template-columns: minmax(92px, 0.9fr) minmax(0, 1.6fr) 42px; }
-      .correlation-col-head {
-        width: 36px;
-        min-height: 132px;
-        font-size: 10px;
-        translate: 6px -10px;
+      .correlation-board {
+        --corr-cell-size: 46px;
+      }
+      .correlation-col-head,
+      .correlation-row-head {
+        font-size: 9px;
       }
       .correlation-cell {
-        width: 36px;
-        min-height: 36px;
+        width: var(--corr-cell-size);
+        height: var(--corr-cell-size);
+        min-height: var(--corr-cell-size);
       }
     }
   </style>
@@ -951,22 +1019,22 @@
       <div class="panel correlation-panel">
         <div class="panel-head">
           <div>
-            <div class="panel-title">描述符相关性矩阵</div>
-            <div class="muted" id="correlationHeadMeta">只在同一反应类型、吸附物、材料家族和审核状态下计算；样本数不足时不显示相关系数。</div>
+            <div class="panel-title">DFT 总相关性热力图</div>
+            <div class="muted" id="correlationHeadMeta">横纵轴都是 DFT 数值变量；仅使用已审核可导出的正式数据。</div>
           </div>
           <div class="pill" id="correlationCount">n = 0</div>
         </div>
         <div class="correlation-toolbar">
           <div class="correlation-toolbar-group">
             <span class="correlation-toolbar-label">矩阵</span>
-            <select id="corrMatrixKind"><option value="descriptor">描述符 x 性能</option></select>
+            <select id="corrMatrixKind"><option value="total">全部 DFT 数值变量</option></select>
           </div>
           <div class="correlation-toolbar-group">
-            <span class="correlation-toolbar-label">目标性能</span>
+            <span class="correlation-toolbar-label">场景</span>
             <select id="corrReaction"><option value="">全部性能场景</option><option>HER</option><option>OER/ORR</option><option>CO2RR</option><option>NRR</option><option>电池/离子</option><option>其他</option></select>
           </div>
           <div class="correlation-toolbar-group">
-            <span class="correlation-toolbar-label">描述符组</span>
+            <span class="correlation-toolbar-label">材料组</span>
             <select id="corrFamily"><option value="">全部特征组</option><option>graphdiyne</option><option>doped GDY</option><option>SAC-GDY</option></select>
           </div>
           <div class="correlation-toolbar-group">
@@ -978,13 +1046,13 @@
             <select id="corrAdsorbate"><option value="">全部</option><option>H</option><option>OH</option><option>OOH</option><option>CO</option><option>COOH</option></select>
           </div>
           <div class="correlation-toolbar-group" style="display:none;">
-            <select id="corrStatus"><option value="reviewed">优先已审核</option></select>
+            <select id="corrStatus"><option value="reviewed">仅已审核可导出</option></select>
           </div>
         </div>
         <div class="correlation-layout">
-          <div class="correlation-caption" id="correlationSummary">行是目标性能，列是描述符。点击任意小方块后，下方显示对应线性相关图。</div>
+          <div class="correlation-caption" id="correlationSummary">行和列都是 DFT 数值变量。颜色越红表示正相关越强，越蓝表示负相关越强；点击任意格子查看散点图。</div>
           <div id="descriptorCorrelation"></div>
-          <div id="correlationScatter" class="scatter-placeholder">点击上方矩阵中的任意方块，这里会显示对应的线性相关图、拟合线、Pearson r、Spearman ρ、样本数和证据摘要。</div>
+          <div id="correlationScatter" class="scatter-placeholder">点击上方热力图中的任意格子，这里会显示对应的线性相关图、拟合线、Pearson r、Spearman ρ、样本数和证据摘要。</div>
         </div>
       </div>
     </section>
@@ -1026,6 +1094,7 @@
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     let currentLibrary = "";
     let latestData = null;
+    let loadedSections = new Set();
     let matrixCategory = "all";
     let paperLookup = {};
     let matrixMode = "count";
@@ -1169,11 +1238,22 @@
     function formatCorrelationLabel(label) {
       const dict = {
         adsorption_energy: "吸附能",
+        binding_energy: "结合能",
         gibbs_free_energy_change: "自由能变化",
+        rds_energy: "RDS 自由能",
         reaction_barrier: "反应能垒",
+        li2s_decomposition_barrier: "Li2S 分解能垒",
+        migration_barrier: "迁移能垒",
+        formation_energy: "形成能",
+        overpotential: "过电位",
+        limiting_potential: "限制电位",
+        band_gap: "带隙",
         d_band_center: "d 带中心",
+        charge_transfer: "电荷转移",
         bader_charge: "Bader 电荷",
         work_function: "功函数",
+        metal_electronegativity: "金属电负性",
+        coordination_number: "配位数",
         bond_length: "键长",
         adsorption_distance: "吸附距离",
       };
@@ -1266,13 +1346,16 @@
     function switchView(name) {
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.toggle("active", btn.dataset.view === name));
       document.querySelectorAll(".view").forEach(view => view.classList.toggle("active", view.id === "view-" + name));
+      if (name === "matrix" || name === "correlation") {
+        loadVisualSection(name).catch(error => showToast("加载" + (name === "matrix" ? "DFT 矩阵" : "相关性") + "失败：" + error.message));
+      }
     }
     function metric(label, value, sub) {
       return '<div class="metric"><div class="value">' + esc(value) + '</div><div class="label">' + esc(label) + '</div><div class="sub">' + esc(sub || "") + '</div></div>';
     }
     function renderMetrics(data) {
       const summary = data.summary || {};
-      const matrixMeta = data.dft_matrix_meta || {};
+      const matrixMeta = data.dft_matrix_meta || data.dft_overview_meta || {};
       const blocked = summary.candidate_dft_results || matrixMeta.blocked_candidate_results || 0;
       const reviewed = summary.reviewed_exportable_dft_results || matrixMeta.reviewed_exportable_results || 0;
       const qualityWarnings = Number(blocked || 0) + Number(matrixMeta.excluded_results || 0);
@@ -1280,7 +1363,7 @@
         metric("文献数", summary.papers || 0, "当前库总量"),
         metric("已审核可用数据", reviewed, "可导出/可入矩阵"),
         metric("候选数据", blocked, "进入审核中心"),
-        metric("可用于相关性分析", summary.correlation_ready_dft_results || reviewed, "优先已审核，必要时同样本探索"),
+        metric("可用于相关性分析", summary.correlation_ready_dft_results || reviewed, "仅统计已审核可导出数据"),
         metric("数据质量提示", qualityWarnings, "候选阻断 + 标签排除")
       ].join("");
     }
@@ -1431,63 +1514,96 @@
         return '<div class="status-card"><div class="num" style="color:' + COLORS[index % COLORS.length] + '">' + esc(row.count) + '</div><div class="muted">' + esc(row.status) + '</div></div>';
       }).join("");
     }
+    function correlationVariables(data) {
+      const raw = (data.variables && data.variables.length)
+        ? data.variables
+        : (data.variable_properties || data.target_properties || []);
+      const seen = new Set();
+      return raw
+        .map(item => typeof item === "string" ? { key: item } : (item || {}))
+        .filter(item => {
+          const key = item.key || item.property || item.name;
+          if (!key || seen.has(key)) return false;
+          seen.add(key);
+          item.key = key;
+          return true;
+        });
+    }
+    function correlationCellKey(yProperty, xProperty) {
+      return String(yProperty || "") + "::" + String(xProperty || "");
+    }
+    function correlationCellStyle(cell, ready) {
+      if (!ready || cell.status === "identity") return "";
+      const r = Number(cell.pearson_r);
+      if (!Number.isFinite(r)) return "";
+      const intensity = Math.min(1, Math.abs(r));
+      const alpha = 0.16 + intensity * 0.68;
+      if (r > 0) {
+        const color = intensity > 0.66 ? "#fff" : "#172033";
+        return "background:rgba(220,38,38," + alpha.toFixed(2) + ");color:" + color + ";";
+      }
+      if (r < 0) {
+        const color = intensity > 0.66 ? "#fff" : "#172033";
+        return "background:rgba(37,99,235," + alpha.toFixed(2) + ");color:" + color + ";";
+      }
+      return "background:rgba(148,163,184,0.22);";
+    }
     function renderCorrelation(payload) {
       const target = document.getElementById("descriptorCorrelation");
       if (!target) return;
       const data = payload || {};
-      const targets = data.target_properties || [];
-      const descriptors = data.descriptor_properties || [];
+      const variables = correlationVariables(data);
       const cells = data.cells || [];
-      document.getElementById("correlationCount").textContent = "reviewed n = " + esc(data.reviewed_numeric_points || 0);
+      document.getElementById("correlationCount").textContent = variables.length + " 个变量";
       const headMeta = document.getElementById("correlationHeadMeta");
       if (headMeta) {
-        headMeta.textContent = (targets.length || 0) + " 个目标属性 · " + (descriptors.length || 0) + " 个描述符 · 点击方块查看线性相关图";
+        headMeta.textContent = variables.length + " 个 DFT 数值变量 · " + cells.length + " 个变量组合 · 点击格子查看散点图";
       }
       const summary = document.getElementById("correlationSummary");
       if (summary) {
         summary.textContent =
-          "行是目标性能，列是描述符。颜色表示相关方向与强弱；点击任意小方块后，下方会显示对应组合的线性相关图。";
+          "行和列都是 DFT 数值变量。颜色越红表示正相关越强，越蓝表示负相关越强；灰色斜纹表示样本不足。";
       }
-      if (!targets.length || !descriptors.length) {
-        target.innerHTML = '<div class="empty">暂无描述符相关性数据。</div>';
+      if (!variables.length) {
+        target.innerHTML = '<div class="empty">暂无 DFT 相关性数据。</div>';
         return;
       }
-      const lookup = new Map(cells.map(cell => [cell.target_property + "::" + cell.descriptor, cell]));
+      const lookup = new Map(cells.map(cell => [
+        correlationCellKey(cell.y_property || cell.target_property, cell.x_property || cell.descriptor),
+        cell
+      ]));
       const readyCells = cells
-        .filter(cell => cell.status === "ready" && cell.pearson_r != null)
+        .filter(cell => cell.status === "ready" && cell.pearson_r != null && (cell.y_property || cell.target_property) !== (cell.x_property || cell.descriptor))
         .sort((a, b) => Math.abs(Number(b.pearson_r || 0)) - Math.abs(Number(a.pearson_r || 0)));
       if (!selectedCorrelationKey || !lookup.has(selectedCorrelationKey)) {
         selectedCorrelationKey = readyCells.length
-          ? (readyCells[0].target_property + "::" + readyCells[0].descriptor)
+          ? correlationCellKey(readyCells[0].y_property || readyCells[0].target_property, readyCells[0].x_property || readyCells[0].descriptor)
           : "";
       }
 
-      let html = '<div class="correlation-board"><div class="correlation-grid" style="grid-template-columns:130px repeat(' + descriptors.length + ', 44px);">';
-      html += '<div class="correlation-corner"><strong>目标性能</strong><small>描述符</small></div>';
-      descriptors.forEach(descriptor => { html += '<div class="correlation-col-head" title="' + esc(descriptor) + '">' + esc(formatCorrelationLabel(descriptor)) + '</div>'; });
-      targets.forEach(targetProperty => {
-        html += '<div class="correlation-row-head" title="' + esc(targetProperty) + '">' + esc(formatCorrelationLabel(targetProperty)) + '</div>';
-        descriptors.forEach(descriptor => {
-          const cell = lookup.get(targetProperty + "::" + descriptor) || {};
-          const ready = cell.status === "ready" && cell.pearson_r != null;
-          const key = targetProperty + "::" + descriptor;
+      let html = '<div class="correlation-board"><div class="correlation-grid" style="grid-template-columns:var(--corr-row-head-width) repeat(' + variables.length + ', var(--corr-cell-size));">';
+      html += '<div class="correlation-corner" aria-label="Y / X"><span class="correlation-axis-y">Y</span><span class="correlation-axis-slash" aria-hidden="true"></span><span class="correlation-axis-x">X</span></div>';
+      variables.forEach(variable => { html += '<div class="correlation-col-head" title="' + esc(variable.key) + '">' + esc(formatCorrelationLabel(variable.key)) + '</div>'; });
+      variables.forEach(yVariable => {
+        const yProperty = yVariable.key;
+        html += '<div class="correlation-row-head" title="' + esc(yProperty) + '">' + esc(formatCorrelationLabel(yProperty)) + '</div>';
+        variables.forEach(xVariable => {
+          const xProperty = xVariable.key;
+          const key = correlationCellKey(yProperty, xProperty);
+          const cell = lookup.get(key) || {};
+          const ready = (cell.status === "ready" || cell.status === "identity") && cell.pearson_r != null;
           const selected = selectedCorrelationKey === key;
           const label = ready ? String(Number(cell.pearson_r).toFixed(2)) : "--";
           const nText = "n=" + (cell.n || 0);
-          const cls = ready ? ("ready " + (cell.color || "neutral")) : "insufficient";
+          const cls = ready ? ("ready " + (cell.status === "identity" ? "identity" : "")) : "insufficient";
           const rho = ready && cell.spearman_rho != null ? ("ρ " + Number(cell.spearman_rho).toFixed(2)) : "样本不足";
-          const statusText = ready ? "Pearson r" : "待更多样本";
-          html += '<button class="correlation-cell ' + esc(cls) + (selected ? ' selected' : '') + '" type="button" title="' + esc((ready ? ('r=' + label + ' · ' + nText + ' · ' + rho) : (cell.message || data.correlation_policy || '')) ) + '" onclick="showCorrelationScatter(\'' + esc(targetProperty) + '\', \'' + esc(descriptor) + '\')"><span class="correlation-cell-status">' + esc(statusText) + '</span><strong>' + esc(label) + '</strong><small>' + esc(nText) + '</small><small>' + esc(rho) + '</small></button>';
+          const statusText = cell.status === "identity" ? "自身" : (ready ? "Pearson r" : "样本不足");
+          const inlineStyle = correlationCellStyle(cell, ready);
+          html += '<button class="correlation-cell ' + esc(cls) + (selected ? ' selected' : '') + '" type="button" style="' + esc(inlineStyle) + '" title="' + esc((ready ? ('r=' + label + ' · ' + nText + ' · ' + rho) : (cell.message || data.correlation_policy || '')) ) + '" onclick="showCorrelationScatter(\'' + esc(yProperty) + '\', \'' + esc(xProperty) + '\')"><span class="correlation-cell-status">' + esc(statusText) + '</span><strong>' + esc(label) + '</strong><small>' + esc(nText) + '</small><small>' + esc(rho) + '</small></button>';
         });
       });
       html += '</div></div>';
       target.innerHTML = html;
-      if (selectedCorrelationKey && lookup.has(selectedCorrelationKey)) {
-        const selectedCell = lookup.get(selectedCorrelationKey);
-        if (selectedCell && selectedCell.status === "ready" && selectedCell.pearson_r != null) {
-          showCorrelationScatter(selectedCell.target_property, selectedCell.descriptor, { preserveSelection: true });
-        }
-      }
     }
     function corrFilters() {
       return {
@@ -1497,19 +1613,20 @@
         minN: document.getElementById("corrMinN").value || "3"
       };
     }
-    async function showCorrelationScatter(targetProperty, descriptor, options = {}) {
+    async function showCorrelationScatter(yProperty, xProperty, options = {}) {
       const box = document.getElementById("correlationScatter");
-      selectedCorrelationKey = targetProperty + "::" + descriptor;
+      selectedCorrelationKey = correlationCellKey(yProperty, xProperty);
       if (!options.preserveSelection && latestData && latestData.descriptor_correlation) {
         renderCorrelation(latestData.descriptor_correlation);
       }
       const filters = corrFilters();
-      box.innerHTML = '<div class="scatter-placeholder">正在读取 ' + esc(formatCorrelationLabel(targetProperty)) + ' 与 ' + esc(formatCorrelationLabel(descriptor)) + ' 的线性相关图...</div>';
+      box.innerHTML = '<div class="scatter-placeholder">正在读取 ' + esc(formatCorrelationLabel(yProperty)) + ' 与 ' + esc(formatCorrelationLabel(xProperty)) + ' 的线性相关图...</div>';
       const params = new URLSearchParams();
       params.set("library_name", currentLibrary || "");
-      params.set("target_property", targetProperty);
-      params.set("descriptor", descriptor);
+      params.set("y_property", yProperty);
+      params.set("x_property", xProperty);
       params.set("min_n", filters.minN);
+      params.set("allow_exploratory", "true");
       if (filters.reaction) params.set("reaction_category", filters.reaction);
       if (filters.adsorbate) params.set("adsorbate", filters.adsorbate);
       if (filters.family) params.set("material_family", filters.family);
@@ -1522,9 +1639,11 @@
     }
     function renderCorrelationScatter(payload) {
       const box = document.getElementById("correlationScatter");
+      const yProperty = payload.y_property || payload.target_property;
+      const xProperty = payload.x_property || payload.descriptor;
       const points = payload.points || [];
       if (!payload.ready) {
-        box.innerHTML = '<div class="scatter-placeholder"><div><strong>' + esc(formatCorrelationLabel(payload.target_property)) + ' x ' + esc(formatCorrelationLabel(payload.descriptor)) + '</strong><br>当前只有 n=' + esc(payload.n || 0) + ' 个配对样本，未达到最小样本数 ' + esc(payload.min_n || 3) + '。可先完成审核，或放宽筛选条件。</div></div>';
+        box.innerHTML = '<div class="scatter-placeholder"><div><strong>' + esc(formatCorrelationLabel(yProperty)) + ' x ' + esc(formatCorrelationLabel(xProperty)) + '</strong><br>当前只有 n=' + esc(payload.n || 0) + ' 个配对样本，未达到最小样本数 ' + esc(payload.min_n || 3) + '。可先完成审核，或放宽筛选条件。</div></div>';
         return;
       }
       const xs = points.map(p => Number(p.x)).filter(Number.isFinite);
@@ -1565,8 +1684,8 @@
         const fallback = p.match_scope !== "direct_catalyst";
         svg += '<circle class="scatter-point ' + (fallback ? "fallback" : "") + '" cx="' + sx(p.x) + '" cy="' + sy(p.y) + '" r="5"><title>' + esc((p.catalyst || "-") + " | " + (p.adsorbate || "-") + " | " + (p.paper_title || "-")) + '</title></circle>';
       });
-      svg += '<text x="' + (width / 2) + '" y="' + (height - 14) + '" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(payload.descriptor) + '</text>';
-      svg += '<text x="18" y="' + (height / 2) + '" transform="rotate(-90 18 ' + (height / 2) + ')" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(payload.target_property) + '</text>';
+      svg += '<text x="' + (width / 2) + '" y="' + (height - 14) + '" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(formatCorrelationLabel(xProperty)) + '</text>';
+      svg += '<text x="18" y="' + (height / 2) + '" transform="rotate(-90 18 ' + (height / 2) + ')" text-anchor="middle" fill="#6b7280" font-size="13">' + esc(formatCorrelationLabel(yProperty)) + '</text>';
       svg += '</svg>';
       const examples = points.slice(0, 6).map((p, idx) =>
         '<div class="evidence-mini-item"><strong>#' + (idx + 1) + ' ' + esc(p.catalyst || "-") + '</strong> · ' + esc(p.adsorbate || "-") + ' · x=' + esc(p.x) + ' / y=' + esc(p.y) +
@@ -1576,7 +1695,7 @@
       box.innerHTML =
         '<div class="scatter-shell">' +
           '<div class="scatter-head">' +
-            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(payload.target_property)) + ' x ' + esc(formatCorrelationLabel(payload.descriptor)) + '</div><div class="muted">优先使用已审核可导出配对；若严格配对为空，则使用同样本非 Rejected 探索性配对。虚线为线性拟合。</div></div>' +
+            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(yProperty)) + ' x ' + esc(formatCorrelationLabel(xProperty)) + '</div><div class="muted">仅使用已审核可导出配对；虚线为线性拟合。</div></div>' +
             '<span class="pill">点击矩阵可切换组合</span>' +
           '</div>' +
           '<div class="scatter-meta">' +
@@ -1609,13 +1728,14 @@
       paperLookup = data.paper_lookup || {};
       const summary = data.summary || {};
       renderMetrics(data);
-      const reactionItems = ((data.dft_matrix_meta || {}).category_counts || []).map(item => ({ type: item.category, count: item.count }));
-      renderTypeDonut(reactionItems, (data.dft_matrix_meta || {}).included_results || 0);
+      const overviewMeta = data.dft_overview_meta || data.dft_matrix_meta || {};
+      const reactionItems = (overviewMeta.category_counts || []).map(item => ({ type: item.category, count: item.count }));
+      renderTypeDonut(reactionItems, overviewMeta.included_results || 0);
       renderCoverage(summary);
       renderBars("yearBars", (data.years || []).map(row => ({ label: row.year || "未知年份", value: row.count })), "label", "value", 0);
       renderBars("journalBars", data.journals || [], "journal", "count", 1);
-      renderMatrix(data.dft_matrix || [], data.dft_matrix_meta || {});
-      renderCorrelation(data.descriptor_correlation || {});
+      if (data.dft_matrix) renderMatrix(data.dft_matrix, data.dft_matrix_meta || {});
+      if (data.descriptor_correlation) renderCorrelation(data.descriptor_correlation);
       renderStatus(data.dft_status || []);
       renderTasks(data.recent_tasks || []);
     }
@@ -1753,29 +1873,70 @@
       if (currentLibrary) rememberLibraryName(currentLibrary);
       document.getElementById("libraryMeta").textContent = selected ? ("当前文献库：" + selected.name + " · " + (selected.paper_count || 0) + " 篇") : "未找到文献库";
     }
-    async function loadVisuals() {
+    function mergeVisualData(data) {
+      latestData = {
+        ...(latestData || {}),
+        ...data,
+        summary: { ...((latestData || {}).summary || {}), ...(data.summary || {}) }
+      };
+      paperLookup = latestData.paper_lookup || {};
+    }
+    function activeVisualView() {
+      const active = document.querySelector(".view.active");
+      return active && active.id ? active.id.replace("view-", "") : "overview";
+    }
+    async function loadVisualSection(section, options = {}) {
       if (!currentLibrary) return;
+      if (!options.force && loadedSections.has(section)) return;
       const filters = corrFilters();
       const params = new URLSearchParams();
       params.set("library_name", currentLibrary);
-      params.set("matrix_status", "reviewed");
-      params.set("corr_min_n", filters.minN);
-      if (filters.reaction) params.set("corr_reaction", filters.reaction);
-      if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
-      if (filters.family) params.set("corr_family", filters.family);
+      params.set("sections", section);
+      if (section === "matrix") params.set("matrix_status", "reviewed");
+      if (section === "correlation") {
+        params.set("corr_min_n", filters.minN);
+        params.set("corr_allow_exploratory", "true");
+        if (filters.reaction) params.set("corr_reaction", filters.reaction);
+        if (filters.adsorbate) params.set("corr_adsorbate", filters.adsorbate);
+        if (filters.family) params.set("corr_family", filters.family);
+      }
       const data = await fetchJSON("/api/visuals/overview?" + params.toString());
-      renderAll(data);
+      mergeVisualData(data);
+      loadedSections.add(section);
+      if (section === "overview") {
+        renderAll(latestData);
+      } else if (section === "matrix") {
+        renderMatrix(latestData.dft_matrix || [], latestData.dft_matrix_meta || {});
+      } else if (section === "correlation") {
+        selectedCorrelationKey = "";
+        renderCorrelation(latestData.descriptor_correlation || {});
+        document.getElementById("correlationScatter").innerHTML = '<div class="scatter-placeholder">点击上方热力图中的任意格子，这里会显示对应的线性相关图、拟合线、Pearson r、Spearman ρ、样本数和证据摘要。</div>';
+      }
     }
     async function handleLibraryChange(name) {
+      const activeSection = activeVisualView();
       currentLibrary = name;
       rememberLibraryName(name);
+      latestData = null;
+      loadedSections = new Set();
+      selectedCorrelationKey = "";
+      matrixCategory = "all";
       document.getElementById("libraryMeta").textContent = "当前文献库：" + name;
-      await loadVisuals().catch(error => showToast("加载可视化失败：" + error.message));
+      await loadVisualSection("overview").catch(error => showToast("加载可视化失败：" + error.message));
+      if (activeSection === "matrix" || activeSection === "correlation") {
+        await loadVisualSection(activeSection).catch(error => showToast("加载当前标签失败：" + error.message));
+      }
     }
     async function reloadAll() {
       try {
+        const activeSection = activeVisualView();
         await loadLibraries();
-        await loadVisuals();
+        latestData = null;
+        loadedSections = new Set();
+        await loadVisualSection("overview");
+        if (activeSection === "matrix" || activeSection === "correlation") {
+          await loadVisualSection(activeSection);
+        }
       } catch (error) {
         showToast("刷新失败：" + error.message);
       }
@@ -1784,7 +1945,10 @@
       TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
       ["corrReaction", "corrAdsorbate", "corrFamily", "corrMinN"].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.addEventListener("change", () => loadVisuals().catch(error => showToast("相关性刷新失败：" + error.message)));
+        if (el) el.addEventListener("change", () => {
+          loadedSections.delete("correlation");
+          loadVisualSection("correlation", { force: true }).catch(error => showToast("相关性刷新失败：" + error.message));
+        });
       });
       initMatrixInteractions();
       

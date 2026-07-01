@@ -26,7 +26,13 @@ def _gate(eligible: bool):
 
 
 def _audit(source: str, decision: str) -> dict:
-    return {"source": source, "source_label": source, "decision": decision}
+    return {
+        "source": source,
+        "source_label": source,
+        "source_identity": f"mcp:{source}",
+        "source_identity_verified": True,
+        "decision": decision,
+    }
 
 
 def test_ai_review_display_status_matrix_matches_export_gate_authority():
@@ -55,8 +61,8 @@ def test_ai_review_display_status_matrix_matches_export_gate_authority():
         ],
         conflicts=[],
     )
-    assert rejected["status"] == "rejected"
-    assert rejected["label"] == "AI 一致拒绝"
+    assert rejected["status"] == "reject_suggested"
+    assert rejected["label"] == "AI 建议拒绝"
 
     conflict = DFTReviewQueueService.build_ai_review_display_status(
         gate=_gate(False),
@@ -73,6 +79,35 @@ def test_ai_review_display_status_matrix_matches_export_gate_authority():
     )
     assert exportable_proposed["status"] == "converged_adopted"
     assert exportable_proposed["label"] == "已采纳 AI 修正"
+
+
+def test_dft_queue_dedupes_same_authenticated_identity_across_run_labels():
+    anchor = {"page": 5, "quoted_text": "reported value"}
+    state = DFTReviewQueueService.build_dft_workflow_state(
+        gate=_gate(False),
+        object_review_audits=[
+            {
+                "candidate_id": "submission-1",
+                "source_label": "claude_dft_20260630_100000",
+                "source_identity": "mcp:claude",
+                "source_identity_verified": True,
+                "decision": "REJECT",
+                "evidence_location": anchor,
+            },
+            {
+                "candidate_id": "submission-2",
+                "source_label": "claude_dft_20260630_110000",
+                "source_identity": "mcp:claude",
+                "source_identity_verified": True,
+                "decision": "REJECT",
+                "evidence_location": anchor,
+            },
+        ],
+    )
+
+    assert state["raw_ai_opinion_count"] == 1
+    assert state["valid_ai_opinion_count"] == 1
+    assert state["state"] == "waiting_second_ai"
 
 
 def test_non_dft_detail_dedupe_key_still_uses_existing_display_semantics():

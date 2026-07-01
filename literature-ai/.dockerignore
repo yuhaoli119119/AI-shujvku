@@ -1,0 +1,17 @@
+backend/.pytest-tmp/
+backend/.pytest_cache/
+backend/data/
+backend/tests/
+backend/reports/
+backend/outputs/
+backend/scratch/
+frontend/node_modules/
+frontend/test-results/
+frontend/playwright-report/
+data/
+outputs/
+test-results/
+.git/
+.pytest_cache/
+**/__pycache__/
+**/*.pyc

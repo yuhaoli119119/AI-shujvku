@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import AuditLog, CatalystSample, DFTResult, Paper
+from app.db.models import ActiveSiteMetal, AuditLog, CatalystSample, DFTResult, Paper
 from app.main import app
 
 
@@ -54,6 +54,8 @@ def test_update_catalyst_basic_info_standardizes_fields_and_audits(setup_test_db
     assert updated["support_normalized"] == "graphene"
     assert updated["metal_1_descriptors"]["element_symbol"] == "Co"
     assert updated["metal_1_descriptors"]["electronegativity"] == 1.88
+    assert payload["active_site_refresh"]["active_site_status"] == "refreshed"
+    assert payload["active_site_refresh"]["inserted_count"] == 2
 
     detail = client.get(f"/api/papers/{paper_id}", params={"mode": "full"})
     assert detail.status_code == 200, detail.text
@@ -62,7 +64,7 @@ def test_update_catalyst_basic_info_standardizes_fields_and_audits(setup_test_db
     assert sample_payload["support_normalized"] == "graphene"
     assert sample_payload["metal_centers"] == ["Co", "Ge"]
     assert sample_payload["metal_1_descriptors"]["element_symbol"] == "Co"
-    assert sample_payload["descriptor_blockers"] == ["unknown_metal_descriptor"]
+    assert sample_payload["descriptor_blockers"] == []
 
     with SessionLocal() as session:
         stored = session.get(CatalystSample, UUID(sample_id))
@@ -79,6 +81,108 @@ def test_update_catalyst_basic_info_standardizes_fields_and_audits(setup_test_db
         assert audit is not None
         assert audit.payload["normalization"]["raw"]["support"] == "Gr"
         assert audit.payload["after"]["support"] == "graphene"
+        assert audit.payload["active_site_refresh"]["active_site_status"] == "refreshed"
+        active_site_rows = session.scalars(
+            select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id == UUID(sample_id)).order_by(ActiveSiteMetal.site_role)
+        ).all()
+        assert [row.site_role for row in active_site_rows] == ["M1", "M2"]
+        assert [row.element_symbol for row in active_site_rows] == ["Co", "Ge"]
+        assert {row.enrichment_status for row in active_site_rows} == {"system_enriched"}
+
+
+def test_multi_metal_screening_set_does_not_generate_fake_dual_atom_descriptors(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = Paper(title="Screening set", library_name="锂硫双原子", pdf_path="screening.pdf")
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(
+            paper_id=paper.id,
+            name="M-BP screening collection",
+            catalyst_type="dual_atom",
+            metal_centers=["Co", "Fe", "Ni", "V"],
+        )
+        session.add(sample)
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    detail = client.get(f"/api/papers/{paper_id}", params={"mode": "full"})
+    assert detail.status_code == 200, detail.text
+    sample_payload = detail.json()["catalyst_samples_items"][0]
+    assert sample_payload["metal_1_descriptors"] is None
+    assert sample_payload["metal_2_descriptors"] is None
+    assert sample_payload["dac_combined_descriptors"] is None
+    assert "screening_set_not_active_site" in sample_payload["descriptor_blockers"]
+    assert "too_many_metal_centers_for_descriptor" in sample_payload["descriptor_blockers"]
+
+
+def test_update_catalyst_basic_info_clears_stale_active_site_rows_for_screening_set(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = Paper(title="Stale site cleanup", library_name="锂硫双原子", pdf_path="cleanup.pdf")
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-Co DAC",
+            catalyst_type="dual_atom",
+            metal_centers=["Fe", "Co"],
+        )
+        session.add(sample)
+        session.flush()
+        session.add_all(
+            [
+                ActiveSiteMetal(
+                    paper_id=paper.id,
+                    catalyst_sample_id=sample.id,
+                    active_site_key=f"catalyst:{sample.id}|site:confirmed_active_center",
+                    site_type="dual_atom",
+                    site_role="M1",
+                    element_symbol="Fe",
+                    element_order=1,
+                    order_source="test",
+                    normalized_pair_key="Fe-Co",
+                    enrichment_status="system_enriched",
+                ),
+                ActiveSiteMetal(
+                    paper_id=paper.id,
+                    catalyst_sample_id=sample.id,
+                    active_site_key=f"catalyst:{sample.id}|site:confirmed_active_center",
+                    site_type="dual_atom",
+                    site_role="M2",
+                    element_symbol="Co",
+                    element_order=2,
+                    order_source="test",
+                    normalized_pair_key="Fe-Co",
+                    enrichment_status="system_enriched",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        sample_id = str(sample.id)
+
+    client = TestClient(app)
+    response = client.post(
+        f"/api/papers/{paper_id}/catalyst-samples/{sample_id}/basic-info",
+        json={
+            "catalyst_type": "dual_atom",
+            "metal_centers": ["Fe", "Co", "Ni"],
+            "source": "literature_library_user",
+        },
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["active_site_refresh"]["active_site_status"] == "skipped"
+    assert payload["active_site_refresh"]["deleted_count"] == 2
+    assert payload["active_site_refresh"]["skipped_reason"] == "screening_set_not_active_site"
+
+    with SessionLocal() as session:
+        active_site_rows = session.scalars(
+            select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id == UUID(sample_id))
+        ).all()
+        assert active_site_rows == []
 
 
 def test_update_catalyst_basic_info_rejects_wrong_paper(setup_test_db):
@@ -165,6 +269,8 @@ def test_create_catalyst_basic_info_from_dft_group_and_bind_rows(setup_test_db):
     payload = response.json()
     assert payload["status"] == "created_and_bound"
     assert set(payload["bound_dft_result_ids"]) == set(row_ids)
+    assert payload["active_site_refresh"]["active_site_status"] == "refreshed"
+    assert payload["active_site_refresh"]["inserted_count"] == 2
 
     with SessionLocal() as session:
         sample = session.get(CatalystSample, UUID(payload["catalyst_sample_id"]))
@@ -176,6 +282,10 @@ def test_create_catalyst_basic_info_from_dft_group_and_bind_rows(setup_test_db):
             select(DFTResult).where(DFTResult.id.in_([UUID(row_id) for row_id in row_ids]))
         ).all()
         assert {row.catalyst_sample_id for row in stored_rows} == {sample.id}
+        active_site_rows = session.scalars(
+            select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id == sample.id).order_by(ActiveSiteMetal.site_role)
+        ).all()
+        assert [row.element_symbol for row in active_site_rows] == ["Co", "Ge"]
         audit = session.scalar(
             select(AuditLog).where(
                 AuditLog.paper_id == UUID(paper_id),

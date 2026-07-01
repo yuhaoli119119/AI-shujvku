@@ -160,10 +160,135 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 "reaction_validation_status",
                 "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS reaction_validation_status VARCHAR(32)",
             )
+            execute_migration_step(
+                "dft_results",
+                "support_lifecycle_status",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_lifecycle_status VARCHAR(32)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "support_writeback_paper_id",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_writeback_paper_id UUID",
+            )
+            execute_migration_step(
+                "dft_results",
+                "support_writeback_dft_result_id",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_writeback_dft_result_id UUID",
+            )
+            execute_migration_step(
+                "dft_results",
+                "support_lifecycle_reason",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_lifecycle_reason TEXT",
+            )
+            execute_migration_step(
+                "dft_results",
+                "support_lifecycle_actor",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_lifecycle_actor VARCHAR(160)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "support_lifecycle_updated_at",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS support_lifecycle_updated_at TIMESTAMP",
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_dft_results_support_lifecycle_status "
+                    "ON dft_results (support_lifecycle_status)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_dft_results_support_writeback_paper_id "
+                    "ON dft_results (support_writeback_paper_id)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_dft_results_support_writeback_dft_result_id "
+                    "ON dft_results (support_writeback_dft_result_id)"
+                )
+            )
+            if "paper_relationships" in table_names:
+                connection.execute(
+                    text(
+                        "UPDATE dft_results AS d SET "
+                        "support_lifecycle_status = 'pending', "
+                        "support_writeback_paper_id = rel.source_paper_id, "
+                        "support_lifecycle_reason = COALESCE(d.support_lifecycle_reason, 'linked_supplementary_candidate'), "
+                        "support_lifecycle_updated_at = COALESCE(d.support_lifecycle_updated_at, CURRENT_TIMESTAMP) "
+                        "FROM ("
+                        "SELECT DISTINCT ON (target_paper_id) target_paper_id, source_paper_id "
+                        "FROM paper_relationships "
+                        "WHERE lower(relationship_type) IN "
+                        "('supplementary', 'supplementary_information', 'supporting_information', 'si') "
+                        "ORDER BY target_paper_id, created_at ASC"
+                        ") AS rel "
+                        "WHERE d.paper_id = rel.target_paper_id "
+                        "AND d.support_lifecycle_status IS NULL"
+                    )
+                )
             connection.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_dft_results_reaction_type "
                     "ON dft_results (reaction_type)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS dft_audit_issues ("
+                    "id UUID PRIMARY KEY DEFAULT gen_random_uuid(), "
+                    "paper_id UUID NOT NULL REFERENCES papers(id) ON DELETE CASCADE, "
+                    "target_type VARCHAR(64) NOT NULL DEFAULT 'dft_results', "
+                    "target_id VARCHAR(64), "
+                    "issue_type VARCHAR(64) NOT NULL, "
+                    "severity VARCHAR(16) NOT NULL DEFAULT 'medium', "
+                    "status VARCHAR(32) NOT NULL DEFAULT 'open', "
+                    "current_snapshot JSONB, "
+                    "suggested_value JSONB, "
+                    "suggested_dft JSONB, "
+                    "evidence_payload JSONB, "
+                    "source_identities JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                    "source_candidate_ids JSONB NOT NULL DEFAULT '[]'::jsonb, "
+                    "fingerprint VARCHAR(128) NOT NULL, "
+                    "resolution_note TEXT, "
+                    "resolved_by VARCHAR(128), "
+                    "resolved_at TIMESTAMP, "
+                    "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                    "CONSTRAINT uq_dft_audit_issue_identity UNIQUE "
+                    "(paper_id, target_type, target_id, issue_type, fingerprint)"
+                    ")"
+                )
+            )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dft_audit_issues_paper_id ON dft_audit_issues (paper_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dft_audit_issues_status ON dft_audit_issues (status)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dft_audit_issues_issue_type ON dft_audit_issues (issue_type)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_dft_audit_issues_target_id ON dft_audit_issues (target_id)"))
+
+    if "external_analysis_runs" in table_names:
+        with engine.begin() as connection:
+            execute_migration_step(
+                "external_analysis_runs",
+                "source_identity",
+                "ALTER TABLE external_analysis_runs ADD COLUMN IF NOT EXISTS source_identity VARCHAR(160)",
+            )
+            execute_migration_step(
+                "external_analysis_runs",
+                "source_identity_verified",
+                "ALTER TABLE external_analysis_runs ADD COLUMN IF NOT EXISTS source_identity_verified BOOLEAN NOT NULL DEFAULT FALSE",
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_external_analysis_runs_source_identity "
+                    "ON external_analysis_runs (source_identity)"
+                )
+            )
+            connection.execute(
+                text(
+                    "UPDATE external_analysis_runs "
+                    "SET source_identity = 'untrusted:legacy_external_analysis', "
+                    "source_identity_verified = FALSE "
+                    "WHERE source_identity IS NULL OR TRIM(source_identity) = ''"
                 )
             )
 
@@ -207,6 +332,11 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 "paper_code",
                 "ALTER TABLE papers ADD COLUMN IF NOT EXISTS paper_code VARCHAR(16)",
             )
+            execute_migration_step(
+                "papers",
+                "journal_id",
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS journal_id UUID REFERENCES journals(id) ON DELETE SET NULL",
+            )
             try:
                 connection.execute(
                     text(
@@ -216,6 +346,22 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 )
             except Exception:
                 logger.exception("Automatic database migration failed while indexing papers.paper_code")
+            try:
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_papers_journal_id ON papers (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_normalized_name ON journals (normalized_name)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_print_issn ON journals (print_issn)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_electronic_issn ON journals (electronic_issn)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_status ON journals (status)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_aliases_journal_id ON journal_aliases (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_aliases_normalized_alias ON journal_aliases (normalized_alias)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_journal_id ON journal_metrics (journal_id)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_metric_type ON journal_metrics (metric_type)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_metric_value ON journal_metrics (metric_value)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_data_year ON journal_metrics (data_year)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_release_year ON journal_metrics (release_year)"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journal_metrics_source_name ON journal_metrics (source_name)"))
+            except Exception:
+                logger.exception("Automatic database migration failed while indexing journal metadata tables")
             execute_migration_step(
                 "papers",
                 "type_confidence",

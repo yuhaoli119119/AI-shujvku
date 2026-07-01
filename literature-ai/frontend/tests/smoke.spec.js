@@ -1043,6 +1043,26 @@ async function mockApi(route) {
               reason: 'Object-level audit says the value should be checked against Table 1.',
             },
           ],
+          dft_object_review_audit_count: 1,
+          dft_object_review_audits: [
+            {
+              candidate_id: 'object-audit-1',
+              candidate_type: 'object_review_audit',
+              status: 'candidate',
+              target_type: 'dft_results',
+              target_id: 'dft-blocked-1',
+              field_name: 'value',
+              source: 'assigned_dft_audit',
+              source_label: 'Assigned AI DFT audit',
+              agent_role: 'dft_auditor',
+              model_name: 'glm-test',
+              decision: 'REVISE',
+              recommended_action: 'propose_correction',
+              verification_status: 'unverified',
+              confidence: 0.71,
+              reason: 'Object-level audit says the value should be checked against Table 1.',
+            },
+          ],
           review_conflict_count: 0,
           workspace_path: '/workspace/paper-1',
         },
@@ -1425,10 +1445,13 @@ async function mockApi(route) {
         canonical_mcp_path: '/mcp',
         target_list_token: '{{TARGET_LIST}}',
         source_label_token: '{{SOURCE_LABEL}}',
+        target_reaction_token: '{{TARGET_REACTION}}',
+        supported_kinds: ['overall', 'dft', 'dft_primary', 'figure', 'table', 'sections_writing', 'text_review'],
         templates: {
           overall: '统一总体提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n受控调用 app.mcp.context.mcp_auth_context + app.mcp.server；禁止直接操作数据库。',
           dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n单个 AI 不得最终确认 DFT。',
-          figure: '统一图表提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
+          dft_primary: '统一 DFT 主 AI 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nget_dft_audit_issues(paper_id=<当前 paper_id>)',
+          figure: '统一图片提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           table: '统一表格提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           sections_writing: '统一章节提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nsection_level section_number parent_heading heading_path',
         },
@@ -1509,8 +1532,43 @@ async function mockApi(route) {
   }
 
   if (pathname === '/api/visuals/overview') {
-    return jsonResponse(route, {
+    const section = requestUrl.searchParams.get('sections');
+    const base = {
       library_name: 'Default Library',
+      included_sections: section ? [section] : ['overview', 'matrix', 'correlation'],
+    };
+    if (section === 'matrix') {
+      return jsonResponse(route, {
+        ...base,
+        paper_lookup: {},
+        dft_matrix: [{ catalyst: 'Fe / graphdiyne', catalyst_key: 'fegraphdiyne', adsorbate: 'Li2S4', adsorbate_key: 'li2s4', reaction_category: '电池/离子', count: 1, paper_count: 1, paper_ids: [], property_types: [], match_scope_counts: {} }],
+        dft_matrix_meta: { included_results: 1, category_counts: [{ category: '电池/离子', count: 1 }] },
+      });
+    }
+    if (section === 'correlation') {
+      return jsonResponse(route, {
+        ...base,
+        descriptor_correlation: {
+          schema_version: 'dft_total_correlation_v3',
+          variables: [
+            { key: 'adsorption_energy', group: 'energy' },
+            { key: 'reaction_barrier', group: 'barrier' },
+          ],
+          variable_properties: ['adsorption_energy', 'reaction_barrier'],
+          target_properties: ['adsorption_energy', 'reaction_barrier'],
+          descriptor_properties: ['adsorption_energy', 'reaction_barrier'],
+          reviewed_numeric_points: 3,
+          cells: [
+            { y_property: 'adsorption_energy', x_property: 'adsorption_energy', target_property: 'adsorption_energy', descriptor: 'adsorption_energy', n: 3, pearson_r: 1, spearman_rho: 1, status: 'identity', source: 'exploratory_same_sample' },
+            { y_property: 'adsorption_energy', x_property: 'reaction_barrier', target_property: 'adsorption_energy', descriptor: 'reaction_barrier', n: 3, pearson_r: 1, spearman_rho: 1, status: 'ready', color: 'positive', source: 'exploratory_same_sample' },
+            { y_property: 'reaction_barrier', x_property: 'adsorption_energy', target_property: 'reaction_barrier', descriptor: 'adsorption_energy', n: 3, pearson_r: 1, spearman_rho: 1, status: 'ready', color: 'positive', source: 'exploratory_same_sample' },
+            { y_property: 'reaction_barrier', x_property: 'reaction_barrier', target_property: 'reaction_barrier', descriptor: 'reaction_barrier', n: 3, pearson_r: 1, spearman_rho: 1, status: 'identity', source: 'exploratory_same_sample' },
+          ],
+        },
+      });
+    }
+    return jsonResponse(route, {
+      ...base,
       summary: {
         papers: 1,
         pdf_available: 1,
@@ -1524,9 +1582,31 @@ async function mockApi(route) {
       years: [{ year: 2025, count: 1 }],
       journals: [{ journal: 'Journal of Testing', count: 1 }],
       paper_types: [{ type: 'research', count: 1 }],
-      dft_matrix: [{ property_type: 'adsorption_energy', adsorbate: 'Li2S4', count: 1, avg_confidence: 0.9 }],
+      dft_overview_meta: { included_results: 1, category_counts: [{ category: '电池/离子', count: 1 }] },
       dft_status: [{ status: 'Codex_Candidate', count: 1 }],
       recent_tasks: [{ job_id: 'job-1', type: 'agent_activity', status: 'completed', title: 'Mock activity', created_at: '2026-06-01T00:00:00' }],
+    });
+  }
+
+  if (pathname === '/api/visuals/correlation-pairs') {
+    return jsonResponse(route, {
+      y_property: 'adsorption_energy',
+      x_property: 'reaction_barrier',
+      target_property: 'adsorption_energy',
+      descriptor: 'reaction_barrier',
+      min_n: 3,
+      n: 3,
+      ready: true,
+      source: 'exploratory_same_sample',
+      pearson_r: 1,
+      spearman_rho: 1,
+      slope: 1,
+      intercept: -1.4,
+      points: [
+        { x: 0.4, y: -1.0, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+        { x: 0.6, y: -0.8, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+        { x: 0.8, y: -0.6, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
+      ],
     });
   }
 
@@ -1735,6 +1815,51 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     page.on('pageerror', err => {
       consoleErrors.push(err.message);
     });
+  });
+
+  test('visuals lazy-loads expensive sections and scatter data', async ({ page }) => {
+    const visualRequests = [];
+    page.on('request', request => {
+      if (request.url().includes('/api/visuals/')) visualRequests.push(request.url());
+    });
+
+    const overviewResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=overview'));
+    await page.goto(`${BASE_URL}/pages/visuals/index.html`);
+    await overviewResponse;
+    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
+    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
+
+    const matrixResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=matrix'));
+    await page.click('.tab-btn[data-view="matrix"]');
+    await matrixResponse;
+    expect(visualRequests.filter(url => url.includes('sections=matrix'))).toHaveLength(1);
+
+    const correlationResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation'));
+    await page.click('.tab-btn[data-view="correlation"]');
+    await correlationResponse;
+    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(1);
+    expect(visualRequests.some(url => url.includes('corr_allow_exploratory=true'))).toBe(true);
+    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
+    await expect(page.locator('#view-correlation .panel-title')).toContainText('DFT 总相关性热力图');
+    await expect(page.locator('#correlationHeadMeta')).toContainText('2 个 DFT 数值变量');
+    await expect(page.locator('.correlation-col-head')).toContainText(['吸附能', '反应能垒']);
+    await expect(page.locator('.correlation-row-head')).toContainText(['吸附能', '反应能垒']);
+    await expect(page.locator('.correlation-cell')).toHaveCount(4);
+    await expect(page.locator('.correlation-cell').nth(1)).toContainText('1.00');
+
+    const filteredResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation') && response.url().includes('corr_min_n=5'));
+    await page.fill('#corrMinN', '5');
+    await page.dispatchEvent('#corrMinN', 'change');
+    await filteredResponse;
+    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
+    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(2);
+
+    const scatterResponse = page.waitForResponse(response => response.url().includes('/api/visuals/correlation-pairs'));
+    await page.locator('.correlation-cell:not(.identity)').first().click();
+    await scatterResponse;
+    expect(visualRequests.filter(url => url.includes('correlation-pairs'))).toHaveLength(1);
+    const scatterRequests = visualRequests.filter(url => url.includes('correlation-pairs'));
+    expect(scatterRequests.some(url => url.includes('allow_exploratory=true'))).toBe(true);
   });
 
   for (const pageInfo of PAGES) {
@@ -2388,6 +2513,108 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftList .cell-primary[title*="reaction_barrier"]').first()).toBeVisible();
   });
 
+  test('business flow: DFT database filters by real catalyst name and labels binding energy', async ({ page }) => {
+    const compareUrls = [];
+    const compareItems = [
+      {
+        paper_id: 'paper-binding',
+        title: 'Binding Energy Paper',
+        display_catalyst_name: 'Co-GDY',
+        catalysts: [{ name: 'Co-GDY', type: 'single_atom' }],
+        adsorbate: 'Li2S6',
+        property_type: 'binding_energy',
+        normalized_property_type: 'binding_energy',
+        canonical_property_type: 'adsorption_energy',
+        property_subtype: 'binding',
+        value: -0.8,
+        unit: 'eV',
+        confidence: 0.9,
+        evidence_text: 'The binding energy is -0.8 eV.',
+        source_section: 'Results',
+        validation_status: 'validated',
+        is_exportable: true,
+      },
+      {
+        paper_id: 'paper-binding',
+        title: 'Binding Energy Paper',
+        display_catalyst_name: 'Co-GDY',
+        catalysts: [{ name: 'Co-GDY', type: 'single_atom' }],
+        adsorbate: 'Li2S4',
+        property_type: 'adsorption_energy',
+        normalized_property_type: 'adsorption_energy',
+        canonical_property_type: 'adsorption_energy',
+        property_subtype: 'adsorption',
+        value: -1.1,
+        unit: 'eV',
+        confidence: 0.91,
+        evidence_text: 'The adsorption energy is -1.1 eV.',
+        source_section: 'Results',
+        validation_status: 'validated',
+        is_exportable: true,
+      },
+      {
+        paper_id: 'paper-adsorption',
+        title: 'Adsorption Energy Paper',
+        display_catalyst_name: 'Fe-GDY',
+        catalysts: [{ name: 'Fe-GDY', type: 'single_atom' }],
+        adsorbate: 'Li2S6',
+        property_type: 'adsorption_energy',
+        normalized_property_type: 'adsorption_energy',
+        canonical_property_type: 'adsorption_energy',
+        property_subtype: 'adsorption',
+        value: -0.6,
+        unit: 'eV',
+        confidence: 0.88,
+        evidence_text: 'The adsorption energy is -0.6 eV.',
+        source_section: 'Results',
+        validation_status: 'validated',
+        is_exportable: true,
+      },
+    ];
+    await page.route('**/api/papers/aggregate**', route => jsonResponse(route, {
+      adsorbate_groups: {},
+      catalyst_groups: {
+        fegdy: [{ name: 'Fe-GDY', catalyst_type: 'single_atom' }],
+        cogdy: [{ name: 'Co-GDY', catalyst_type: 'single_atom' }],
+      },
+      possible_name_aliases: [],
+    }));
+    await page.route('**/api/papers/compare**', route => {
+      const rawUrl = route.request().url();
+      compareUrls.push(rawUrl);
+      const catalystName = new URL(rawUrl).searchParams.get('catalyst_name');
+      const items = catalystName
+        ? compareItems.filter(item => item.display_catalyst_name === catalystName)
+        : compareItems;
+      return jsonResponse(route, {
+        items,
+        stats: { count: 1, min: -0.8, max: -0.8, mean: -0.8, unit: 'eV' },
+        total: items.length,
+        has_more: false,
+      });
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await expect(page.locator('#propertyType')).toContainText('结合能');
+    await expect(page.locator('#catalystName')).toContainText('Co-GDY');
+    await expect(page.locator('.catalyst-name[data-catalyst-name="Co-GDY"]')).toHaveCount(2);
+    await expect(page.locator('.catalyst-name[data-catalyst-name="Fe-GDY"]')).toHaveCount(1);
+    const catalystColors = await page.evaluate(() => ({
+      co: Array.from(document.querySelectorAll('.catalyst-name[data-catalyst-name="Co-GDY"]')).map(node => getComputedStyle(node).color),
+      fe: getComputedStyle(document.querySelector('.catalyst-name[data-catalyst-name="Fe-GDY"]')).color,
+    }));
+    expect(new Set(catalystColors.co).size).toBe(1);
+    expect(catalystColors.co[0]).not.toBe(catalystColors.fe);
+    await page.selectOption('#catalystName', 'Co-GDY');
+
+    await expect(page.locator('#dftList')).toContainText('结合能');
+    await expect.poll(() => compareUrls.some(rawUrl => {
+      const parsed = new URL(rawUrl);
+      return parsed.searchParams.get('catalyst_name') === 'Co-GDY';
+    })).toBe(true);
+    expect(compareUrls.every(rawUrl => new URL(rawUrl).searchParams.get('sort') === 'catalyst_group')).toBe(true);
+  });
+
   test('business flow: DFT export displays safety headers', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
@@ -2560,7 +2787,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(firstAudit).toContainText('待审 DFT');
     await expect(firstAudit).toContainText('候选 1');
     await expect(firstAudit).toContainText('外部审核 1');
-    await expect(firstAudit).toContainText('对象审核 1');
+    await expect(firstAudit).toContainText('DFT 审核 1');
 
     const secondStatus = missingRow.locator('td').nth(3);
     const secondAudit = missingRow.locator('td').nth(4);
@@ -2583,7 +2810,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(overlay).toContainText('审核痕迹');
     await expect(overlay).toContainText('待处理 DFT');
     await expect(overlay).toContainText('外部审核：1');
-    await expect(overlay).toContainText('对象审核：1');
+    await expect(overlay).toContainText('DFT 审核：1');
+    await expect(overlay).toContainText('对象审核总数：1');
     await expect(overlay).toContainText('图表风险');
     await expect(overlay).toContainText('证据定位风险');
     await expect(overlay).toContainText('系统候选');
@@ -2796,7 +3024,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       return jsonResponse(route, { ok: true });
     });
     page.on('dialog', async dialog => {
-      expect(dialog.message()).toContain('这不是人工 verified');
+      expect(dialog.message()).toContain('非 DFT');
       materializeDialogs.push(dialog.message());
       await dialog.accept();
     });
@@ -2815,9 +3043,154 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.evaluate(() => materializeRun('run-1'));
     await expect.poll(() => materializePayloads.length).toBe(2);
-    expect(materializePayloads[1]).toEqual({ explicit_all: true, created_by: 'web_user' });
-    expect(materializePayloads[1]).not.toHaveProperty('candidate_ids');
+    expect(materializePayloads[1]).toEqual({ candidate_ids: ['candidate-1'], created_by: 'web_user' });
     expect(materializeDialogs).toHaveLength(2);
+  });
+
+  test('business flow: deferred DFT candidate uses run-scoped review rules', async ({ page }) => {
+    const runPayload = {
+      id: 'dft-run-1',
+      source: 'ide_ai',
+      source_label: 'DFT deferred review',
+      created_at: '2026-05-26T12:00:00',
+      mapping_status: 'normalized',
+      candidates: [
+        {
+          id: 'dft-candidate-1',
+          candidate_type: 'object_review_audit',
+          status: 'candidate',
+          action_mode: 'apply_review_rules',
+          action_scope: 'run',
+          confidence: 0.9,
+          normalized_payload: {
+            target_type: 'dft_results',
+            target_id: 'new',
+            decision: 'new_candidate',
+          },
+        },
+      ],
+    };
+    const applyPayloads = [];
+    let materializeCalls = 0;
+
+    await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
+    await page.route(/\/api\/external-analysis\/runs\/dft-run-1\/apply-review-rules$/, async route => {
+      applyPayloads.push(JSON.parse(route.request().postData() || '{}'));
+      return jsonResponse(route, {
+        run_id: 'dft-run-1',
+        auto_apply_summary: { new_dft_candidates: { materialized_count: 1 } },
+        candidates: [{ id: 'dft-candidate-1', status: 'materialized' }],
+      });
+    });
+    await page.route(/\/api\/external-analysis\/runs\/dft-run-1\/materialize$/, async route => {
+      materializeCalls += 1;
+      return jsonResponse(route, { ok: true });
+    });
+    page.on('dialog', async dialog => {
+      expect(dialog.message()).toContain('整 run 操作');
+      expect(dialog.message()).toContain('不会自动变成人工 verified');
+      await dialog.accept();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="review"]');
+
+    const rendered = await page.evaluate(() => renderCandidates('dft-run-1', state.externalRuns[0].candidates));
+    expect(rendered).toContain('待按审核规则处理');
+    expect(rendered).toContain('按本 run 审核规则处理');
+    expect(rendered).not.toContain('candidate-select');
+    expect(rendered).not.toContain('已处理');
+
+    await page.evaluate(() => applyReviewRulesForRun('dft-run-1'));
+    await expect.poll(() => applyPayloads.length).toBe(1);
+    expect(applyPayloads[0]).toEqual({ reviewer: 'web_user' });
+    expect(materializeCalls).toBe(0);
+  });
+
+  test('business flow: mixed DFT run applies once and legacy table correction stays readonly', async ({ page }) => {
+    const runPayload = {
+      id: 'mixed-run-1',
+      source: 'ide_ai',
+      source_label: 'Mixed deferred review',
+      created_at: '2026-05-26T12:00:00',
+      mapping_status: 'normalized',
+      candidates: [
+        {
+          id: 'mixed-dft-1',
+          candidate_type: 'object_review_audit',
+          status: 'candidate',
+          action_mode: 'apply_review_rules',
+          action_scope: 'run',
+          normalized_payload: { target_type: 'dft_results', target_id: 'new', decision: 'new_candidate' },
+        },
+        {
+          id: 'mixed-note-1',
+          candidate_type: 'note',
+          status: 'pending',
+          action_mode: 'materialize',
+          action_scope: 'candidate',
+          normalized_payload: { content: 'Anchored non-DFT note.' },
+        },
+        {
+          id: 'legacy-table-1',
+          candidate_type: 'correction',
+          status: 'pending',
+          action_mode: 'readonly',
+          action_scope: 'candidate',
+          normalized_payload: {
+            field_name: 'tables',
+            target_path: 'tables:table-1:caption',
+            operation: 'replace',
+            proposed_value: 'Blocked legacy caption',
+          },
+        },
+      ],
+    };
+    let applyCalls = 0;
+    let materializeCalls = 0;
+    let dialogCount = 0;
+
+    await page.route(/\/api\/external-analysis\/runs(\?|$)/, route => jsonResponse(route, [runPayload]));
+    await page.route(/\/api\/external-analysis\/runs\/mixed-run-1\/apply-review-rules$/, async route => {
+      applyCalls += 1;
+      return jsonResponse(route, {
+        run_id: 'mixed-run-1',
+        auto_apply_summary: { new_dft_candidates: { materialized_count: 1 } },
+      });
+    });
+    await page.route(/\/api\/external-analysis\/runs\/mixed-run-1\/materialize$/, async route => {
+      materializeCalls += 1;
+      return jsonResponse(route, { ok: true });
+    });
+    page.on('dialog', async dialog => {
+      dialogCount += 1;
+      expect(dialog.message()).toContain('整 run 操作');
+      await dialog.accept();
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
+    await page.waitForTimeout(500);
+    await page.click('.paper-row');
+    await page.click('button[data-tab="review"]');
+
+    const legacyTable = await page.evaluate(() => {
+      const candidate = state.externalRuns[0].candidates.find(item => item.id === 'legacy-table-1');
+      return {
+        action: externalCandidateAction(candidate),
+        html: renderCandidates('mixed-run-1', [candidate]),
+      };
+    });
+    expect(legacyTable.action).toEqual({ mode: 'readonly', scope: 'candidate' });
+    expect(legacyTable.html).toContain('只读候选');
+    expect(legacyTable.html).not.toContain('应用/记录');
+    expect(legacyTable.html).not.toContain('candidate-select');
+
+    await page.evaluate(() => materializeRun('mixed-run-1'));
+    await expect.poll(() => applyCalls).toBe(1);
+    expect(materializeCalls).toBe(0);
+    expect(dialogCount).toBe(1);
   });
 
   test('business flow: literature library opens extraction job center', async ({ page }) => {
@@ -2848,7 +3221,19 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
   test('business flow: literature library exposes DFT safety and Codex item actions', async ({ page }) => {
       let verifyPayload = null;
+      let manualUpdatePayload = null;
       let catalystBasicInfoPayload = null;
+      await page.addInitScript(() => {
+        window.__copiedDftLocator = '';
+        Object.defineProperty(navigator, 'clipboard', {
+          configurable: true,
+          value: {
+            writeText: async text => {
+              window.__copiedDftLocator = String(text || '');
+            },
+          },
+        });
+      });
       await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1\/verify$/, async route => {
         verifyPayload = JSON.parse(route.request().postData() || '{}');
         return jsonResponse(route, {
@@ -2867,6 +3252,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           locator_status: 'exact_page',
         },
         audit_log_id: 'audit-1',
+      });
+    });
+    await page.route(/\/api\/papers\/paper-1\/dft-results\/dft-1$/, async route => {
+      if (route.request().method() !== 'PATCH') return route.fallback();
+      manualUpdatePayload = JSON.parse(route.request().postData() || '{}');
+      return jsonResponse(route, {
+        paper_id: 'paper-1',
+        dft_result_id: 'dft-1',
+        changed_fields: ['value'],
+        corrections: [],
+        invalidated_review_ids: [],
+        export_safety: { is_exportable: false, blocked_reasons: ['unsafe_review'] },
       });
     });
     await page.route(/\/api\/papers\/paper-1\/catalyst-samples\/catalyst-1\/basic-info$/, async route => {
@@ -2898,8 +3295,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftContent')).toContainText('尚未完成审核');
     const dftActions = page.locator('#dftContent [data-role="dft-readiness-actions"]');
     await expect(dftActions).toHaveCount(1);
-    await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
-    await expect(dftActions.locator('button:has-text("重新检查写回")')).toBeVisible();
+    await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toHaveCount(0);
+    await expect(dftActions.locator('button:has-text("刷新审核状态")')).toBeVisible();
     await expect(dftActions.locator('button:has-text("打开审核中心")')).toBeVisible();
     await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
     const missingReviewLabels = await page.evaluate(() => {
@@ -2973,15 +3370,65 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     await expect(page.locator('#dftContent [data-role="dft-sample-group"]').first()).toBeVisible();
     await page.locator('#dftContent [data-role="dft-sample-group"]').first().locator('summary').first().click();
-    const dftCandidateCard = page.locator('#dftContent details.readable-card').filter({ hasText: 'adsorption_energy' }).first();
-    await dftCandidateCard.locator('summary').click();
-    await expect(dftCandidateCard.locator('button:has-text("接受入库")')).toBeVisible();
-
+    const dftCandidateCard = page.locator('#dftContent .dft-compact-card').filter({ hasText: 'adsorption_energy' }).first();
+    await expect(dftCandidateCard).toHaveClass(/dft-compact-card/);
+    await expect(dftCandidateCard.locator('[data-role="dft-record-table"]')).toBeVisible();
+    await expect.poll(() => dftCandidateCard.locator('[data-role="dft-record-table"]').evaluate(node => node.closest('summary') === null)).toBe(true);
+    await expect(dftCandidateCard.locator('[data-role="dft-record-number"]')).toHaveText('DFT #1');
+    await expect(dftCandidateCard.locator('[data-role="dft-record-locator"]')).toHaveText('DFT #1');
+    await expect(dftCandidateCard.locator('[data-role="dft-core-value"]')).toContainText('-1.23');
+    await expect(dftCandidateCard.locator('[data-role="dft-core-value"]')).toContainText('eV');
+    await dftCandidateCard.locator('[data-role="copy-dft-locator"]').click();
+    await expect.poll(() => page.evaluate(() => window.__copiedDftLocator)).toBe('DFT #1; dft_result_id=dft-1');
+    await dftCandidateCard.locator('[data-role="dft-record-table"]').click();
+    await expect(page.locator('#dftDetailDialog')).toBeHidden();
+    await dftCandidateCard.locator('.dft-compact-expand').click();
+    await expect(page.locator('#dftDetailDialog')).toBeVisible();
+    await expect(page.locator('#dftDetailBody')).toContainText('-1.23');
+    await expect(page.locator('#dftDetailBody')).toContainText('The adsorption energy is -1.23 eV.');
+    await expect(page.locator('#dftDetailBody button:has-text("接受入库")')).toBeVisible();
+    await expect(page.locator('#dftDetailBody button:has-text("修改数据")')).toBeVisible();
     page.once('dialog', dialog => dialog.accept());
-    await dftCandidateCard.locator('button:has-text("接受入库")').click();
+    await page.locator('#dftDetailBody button:has-text("接受入库")').click();
     await expect.poll(() => verifyPayload).not.toBeNull();
     expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
     expect(verifyPayload.reviewer).toBe('literature_library_dft');
+    await page.waitForFunction(() => {
+      const selectedPaper = window.state && window.state.selectedPaper;
+      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
+    });
+    await page.locator('#dftContent [data-role="dft-sample-group"]').first().evaluate(group => group.setAttribute('open', ''));
+    await expect(page.locator('#dftEditDialog')).toHaveCount(0);
+    await page.evaluate(() => openDftEditDialog('dft-1'));
+    await expect(page.locator('#dftDetailDialog')).toBeVisible();
+    await expect(page.locator('#dftDetailTitle')).toContainText('修改 DFT #1 数据');
+    await expect(page.locator('#dftDetailBody #dftEditValue')).toBeVisible();
+    await page.locator('#dftEditValue').fill('-1.31');
+    await page.locator('#dftEditReason').fill('对照原 PDF 表格修正数值。');
+    await page.locator('#dftEditSubmit').click();
+    await expect.poll(() => manualUpdatePayload).not.toBeNull();
+    expect(manualUpdatePayload).toMatchObject({
+      confirm_manual_update: true,
+      reviewer: 'literature_library_user',
+      reason: '对照原 PDF 表格修正数值。',
+      updates: { value: -1.31 },
+    });
+    expect(Object.keys(manualUpdatePayload.updates)).toEqual(['value']);
+    await expect(page.locator('#dftDetailDialog')).toBeHidden();
+    await page.waitForFunction(() => {
+      const selectedPaper = window.state && window.state.selectedPaper;
+      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
+    });
+    const groupedDftNumbers = await page.evaluate(() => {
+      const host = document.createElement('div');
+      host.innerHTML = renderReadableCards('候选 DFT 数据', [
+        { id: 'dft-a', catalyst_sample_id: 'sample-a', property_type: 'adsorption_energy', value: -1, unit: 'eV' },
+        { id: 'dft-b', catalyst_sample_id: 'sample-b', property_type: 'reaction_barrier', value: 0.5, unit: 'eV' },
+        { id: 'dft-c', catalyst_sample_id: 'sample-a', property_type: 'binding_energy', value: -0.7, unit: 'eV' },
+      ]);
+      return Array.from(host.querySelectorAll('[data-role="dft-record-number"]')).map(node => node.textContent.trim());
+    });
+    expect(groupedDftNumbers).toEqual(['DFT #1', 'DFT #2', 'DFT #3']);
 
       await page.click('button[data-tab="figures"]');
       await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
@@ -3015,6 +3462,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(500);
       await page.click('.paper-row');
       await page.click('button[data-tab="dft"]');
+      await page.waitForFunction(() => {
+        const selectedPaper = window.state && window.state.selectedPaper;
+        const isFullDetail = selectedPaper && selectedPaper._detailMode === 'full';
+        const fullDetailIdle = !(window.state && window.state.fullDetailLoadingFor);
+        const createButton = Array.from(document.querySelectorAll('#dftContent [data-role="dft-sample-group"] button'))
+          .find(button => button.textContent && button.textContent.includes('补充基础信息'));
+        return isFullDetail && fullDetailIdle && createButton && createButton.offsetParent !== null;
+      });
 
       const group = page.locator('#dftContent [data-role="dft-sample-group"]').first();
       await expect(group).toContainText('基础信息待补');
@@ -3048,7 +3503,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       expect(separatorParsing.invalid.invalid).toEqual(['铁、钴']);
     });
 
-    test('business flow: single DFT action settles and copies the next AI review task', async ({ page }) => {
+    test('business flow: single DFT action no longer copies the next AI review task from detail', async ({ page }) => {
       let settleCalls = 0;
       await page.addInitScript(() => {
         window.__copiedDftReviewTask = '';
@@ -3076,12 +3531,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft`);
       const nextAction = page.locator('#dftContent [data-role="dft-next-action"]');
-      await expect(nextAction).toBeVisible();
-      await nextAction.click();
-
-      await expect.poll(() => settleCalls).toBe(1);
-      await expect.poll(() => page.evaluate(() => window.__copiedDftReviewTask)).toContain('统一 DFT 提示词');
-      await expect.poll(() => page.evaluate(() => window.__copiedDftReviewTask)).toContain('新数据审核候选清单');
+      await expect(nextAction).toHaveCount(0);
+      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
+      expect(settleCalls).toBe(0);
     });
 
     test('business flow: literature library renders common markdown table variants', async ({ page }) => {
@@ -3234,16 +3686,15 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(700);
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
       await expect(page.locator('#dftContent [data-role="dft-readiness-actions"]')).toHaveCount(1);
-      await expect(page.locator('#dftContent button:has-text("生成下一轮 AI 审核任务")')).toBeVisible();
-      await expect(page.locator('#dftContent button:has-text("重新检查写回")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("生成下一轮 AI 审核任务")')).toHaveCount(0);
+      await expect(page.locator('#dftContent button:has-text("刷新审核状态")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
-      await expect(page.locator('#dftContent')).toContainText('同一 AI/模型可以重复审核');
-      await expect(page.locator('#dftContent')).toContainText('按独立 candidate_id 计一票');
+      await expect(page.locator('#dftContent')).toContainText('正式 DFT 普通 AI 和主 AI 任务请回审核中心按单篇文献复制提示词');
       await expect(page.locator('#dftContent')).toContainText('page 和 quoted_text');
       await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
 
-      const cards = page.locator('#dftContent details.readable-card');
+      const cards = page.locator('#dftContent .dft-compact-card');
     await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
     await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('已采纳 AI 修正');
     await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('第二意见缺证据定位');
@@ -3293,8 +3744,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       };
     });
     expect(submissionVoteBehavior.consensusCount).toBe(1);
-    expect(submissionVoteBehavior.rejectedActions).toBe('');
-    expect(submissionVoteBehavior.mlReadyActions).toBe('');
+    expect(submissionVoteBehavior.rejectedActions).toContain('修改数据');
+    expect(submissionVoteBehavior.mlReadyActions).toContain('修改数据');
+    expect(submissionVoteBehavior.rejectedActions).not.toContain('接受入库');
+    expect(submissionVoteBehavior.mlReadyActions).not.toContain('接受入库');
     expect(submissionVoteBehavior.rejectedStatus).toBe('已拒绝');
     const exportableFallbackDisplay = await page.evaluate(() => dftAiOpinionMeta({
       is_exportable: true,
@@ -3432,10 +3885,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft&library_name=${encodeURIComponent('Default Library')}`);
       await page.waitForTimeout(700);
 
-      const card = page.locator('#dftContent details.readable-card').filter({ hasText: 'binding_energy' }).first();
+      const card = page.locator('#dftContent .dft-compact-card').filter({ hasText: 'binding_energy' }).first();
       await expect(card).toContainText('AI 已提修正');
       await expect(card).not.toContainText('已采纳 AI 修正');
-      await expect(card).toContainText('Conflicts 1');
+      await page.locator('#dftContent [data-role="dft-sample-group"]').evaluateAll(groups => {
+        groups.forEach(group => group.setAttribute('open', ''));
+      });
+      await card.locator('.dft-compact-expand').click();
+      await expect(page.locator('#dftDetailBody')).toContainText('Conflicts 1');
     });
 
     test('business flow: literature library deep-links to the requested review object', async ({ page }) => {
@@ -3445,9 +3902,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('button[data-tab="dft"].active')).toBeVisible();
       await expect(page.locator('#workspaceBody')).toContainText('Test Paper for Smoke Validation');
 
-      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      const targetCard = page.locator('#dftContent .dft-compact-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
       await expect(targetCard).toBeVisible();
-      await expect(targetCard).toHaveAttribute('open', '');
+      await expect(targetCard).toHaveClass(/deep-link-focus/);
       await expect(targetCard).toContainText('adsorption_energy');
       await expect(targetCard).toContainText('-1.23');
     });
@@ -3456,8 +3913,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-1&tab=dft&target_type=dft_results&target_id=dft-1&field_name=value&pdf_page=5&pdf_locator_status=exact_page&pdf_evidence_text=${encodeURIComponent('The adsorption energy of Li2S4 on Fe-N4 is -1.23 eV.')}`);
       await page.waitForTimeout(900);
 
-      const targetCard = page.locator('#dftContent details.readable-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
-      await expect(targetCard).toHaveAttribute('open', '');
+      const targetCard = page.locator('#dftContent .dft-compact-card[data-codex-item-type="dft_result"][data-target-id="dft-1"]').first();
+      await expect(targetCard).toHaveClass(/deep-link-focus/);
 
       const overlay = page.locator('#pdfViewerOverlay');
       await expect(overlay).toBeVisible();
@@ -4063,12 +4520,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       ];
 
       for (const [targetId, expectedText] of expectations) {
-        const detailCard = page.locator(`#dftContent details.readable-card[data-target-id="${targetId}"]`);
+        const detailCard = page.locator(`#dftContent .dft-compact-card[data-target-id="${targetId}"]`);
         await expect(detailCard).toHaveCount(1);
-        await detailCard.locator('summary').click();
-        await expect(detailCard).toContainText('Conflicts 1');
-        await expect(detailCard).toContainText(expectedText);
-        await expect(detailCard).not.toContainText(/Conflict fields:\s*value\b/);
+        await detailCard.locator('.dft-compact-expand').click();
+        await expect(page.locator('#dftDetailBody')).toContainText('Conflicts 1');
+        await expect(page.locator('#dftDetailBody')).toContainText(expectedText);
+        await expect(page.locator('#dftDetailBody')).not.toContainText(/Conflict fields:\s*value\b/);
+        await page.evaluate(() => closeDftDetailDialog());
       }
     });
 
@@ -4427,48 +4885,79 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#progressBox')).toHaveCount(0);
   });
 
-  test('business flow: review center builds prompts from the canonical backend contract', async ({ page }) => {
+  test('business flow: review center builds single-paper prompts from the canonical backend contract', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    const prompt = await page.evaluate(() => buildIdePromptForCopy('sections_writing'));
+    const prompt = await page.evaluate(() => {
+      selectedPaperIds.clear();
+      const row = state.rows[0];
+      selectedPaperIds.add(String(row.paper_id));
+      return buildIdePromptForCopy(PROMPT_COPY_ACTIONS.dft);
+    });
 
-    expect(prompt).toContain('统一章节提示词');
-    expect(prompt).toContain('section_level section_number parent_heading heading_path');
-    expect(prompt).toContain('source_label=<agent_name>_sections_writing_');
+    expect(prompt).toContain('统一 DFT 提示词');
+    expect(prompt).toContain('source_label=<agent_name>_dft_');
+    expect(prompt).toContain('role: main_paper');
+    expect(prompt).toContain('DFT 普通 AI 审核提示词');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
     expect(prompt).not.toContain('{{SOURCE_LABEL}}');
   });
 
-  test('business flow: review center keeps one visual entry and resolves figure, table, or mixed prompts', async ({ page }) => {
+  test('business flow: review center exposes separate figure table and DFT primary entries', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    await expect(page.locator('#promptCopySelect option')).toHaveCount(5);
-    await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveText('图表指令');
-    await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveCount(0);
+    await expect(page.locator('#promptCopySelect option')).toHaveCount(6);
+    await expect(page.locator('#promptCopySelect option[value="main_figure"]')).toHaveText('主文图片审核提示词');
+    await expect(page.locator('#promptCopySelect option[value="support_figure"]')).toHaveText('支撑文献图片审核提示词');
+    await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveText('表格审核提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 普通 AI 审核提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveText('DFT 主 AI 判断/修复提示词');
+    await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveCount(0);
+    await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
 
-    const kinds = await page.evaluate(() => {
-      const originalRows = state.rows;
-      const originalVisibleRows = currentVisibleRows;
+    const prompts = await page.evaluate(async () => {
       selectedPaperIds.clear();
-      window.currentVisibleRows = () => [{ paper_id: 'figure-only', figure_count: 2, table_count: 0 }];
-      const figureKind = resolveVisualPromptKind();
-      window.currentVisibleRows = () => [{ paper_id: 'table-only', figure_count: 0, table_count: 2 }];
-      const tableKind = resolveVisualPromptKind();
-      window.currentVisibleRows = () => [
-        { paper_id: 'mixed', figure_count: 1, table_count: 1 },
-      ];
-      const mixedKind = resolveVisualPromptKind();
-      window.currentVisibleRows = originalVisibleRows;
-      state.rows = originalRows;
-      return { figureKind, tableKind, mixedKind };
+      selectedPaperIds.add(String(state.rows[0].paper_id));
+      return {
+        mainFigure: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.main_figure),
+        table: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.table),
+        dftPrimary: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.dft_primary),
+      };
     });
 
-    expect(kinds).toEqual({ figureKind: 'figure', tableKind: 'table', mixedKind: 'figure_table' });
-    const mixedPrompt = await page.evaluate(() => buildIdePromptForCopy('figure_table'));
-    expect(mixedPrompt).toContain('统一 Figure + Table 提示词');
-    expect(mixedPrompt).toContain('source_label=<agent_name>_figure_table_');
+    expect(prompts.mainFigure).toContain('统一图片提示词');
+    expect(prompts.mainFigure).toContain('source_label=<agent_name>_main_figure_');
+    expect(prompts.mainFigure).toContain('主文图片审核提示词');
+    expect(prompts.table).toContain('统一表格提示词');
+    expect(prompts.table).toContain('source_label=<agent_name>_table_');
+    expect(prompts.table).toContain('同时检查主文表格和已关联 SI 表格');
+    expect(prompts.dftPrimary).toContain('统一 DFT 主 AI 提示词');
+    expect(prompts.dftPrimary).toContain('source_label=<agent_name>_dft_primary_');
+    expect(prompts.dftPrimary).toContain('get_dft_audit_issues');
+  });
+
+  test('business flow: review center legacy prompts keep table mutations on direct tools', async ({ page }) => {
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+    await page.waitForTimeout(500);
+
+    const prompts = await page.evaluate(() => ({
+      overall: legacyIdePromptTemplateV2('overall'),
+      figure: legacyIdePromptTemplateV2('figure'),
+      table: legacyIdePromptTemplateV2('table'),
+    }));
+
+    Object.values(prompts).forEach(prompt => {
+      expect(prompt).toContain('update_table');
+      expect(prompt).toContain('create_table');
+      expect(prompt).toContain('merge_table');
+      expect(prompt).toContain('delete_table');
+      expect(prompt).not.toContain('tables:new:create');
+      expect(prompt).not.toContain('"field_name":"tables"');
+    });
+    expect(prompts.table).toContain('corrected_value');
+    expect(prompts.table).toContain('不会修改表对象');
   });
 
   test('business flow: delete current paper opens confirmation and clears selection', async ({ page }) => {
@@ -5330,6 +5819,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const siRow = page.locator('.paper-row[data-id="paper-si-1"]');
     await siRow.click();
     await expect(page.locator('#paperTitle')).toContainText('Supporting Information for Main Paper For Selection Stability');
+    await expect.poll(() => page.evaluate(() => ({
+      selectedPaperId: window.state.selectedPaperId,
+      incomingCount: (window.state.selectedPaper && window.state.selectedPaper.incoming_relationships || []).length
+    }))).toEqual({ selectedPaperId: 'paper-si-1', incomingCount: 1 });
     const inheritedProgress = await page.evaluate(() => manualReviewProgress(window.state.selectedPaper));
     expect(inheritedProgress.figures.completed).toBe(true);
     expect(inheritedProgress.figures.inherited).toBe(true);

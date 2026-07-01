@@ -19,6 +19,8 @@ from app.schemas.project_library import (
     ProjectLibraryUserSubmitResultPayload,
 )
 from app.services.dft_export_service import build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
+from app.services.dft_audit_report_service import DFTAuditReportService
+from app.services.dft_audit_issue_service import DFT_AUDIT_ISSUE_OPEN_STATUSES, DFTAuditIssueService
 from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_ml_service import ProjectLibraryMLService
 from app.services.project_library_quality_service import ProjectLibraryQualityService
@@ -35,6 +37,55 @@ router = APIRouter()
 def _v3_filename(task: str, suffix: str) -> str:
     safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task).strip("_")
     return f"dft_ml_dataset_v3_{safe_task or 'task'}.{suffix}"
+
+
+@router.get("/audit-issues")
+def get_dft_audit_issues(
+    paper_id: UUID | None = Query(default=None),
+    status: list[str] | None = Query(default=None),
+    include_closed: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=1000),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    statuses = set(status or [])
+    if not statuses and not include_closed:
+        statuses = set(DFT_AUDIT_ISSUE_OPEN_STATUSES)
+    try:
+        service = DFTAuditIssueService(session)
+        rows = service.list_issues(
+            paper_id=paper_id,
+            statuses=statuses or None,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "items": [service.serialize_issue(row) for row in rows],
+        "count": len(rows),
+        "filters": {
+            "paper_id": str(paper_id) if paper_id else None,
+            "status": sorted(statuses) if statuses else None,
+            "include_closed": include_closed,
+        },
+    }
+
+
+@router.get("/audit-report")
+def get_dft_audit_report(
+    paper_id: UUID | None = Query(default=None),
+    days: int = Query(default=30, ge=1, le=365),
+    include_closed: bool = Query(default=False),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    from app.config import get_settings
+
+    settings = get_settings()
+    return DFTAuditReportService(session).build_report(
+        paper_id=paper_id,
+        days=days,
+        include_closed=include_closed,
+        mcp_api_keys=settings.mcp_api_keys,
+    )
 
 
 @router.get("/project-library-queue", response_model=ProjectLibraryQueuePayload)
@@ -215,6 +266,7 @@ def get_dft_ml_dataset_v3(
     property_type: str | None = Query(default=None),
     adsorbate: str | None = Query(default=None),
     catalyst_type: str | None = Query(default=None),
+    catalyst_name: str | None = Query(default=None),
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     library_name: str | None = Query(default=None),
@@ -231,6 +283,7 @@ def get_dft_ml_dataset_v3(
             property_type=property_type,
             adsorbate=adsorbate,
             catalyst_type=catalyst_type,
+            catalyst_name=catalyst_name,
             year_min=year_min,
             year_max=year_max,
             library_name=library_name,
@@ -249,6 +302,7 @@ def get_dft_ml_dataset_v3_csv(
     property_type: str | None = Query(default=None),
     adsorbate: str | None = Query(default=None),
     catalyst_type: str | None = Query(default=None),
+    catalyst_name: str | None = Query(default=None),
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     library_name: str | None = Query(default=None),
@@ -265,6 +319,7 @@ def get_dft_ml_dataset_v3_csv(
             property_type=property_type,
             adsorbate=adsorbate,
             catalyst_type=catalyst_type,
+            catalyst_name=catalyst_name,
             year_min=year_min,
             year_max=year_max,
             library_name=library_name,
@@ -288,6 +343,7 @@ def get_dft_ml_dataset_v3_manifest(
     property_type: str | None = Query(default=None),
     adsorbate: str | None = Query(default=None),
     catalyst_type: str | None = Query(default=None),
+    catalyst_name: str | None = Query(default=None),
     year_min: int | None = Query(default=None),
     year_max: int | None = Query(default=None),
     library_name: str | None = Query(default=None),
@@ -304,6 +360,7 @@ def get_dft_ml_dataset_v3_manifest(
             property_type=property_type,
             adsorbate=adsorbate,
             catalyst_type=catalyst_type,
+            catalyst_name=catalyst_name,
             year_min=year_min,
             year_max=year_max,
             library_name=library_name,

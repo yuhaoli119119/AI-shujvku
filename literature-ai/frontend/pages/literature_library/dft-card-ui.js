@@ -142,7 +142,10 @@ function isFinalizedDftResult(item, exportable) {
 function renderDftDecisionActions(item, exportable) {
     const resultId = dftResultId(item);
     if (!resultId) return "";
-    if (isFinalizedDftResult(item, exportable)) return "";
+    const editButton = '<button class="btn ghost small" type="button" onclick="openDftEditDialog(\'' + escAttr(resultId) + '\')">修改数据</button>';
+    if (isFinalizedDftResult(item, exportable)) {
+        return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' + editButton + '</div>';
+    }
     const safety = item && item.export_safety;
     const reviewStatuses = String((safety && safety.review_status) || "")
         .toLowerCase()
@@ -152,12 +155,13 @@ function renderDftDecisionActions(item, exportable) {
     const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
     const workflowState = String(item && item.dft_workflow_state || "").trim().toLowerCase();
     if (candidateStatus === "rejected" || workflowState === "rejected" || reviewStatuses.includes("rejected")) {
-        return "";
+        return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' + editButton + '</div>';
     }
     if (exportable) {
-        return "";
+        return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' + editButton + '</div>';
     }
     return '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">' +
+        editButton +
         '<button class="btn primary small" type="button" onclick="acceptDftResult(\'' + escAttr(resultId) + '\')">接受入库</button>' +
         '<button class="btn ghost small" type="button" onclick="rejectDftResult(\'' + escAttr(resultId) + '\')">拒绝</button>' +
     '</div>';

@@ -147,7 +147,7 @@ class PaperWorkbenchAiPackageMixin:
                     "web_llm_extract": "disabled",
                     "required_workflow": (
                         "prepare-ai-context / codex-item -> IDE AI -> import_analysis. Non-DFT "
-                        "metadata, sections, table field corrections, figure metadata, writing_cards, mechanism_claims, "
+                        "metadata, sections, figure metadata, writing_cards, mechanism_claims, "
                         "electrochemical_performance, catalyst_samples, notes, and relationships may be "
                         "auto-applied with PDF evidence anchors and module write locks. DFT results/settings "
                         "remain candidates until the review/export gate passes. Table object lifecycle operations "
@@ -196,7 +196,6 @@ class PaperWorkbenchAiPackageMixin:
                     "ai_can_apply_without_human_confirmation": [
                         "paper metadata",
                         "sections",
-                        "tables",
                         "figure metadata/captions/content_summary",
                         "writing_cards",
                         "mechanism_claims",
@@ -209,6 +208,7 @@ class PaperWorkbenchAiPackageMixin:
                         "dft_results",
                         "dft_settings",
                         "DFT export verification",
+                        "table object mutations through import_analysis",
                         "figure image recrop/create through import_analysis",
                     ],
                     "evidence_required": [
@@ -360,11 +360,11 @@ class PaperWorkbenchAiPackageMixin:
                 "ai_task": (
                     "Read the main text and any available supplementary_information source documents. First repair "
                     "non-DFT content directly through import_analysis when there is checkable PDF evidence: metadata, "
-                    "sections, table field corrections, figure metadata/summaries, writing_cards, mechanism_claims, "
+                    "sections, figure metadata/summaries, writing_cards, mechanism_claims, "
                     "electrochemical_performance, catalyst_samples, notes, and relationships. For missing sections or "
                     "writing_cards, create objects with target_path=<collection>:new:create. For existing objects, use "
-                    "replace corrections with target_path=<collection>:<id>:<field>. Table object lifecycle operations "
-                    "are direct MCP calls: update_table for table field fixes, create_table for missing tables, "
+                    "replace corrections with target_path=<collection>:<id>:<field>, except for tables. Every table object mutation "
+                    "is a direct MCP call: update_table for table field fixes, create_table for missing tables, "
                     "merge_table for parser-split or duplicate fragments, and delete_table for invalid table objects. "
                     "Use the table object's real paper_id for these table tools, including SI related_paper_id when the "
                     "table belongs to supplementary_information. Figure image crop/create operations "

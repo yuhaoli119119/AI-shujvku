@@ -300,6 +300,20 @@ class ReviewAdjudicationService:
         skipped: list[dict[str, Any]] = []
         for row in auto_rows:
             adjudication = row.get("adjudication") or {}
+            if self._module_for_target_type(row.get("target_type")) == "dft":
+                skipped.append(
+                    {
+                        "paper_id": row.get("paper_id"),
+                        "target_type": row.get("target_type"),
+                        "target_id": row.get("target_id"),
+                        "field_name": row.get("field_name"),
+                        "reason": "dft_auto_advance_disabled",
+                        "status": "audit_only",
+                        "recommended_action": adjudication.get("recommended_action"),
+                        "writes_final_truth": False,
+                    }
+                )
+                continue
             try:
                 executed.append(self._execute_action(row=row, adjudication=adjudication, reviewer=reviewer, auto_mode=True))
             except Exception as exc:
@@ -350,6 +364,18 @@ class ReviewAdjudicationService:
         paper_id = UUID(str(row["paper_id"]))
         target_id = UUID(str(row["target_id"]))
         action_note = payload.get("reason") or adjudication.get("reason_summary")
+        if auto_mode and self._module_for_target_type(row.get("target_type")) == "dft":
+            return {
+                "paper_id": str(paper_id),
+                "target_type": row.get("target_type"),
+                "target_id": row.get("target_id"),
+                "field_name": row.get("field_name"),
+                "action": "audit_only",
+                "auto_mode": auto_mode,
+                "status": "skipped",
+                "reason": "dft_auto_advance_disabled",
+                "writes_final_truth": False,
+            }
         if action == "verify":
             result = self.dft_reviews.verify_result(
                 paper_id=paper_id,

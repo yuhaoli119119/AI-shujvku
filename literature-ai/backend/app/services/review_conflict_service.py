@@ -44,6 +44,7 @@ class ReviewConflictAggregationService(
         self,
         *,
         paper_id: UUID | None = None,
+        paper_ids: set[UUID] | None = None,
         target_type: str | None = None,
         target_id: str | None = None,
         field_name: str | None = None,
@@ -62,6 +63,7 @@ class ReviewConflictAggregationService(
             )
         opinions = self._collect_opinions(
             paper_id=paper_id,
+            paper_ids=paper_ids,
             target_type=target_type,
             target_id=target_id,
             field_name=field_name,
@@ -194,6 +196,7 @@ class ReviewConflictAggregationService(
         canonical = self._safe_canonical_target_type(target_type)
         payload = self.list_conflicts(
             paper_id=None,
+            paper_ids=paper_ids,
             target_type=canonical,
             include_non_conflicts=False,
             active_only=True,

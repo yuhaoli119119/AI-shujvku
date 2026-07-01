@@ -61,12 +61,14 @@ def resolve_sample_identity(
     *,
     paper_id: Any,
     proposed_value: dict[str, Any],
+    samples: list[CatalystSample] | None = None,
 ) -> SampleIdentityResolution:
-    samples = list(
-        session.scalars(
-            select(CatalystSample).where(CatalystSample.paper_id == paper_id)
-        ).all()
-    )
+    if samples is None:
+        samples = list(
+            session.scalars(
+                select(CatalystSample).where(CatalystSample.paper_id == paper_id)
+            ).all()
+        )
     proposed_name = _norm(proposed_value.get("name"))
     proposed_structure = _norm(proposed_value.get("structure_name"))
     proposed_metals = _metals(proposed_value.get("metal_centers"))

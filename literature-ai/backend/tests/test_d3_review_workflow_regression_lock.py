@@ -318,6 +318,6 @@ def test_export_headers_and_block_counts_are_stable_for_mixed_safe_unsafe_rows(t
             assert response.headers["x-d1-exported-count"] == "1"
             assert response.headers["x-d1-blocked-count"] == "2"
             assert "unsafe_review" in response.headers["x-d1-blocked-reasons"]
-            assert "missing_evidence" in response.headers["x-d1-blocked-reasons"]
+            assert "missing_material_identity" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()

@@ -23,6 +23,7 @@ from app.db.models import (
     WritingCard,
 )
 from app.schemas.api import PaperListFilterParams
+from app.config import get_settings
 from app.services.paper_query import PaperQueryService, _cached_pdf_size_for_storage
 
 
@@ -75,6 +76,38 @@ def test_paper_query_service_returns_counts_and_detail_payload():
         engine.dispose()
 
 
+def test_paper_query_pdf_exists_uses_artifact_status_fallback(setup_test_db):
+    engine = setup_test_db
+    settings = get_settings()
+    pdf_dir = settings.storage_root / "pdf"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / "paper.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n% test pdf bytes\n")
+
+    with Session(engine) as session:
+        paper = Paper(
+            title="PDF fallback paper",
+            pdf_path="storage/pdf/paper.pdf",
+            oa_status="uploaded",
+        )
+        session.add(paper)
+        session.commit()
+        paper_id = paper.id
+
+        service = PaperQueryService(session)
+        listing = service.list_papers()
+        detail = service.get_paper_detail(paper_id)
+
+    row = next(item for item in listing if item.id == paper_id)
+    assert row.pdf_exists is True
+    assert row.pdf_artifact_status["pdf_exists"] is True
+    assert row.pdf_path_kind == "storage_relative"
+    assert row.pdf_file_size == pdf_path.stat().st_size
+    assert detail.pdf_exists is True
+    assert detail.pdf_artifact_status["pdf_exists"] is True
+    assert detail.pdf_path_kind == "storage_relative"
+
+
 def test_detail_keeps_supplementary_tables_but_not_supplementary_figures_by_default():
     engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
@@ -97,7 +130,7 @@ def test_detail_keeps_supplementary_tables_but_not_supplementary_figures_by_defa
         session.add(PaperFigure(paper_id=si.id, caption="Figure S1. SI", image_path="figures/si.png", page=5))
         session.commit()
 
-        detail = PaperQueryService(session).get_paper_detail(main.id, compact=True)
+        detail = PaperQueryService(session).get_paper_detail(main.id, compact=False)
 
         assert detail is not None
         assert [table.caption for table in detail.tables] == ["Table 1. Main", "Table S1. SI"]

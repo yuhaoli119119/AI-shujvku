@@ -100,7 +100,11 @@ def _candidate_identity_payload(
         "canonical_property_type": canonical_property_type,
         "property_subtype": property_subtype,
         "adsorbate": canonicalize_adsorbate(adsorbate) or adsorbate or "",
-        "reaction_step": normalize_dft_reaction_step_for_identity(reaction_step),
+        "reaction_step": normalize_dft_reaction_step_for_identity(
+            reaction_step,
+            property_type=canonical_property_type,
+            adsorbate=canonicalize_adsorbate(adsorbate) or adsorbate,
+        ),
         "value": value,
         "unit": unit,
     }

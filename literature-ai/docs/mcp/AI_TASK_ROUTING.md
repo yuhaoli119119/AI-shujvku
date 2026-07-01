@@ -27,6 +27,7 @@ read_papers,append_notes,propose_corrections,request_parse
 ```
 
 Do not grant `review_corrections` to an ordinary IDE AI key unless that client is intentionally acting as a trusted admin.
+Do not grant `repair_dft_issues` to ordinary IDE, DFT audit, or propose-only keys. Use a separate primary repair key with only `read_papers,repair_dft_issues` when the user explicitly assigns a DFT audit issue repair task.
 
 ## Multi-AI Concurrency Rules
 
@@ -121,6 +122,7 @@ Recommended tool order:
 Required capability:
 
 `read_papers` and `propose_corrections`. Use `review_corrections` or `review_dft` only for trusted final reviewers.
+Do not use `repair_dft_issues` for this audit role.
 
 Recommended provenance:
 
@@ -137,6 +139,14 @@ Stable missing-row workflow:
 - For any paper, if the assigned AI finds a missing DFT row that should enter the system queue, submit it as `decision="new_candidate"` with `target_type="dft_results"`, `target_id="new"`, `field_name="dft_results"`, and a complete structured `corrected_value`.
 - In that case, do not leave the import as candidate-only. Call `import_analysis` with `auto_apply_review_rules=true` so the backend materializes an unverified `DFTResult` candidate plus locator.
 - This materialization is still not final verification, not export approval, and not a bypass of the later consensus/adjudication gate.
+
+DFT audit issue repair is a separate follow-up role:
+
+- Required capability: `read_papers,repair_dft_issues`.
+- Example key: `dft_primary_repair|DFT Primary Repair AI|<strong-random-key>|read_papers,repair_dft_issues`.
+- The primary repair AI should first call `get_dft_audit_issues`, then call `repair_dft_audit_issue` for exactly one `issue_id` at a time.
+- The audit AI, ordinary IDE AI, and propose-only keys must not call `repair_dft_audit_issue`.
+- A repair result remains AI-applied candidate data, not human verification, safe verification, or ML/CSV export approval.
 
 Expected review order for high-risk DFT data:
 

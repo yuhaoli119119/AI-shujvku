@@ -205,27 +205,39 @@ class EvidenceLocatorService:
             raise LookupError("Evidence claim not found")
         return self._fallback_claim_locator(claim)
 
-    def list_locators_for_paper(self, paper_id: UUID) -> list[EvidenceLocatorResponse]:
+    def list_locators_for_paper(self, paper_id: UUID, *, limit: int = 50) -> list[EvidenceLocatorResponse]:
+        safe_limit = max(1, min(int(limit), 200))
         rows = self.session.scalars(
-            select(EvidenceLocator).where(EvidenceLocator.paper_id == paper_id).order_by(EvidenceLocator.created_at.asc())
+            select(EvidenceLocator)
+            .where(EvidenceLocator.paper_id == paper_id)
+            .order_by(EvidenceLocator.created_at.asc())
+            .limit(safe_limit)
         ).all()
         locators = [self._serialize(row) for row in rows]
+        if len(locators) >= safe_limit:
+            return locators
         seen_claim_ids = {item.claim_id for item in locators if item.claim_id is not None}
         seen_chunks = {(item.chunk_id, item.target_type, item.target_id) for item in locators}
         for row in self.session.scalars(select(EvidenceClaim).where(EvidenceClaim.paper_id == paper_id)).all():
             if row.id in seen_claim_ids:
                 continue
             locators.append(self._fallback_claim_locator(row))
+            if len(locators) >= safe_limit:
+                return locators
         for span in self.session.scalars(select(EvidenceSpan).where(EvidenceSpan.paper_id == paper_id)).all():
             key = (span.object_id, OBJECT_TYPE_ALIASES.get(span.object_type, span.object_type), span.object_id)
             if key in seen_chunks:
                 continue
             locators.append(self._fallback_span_locator(span))
+            if len(locators) >= safe_limit:
+                return locators
         for section in self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper_id)).all():
             key = (str(section.id), "section", str(section.id))
             if key in seen_chunks:
                 continue
             locators.append(self._fallback_section_locator(section))
+            if len(locators) >= safe_limit:
+                return locators
         return locators
 
     def list_extraction_locators(

@@ -41,6 +41,7 @@ def review_center(
     limit: int = Query(default=100, ge=1, le=5000),
     sort_by: str = Query(default="recent"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
+    paper_id: UUID | None = Query(default=None, description="Filter to one paper and its supplementary group"),
     summary_only: bool = Query(default=False, description="Return a lightweight row summary for the review center table"),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
@@ -50,6 +51,7 @@ def review_center(
         sort_by=sort_by,
         library_name=library_name,
         summary_only=summary_only,
+        paper_ids=[paper_id] if paper_id else None,
     )
 
 

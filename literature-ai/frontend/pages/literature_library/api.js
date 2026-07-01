@@ -156,6 +156,7 @@ const UI_LABELS = {
         unknown: "未识别"
     },
     candidate_status: {
+        candidate: "待按审核规则处理",
         pending: "待确认",
         requires_resolution: "需人工处理",
         materialized: "已记录",

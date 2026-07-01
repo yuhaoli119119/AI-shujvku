@@ -404,6 +404,16 @@
     td { font-size: 12px; font-weight: 500; color: var(--color-text); }
     .cell-primary { display: block; font-size: 12px; font-weight: 600; color: var(--color-text); line-height: 1.25; }
     .cell-primary.num-text { font-family: var(--font-mono); }
+    .catalyst-name { font-weight: 800; }
+    .catalyst-color-0 { color: #0f766e; }
+    .catalyst-color-1 { color: #b45309; }
+    .catalyst-color-2 { color: #7c3aed; }
+    .catalyst-color-3 { color: #be123c; }
+    .catalyst-color-4 { color: #0369a1; }
+    .catalyst-color-5 { color: #15803d; }
+    .catalyst-color-6 { color: #c2410c; }
+    .catalyst-color-7 { color: #4338ca; }
+    .catalyst-color-unbound { color: var(--color-text-muted); }
     .cell-secondary { display: block; margin-top: 1px; font-size: 10px; font-weight: 500; color: var(--color-text-muted); line-height: 1.25; }
     .num-col { font-family: var(--font-mono); }
     .val-unit { font-size: 10px; color: var(--color-text-muted); display: block; margin-top: 0; font-weight: 500; line-height: 1.2; }
@@ -528,9 +538,9 @@
         <div class="dashboard-toolbar" style="flex-wrap: nowrap;">
           <div class="filter-grid" style="flex-wrap: nowrap; flex: 1 1 auto; overflow-x: auto;">
             <div class="filter-field"><label for="libraryFilter" style="white-space: nowrap;">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
-            <div class="filter-field"><label for="propertyType" style="white-space: nowrap;">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="li2s_decomposition_barrier">li2s_decomposition_barrier</option><option value="migration_barrier">migration_barrier</option><option value="charge_transfer">charge_transfer</option><option value="formation_energy">formation_energy</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option><option value="overpotential">overpotential</option></select></div>
+            <div class="filter-field"><label for="propertyType" style="white-space: nowrap;">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="binding_energy">binding_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="li2s_decomposition_barrier">li2s_decomposition_barrier</option><option value="migration_barrier">migration_barrier</option><option value="charge_transfer">charge_transfer</option><option value="formation_energy">formation_energy</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option><option value="overpotential">overpotential</option></select></div>
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
-            <div class="filter-field"><label for="catalystType" style="white-space: nowrap;">催化剂</label><select id="catalystType" onchange="handleDftFilterChange()"><option value="">all</option><option value="single_atom">single_atom</option><option value="dual_atom">dual_atom</option><option value="SAC">SAC</option><option value="DAC">DAC</option></select></div>
+            <div class="filter-field"><label for="catalystName" style="white-space: nowrap;">催化剂</label><select id="catalystName" onchange="handleDftFilterChange()"><option value="">all</option></select></div>
             <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="未记录者保留">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
           </div>
           <div class="export-panel" style="flex-wrap: nowrap; white-space: nowrap;">
@@ -615,6 +625,7 @@
       querySeq: 0,
       queryDebounceTimer: null,
       overviewTimer: null,
+      catalystOptions: [],
     };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function toggleDashboard() {
@@ -711,6 +722,8 @@
       const labels = {
         adsorption: "吸附能",
         adsorption_energy: "吸附能",
+        binding: "结合能",
+        binding_energy: "结合能",
         gibbs_free_energy_change: "自由能变化",
         reaction_barrier: "反应能垒",
         activation_energy: "反应能垒",
@@ -743,7 +756,9 @@
       const propertyLabels = {
         "": "全部",
         adsorption: "吸附能",
-        adsorption_energy: "吸附能",
+        adsorption_energy: "吸附能（含结合能）",
+        binding: "结合能",
+        binding_energy: "结合能",
         gibbs_free_energy_change: "自由能变化",
         reaction_barrier: "反应能垒",
         activation_energy: "反应能垒",
@@ -756,13 +771,6 @@
         d_band_center: "d 带中心",
         bader_charge: "Bader 电荷",
         overpotential: "过电位",
-      };
-      const catalystLabels = {
-        "": "全部",
-        single_atom: "单原子催化剂",
-        dual_atom: "双原子催化剂",
-        SAC: "SAC",
-        DAC: "DAC"
       };
       const validationLabels = {
         "": "全部（含候选）",
@@ -777,7 +785,7 @@
         });
       }
       setSelectLabels("propertyType", propertyLabels);
-      setSelectLabels("catalystType", catalystLabels);
+      populateCatalystFilter();
     }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
@@ -854,6 +862,53 @@
         state.currentLibrary = current;
       }
     }
+    function populateCatalystFilter() {
+      const select = document.getElementById("catalystName");
+      if (!select) return;
+      const current = select.value || "";
+      const options = Array.isArray(state.catalystOptions) ? state.catalystOptions : [];
+      select.innerHTML = '<option value="">全部</option>' + options.map(name =>
+        '<option value="' + esc(name) + '">' + esc(name) + '</option>'
+      ).join("");
+      if (current && options.includes(current)) {
+        select.value = current;
+      }
+    }
+    async function loadCatalystFilterOptions() {
+      await ensureCurrentLibraryName();
+      const params = applyLibraryParam(new URLSearchParams());
+      const url = `/api/papers/aggregate${params.toString() ? "?" + params.toString() : ""}`;
+      try {
+        const data = await fetchJSON(url);
+        const names = new Set();
+        const groups = data && data.catalyst_groups && typeof data.catalyst_groups === "object"
+          ? data.catalyst_groups
+          : {};
+        Object.entries(groups).forEach(([groupKey, items]) => {
+          if (!Array.isArray(items)) return;
+          items.forEach(item => {
+            if (item && typeof item === "object" && item.name) {
+              names.add(String(item.name).trim());
+            } else if (groupKey) {
+              names.add(String(groupKey).trim());
+            }
+          });
+        });
+        const aliases = Array.isArray(data && data.possible_name_aliases) ? data.possible_name_aliases : [];
+        aliases.forEach(item => {
+          if (typeof item === "string" && item.trim()) names.add(item.trim());
+          if (item && typeof item === "object" && Array.isArray(item.variants)) {
+            item.variants.forEach(value => {
+              if (value) names.add(String(value).trim());
+            });
+          }
+        });
+        state.catalystOptions = Array.from(names).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+      } catch (_) {
+        state.catalystOptions = [];
+      }
+      populateCatalystFilter();
+    }
     function setCurrentLibraryFromSelect() {
       const select = document.getElementById("libraryFilter");
       state.currentLibrary = select ? select.value : "";
@@ -862,6 +917,9 @@
     function handleLibraryChange() {
       setCurrentLibraryFromSelect();
       resetDftPagination();
+      state.catalystOptions = [];
+      populateCatalystFilter();
+      loadCatalystFilterOptions();
       scheduleQueryDFT({ immediate: true });
       scheduleExportSafetyOverview();
     }
@@ -1109,7 +1167,7 @@
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      const catalyst = document.getElementById("catalystType").value;
+      const catalyst = document.getElementById("catalystName").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
       const backendStatus = "exportable";
       const pageSize = getDftPageSize();
@@ -1121,10 +1179,10 @@
       params.set("offset", String(offset));
       params.set("status", backendStatus);
       params.set("compact", "1");
-      params.set("sort", prop ? "value" : "property_mix");
+      params.set("sort", "catalyst_group");
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
-      if (catalyst) params.set("catalyst_type", catalyst);
+      if (catalyst) params.set("catalyst_name", catalyst);
       const url = `${API_BASE}/compare?${params.toString()}`;
       const list = document.getElementById("dftList");
       list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询已审核可导出 DFT 数据...</td></tr>';
@@ -1458,15 +1516,34 @@
       }
       document.getElementById("resultSummary").textContent = label;
     }
+    function dftCatalystDisplayName(item) {
+      return item.display_catalyst_name || (item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-");
+    }
+    function catalystColorClassesForRows(items) {
+      let lastCatalystKey = null;
+      let colorIndex = -1;
+      return items.map(item => {
+        const name = String(dftCatalystDisplayName(item) || "-").trim();
+        if (!name || name === "-") return "catalyst-color-unbound";
+        const catalystKey = name.toLocaleLowerCase();
+        if (catalystKey !== lastCatalystKey) {
+          colorIndex = (colorIndex + 1) % 8;
+          lastCatalystKey = catalystKey;
+        }
+        return `catalyst-color-${colorIndex}`;
+      });
+    }
     function renderRows(items) {
       const list = document.getElementById("dftList");
       if (!items.length) {
         list.innerHTML = '<tr><td colspan="8" class="empty-state">当前筛选条件下暂无已审核可导出 DFT 数据；候选请到审核中心处理。</td></tr>';
         return;
       }
+      const catalystColorClasses = catalystColorClassesForRows(items);
       list.innerHTML = items.map((item, idx) => {
         const property = dftPropertyDisplay(item);
-        const catName = item.display_catalyst_name || (item.catalysts && item.catalysts[0] ? item.catalysts[0].name : "-");
+        const catName = dftCatalystDisplayName(item);
+        const catalystColorClass = catalystColorClasses[idx] || "catalyst-color-unbound";
         const hasConfidence = item.confidence != null && Number.isFinite(Number(item.confidence));
         const conf = hasConfidence ? Number(item.confidence) : null;
         const cls = !hasConfidence ? "unknown" : conf >= 0.8 ? "high" : conf >= 0.5 ? "medium" : "low";
@@ -1476,7 +1553,7 @@
           ? "当前未绑定催化剂样本，名称来自证据中的材料/结构标识。"
           : "已绑定催化剂样本。";
         return `<tr>
-          <td><span class="cell-primary" title="${esc(catalystHint)}">${esc(catName)}</span></td>
+          <td><span class="cell-primary catalyst-name ${catalystColorClass}" data-catalyst-name="${esc(catName)}" title="${esc(catalystHint)}">${esc(catName)}</span></td>
           <td><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
           <td><span class="cell-primary" title="${esc(property.secondary)}">${esc(property.primary || "-")}</span></td>
           <td class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
@@ -1523,12 +1600,12 @@
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      const catalyst = document.getElementById("catalystType").value;
+      const catalyst = document.getElementById("catalystName").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
-      if (catalyst) params.set("catalyst_type", catalyst);
+      if (catalyst) params.set("catalyst_name", catalyst);
       params.set("min_confidence", minConf);
       applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
@@ -1598,12 +1675,12 @@
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
       const adsorbate = document.getElementById("adsorbate").value.trim();
-      const catalyst = document.getElementById("catalystType").value;
+      const catalyst = document.getElementById("catalystName").value;
       const minConf = document.getElementById("minConfidence").value || 0.3;
       const params = new URLSearchParams();
       if (prop) params.set("property_type", prop);
       if (adsorbate) params.set("adsorbate", adsorbate);
-      if (catalyst) params.set("catalyst_type", catalyst);
+      if (catalyst) params.set("catalyst_name", catalyst);
       params.set("min_confidence", minConf);
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
@@ -1650,7 +1727,7 @@
       document.addEventListener("keydown", event => {
         if (event.key === "Escape") closeEvidenceModal();
       });
-      loadLibraries().finally(() => {
+      loadLibraries().finally(() => loadCatalystFilterOptions()).finally(() => {
         queryDFT();
         scheduleExportSafetyOverview();
       });

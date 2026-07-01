@@ -5,7 +5,7 @@ import math
 import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -44,9 +44,13 @@ ELEMENT_SYMBOLS = {
 REACTION_CATEGORY_ORDER = ["HER", "OER/ORR", "CO2RR", "NRR", "电池/离子", "分子/污染物", "其他"]
 TARGET_PROPERTY_ORDER = [
     "adsorption_energy",
+    "binding_energy",
     "gibbs_free_energy_change",
     "overpotential",
     "reaction_barrier",
+    "li2s_decomposition_barrier",
+    "migration_barrier",
+    "formation_energy",
     "limiting_potential",
     "band_gap",
 ]
@@ -61,6 +65,49 @@ DESCRIPTOR_PROPERTY_ORDER = [
     "bond_length",
     "adsorption_distance",
 ]
+CORRELATION_VARIABLE_ORDER = [
+    "adsorption_energy",
+    "binding_energy",
+    "gibbs_free_energy_change",
+    "rds_energy",
+    "reaction_barrier",
+    "li2s_decomposition_barrier",
+    "migration_barrier",
+    "formation_energy",
+    "overpotential",
+    "limiting_potential",
+    "band_gap",
+    "d_band_center",
+    "charge_transfer",
+    "bader_charge",
+    "work_function",
+    "metal_electronegativity",
+    "coordination_number",
+    "bond_length",
+    "adsorption_distance",
+]
+CORRELATION_VARIABLE_GROUPS = {
+    "adsorption_energy": "energy",
+    "binding_energy": "energy",
+    "gibbs_free_energy_change": "energy",
+    "rds_energy": "energy",
+    "reaction_barrier": "barrier",
+    "li2s_decomposition_barrier": "barrier",
+    "migration_barrier": "barrier",
+    "formation_energy": "energy",
+    "overpotential": "potential",
+    "limiting_potential": "potential",
+    "band_gap": "electronic",
+    "d_band_center": "electronic",
+    "charge_transfer": "charge",
+    "bader_charge": "charge",
+    "work_function": "electronic",
+    "metal_electronegativity": "structure",
+    "coordination_number": "structure",
+    "bond_length": "structure",
+    "adsorption_distance": "structure",
+}
+CORRELATION_PROPERTY_TYPES = frozenset(CORRELATION_VARIABLE_ORDER)
 DFT_TARGET_TYPES = {"dft_result", "dft_results"}
 
 
@@ -101,12 +148,23 @@ def _canonical_property_type(value: Any) -> str:
         "e_ads": "adsorption_energy",
         "eads": "adsorption_energy",
         "adsorption_energy_ev": "adsorption_energy",
-        "binding_energy": "adsorption_energy",
+        "e_bind": "binding_energy",
+        "ebind": "binding_energy",
+        "binding_energy_ev": "binding_energy",
         "gibbs_free_energy": "gibbs_free_energy_change",
         "free_energy_change": "gibbs_free_energy_change",
         "delta_g": "gibbs_free_energy_change",
         "reaction_energy_barrier": "reaction_barrier",
         "energy_barrier": "reaction_barrier",
+        "li2s_decomposition": "li2s_decomposition_barrier",
+        "li2s_decomposition_energy_barrier": "li2s_decomposition_barrier",
+        "li2s_decomposition_barrier_ev": "li2s_decomposition_barrier",
+        "diffusion_barrier": "migration_barrier",
+        "migration_energy_barrier": "migration_barrier",
+        "migration_barrier_ev": "migration_barrier",
+        "formation_energy_ev": "formation_energy",
+        "e_form": "formation_energy",
+        "eformation": "formation_energy",
         "d_band": "d_band_center",
         "d_band_centre": "d_band_center",
         "dband_center": "d_band_center",
@@ -282,11 +340,15 @@ def _build_dft_catalyst_adsorbate_matrix(
     *,
     matrix_status: str = "all",
     limit: int = 240,
+    dft_rows: list[tuple[DFTResult, Paper]] | None = None,
+    catalysts: list[CatalystSample] | None = None,
+    gate_by_id: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    dft_stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
-    for clause in filters:
-        dft_stmt = dft_stmt.where(clause)
-    dft_rows = session.execute(dft_stmt).all()
+    if dft_rows is None:
+        dft_stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+        for clause in filters:
+            dft_stmt = dft_stmt.where(clause)
+        dft_rows = session.execute(dft_stmt).all()
     if not dft_rows:
         return [], {
             "total_results": 0,
@@ -301,7 +363,10 @@ def _build_dft_catalyst_adsorbate_matrix(
         }
 
     paper_by_id = {paper.id: paper for _, paper in dft_rows}
-    catalysts = session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(list(paper_by_id)))).all()
+    if catalysts is None:
+        catalysts = session.scalars(
+            select(CatalystSample).where(CatalystSample.paper_id.in_(list(paper_by_id)))
+        ).all()
     catalysts_by_id = {item.id: item for item in catalysts}
     catalysts_by_paper: dict[Any, list[CatalystSample]] = defaultdict(list)
     for catalyst in catalysts:
@@ -316,7 +381,12 @@ def _build_dft_catalyst_adsorbate_matrix(
     reviewed_exportable_results = 0
     blocked_candidate_results = 0
     reviewed_only = (matrix_status or "all").strip().lower() in {"reviewed", "exportable", "trusted"}
-    gate_by_id = bulk_export_gate_results(session, [row for row, _paper in dft_rows], target_type="dft_results")
+    if gate_by_id is None:
+        gate_by_id = bulk_export_gate_results(
+            session,
+            [row for row, _paper in dft_rows],
+            target_type="dft_results",
+        )
 
     for dft, paper in dft_rows:
         gate = gate_by_id[str(dft.id)]
@@ -721,6 +791,17 @@ def _correlation_color(value: float | None) -> str:
     return "neutral"
 
 
+def _correlation_variable_payload(key: str) -> dict[str, str]:
+    return {
+        "key": key,
+        "group": CORRELATION_VARIABLE_GROUPS.get(key, "other"),
+    }
+
+
+def _correlation_variable_list() -> list[dict[str, str]]:
+    return [_correlation_variable_payload(key) for key in CORRELATION_VARIABLE_ORDER]
+
+
 def _paper_filters(library_name: str | None) -> list[Any]:
     if not library_name:
         return []
@@ -824,6 +905,20 @@ def _record_catalyst_payload(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _dft_review_counts_from_rows(
+    rows: list[tuple[DFTResult, Paper]],
+    gate_by_id: dict[str, Any],
+) -> dict[str, int]:
+    reviewed = sum(bool(gate_by_id[str(row.id)].eligible) for row, _paper in rows)
+    total = len(rows)
+    return {
+        "total": total,
+        "reviewed_exportable": reviewed,
+        "candidates": total - reviewed,
+        "correlation_ready": reviewed,
+    }
+
+
 def _binding_scope(record: dict[str, Any]) -> str:
     source = str(((record.get("provenance") or {}).get("catalyst_binding_source") or "")).strip().lower()
     if source in {"explicit_bound", "auto_bound"}:
@@ -852,7 +947,7 @@ def _build_dft_catalyst_adsorbate_matrix_v2(
     for record in records:
         target = _record_target(record)
         canonical_property_type = target.get("canonical_property_type")
-        if canonical_property_type not in set(TARGET_PROPERTY_ORDER) | set(DESCRIPTOR_PROPERTY_ORDER):
+        if canonical_property_type not in CORRELATION_PROPERTY_TYPES:
             excluded_reasons["unsupported_property_type"] += 1
             continue
         adsorbate = _record_adsorbate(record)
@@ -1081,14 +1176,192 @@ def _paired_descriptor_points_v2(
     return pairs, len(filtered_targets)
 
 
-def _median_numeric(values: list[float]) -> float | None:
-    finite = sorted(float(value) for value in values if isinstance(value, int | float) and math.isfinite(float(value)))
-    if not finite:
-        return None
-    middle = len(finite) // 2
-    if len(finite) % 2:
-        return finite[middle]
-    return (finite[middle - 1] + finite[middle]) / 2
+def _build_exploratory_descriptor_index(
+    rows: list[tuple[DFTResult, Paper]],
+    catalysts_by_id: dict[str, CatalystSample],
+    *,
+    eligible_result_ids: set[str],
+    reaction_category: str | None = None,
+    adsorbate: str | None = None,
+    material_family: str | None = None,
+) -> dict[str, dict[str, list[dict[str, Any]]]]:
+    """Index reviewed/exportable exploratory rows once for every correlation cell."""
+    requested_adsorbate = _canonical_adsorbate(adsorbate)[0] if adsorbate else None
+    requested_family = _norm_key(material_family or "")
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for result, paper in rows:
+        if str(result.id) not in eligible_result_ids:
+            continue
+        if result.value is None or str(result.candidate_status or "").strip().lower() == "rejected":
+            continue
+        prop = _canonical_property_type(result.property_type)
+        if prop not in CORRELATION_PROPERTY_TYPES:
+            continue
+        result_adsorbate = _canonical_adsorbate(result.adsorbate)[0]
+        if requested_adsorbate and result_adsorbate != requested_adsorbate:
+            continue
+        category = _dft_correlation_category(result_adsorbate, result.reaction_step)
+        if reaction_category and category != reaction_category:
+            continue
+        catalyst = catalysts_by_id.get(str(result.catalyst_sample_id or ""))
+        catalyst_payload = _canonical_catalyst(catalyst, paper)
+        family = catalyst_payload.get("family") or catalyst_payload.get("label") or catalyst_payload.get("name") or ""
+        if requested_family and requested_family not in _norm_key(family):
+            continue
+        group_key = (
+            f"catalyst:{result.catalyst_sample_id}"
+            if result.catalyst_sample_id
+            else f"unassigned:{result.id}"
+        )
+        entry = {
+            "value": float(result.value),
+            "unit": result.unit,
+            "result": result,
+            "paper": paper,
+            "catalyst": catalyst_payload,
+            "adsorbate": result_adsorbate,
+            "category": category,
+        }
+        grouped[group_key][prop].append(entry)
+    _add_derived_rds_entries(grouped)
+    return grouped
+
+
+def _dft_correlation_category(adsorbate: str | None, reaction_step: Any) -> str:
+    if adsorbate:
+        return _adsorbate_category(adsorbate)
+    step = _clean_pdf_text(reaction_step).lower()
+    if any(token in step for token in ("li2s", "lips", "li-s", "lithium", "polysulfide", "sulfur")):
+        return "电池/离子"
+    return "其他"
+
+
+def _add_derived_rds_entries(grouped: dict[str, dict[str, list[dict[str, Any]]]]) -> None:
+    for group in grouped.values():
+        if group.get("rds_energy"):
+            continue
+        free_energy_entries = [
+            item
+            for item in group.get("gibbs_free_energy_change", [])
+            if isinstance(item.get("value"), int | float) and math.isfinite(float(item["value"]))
+        ]
+        if not free_energy_entries:
+            continue
+        rds_entry = max(free_energy_entries, key=lambda item: float(item["value"])).copy()
+        rds_entry["derived_from_property"] = "gibbs_free_energy_change"
+        group["rds_energy"].append(rds_entry)
+
+
+def _exploratory_descriptor_points_from_index(
+    grouped: dict[str, dict[str, list[dict[str, Any]]]],
+    *,
+    target_property: str,
+    descriptor: str,
+) -> list[dict[str, Any]]:
+    """Build one target/descriptor pair set from the request-local exploratory index."""
+    return _exploratory_variable_points_from_index(
+        grouped,
+        y_property=target_property,
+        x_property=descriptor,
+    )
+
+
+def _entries_context_compatible(x_entry: dict[str, Any], y_entry: dict[str, Any]) -> bool:
+    x_adsorbate = x_entry.get("adsorbate")
+    y_adsorbate = y_entry.get("adsorbate")
+    return (
+        not x_adsorbate
+        or x_adsorbate == "none"
+        or not y_adsorbate
+        or y_adsorbate == "none"
+        or x_adsorbate == y_adsorbate
+    )
+
+
+def _exploratory_variable_points_from_index(
+    grouped: dict[str, dict[str, list[dict[str, Any]]]],
+    *,
+    y_property: str,
+    x_property: str,
+) -> list[dict[str, Any]]:
+    """Build one x/y variable pair set from the request-local exploratory index."""
+    points: list[dict[str, Any]] = []
+    for group in grouped.values():
+        y_entries = group.get(y_property) or []
+        x_entries = group.get(x_property) or []
+        if not y_entries or not x_entries:
+            continue
+        if x_property == y_property:
+            for entry in y_entries:
+                value = float(entry["value"])
+                if not math.isfinite(value):
+                    continue
+                paper = entry["paper"]
+                result = entry["result"]
+                points.append(
+                    {
+                        "x": value,
+                        "y": value,
+                        "descriptor_unit": entry.get("unit"),
+                        "target_unit": entry.get("unit"),
+                        "paper_id": str(paper.id),
+                        "paper_title": paper.title,
+                        "doi": paper.doi,
+                        "year": paper.year,
+                        "journal": paper.journal,
+                        "catalyst": (entry.get("catalyst") or {}).get("label"),
+                        "adsorbate": entry.get("adsorbate"),
+                        "reaction_category": entry.get("category"),
+                        "reaction_step": _clean_pdf_text(result.reaction_step).lower(),
+                        "match_scope": "self_identity",
+                        "target_result_id": str(result.id),
+                        "descriptor_result_id": str(result.id),
+                        "target_evidence": _clean_pdf_text(result.evidence_text)[:420],
+                        "descriptor_evidence": _clean_pdf_text(result.evidence_text)[:420],
+                        "source_section": result.source_section,
+                        "source_figure": result.source_figure,
+                    }
+                )
+            continue
+        if len(y_entries) != 1:
+            continue
+        y_entry = y_entries[0]
+        compatible = [item for item in x_entries if _entries_context_compatible(item, y_entry)]
+        if len(compatible) != 1:
+            continue
+        x_entry = compatible[0]
+        x = float(x_entry["value"])
+        y = float(y_entry["value"])
+        if not math.isfinite(x) or not math.isfinite(y):
+            continue
+        paper = y_entry["paper"]
+        y_result = y_entry["result"]
+        x_result = x_entry["result"]
+        points.append(
+            {
+                "x": x,
+                "y": y,
+                "descriptor_unit": x_entry.get("unit"),
+                "target_unit": y_entry.get("unit"),
+                "paper_id": str(paper.id),
+                "paper_title": paper.title,
+                "doi": paper.doi,
+                "year": paper.year,
+                "journal": paper.journal,
+                "catalyst": (y_entry.get("catalyst") or {}).get("label"),
+                "adsorbate": y_entry.get("adsorbate"),
+                "reaction_category": y_entry.get("category"),
+                "reaction_step": _clean_pdf_text(y_result.reaction_step).lower(),
+                "match_scope": "exploratory_same_sample",
+                "target_result_id": str(y_result.id),
+                "descriptor_result_id": str(x_result.id),
+                "target_evidence": _clean_pdf_text(y_result.evidence_text)[:420],
+                "descriptor_evidence": _clean_pdf_text(x_result.evidence_text)[:420],
+                "source_section": y_result.source_section or x_result.source_section,
+                "source_figure": y_result.source_figure or x_result.source_figure,
+            }
+        )
+    return points
 
 
 def _raw_exploratory_descriptor_points(
@@ -1101,110 +1374,103 @@ def _raw_exploratory_descriptor_points(
     adsorbate: str | None = None,
     material_family: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Exploratory fallback for visualization when strict export pairing is empty."""
-    requested_adsorbate = _canonical_adsorbate(adsorbate)[0] if adsorbate else None
-    requested_family = _norm_key(material_family or "")
-    stmt = (
-        select(DFTResult, Paper, CatalystSample)
-        .join(Paper, DFTResult.paper_id == Paper.id)
-        .outerjoin(CatalystSample, DFTResult.catalyst_sample_id == CatalystSample.id)
-        .where(DFTResult.value.is_not(None))
-        .where(func.lower(func.coalesce(DFTResult.candidate_status, "")) != "rejected")
-    )
+    """Backward-compatible one-pair helper backed by one bulk DFT read."""
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
     for clause in filters:
         stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    paper_ids = {paper.id for _result, paper in rows}
+    catalysts = (
+        session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(paper_ids))).all()
+        if paper_ids
+        else []
+    )
+    grouped = _build_exploratory_descriptor_index(
+        rows,
+        {str(item.id): item for item in catalysts},
+        eligible_result_ids={
+            result_id
+            for result_id, gate in bulk_export_gate_results(
+                session,
+                [row for row, _paper in rows],
+                target_type="dft_results",
+            ).items()
+            if gate.eligible
+        },
+        reaction_category=reaction_category,
+        adsorbate=adsorbate,
+        material_family=material_family,
+    )
+    return _exploratory_descriptor_points_from_index(
+        grouped,
+        target_property=target_property,
+        descriptor=descriptor,
+    )
 
-    grouped: dict[str, dict[str, Any]] = defaultdict(lambda: {"targets": [], "descriptors": []})
-    for result, paper, catalyst in session.execute(stmt).all():
-        prop = _canonical_property_type(result.property_type)
-        if prop not in {target_property, descriptor}:
-            continue
-        result_adsorbate = _canonical_adsorbate(result.adsorbate)[0]
-        if requested_adsorbate and result_adsorbate != requested_adsorbate:
-            continue
-        category = _adsorbate_category(result_adsorbate) if result_adsorbate else "其他"
-        if reaction_category and category != reaction_category:
-            continue
-        catalyst_payload = _canonical_catalyst(catalyst, paper)
-        family = catalyst_payload.get("family") or catalyst_payload.get("label") or catalyst_payload.get("name") or ""
-        if requested_family and requested_family not in _norm_key(family):
-            continue
-        group_key = str(result.catalyst_sample_id or result.paper_id)
-        entry = {
-            "value": float(result.value),
-            "unit": result.unit,
-            "result": result,
-            "paper": paper,
-            "catalyst": catalyst_payload,
-            "adsorbate": result_adsorbate,
-            "category": category,
-        }
-        if prop == target_property:
-            grouped[group_key]["targets"].append(entry)
-        else:
-            grouped[group_key]["descriptors"].append(entry)
 
-    points: list[dict[str, Any]] = []
-    for group in grouped.values():
-        targets = group["targets"]
-        descriptors = group["descriptors"]
-        if not targets or not descriptors:
-            continue
-        for target_entry in targets:
-            compatible = [
-                item
-                for item in descriptors
-                if not item.get("adsorbate")
-                or item.get("adsorbate") == "none"
-                or not target_entry.get("adsorbate")
-                or item.get("adsorbate") == target_entry.get("adsorbate")
-            ]
-            if not compatible:
-                compatible = descriptors
-            x = _median_numeric([item["value"] for item in compatible])
-            y = float(target_entry["value"])
-            if x is None or not math.isfinite(y):
-                continue
-            descriptor_entry = compatible[0]
-            paper = target_entry["paper"]
-            target_result = target_entry["result"]
-            descriptor_result = descriptor_entry["result"]
-            points.append(
-                {
-                    "x": x,
-                    "y": y,
-                    "descriptor_unit": descriptor_entry.get("unit"),
-                    "target_unit": target_entry.get("unit"),
-                    "paper_id": str(paper.id),
-                    "paper_title": paper.title,
-                    "doi": paper.doi,
-                    "year": paper.year,
-                    "journal": paper.journal,
-                    "catalyst": (target_entry.get("catalyst") or {}).get("label"),
-                    "adsorbate": target_entry.get("adsorbate"),
-                    "reaction_category": target_entry.get("category"),
-                    "reaction_step": _clean_pdf_text(target_result.reaction_step).lower(),
-                    "match_scope": "exploratory_same_sample",
-                    "target_result_id": str(target_result.id),
-                    "descriptor_result_id": str(descriptor_result.id),
-                    "target_evidence": _clean_pdf_text(target_result.evidence_text)[:420],
-                    "descriptor_evidence": _clean_pdf_text(descriptor_result.evidence_text)[:420],
-                    "source_section": target_result.source_section or descriptor_result.source_section,
-                    "source_figure": target_result.source_figure or descriptor_result.source_figure,
-                }
-            )
-    return points
+def _raw_exploratory_variable_points(
+    session: Session,
+    filters: list[Any],
+    *,
+    y_property: str,
+    x_property: str,
+    reaction_category: str | None = None,
+    adsorbate: str | None = None,
+    material_family: str | None = None,
+) -> list[dict[str, Any]]:
+    """Backward-compatible one-pair helper backed by one bulk DFT read."""
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    paper_ids = {paper.id for _result, paper in rows}
+    catalysts = (
+        session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(paper_ids))).all()
+        if paper_ids
+        else []
+    )
+    grouped = _build_exploratory_descriptor_index(
+        rows,
+        {str(item.id): item for item in catalysts},
+        eligible_result_ids={
+            result_id
+            for result_id, gate in bulk_export_gate_results(
+                session,
+                [row for row, _paper in rows],
+                target_type="dft_results",
+            ).items()
+            if gate.eligible
+        },
+        reaction_category=reaction_category,
+        adsorbate=adsorbate,
+        material_family=material_family,
+    )
+    return _exploratory_variable_points_from_index(
+        grouped,
+        y_property=y_property,
+        x_property=x_property,
+    )
+
+
+def _correlation_property_counts_from_index(
+    exploratory_index: dict[str, dict[str, list[dict[str, Any]]]]
+) -> Counter[str]:
+    counts: Counter[str] = Counter()
+    for group in exploratory_index.values():
+        for property_type, entries in group.items():
+            counts[property_type] += len(entries)
+    return counts
 
 
 def _build_descriptor_correlation_summary_v2(
     dataset: dict[str, Any],
-    session: Session,
-    filters: list[Any],
+    exploratory_index: dict[str, dict[str, list[dict[str, Any]]]],
     *,
     min_n: int = 3,
     reaction_category: str | None = None,
     adsorbate: str | None = None,
     material_family: str | None = None,
+    allow_exploratory: bool = False,
 ) -> dict[str, Any]:
     filtered_targets = _filtered_target_records_v2(
         dataset,
@@ -1213,50 +1479,59 @@ def _build_descriptor_correlation_summary_v2(
         material_family=material_family,
     )
     cells = []
-    property_counts: Counter[str] = Counter()
+    property_counts = _correlation_property_counts_from_index(exploratory_index)
     for record in filtered_targets:
         property_counts[_record_target(record).get("canonical_property_type") or ""] += 1
-    for target in TARGET_PROPERTY_ORDER:
-        for descriptor in DESCRIPTOR_PROPERTY_ORDER:
+    variables = _correlation_variable_list()
+    variable_keys = [item["key"] for item in variables]
+    for y_property in variable_keys:
+        for x_property in variable_keys:
             strict_pair_payload, _ = _paired_descriptor_points_v2(
                 dataset,
                 reaction_category=reaction_category,
                 adsorbate=adsorbate,
                 material_family=material_family,
-                target_property=target,
-                descriptor=descriptor,
+                target_property=y_property,
+                descriptor=x_property,
             )
             pair_payload = strict_pair_payload
             source = "reviewed_exportable"
-            if not pair_payload:
-                pair_payload = _raw_exploratory_descriptor_points(
-                    session,
-                    filters,
-                    target_property=target,
-                    descriptor=descriptor,
-                    reaction_category=reaction_category,
-                    adsorbate=adsorbate,
-                    material_family=material_family,
+            if allow_exploratory and not pair_payload:
+                pair_payload = _exploratory_variable_points_from_index(
+                    exploratory_index,
+                    y_property=y_property,
+                    x_property=x_property,
                 )
                 if pair_payload:
                     source = "exploratory_same_sample"
-            stats = _correlation_stats(pair_payload)
             n = len(pair_payload)
-            status = (
-                "ready"
-                if n >= min_n and stats["pearson_r"] is not None
-                else "insufficient_paired_data"
-            )
-            color = _correlation_color(stats["pearson_r"]) if status == "ready" else "gray"
+            if x_property == y_property and n:
+                stats = {
+                    "pearson_r": 1.0,
+                    "spearman_rho": 1.0,
+                    "slope": 1.0,
+                    "intercept": 0.0,
+                }
+                status = "identity"
+            else:
+                stats = _correlation_stats(pair_payload)
+                status = (
+                    "ready"
+                    if n >= min_n and stats["pearson_r"] is not None
+                    else "insufficient_paired_data"
+                )
+            color = _correlation_color(stats["pearson_r"]) if status in {"ready", "identity"} else "gray"
             cells.append(
                 {
-                    "target_property": target,
-                    "descriptor": descriptor,
+                    "y_property": y_property,
+                    "x_property": x_property,
+                    "target_property": y_property,
+                    "descriptor": x_property,
                     "n": n,
-                    "pearson_r": stats["pearson_r"] if status == "ready" else None,
-                    "spearman_rho": stats["spearman_rho"] if status == "ready" else None,
-                    "slope": stats["slope"] if status == "ready" else None,
-                    "intercept": stats["intercept"] if status == "ready" else None,
+                    "pearson_r": stats["pearson_r"] if status in {"ready", "identity"} else None,
+                    "spearman_rho": stats["spearman_rho"] if status in {"ready", "identity"} else None,
+                    "slope": stats["slope"] if status in {"ready", "identity"} else None,
+                    "intercept": stats["intercept"] if status in {"ready", "identity"} else None,
                     "status": status,
                     "color": color,
                     "source": source,
@@ -1264,24 +1539,27 @@ def _build_descriptor_correlation_summary_v2(
                         (
                             f"已形成 {n} 个最新导出逻辑下的配对样本。"
                             if source == "reviewed_exportable"
-                            else f"已形成 {n} 个同样本探索性配对样本。"
+                            else f"已形成 {n} 个已审核同样本配对样本。"
                         )
-                        if status == "ready"
+                        if status in {"ready", "identity"}
                         else (
                             "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
                             f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
                             if source == "reviewed_exportable"
-                            else "Strict reviewed/exportable pairing is empty, and the exploratory same-sample fallback "
+                            else "Strict reviewed/exportable pairing is empty, and the reviewed same-sample fallback "
                             f"still has n < {min_n} under the selected reaction/adsorbate/material filters."
                         )
                     ),
                 }
             )
     return {
-        "schema_version": "descriptor_correlation_v2",
+        "schema_version": "dft_total_correlation_v3",
+        "matrix_kind": "total_variable_correlation",
         "min_n": min_n,
-        "target_properties": TARGET_PROPERTY_ORDER,
-        "descriptor_properties": DESCRIPTOR_PROPERTY_ORDER,
+        "variables": variables,
+        "variable_properties": variable_keys,
+        "target_properties": variable_keys,
+        "descriptor_properties": variable_keys,
         "cells": cells,
         "property_counts": dict(property_counts),
         "reviewed_numeric_points": len(filtered_targets),
@@ -1293,165 +1571,369 @@ def _build_descriptor_correlation_summary_v2(
             "dataset_schema_version": (dataset.get("metadata") or {}).get("schema_version"),
         },
         "correlation_policy": (
-            "Correlations are derived from the current DFT ML dataset export logic. "
-            "Strict reviewed/exportable matching is preferred. When strict pairing is empty, the visualization falls back "
-            "to same-sample non-rejected exploratory pairs."
+            "The heatmap is a single DFT variable-by-variable matrix. Strict reviewed/exportable matching is preferred. "
+            "When strict pairing is empty, an explicitly requested fallback may use reviewed/exportable same-sample pairs."
         ),
     }
 
 
+def _load_visual_dft_rows(
+    session: Session,
+    filters: list[Any],
+) -> tuple[list[tuple[DFTResult, Paper]], dict[str, Any]]:
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    rows = session.execute(stmt).all()
+    gates = bulk_export_gate_results(
+        session,
+        [row for row, _paper in rows],
+        target_type="dft_results",
+    )
+    return rows, gates
+
+
+def _load_visual_support_rows(
+    session: Session,
+    dft_rows: list[tuple[DFTResult, Paper]],
+    *,
+    include_settings: bool,
+) -> tuple[list[CatalystSample], list[DFTSetting]]:
+    paper_ids = {paper.id for _row, paper in dft_rows}
+    if not paper_ids:
+        return [], []
+    catalysts = session.scalars(
+        select(CatalystSample).where(CatalystSample.paper_id.in_(paper_ids))
+    ).all()
+    settings = (
+        session.scalars(select(DFTSetting).where(DFTSetting.paper_id.in_(paper_ids))).all()
+        if include_settings
+        else []
+    )
+    return catalysts, settings
+
+
+def _visual_dataset_from_rows(
+    session: Session,
+    library_name: str | None,
+    dft_rows: list[tuple[DFTResult, Paper]],
+    gate_by_id: dict[str, Any],
+    catalysts: list[CatalystSample],
+    settings: list[DFTSetting],
+) -> dict[str, Any]:
+    return build_dft_ml_dataset(
+        session,
+        library_name=normalize_library_name(library_name) if library_name else None,
+        _source_rows=dft_rows,
+        _gate_by_id=gate_by_id,
+        _catalysts=catalysts,
+        _settings=settings,
+    )
+
+
+def _overview_summary_counts(
+    session: Session,
+    filters: list[Any],
+) -> dict[str, int]:
+    def joined_count(model) -> Any:
+        stmt = select(func.count(model.id)).join(Paper, model.paper_id == Paper.id)
+        for clause in filters:
+            stmt = stmt.where(clause)
+        return stmt.scalar_subquery()
+
+    paper_count = select(func.count(Paper.id))
+    pdf_count = select(func.count(Paper.id)).where(Paper.pdf_path.is_not(None), Paper.pdf_path != "")
+    parsed_count = select(func.count(func.distinct(PaperSection.paper_id))).join(
+        Paper,
+        PaperSection.paper_id == Paper.id,
+    )
+    for clause in filters:
+        paper_count = paper_count.where(clause)
+        pdf_count = pdf_count.where(clause)
+        parsed_count = parsed_count.where(clause)
+    row = session.execute(
+        select(
+            paper_count.scalar_subquery().label("papers"),
+            pdf_count.scalar_subquery().label("pdf_available"),
+            parsed_count.scalar_subquery().label("parsed_papers"),
+            joined_count(PaperFigure).label("figures"),
+            joined_count(FigureDataPoint).label("figure_data_points"),
+            joined_count(DFTSetting).label("dft_settings"),
+            joined_count(CatalystSample).label("catalyst_samples"),
+        )
+    ).one()
+    return {key: int(value or 0) for key, value in row._mapping.items()}
+
+
+def _dft_overview_meta(
+    rows: list[tuple[DFTResult, Paper]],
+    review_counts: dict[str, int],
+) -> dict[str, Any]:
+    categories: Counter[str] = Counter()
+    excluded: Counter[str] = Counter()
+    for result, _paper in rows:
+        adsorbate, category, reason = _canonical_adsorbate(result.adsorbate)
+        if reason or not adsorbate:
+            excluded[reason or "invalid_adsorbate"] += 1
+            continue
+        categories[category] += 1
+    return {
+        "total_results": review_counts["total"],
+        "reviewed_exportable_results": review_counts["reviewed_exportable"],
+        "blocked_candidate_results": review_counts["candidates"],
+        "included_results": sum(categories.values()),
+        "excluded_results": sum(excluded.values()),
+        "excluded_reasons": dict(excluded),
+        "category_counts": [
+            {"category": category, "count": categories[category]}
+            for category in REACTION_CATEGORY_ORDER
+            if categories[category]
+        ],
+    }
+
+
+def _requested_visual_sections(raw_sections: str | None) -> set[str]:
+    if raw_sections is None or not raw_sections.strip():
+        return {"overview", "matrix", "correlation"}
+    allowed = {"overview", "matrix", "correlation"}
+    return {item for item in (part.strip().lower() for part in raw_sections.split(",")) if item in allowed}
+
+
 @router.get("/overview")
-async def visualization_overview(
+def visualization_overview(
     library_name: str | None = Query(default=None),
     matrix_status: str = Query(default="all", description="all or reviewed; reviewed uses the current exportable dataset logic"),
     corr_reaction: str | None = Query(default=None),
     corr_adsorbate: str | None = Query(default=None),
     corr_family: str | None = Query(default=None),
     corr_min_n: int = Query(default=3, ge=3, le=50),
+    corr_allow_exploratory: bool = Query(
+        default=False,
+        description="When true, correlation may fall back to reviewed/exportable same-sample pairs.",
+    ),
+    sections: str | None = Query(
+        default=None,
+        description="Optional comma-separated overview,matrix,correlation sections; omitted preserves the full legacy response.",
+    ),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     filters = _paper_filters(library_name)
-
-    total_papers = _paper_count(session, library_name)
-    pdf_stmt = select(func.count(Paper.id)).where(Paper.pdf_path.is_not(None), Paper.pdf_path != "")
-    parsed_stmt = (
-        select(func.count(func.distinct(PaperSection.paper_id)))
-        .join(Paper, PaperSection.paper_id == Paper.id)
-    )
-    for clause in filters:
-        pdf_stmt = pdf_stmt.where(clause)
-        parsed_stmt = parsed_stmt.where(clause)
-
-    years = []
-    year_stmt = select(Paper.year, func.count(Paper.id)).group_by(Paper.year).order_by(Paper.year.desc())
-    for clause in filters:
-        year_stmt = year_stmt.where(clause)
-    for year, count in session.execute(year_stmt).all():
-        years.append({"year": year, "count": int(count or 0)})
-
-    journals = []
-    journal_stmt = (
-        select(Paper.journal, func.count(Paper.id))
-        .group_by(Paper.journal)
-        .order_by(func.count(Paper.id).desc())
-        .limit(12)
-    )
-    for clause in filters:
-        journal_stmt = journal_stmt.where(clause)
-    for journal, count in session.execute(journal_stmt).all():
-        journals.append({"journal": journal or "未记录期刊", "count": int(count or 0)})
-
-    type_counts: Counter[str] = Counter()
-    type_stmt = select(Paper.paper_type, func.count(Paper.id)).group_by(Paper.paper_type)
-    for clause in filters:
-        type_stmt = type_stmt.where(clause)
-    for paper_type, count in session.execute(type_stmt).all():
-        key = str(paper_type or "Unknown").strip() or "Unknown"
-        type_counts[key] += int(count or 0)
-
-    dft_review_counts = _dft_review_counts(session, filters)
-    dataset = _visual_dataset(session, library_name)
+    requested_sections = _requested_visual_sections(sections)
+    dft_rows, gate_by_id = _load_visual_dft_rows(session, filters)
+    dft_review_counts = _dft_review_counts_from_rows(dft_rows, gate_by_id)
     reviewed_only = (matrix_status or "all").strip().lower() in {"reviewed", "exportable", "trusted"}
-    if reviewed_only:
-        matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix_v2(
-            dataset,
-            dft_review_counts,
-            matrix_status=matrix_status,
+    need_dataset = "correlation" in requested_sections or ("matrix" in requested_sections and reviewed_only)
+    need_support_rows = "matrix" in requested_sections or "correlation" in requested_sections
+    catalysts: list[CatalystSample] = []
+    settings: list[DFTSetting] = []
+    dataset: dict[str, Any] | None = None
+    if need_support_rows:
+        catalysts, settings = _load_visual_support_rows(
+            session,
+            dft_rows,
+            include_settings=need_dataset,
         )
-    else:
-        matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix(session, filters, matrix_status=matrix_status)
-    descriptor_correlation = _build_descriptor_correlation_summary_v2(
-        dataset,
-        session,
-        filters,
-        min_n=corr_min_n,
-        reaction_category=corr_reaction,
-        adsorbate=corr_adsorbate,
-        material_family=corr_family,
-    )
-
-    dft_status = []
-    status_stmt = (
-        select(DFTResult.candidate_status, func.count(DFTResult.id))
-        .join(Paper, DFTResult.paper_id == Paper.id)
-        .group_by(DFTResult.candidate_status)
-        .order_by(func.count(DFTResult.id).desc())
-    )
-    for clause in filters:
-        status_stmt = status_stmt.where(clause)
-    for status, count in session.execute(status_stmt).all():
-        dft_status.append({"status": status or "unknown", "count": int(count or 0)})
-
-    tasks = []
-    task_stmt = select(WorkflowJob).order_by(WorkflowJob.created_at.desc()).limit(12)
-    if library_name:
-        task_stmt = task_stmt.where(build_library_name_clause(WorkflowJob.library_name, library_name))
-    for job in session.scalars(task_stmt).all():
-        tasks.append(
-            {
-                "job_id": job.job_id,
-                "type": job.type,
-                "status": job.status,
-                "title": (job.payload or {}).get("title") if isinstance(job.payload, dict) else None,
-                "action": (job.payload or {}).get("action") if isinstance(job.payload, dict) else None,
-                "created_at": job.created_at.isoformat() if job.created_at else None,
-                "updated_at": job.updated_at.isoformat() if job.updated_at else None,
-            }
+    if need_dataset:
+        dataset = _visual_dataset_from_rows(
+            session,
+            library_name,
+            dft_rows,
+            gate_by_id,
+            catalysts,
+            settings,
         )
 
-    paper_lookup = {}
-    papers_query = select(Paper.id, Paper.title, Paper.journal, Paper.year, Paper.doi)
-    for clause in filters:
-        papers_query = papers_query.where(clause)
-    for p_id, p_title, p_journal, p_year, p_doi in session.execute(papers_query).all():
-        paper_lookup[str(p_id)] = {
-            "title": p_title or "无标题",
-            "journal": p_journal or "未知期刊",
-            "year": p_year,
-            "doi": p_doi or "",
-        }
-
-    return {
+    response: dict[str, Any] = {
         "library_name": normalize_library_name(library_name) if library_name else None,
-        "paper_lookup": paper_lookup,
-        "summary": {
-            "papers": total_papers,
-            "pdf_available": _count(session, pdf_stmt),
-            "parsed_papers": _count(session, parsed_stmt),
-            "figures": _joined_count(session, PaperFigure, library_name),
-            "figure_data_points": _joined_count(session, FigureDataPoint, library_name),
-            "dft_settings": _joined_count(session, DFTSetting, library_name),
-            "catalyst_samples": _joined_count(session, CatalystSample, library_name),
-            "dft_results": _joined_count(session, DFTResult, library_name),
+        "included_sections": sorted(requested_sections),
+    }
+
+    if "overview" in requested_sections:
+        summary = {
+            **_overview_summary_counts(session, filters),
+            "dft_results": dft_review_counts["total"],
             "reviewed_exportable_dft_results": dft_review_counts["reviewed_exportable"],
             "candidate_dft_results": dft_review_counts["candidates"],
             "correlation_ready_dft_results": dft_review_counts["correlation_ready"],
-        },
-        "years": years,
-        "journals": journals,
-        "paper_types": [{"type": key, "count": value} for key, value in sorted(type_counts.items())],
-        "dft_matrix": matrix_rows,
-        "dft_matrix_meta": matrix_meta,
-        "descriptor_correlation": descriptor_correlation,
-        "dft_status": dft_status,
-        "recent_tasks": tasks,
-    }
+        }
+        years = []
+        year_stmt = select(Paper.year, func.count(Paper.id)).group_by(Paper.year).order_by(Paper.year.desc())
+        for clause in filters:
+            year_stmt = year_stmt.where(clause)
+        for year, count in session.execute(year_stmt).all():
+            years.append({"year": year, "count": int(count or 0)})
+
+        journals = []
+        journal_stmt = (
+            select(Paper.journal, func.count(Paper.id))
+            .group_by(Paper.journal)
+            .order_by(func.count(Paper.id).desc())
+            .limit(12)
+        )
+        for clause in filters:
+            journal_stmt = journal_stmt.where(clause)
+        for journal, count in session.execute(journal_stmt).all():
+            journals.append({"journal": journal or "未记录期刊", "count": int(count or 0)})
+
+        type_counts: Counter[str] = Counter()
+        type_stmt = select(Paper.paper_type, func.count(Paper.id)).group_by(Paper.paper_type)
+        for clause in filters:
+            type_stmt = type_stmt.where(clause)
+        for paper_type, count in session.execute(type_stmt).all():
+            key = str(paper_type or "Unknown").strip() or "Unknown"
+            type_counts[key] += int(count or 0)
+
+        status_counts = Counter((row.candidate_status or "unknown") for row, _paper in dft_rows)
+        dft_status = [
+            {"status": status, "count": count}
+            for status, count in status_counts.most_common()
+        ]
+
+        tasks = []
+        task_stmt = select(WorkflowJob).order_by(WorkflowJob.created_at.desc()).limit(12)
+        if library_name:
+            task_stmt = task_stmt.where(build_library_name_clause(WorkflowJob.library_name, library_name))
+        for job in session.scalars(task_stmt).all():
+            tasks.append(
+                {
+                    "job_id": job.job_id,
+                    "type": job.type,
+                    "status": job.status,
+                    "title": (job.payload or {}).get("title") if isinstance(job.payload, dict) else None,
+                    "action": (job.payload or {}).get("action") if isinstance(job.payload, dict) else None,
+                    "created_at": job.created_at.isoformat() if job.created_at else None,
+                    "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+                }
+            )
+        response.update(
+            {
+                "summary": summary,
+                "years": years,
+                "journals": journals,
+                "paper_types": [{"type": key, "count": value} for key, value in sorted(type_counts.items())],
+                "dft_overview_meta": _dft_overview_meta(dft_rows, dft_review_counts),
+                "dft_status": dft_status,
+                "recent_tasks": tasks,
+            }
+        )
+
+    if "matrix" in requested_sections:
+        if reviewed_only:
+            matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix_v2(
+                dataset or {},
+                dft_review_counts,
+                matrix_status=matrix_status,
+            )
+        else:
+            matrix_rows, matrix_meta = _build_dft_catalyst_adsorbate_matrix(
+                session,
+                filters,
+                matrix_status=matrix_status,
+                dft_rows=dft_rows,
+                catalysts=catalysts,
+                gate_by_id=gate_by_id,
+            )
+        paper_lookup = {
+            str(paper.id): {
+                "title": paper.title or "无标题",
+                "journal": paper.journal or "未知期刊",
+                "year": paper.year,
+                "doi": paper.doi or "",
+            }
+            for _row, paper in dft_rows
+        }
+        response.update(
+            {
+                "paper_lookup": paper_lookup,
+                "dft_matrix": matrix_rows,
+                "dft_matrix_meta": matrix_meta,
+            }
+        )
+
+    if "correlation" in requested_sections:
+        exploratory_index = (
+            _build_exploratory_descriptor_index(
+                dft_rows,
+                {str(item.id): item for item in catalysts},
+                eligible_result_ids={
+                    result_id
+                    for result_id, gate in gate_by_id.items()
+                    if gate.eligible
+                },
+                reaction_category=corr_reaction,
+                adsorbate=corr_adsorbate,
+                material_family=corr_family,
+            )
+            if corr_allow_exploratory
+            else {}
+        )
+        response["descriptor_correlation"] = _build_descriptor_correlation_summary_v2(
+            dataset or {},
+            exploratory_index,
+            min_n=corr_min_n,
+            reaction_category=corr_reaction,
+            adsorbate=corr_adsorbate,
+            material_family=corr_family,
+            allow_exploratory=corr_allow_exploratory,
+        )
+
+    return response
 
 
 @router.get("/correlation-pairs")
-async def descriptor_correlation_pairs(
-    target_property: str = Query(...),
-    descriptor: str = Query(...),
+def descriptor_correlation_pairs(
+    target_property: str | None = Query(default=None),
+    descriptor: str | None = Query(default=None),
+    y_property: str | None = Query(default=None),
+    x_property: str | None = Query(default=None),
     library_name: str | None = Query(default=None),
     reaction_category: str | None = Query(default=None),
     adsorbate: str | None = Query(default=None),
     material_family: str | None = Query(default=None),
     min_n: int = Query(default=3, ge=3, le=50),
+    allow_exploratory: bool = Query(
+        default=False,
+        description="When true, may fall back to reviewed/exportable same-sample pairs.",
+    ),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    target = _canonical_property_type(target_property)
-    descriptor_key = _canonical_property_type(descriptor)
-    dataset = _visual_dataset(session, library_name)
+    y_raw = y_property or target_property
+    x_raw = x_property or descriptor
+    if not y_raw or not x_raw:
+        raise HTTPException(status_code=400, detail="x_property/y_property or descriptor/target_property are required")
+    target = _canonical_property_type(y_raw)
+    descriptor_key = _canonical_property_type(x_raw)
+    filters = _paper_filters(library_name)
+    stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
+    for clause in filters:
+        stmt = stmt.where(clause)
+    source_rows = session.execute(stmt).all()
+    required_properties = {target, descriptor_key}
+    if "rds_energy" in required_properties:
+        required_properties.add("gibbs_free_energy_change")
+    pair_rows = [
+        (row, paper)
+        for row, paper in source_rows
+        if _canonical_property_type(row.property_type) in required_properties
+    ]
+    gate_by_id = bulk_export_gate_results(
+        session,
+        [row for row, _paper in pair_rows],
+        target_type="dft_results",
+    )
+    catalysts, settings = _load_visual_support_rows(
+        session,
+        pair_rows,
+        include_settings=True,
+    )
+    dataset = _visual_dataset_from_rows(
+        session,
+        library_name,
+        pair_rows,
+        gate_by_id,
+        catalysts,
+        settings,
+    )
     strict_pairs, filtered_target_count = _paired_descriptor_points_v2(
         dataset,
         reaction_category=reaction_category,
@@ -1462,22 +1944,41 @@ async def descriptor_correlation_pairs(
     )
     pairs = strict_pairs
     source = "reviewed_exportable"
-    if not pairs:
-        pairs = _raw_exploratory_descriptor_points(
-            session,
-            _paper_filters(library_name),
-            target_property=target,
-            descriptor=descriptor_key,
+    if allow_exploratory and not pairs:
+        exploratory_index = _build_exploratory_descriptor_index(
+            pair_rows,
+            {str(item.id): item for item in catalysts},
+            eligible_result_ids={
+                result_id
+                for result_id, gate in gate_by_id.items()
+                if gate.eligible
+            },
             reaction_category=reaction_category,
             adsorbate=adsorbate,
             material_family=material_family,
         )
+        pairs = _exploratory_variable_points_from_index(
+            exploratory_index,
+            y_property=target,
+            x_property=descriptor_key,
+        )
         if pairs:
             source = "exploratory_same_sample"
-    stats = _correlation_stats(pairs)
-    ready = len(pairs) >= min_n and stats["pearson_r"] is not None
+    if target == descriptor_key and pairs:
+        stats = {
+            "pearson_r": 1.0,
+            "spearman_rho": 1.0,
+            "slope": 1.0,
+            "intercept": 0.0,
+        }
+        ready = len(pairs) >= min_n
+    else:
+        stats = _correlation_stats(pairs)
+        ready = len(pairs) >= min_n and stats["pearson_r"] is not None
     return {
-        "schema_version": "descriptor_scatter_v2",
+        "schema_version": "dft_total_correlation_scatter_v3",
+        "y_property": target,
+        "x_property": descriptor_key,
         "target_property": target,
         "descriptor": descriptor_key,
         "library_name": normalize_library_name(library_name) if library_name else None,
@@ -1500,7 +2001,7 @@ async def descriptor_correlation_pairs(
         "intercept": stats["intercept"] if ready else None,
         "points": pairs,
         "policy": (
-            "Scatter pairs prefer the current reviewed/exportable DFT ML dataset. "
-            "When strict descriptor assignment is empty, the visualization uses same-sample non-rejected exploratory pairs."
+            "Scatter pairs use the current reviewed/exportable DFT ML dataset by default. "
+            "Reviewed/exportable same-sample pairs are returned only when explicitly requested."
         ),
     }

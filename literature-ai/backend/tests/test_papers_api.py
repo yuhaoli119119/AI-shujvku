@@ -9,7 +9,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 from fastapi import Request
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
@@ -74,8 +74,8 @@ def test_papers_status_and_stream(setup_test_db, monkeypatch):
                 lines.append(line)
             
         full_output = "\n".join(lines)
-        assert "event: papers_update" in full_output
-        assert "First Test Paper" in full_output
+        assert "event: heartbeat" in full_output
+        assert "event: papers_update" not in full_output
         assert "event: heartbeat" in full_output
 
 
@@ -177,7 +177,7 @@ def test_paper_api_exposes_stable_paper_id_on_list_and_detail(setup_test_db):
     assert detail_payload["paper_id"] == paper_id
 
 
-def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
+def test_light_paper_detail_omits_verified_writing_card_payload(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     with Session() as session:
@@ -215,9 +215,67 @@ def test_light_paper_detail_keeps_verified_writing_cards(setup_test_db):
     assert response.status_code == 200
     payload = response.json()
     assert payload["sections"] == []
-    assert payload["writing_cards_review_status"] == "ai_verified"
-    assert len(payload["writing_cards_items"]) == 1
-    assert payload["writing_cards_items"][0]["research_gap"] == "AI reviewed writing card"
+    assert payload["counts"]["writing_cards"] == 1
+    assert payload["writing_cards_items"] == []
+
+
+def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Large DFT detail", pdf_path="large-dft.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    adsorbate=f"Li2S{i}",
+                    property_type="adsorption_energy",
+                    value=-float(i) / 10,
+                    unit="eV",
+                    evidence_text=f"DFT evidence {i}",
+                )
+                for i in range(120)
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    statements = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        client = TestClient(app)
+        light = client.get(f"/api/papers/{paper_id}", params={"mode": "light"})
+        assert light.status_code == 200
+        light_payload = light.json()
+        assert light_payload["counts"]["dft_results"] == 120
+        assert light_payload["dft_results_items"] == []
+        assert light_payload["catalyst_samples_items"] == []
+        assert light_payload["sections"] == []
+        assert light_payload["figures"] == []
+        assert len(light.content) < 200_000
+        assert len(statements) < 25
+
+        statements.clear()
+        full = client.get(f"/api/papers/{paper_id}", params={"mode": "full"})
+        assert full.status_code == 200
+        full_payload = full.json()
+        assert len(full_payload["dft_results_items"]) == 28
+        assert full_payload["dft_results_page"]["total"] == 120
+        assert full_payload["dft_results_page"]["has_more"] is True
+        assert len(statements) < 100
+
+        page = client.get(f"/api/papers/{paper_id}/dft-results", params={"offset": 50, "limit": 50})
+        assert page.status_code == 200
+        assert len(page.json()["items"]) == 50
+        assert page.json()["has_more"] is True
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
@@ -491,7 +549,7 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v8"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v16"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in data["prompt_contract"]["project_library_contexts"]
@@ -503,6 +561,8 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "图片核验默认只核验主文 paper_id 的 figures" in data["suggested_client_prompt"]
     assert "Figure-derived DFT values become candidates and require second review/safety gate" in data["prompt_contract"]["templates"]["figure"]
     assert "Figure-derived DFT data must be submitted as DFT candidates" in data["legacy_suggested_client_prompt"]
+    assert "never table correction_proposals through import_analysis" in data["legacy_suggested_client_prompt"]
+    assert "table field corrections" not in data["legacy_suggested_client_prompt"]
     assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
     ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
     assert "raw query" in ai_search["purpose"]
@@ -682,6 +742,16 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
             evidence_text="The Li adsorption energy on the vacancy defect is -1.23 eV.",
             confidence=0.82,
         )
+        si_dft_result = DFTResult(
+            paper_id=si_paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-2.34,
+            unit="eV",
+            reaction_step="SI adsorption comparison",
+            evidence_text="The SI reports -2.34 eV for Li2S4 adsorption.",
+            confidence=0.78,
+        )
         catalyst_a = CatalystSample(
             paper_id=paper.id,
             name="Vacancy graphene",
@@ -705,6 +775,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
                 section,
                 figure,
                 dft_result,
+                si_dft_result,
                 catalyst_a,
                 catalyst_b,
                 MechanismClaim(
@@ -755,6 +826,38 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
                 parser_source="test",
             )
         )
+        pending_run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="ide_ai",
+            source_label="ordinary_dft_test",
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add(pending_run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=pending_run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                status="candidate",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "agent_role": "ordinary_dft_ai",
+                    "corrected_value": {
+                        "material_identity": "Vacancy graphene",
+                        "property_type": "adsorption_energy",
+                        "value": -2.34,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {"page": 7, "quoted_text": "Li2S4 adsorption is -2.34 eV"},
+                },
+            )
+        )
         session.commit()
         paper_id = paper.id
         si_paper_id = si_paper.id
@@ -787,6 +890,20 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert figure["image_review"]["review_required"] is True
     assert "small_crop_or_subfigure" in figure["image_review"]["flags"]
     assert data["context"]["structured_candidates"]["dft_results"][0]["candidate_status"] == "candidate_unverified"
+    si_groups = data["context"]["structured_candidates"]["linked_supplementary_dft_result_groups"]
+    assert len(si_groups) == 1
+    assert si_groups[0]["related_paper_id"] == str(si_paper_id)
+    assert si_groups[0]["writeback_paper_id"] == str(paper_id)
+    assert si_groups[0]["candidate_count"] == 1
+    assert si_groups[0]["items"][0]["record_paper_id"] == str(si_paper_id)
+    handoff = data["context"]["dft_review_handoff"]
+    assert handoff["state"] == "requires_apply_review_rules"
+    assert handoff["pending_candidate_count"] == 1
+    assert handoff["pending_run_count"] == 1
+    assert handoff["processable_dft_candidate_count"] == 1
+    assert handoff["blocked_ml_predicted_count"] == 0
+    assert handoff["runs"][0]["action_tool"] == "apply_analysis_review_rules"
+    assert handoff["items"][0]["source_label"] == "ordinary_dft_test"
     dft_safety = data["context"]["structured_candidates"]["dft_results"][0]["export_safety"]
     assert dft_safety["is_exportable"] is False
     assert dft_safety["blocked_reasons"] == ["missing_material_identity", "missing_review"]
@@ -800,6 +917,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert any(item["code"] == "dft_unverified" for item in data["context"]["warnings"])
     assert any(item["code"] == "dft_export_blocked" for item in data["context"]["warnings"])
     assert any(item["code"] == "figure_crop_review" for item in data["context"]["warnings"])
+    assert any(item["code"] == "pending_dft_review_rules" for item in data["context"]["warnings"])
     assert "Graphene vacancy defect DFT test paper" in data["markdown"]
     assert "Automatic parser, extraction, and external analysis outputs are candidates" in data["markdown"]
 
@@ -1191,7 +1309,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
     assert readiness["total_candidates"] == 2
     assert readiness["eligible_count"] == 1
     assert readiness["blocked_count"] == 1
-    assert readiness["blocked_reasons"] == {"missing_review": 1, "missing_evidence": 1}
+    assert readiness["blocked_reasons"] == {"missing_review": 1}
 
     dataset_response = client.get("/api/papers/export/dft-dataset")
     assert dataset_response.status_code == 200
@@ -1209,8 +1327,8 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
     assert queue["metadata"]["blocked_count"] == 1
     assert len(queue["rows"]) == 1
     assert queue["rows"][0]["record_id"] == str(missing_locator_result_id)
-    assert queue["rows"][0]["recommended_action"] == "repair_evidence_reference"
-    assert queue["rows"][0]["can_mark_verified"] is False
+    assert queue["rows"][0]["recommended_action"] == "verify_against_pdf"
+    assert queue["rows"][0]["can_mark_verified"] is True
     assert "verify_url" in queue["rows"][0]
 
     exportable_queue_response = client.get("/api/papers/export/dft-review-queue", params={"status": "exportable"})
@@ -1337,7 +1455,11 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert rejected_payload["dft_result_id"] == str(row_id)
     assert rejected_payload["export_safety"]["is_exportable"] is False
     assert rejected_payload["export_safety"]["review_status"] == "rejected"
-    assert rejected_payload["export_safety"]["blocked_reasons"] == ["missing_material_identity", "unsafe_review"]
+    assert rejected_payload["export_safety"]["blocked_reasons"] == [
+        "missing_material_identity",
+        "unsafe_review",
+        "target_rejected",
+    ]
     assert all(item["reviewer_status"] == "rejected" for item in rejected_payload["reviews"])
 
     active_queue = client.get("/api/papers/export/dft-review-queue")
@@ -1363,7 +1485,11 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     dataset = client.get("/api/papers/export/dft-dataset").json()
     assert dataset["metadata"]["eligible_count"] == 0
     assert dataset["metadata"]["blocked_count"] == 1
-    assert dataset["metadata"]["blocked_reasons"] == {"missing_material_identity": 1, "unsafe_review": 1}
+    assert dataset["metadata"]["blocked_reasons"] == {
+        "missing_material_identity": 1,
+        "unsafe_review": 1,
+        "target_rejected": 1,
+    }
 
     with Session() as session:
         saved_correction = session.scalar(select(PaperCorrection).where(PaperCorrection.target_path == f"dft_results:{row_id}:unit"))
@@ -1375,6 +1501,94 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         audit = session.scalar(select(AuditLog).where(AuditLog.action == "reject_dft_result"))
         assert audit is not None
         assert audit.target_id == str(row_id)
+
+
+def test_manual_dft_update_applies_audited_changes_and_invalidates_review(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Manual DFT edit paper", year=2026, pdf_path="manual-edit.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.11,
+            unit="eV",
+            source_section="Results",
+            evidence_text="Table 2 reports -1.25 eV for Li2S4 adsorption.",
+            candidate_status="ML_Ready",
+        )
+        session.add(row)
+        session.flush()
+        review = ExtractionFieldReview(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name="value",
+            original_value=-1.11,
+            reviewed_value=-1.11,
+            unit="eV",
+            evidence_text=row.evidence_text,
+            reviewer_status="verified",
+            reviewer="human",
+            reviewer_note="Previously verified",
+        )
+        session.add(review)
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+        review_id = str(review.id)
+
+    client = TestClient(app)
+    response = client.patch(
+        f"/api/papers/{paper_id}/dft-results/{row_id}",
+        json={
+            "confirm_manual_update": True,
+            "updates": {
+                "value": -1.25,
+                "unit": "eV",
+                "reaction_step": "Li2S4 adsorption",
+            },
+            "reason": "Corrected against Table 2 in the source PDF.",
+            "reviewer": "literature_library_user",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["changed_fields"] == ["value", "reaction_step"]
+    assert payload["invalidated_review_ids"] == [review_id]
+    assert payload["export_safety"]["is_exportable"] is False
+    assert "unsafe_review" in payload["export_safety"]["blocked_reasons"]
+    assert all(item["status"] == "approved" for item in payload["corrections"])
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.value == -1.25
+        assert stored.reaction_step == "Li2S4 adsorption"
+        assert stored.candidate_status == "system_candidate"
+        stored_review = session.get(ExtractionFieldReview, UUID(review_id))
+        assert stored_review.reviewer_status == "pending"
+        assert stored_review.reviewed_value is None
+        correction_paths = set(
+            session.scalars(
+                select(PaperCorrection.target_path).where(PaperCorrection.paper_id == UUID(paper_id))
+            ).all()
+        )
+        assert correction_paths == {
+            f"dft_results:{row_id}:value",
+            f"dft_results:{row_id}:reaction_step",
+        }
+        audit = session.scalar(
+            select(AuditLog).where(
+                AuditLog.action == "manual_update_dft_result",
+                AuditLog.target_id == row_id,
+            )
+        )
+        assert audit is not None
+        assert audit.payload["before"]["value"] == -1.11
+        assert audit.payload["after"]["value"] == -1.25
 
 
 def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_test_db):
@@ -1780,6 +1994,78 @@ def test_compare_dft_results_exposes_specific_and_canonical_property_types(setup
     assert items["RDS Gibbs free energy"]["property_subtype"] == "gibbs_free_energy_change"
 
 
+def test_compare_dft_results_adsorption_filter_includes_binding_energy_group(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Binding energy compare paper", year=2026, pdf_path="binding-labels.pdf")
+        session.add(paper)
+        session.flush()
+        fe_gdy = CatalystSample(paper_id=paper.id, name="Fe-GDY", catalyst_type="single_atom")
+        co_gdy = CatalystSample(paper_id=paper.id, name="Co-GDY", catalyst_type="single_atom")
+        session.add_all([fe_gdy, co_gdy])
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_gdy.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S4",
+                    value=-1.2,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=co_gdy.id,
+                    property_type="binding_energy",
+                    adsorbate="Li2S6",
+                    value=-0.8,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="formation_energy",
+                    adsorbate="vacancy",
+                    value=1.1,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    adsorption_response = client.get(
+        "/api/papers/compare",
+        params={"property_type": "adsorption_energy", "min_confidence": 0.0, "status": "all"},
+    )
+    assert adsorption_response.status_code == 200
+    adsorption_items = {item["property_type"]: item for item in adsorption_response.json()["items"]}
+    assert set(adsorption_items) == {"adsorption_energy", "binding_energy"}
+    assert adsorption_items["binding_energy"]["canonical_property_type"] == "adsorption_energy"
+    assert adsorption_items["binding_energy"]["property_subtype"] == "binding"
+
+    binding_response = client.get(
+        "/api/papers/compare",
+        params={"property_type": "binding_energy", "min_confidence": 0.0, "status": "all"},
+    )
+    assert binding_response.status_code == 200
+    binding_types = {item["property_type"] for item in binding_response.json()["items"]}
+    assert binding_types == {"binding_energy"}
+
+    catalyst_response = client.get(
+        "/api/papers/compare",
+        params={"catalyst_name": "Co-GDY", "min_confidence": 0.0, "status": "all", "compact": "true"},
+    )
+    assert catalyst_response.status_code == 200
+    catalyst_items = catalyst_response.json()["items"]
+    assert [item["display_catalyst_name"] for item in catalyst_items] == ["Co-GDY"]
+    assert [item["property_type"] for item in catalyst_items] == ["binding_energy"]
+
+
 def test_compare_dft_results_without_property_type_returns_all_types(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -2042,6 +2328,76 @@ def test_compare_dft_results_property_mix_sort_interleaves_property_types(setup_
     }
 
 
+def test_compare_dft_results_catalyst_group_sort_keeps_same_catalyst_adjacent(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Catalyst grouped compare paper", year=2026, pdf_path="catalyst-grouped.pdf")
+        session.add(paper)
+        session.flush()
+        fe_gdy = CatalystSample(paper_id=paper.id, name="Fe-GDY", catalyst_type="single_atom")
+        co_gdy = CatalystSample(paper_id=paper.id, name="Co-GDY", catalyst_type="single_atom")
+        session.add_all([fe_gdy, co_gdy])
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_gdy.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S4",
+                    value=-0.2,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=co_gdy.id,
+                    property_type="binding_energy",
+                    adsorbate="Li2S4",
+                    value=-0.4,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=fe_gdy.id,
+                    property_type="reaction_barrier",
+                    adsorbate="Li2S",
+                    value=0.8,
+                    unit="eV",
+                    confidence=0.9,
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=co_gdy.id,
+                    property_type="charge_transfer",
+                    adsorbate="Li2S6",
+                    value=0.1,
+                    unit="e",
+                    confidence=0.9,
+                ),
+            ]
+        )
+        session.commit()
+
+    client = TestClient(app)
+    response = client.get(
+        "/api/papers/compare",
+        params={"min_confidence": 0.0, "status": "all", "compact": "true", "sort": "catalyst_group"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["query"]["sort"] == "catalyst_group"
+    assert [item["display_catalyst_name"] for item in payload["items"]] == [
+        "Co-GDY",
+        "Co-GDY",
+        "Fe-GDY",
+        "Fe-GDY",
+    ]
+
+
 def test_compare_dft_results_exposes_evidence_derived_catalyst_name_when_unbound(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -2168,6 +2524,17 @@ def test_dft_dataset_export_honors_catalyst_type_and_min_confidence_filters(setu
     assert payload["metadata"]["numeric_record_count"] == 1
     assert len(payload["records"]) == 1
     assert payload["records"][0]["target"]["adsorbate"] == "O"
+
+    name_response = client.get(
+        "/api/papers/export/dft-dataset",
+        params={"catalyst_name": "Pt", "min_confidence": 0.3},
+    )
+    assert name_response.status_code == 200
+    name_payload = name_response.json()
+    assert name_payload["metadata"]["eligible_count"] == 1
+    assert len(name_payload["records"]) == 1
+    assert name_payload["records"][0]["target"]["adsorbate"] == "H"
+    assert name_payload["records"][0]["catalyst"]["name"] == "Pt"
 
 
 def test_visuals_dft_matrix_uses_catalyst_adsorbate_categories(setup_test_db):
@@ -2354,9 +2721,9 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
         },
     )
     assert before_response.status_code == 200
-    assert before_response.json()["ready"] is True
-    assert before_response.json()["n"] == 3
-    assert before_response.json()["source"] == "exploratory_same_sample"
+    assert before_response.json()["ready"] is False
+    assert before_response.json()["n"] == 0
+    assert before_response.json()["source"] == "reviewed_exportable"
 
     for paper_id, row_id in rows_to_verify:
         verify_response = client.post(
@@ -2521,6 +2888,196 @@ def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setu
     assert {point["match_scope"] for point in pairs["points"]} == {"direct_catalyst"}
 
 
+def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        for index, (adsorption_energy, reaction_barrier) in enumerate(
+            [(-1.4, 0.4), (-1.2, 0.6), (-1.0, 0.8)],
+            start=1,
+        ):
+            paper = Paper(
+                title=f"Total correlation paper {index}",
+                year=2026,
+                journal="Codex Test Journal",
+                library_name="TotalCorrelationLibrary",
+                pdf_path=f"total-correlation-{index}.pdf",
+                doi=f"10.1000/total-correlation-{index}",
+            )
+            session.add(paper)
+            session.flush()
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-LiS-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            result_rows = [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H",
+                    value=adsorption_energy,
+                    unit="eV",
+                    reaction_step="H adsorption",
+                    evidence_text=f"The adsorption energy is {adsorption_energy} eV.",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="reaction_barrier",
+                    adsorbate="H",
+                    value=reaction_barrier,
+                    unit="eV",
+                    reaction_step="H reaction barrier",
+                    evidence_text=f"The reaction barrier is {reaction_barrier} eV.",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="gibbs_free_energy_change",
+                    adsorbate=None,
+                    value=reaction_barrier,
+                    unit="eV",
+                    reaction_step="RDS",
+                    evidence_text=f"The RDS Gibbs free energy is {reaction_barrier} eV.",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="binding_energy",
+                    adsorbate=None,
+                    value=-5.0 - index / 10,
+                    unit="eV",
+                    reaction_step="metal binding",
+                    evidence_text=f"The metal binding energy is {-5.0 - index / 10} eV.",
+                ),
+            ]
+            session.add_all(result_rows)
+            session.flush()
+            for result_row in result_rows:
+                session.add(
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="dft_results",
+                        target_id=str(result_row.id),
+                        field_name="value",
+                        original_value=result_row.value,
+                        reviewed_value=result_row.value,
+                        unit=result_row.unit,
+                        evidence_text=result_row.evidence_text,
+                        reviewer_status="verified",
+                        reviewer="correlation_test",
+                        reviewer_note="Verified for total correlation test.",
+                        write_version=1,
+                    )
+                )
+                session.add(
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        target_type="dft_results",
+                        target_id=str(result_row.id),
+                        field_name="value",
+                        page=index,
+                        locator_status="exact_page",
+                        evidence_text=result_row.evidence_text,
+                        source_type="pdf_text",
+                        parser_source="unit_test",
+                        locator_confidence=0.98,
+                    )
+                )
+        session.commit()
+
+    client = TestClient(app)
+    overview_response = client.get(
+        "/api/visuals/overview",
+        params={
+            "library_name": "TotalCorrelationLibrary",
+            "sections": "correlation",
+            "corr_min_n": 3,
+            "corr_allow_exploratory": True,
+        },
+    )
+    assert overview_response.status_code == 200
+    overview = overview_response.json()["descriptor_correlation"]
+    assert overview["schema_version"] == "dft_total_correlation_v3"
+    variable_keys = [item["key"] for item in overview["variables"]]
+    assert "adsorption_energy" in variable_keys
+    assert "reaction_barrier" in variable_keys
+    assert "rds_energy" in variable_keys
+    cell = next(
+        item
+        for item in overview["cells"]
+        if item["y_property"] == "adsorption_energy" and item["x_property"] == "reaction_barrier"
+    )
+    assert cell["status"] == "ready"
+    assert cell["n"] == 3
+    assert cell["source"] == "exploratory_same_sample"
+    assert cell["pearson_r"] == 1.0
+    rds_cell = next(
+        item
+        for item in overview["cells"]
+        if item["y_property"] == "adsorption_energy" and item["x_property"] == "rds_energy"
+    )
+    assert rds_cell["status"] == "ready"
+    assert rds_cell["n"] == 3
+    assert rds_cell["source"] == "exploratory_same_sample"
+
+    pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "TotalCorrelationLibrary",
+            "y_property": "adsorption_energy",
+            "x_property": "reaction_barrier",
+            "min_n": 3,
+            "allow_exploratory": True,
+        },
+    )
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["ready"] is True
+    assert pairs["n"] == 3
+    assert pairs["y_property"] == "adsorption_energy"
+    assert pairs["x_property"] == "reaction_barrier"
+
+    binding_pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "TotalCorrelationLibrary",
+            "y_property": "binding_energy",
+            "x_property": "binding_energy",
+            "min_n": 3,
+            "allow_exploratory": True,
+        },
+    )
+    assert binding_pairs_response.status_code == 200
+    binding_pairs = binding_pairs_response.json()
+    assert binding_pairs["ready"] is True
+    assert binding_pairs["n"] == 3
+    assert binding_pairs["pearson_r"] == 1.0
+    assert all(point["x"] == point["y"] for point in binding_pairs["points"])
+    assert {point["match_scope"] for point in binding_pairs["points"]} == {"self_identity"}
+
+    rds_pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "TotalCorrelationLibrary",
+            "y_property": "adsorption_energy",
+            "x_property": "rds_energy",
+            "min_n": 3,
+            "allow_exploratory": True,
+        },
+    )
+    assert rds_pairs_response.status_code == 200
+    rds_pairs = rds_pairs_response.json()
+    assert rds_pairs["ready"] is True
+    assert rds_pairs["n"] == 3
+    assert rds_pairs["x_property"] == "rds_energy"
+
+
 def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pairs(setup_test_db):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
@@ -2607,7 +3164,11 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
 
     overview_response = client.get(
         "/api/visuals/overview",
-        params={"library_name": "CorrelationLibrary", "matrix_status": "reviewed", "corr_min_n": 3},
+        params={
+            "library_name": "CorrelationLibrary",
+            "matrix_status": "reviewed",
+            "corr_min_n": 3,
+        },
     )
     assert overview_response.status_code == 200
     overview = overview_response.json()
@@ -2616,9 +3177,29 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
         for item in overview["descriptor_correlation"]["cells"]
         if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
     )
-    assert cell["status"] == "ready"
-    assert cell["n"] == 3
-    assert cell["source"] == "exploratory_same_sample"
+    assert cell["status"] == "insufficient_paired_data"
+    assert cell["n"] == 0
+    assert cell["source"] == "reviewed_exportable"
+
+    exploratory_overview_response = client.get(
+        "/api/visuals/overview",
+        params={
+            "library_name": "CorrelationLibrary",
+            "matrix_status": "reviewed",
+            "corr_min_n": 3,
+            "corr_allow_exploratory": True,
+        },
+    )
+    assert exploratory_overview_response.status_code == 200
+    exploratory_overview = exploratory_overview_response.json()
+    exploratory_cell = next(
+        item
+        for item in exploratory_overview["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
+    )
+    assert exploratory_cell["status"] == "ready"
+    assert exploratory_cell["n"] == 3
+    assert exploratory_cell["source"] == "exploratory_same_sample"
 
     pairs_response = client.get(
         "/api/visuals/correlation-pairs",
@@ -2627,6 +3208,7 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
             "target_property": "adsorption_energy",
             "descriptor": "bader_charge",
             "min_n": 3,
+            "allow_exploratory": True,
         },
     )
     assert pairs_response.status_code == 200
@@ -2636,6 +3218,313 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
     assert pairs["source"] == "exploratory_same_sample"
     assert len(pairs["points"]) == 3
     assert {point["match_scope"] for point in pairs["points"]} == {"exploratory_same_sample"}
+
+
+def test_visuals_exploratory_correlation_rejects_unassigned_and_one_to_many_pairs(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        unassigned_paper = Paper(
+            title="Unassigned exploratory correlation paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="AmbiguousCorrelationLibrary",
+            pdf_path="unassigned-exploratory-correlation.pdf",
+        )
+        session.add(unassigned_paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=unassigned_paper.id,
+                    property_type="formation_energy",
+                    value=2.48,
+                    unit="eV",
+                    evidence_text="Formation energy evidence.",
+                ),
+                DFTResult(
+                    paper_id=unassigned_paper.id,
+                    property_type="reaction_barrier",
+                    value=0.27,
+                    unit="eV",
+                    evidence_text="Reaction barrier evidence.",
+                ),
+            ]
+        )
+
+        ambiguous_paper = Paper(
+            title="One-to-many exploratory correlation paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="AmbiguousCorrelationLibrary",
+            pdf_path="one-to-many-exploratory-correlation.pdf",
+        )
+        session.add(ambiguous_paper)
+        session.flush()
+        catalyst = CatalystSample(
+            paper_id=ambiguous_paper.id,
+            name="Fe-GDY",
+            metal_centers=["Fe"],
+            support="graphdiyne",
+        )
+        session.add(catalyst)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=ambiguous_paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="formation_energy",
+                    value=2.86,
+                    unit="eV",
+                    evidence_text="Formation energy evidence.",
+                ),
+                DFTResult(
+                    paper_id=ambiguous_paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="reaction_barrier",
+                    value=0.31,
+                    unit="eV",
+                    evidence_text="First reaction barrier evidence.",
+                ),
+                DFTResult(
+                    paper_id=ambiguous_paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="reaction_barrier",
+                    value=0.44,
+                    unit="eV",
+                    evidence_text="Second reaction barrier evidence.",
+                ),
+            ]
+        )
+        session.commit()
+
+    response = TestClient(app).get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "AmbiguousCorrelationLibrary",
+            "y_property": "reaction_barrier",
+            "x_property": "formation_energy",
+            "min_n": 3,
+            "allow_exploratory": True,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ready"] is False
+    assert payload["n"] == 0
+    assert payload["points"] == []
+    assert payload["source"] == "reviewed_exportable"
+
+
+def test_visuals_exploratory_correlation_excludes_unreviewed_system_candidates(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        for index in range(3):
+            paper = Paper(
+                title=f"Unreviewed correlation paper {index}",
+                year=2026,
+                journal="Codex Test Journal",
+                library_name="UnreviewedCorrelationLibrary",
+                pdf_path=f"unreviewed-correlation-{index}.pdf",
+            )
+            session.add(paper)
+            session.flush()
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-GDY-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            session.add_all(
+                [
+                    DFTResult(
+                        paper_id=paper.id,
+                        catalyst_sample_id=catalyst.id,
+                        property_type="formation_energy",
+                        value=2.0 + index / 10,
+                        unit="eV",
+                        evidence_text="Unreviewed formation energy candidate.",
+                    ),
+                    DFTResult(
+                        paper_id=paper.id,
+                        catalyst_sample_id=catalyst.id,
+                        property_type="reaction_barrier",
+                        value=0.3 + index / 10,
+                        unit="eV",
+                        evidence_text="Unreviewed reaction barrier candidate.",
+                    ),
+                ]
+            )
+        session.commit()
+
+    client = TestClient(app)
+    pairs_response = client.get(
+        "/api/visuals/correlation-pairs",
+        params={
+            "library_name": "UnreviewedCorrelationLibrary",
+            "y_property": "reaction_barrier",
+            "x_property": "formation_energy",
+            "min_n": 3,
+            "allow_exploratory": True,
+        },
+    )
+    assert pairs_response.status_code == 200
+    pairs = pairs_response.json()
+    assert pairs["ready"] is False
+    assert pairs["n"] == 0
+    assert pairs["points"] == []
+    assert pairs["source"] == "reviewed_exportable"
+
+    overview_response = client.get(
+        "/api/visuals/overview",
+        params={
+            "library_name": "UnreviewedCorrelationLibrary",
+            "sections": "correlation",
+            "corr_min_n": 3,
+            "corr_allow_exploratory": True,
+        },
+    )
+    assert overview_response.status_code == 200
+    cell = next(
+        item
+        for item in overview_response.json()["descriptor_correlation"]["cells"]
+        if item["y_property"] == "reaction_barrier" and item["x_property"] == "formation_energy"
+    )
+    assert cell["status"] == "insufficient_paired_data"
+    assert cell["n"] == 0
+    assert cell["source"] == "reviewed_exportable"
+
+
+def test_visuals_correlation_summary_prefetches_reviewed_dft_once(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Bulk exploratory correlation paper",
+            year=2026,
+            journal="Codex Test Journal",
+            library_name="BulkCorrelationLibrary",
+            pdf_path="bulk-correlation.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        for index in range(48):
+            catalyst = CatalystSample(
+                paper_id=paper.id,
+                name=f"Fe-GDY-{index}",
+                metal_centers=["Fe"],
+                support="graphdiyne",
+            )
+            session.add(catalyst)
+            session.flush()
+            result_rows = [
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="adsorption_energy",
+                    adsorbate="H",
+                    value=-1.0 - index / 100,
+                    unit="eV",
+                    evidence_text="Exploratory target evidence.",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    catalyst_sample_id=catalyst.id,
+                    property_type="bader_charge",
+                    adsorbate=None,
+                    value=0.1 + index / 100,
+                    unit="e",
+                    evidence_text="Exploratory descriptor evidence.",
+                ),
+            ]
+            session.add_all(result_rows)
+            session.flush()
+            for result_row in result_rows:
+                session.add(
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="dft_results",
+                        target_id=str(result_row.id),
+                        field_name="value",
+                        original_value=result_row.value,
+                        reviewed_value=result_row.value,
+                        unit=result_row.unit,
+                        evidence_text=result_row.evidence_text,
+                        reviewer_status="verified",
+                        reviewer="correlation_test",
+                        reviewer_note="Verified for exploratory correlation prefetch test.",
+                        write_version=1,
+                    )
+                )
+                session.add(
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        target_type="dft_results",
+                        target_id=str(result_row.id),
+                        field_name="value",
+                        page=index + 1,
+                        locator_status="exact_page",
+                        evidence_text=result_row.evidence_text,
+                        source_type="pdf_text",
+                        parser_source="unit_test",
+                        locator_confidence=0.98,
+                    )
+                )
+        session.commit()
+
+    statements = []
+
+    def record_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+        statements.append(" ".join(statement.lower().split()))
+
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        response = TestClient(app).get(
+            "/api/visuals/overview",
+                params={
+                    "library_name": "BulkCorrelationLibrary",
+                    "sections": "correlation",
+                    "corr_min_n": 3,
+                },
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["included_sections"] == ["correlation"]
+    assert "summary" not in payload
+    assert "dft_matrix" not in payload
+    cell = next(
+        item
+        for item in payload["descriptor_correlation"]["cells"]
+        if item["target_property"] == "adsorption_energy" and item["descriptor"] == "bader_charge"
+    )
+    assert cell["source"] == "reviewed_exportable"
+    assert cell["status"] == "ready"
+    assert cell["n"] == 48
+
+    dft_scans = [statement for statement in statements if statement.startswith("select") and " from dft_results " in statement]
+    assert len(dft_scans) == 1
+    assert len(statements) < 20
+
+
+def test_visuals_overview_section_omits_hidden_expensive_payloads(setup_test_db):
+    response = TestClient(app).get(
+        "/api/visuals/overview",
+        params={"sections": "overview"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["included_sections"] == ["overview"]
+    assert "summary" in payload
+    assert "dft_overview_meta" in payload
+    assert "dft_matrix" not in payload
+    assert "descriptor_correlation" not in payload
 
 
 def test_ai_search_falls_back_to_raw_query_when_llm_unconfigured(setup_test_db, monkeypatch):

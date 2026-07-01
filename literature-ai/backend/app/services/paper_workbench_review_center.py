@@ -12,6 +12,10 @@ from app.services.dft_rescan_policy import (
     normalize_source_document_type,
     normalize_unit,
 )
+from app.services.supplementary_dft_lifecycle_service import (
+    CLOSED_SUPPORT_DFT_LIFECYCLE_STATUSES,
+    OPEN_SUPPORT_DFT_LIFECYCLE_STATUSES,
+)
 
 
 FINALIZED_DFT_CANDIDATE_STATUSES = {
@@ -83,6 +87,13 @@ class PaperWorkbenchReviewCenterMixin:
             if str(candidate_status or "").strip().lower() in exportable_statuses
         )
 
+    @staticmethod
+    def _is_dft_object_review_payload(payload: Any) -> bool:
+        if not isinstance(payload, dict):
+            return False
+        target_type = str(payload.get("target_type") or "").strip().lower()
+        return target_type in {"dft_result", "dft_results"}
+
     @classmethod
     def _supplementary_group_payload(
         cls,
@@ -92,6 +103,7 @@ class PaperWorkbenchReviewCenterMixin:
         support_ids_by_main: dict[UUID, set[UUID]],
         related_paper_meta: dict[UUID, dict[str, Any]],
         dft_status_counts_by_paper: dict[UUID, dict[str, int]],
+        dft_lifecycle_counts_by_paper: dict[UUID, dict[str, int]],
     ) -> dict[str, Any] | None:
         main_id = group_main_by_paper.get(paper_id)
         if main_id is None:
@@ -100,28 +112,41 @@ class PaperWorkbenchReviewCenterMixin:
         member_ids = [main_id] + support_ids
         group_status_counts: Counter[str] = Counter()
         support_status_counts: Counter[str] = Counter()
+        support_lifecycle_counts: Counter[str] = Counter()
         for member_id in member_ids:
             member_counts = dft_status_counts_by_paper.get(member_id, {})
             group_status_counts.update(member_counts)
             if member_id != main_id:
                 support_status_counts.update(member_counts)
+                support_lifecycle_counts.update(dft_lifecycle_counts_by_paper.get(member_id, {}))
         main_counts = dft_status_counts_by_paper.get(main_id, {})
+        support_active_count = cls._active_count_from_status_counts(dict(support_status_counts))
+        support_lifecycle_open_count = sum(
+            int(support_lifecycle_counts.get(status, 0) or 0)
+            for status in OPEN_SUPPORT_DFT_LIFECYCLE_STATUSES
+        )
+        support_lifecycle_closed_count = sum(
+            int(support_lifecycle_counts.get(status, 0) or 0)
+            for status in CLOSED_SUPPORT_DFT_LIFECYCLE_STATUSES
+        )
+        support_lifecycle_state = (
+            "evidence_only_pending_writeback" if support_lifecycle_open_count else "clear"
+        )
+        support_lifecycle_label = (
+            "SI 证据待闭环" if support_lifecycle_open_count else "SI 已闭环"
+        )
         return {
             "role": "main" if paper_id == main_id else "supplementary",
             "main_paper_id": str(main_id),
             "main_paper_code": related_paper_meta.get(main_id, {}).get("paper_code"),
             "support_papers": [
-                {
-                    "paper_id": str(support_id),
-                    "paper_code": related_paper_meta.get(support_id, {}).get("paper_code"),
-                    "title": related_paper_meta.get(support_id, {}).get("title"),
-                    "active_dft_candidate_count": cls._active_count_from_status_counts(
-                        dft_status_counts_by_paper.get(support_id, {})
-                    ),
-                    "dft_candidate_count": sum(
-                        int(count or 0) for count in dft_status_counts_by_paper.get(support_id, {}).values()
-                    ),
-                }
+                cls._support_paper_lifecycle_payload(
+                    support_id=support_id,
+                    main_id=main_id,
+                    related_paper_meta=related_paper_meta,
+                    status_counts=dft_status_counts_by_paper.get(support_id, {}),
+                    lifecycle_counts=dft_lifecycle_counts_by_paper.get(support_id, {}),
+                )
                 for support_id in support_ids
             ],
             "member_paper_ids": [str(member_id) for member_id in member_ids],
@@ -132,8 +157,45 @@ class PaperWorkbenchReviewCenterMixin:
             "main_active_dft_candidate_count": cls._active_count_from_status_counts(main_counts),
             "main_exportable_dft_count": cls._exportable_count_from_status_counts(main_counts),
             "support_dft_candidate_count": sum(int(count or 0) for count in support_status_counts.values()),
-            "support_active_dft_candidate_count": cls._active_count_from_status_counts(dict(support_status_counts)),
+            "support_active_dft_candidate_count": support_active_count,
+            "support_dft_lifecycle_state": support_lifecycle_state,
+            "support_dft_lifecycle_label": support_lifecycle_label,
+            "support_dft_lifecycle_counts": dict(sorted(support_lifecycle_counts.items())),
+            "support_dft_lifecycle_open_count": support_lifecycle_open_count,
+            "support_dft_lifecycle_closed_count": support_lifecycle_closed_count,
+            "support_canonical_writeback_paper_id": str(main_id),
             "candidate_status_counts": dict(sorted(group_status_counts.items())),
+        }
+
+    @classmethod
+    def _support_paper_lifecycle_payload(
+        cls,
+        *,
+        support_id: UUID,
+        main_id: UUID,
+        related_paper_meta: dict[UUID, dict[str, Any]],
+        status_counts: dict[str, int],
+        lifecycle_counts: dict[str, int],
+    ) -> dict[str, Any]:
+        open_count = sum(
+            int(lifecycle_counts.get(status, 0) or 0)
+            for status in OPEN_SUPPORT_DFT_LIFECYCLE_STATUSES
+        )
+        closed_count = sum(
+            int(lifecycle_counts.get(status, 0) or 0)
+            for status in CLOSED_SUPPORT_DFT_LIFECYCLE_STATUSES
+        )
+        return {
+            "paper_id": str(support_id),
+            "paper_code": related_paper_meta.get(support_id, {}).get("paper_code"),
+            "title": related_paper_meta.get(support_id, {}).get("title"),
+            "active_dft_candidate_count": cls._active_count_from_status_counts(status_counts),
+            "dft_candidate_count": sum(int(count or 0) for count in status_counts.values()),
+            "canonical_writeback_paper_id": str(main_id),
+            "dft_lifecycle_state": "evidence_only_pending_writeback" if open_count else "clear",
+            "dft_lifecycle_counts": dict(sorted(lifecycle_counts.items())),
+            "dft_lifecycle_open_count": open_count,
+            "dft_lifecycle_closed_count": closed_count,
         }
 
     @staticmethod

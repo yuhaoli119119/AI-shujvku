@@ -17,16 +17,26 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
 )
+from app.services.dft_audit_issue_service import DFTAuditIssueService
+from app.services.dft_material_binding_service import DFTMaterialBindingService
 from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
+    normalize_source_document_type,
 )
+from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
 from app.utils.evidence_anchors import has_evidence_anchor
 
 
 class VerificationSessionDFTCandidateMixin:
-    def _materialize_new_dft_candidates(self, *, paper_id: UUID, reviewer: str) -> dict[str, Any]:
-        rows = self.session.execute(
+    def _materialize_new_dft_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        reviewer: str,
+        candidate_run_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        stmt = (
             select(ExternalAnalysisCandidate, ExternalAnalysisRun)
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
@@ -35,12 +45,17 @@ class VerificationSessionDFTCandidateMixin:
                 ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")),
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        rows = self.session.execute(stmt).all()
         existing_by_signature = self._existing_new_dft_signatures(paper_id)
         existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(paper_id)
         existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(paper_id)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
+        issue_service = DFTAuditIssueService(self.session)
+        material_binding_service = DFTMaterialBindingService(self.session)
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
@@ -48,7 +63,17 @@ class VerificationSessionDFTCandidateMixin:
             target_id = str(payload.get("target_id") or "").strip().lower()
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
                 continue
+            issue = issue_service.create_or_update_missing_issue(
+                paper_id=paper_id,
+                candidate=candidate,
+                run=run,
+                payload=payload,
+            )
             if bool(payload.get("borrowed_from_reference")):
+                skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
+                self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
+                continue
+            if self._is_supporting_reference_dft_payload(payload):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
                 self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
                 continue
@@ -89,18 +114,32 @@ class VerificationSessionDFTCandidateMixin:
             else:
                 self._maybe_upgrade_method_only_reaction_step(existing, candidate_item)
                 action = "deduplicated"
+            material_binding = material_binding_service.ensure_row_binding(
+                row=existing,
+                material_identity=candidate_item["material_identity"],
+            )
             candidate.status = "materialized"
             candidate.materialized_target_type = "dft_results"
             candidate.materialized_target_id = str(existing.id)
             self.session.add(candidate)
+            support_lifecycle = self._resolve_materialized_support_candidate(
+                paper_id=paper_id,
+                candidate_item=candidate_item,
+                canonical_row=existing,
+                action=action,
+                reviewer=reviewer,
+            )
             materialized.append(
                 {
                     "candidate_id": str(candidate.id),
                     "action": action,
                     "dft_result_id": str(existing.id),
+                    "issue_id": str(issue.id),
                     "property_type": existing.property_type,
                     "value": existing.value,
                     "unit": existing.unit,
+                    "material_binding": material_binding,
+                    "support_lifecycle": support_lifecycle,
                 }
             )
         if materialized:
@@ -135,6 +174,9 @@ class VerificationSessionDFTCandidateMixin:
         corrected = payload.get("corrected_value")
         if not isinstance(corrected, dict):
             return None, "missing_structured_corrected_value"
+        ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+        if ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}:
+            return None, "ml_predicted_not_dft_result"
         material_identity = self._first_text(
             corrected.get("material_identity"),
             corrected.get("material"),
@@ -177,7 +219,7 @@ class VerificationSessionDFTCandidateMixin:
             corrected.get("reaction_step"),
             " | ".join(part for part in [method, temperature] if part),
         )
-        adsorbate = self._first_text(corrected.get("adsorbate"), payload.get("adsorbate"), "H2")
+        adsorbate = self._first_text(corrected.get("adsorbate"), payload.get("adsorbate"))
         evidence_text = self._first_text(
             evidence_payload.get("quoted_text"),
             evidence_payload.get("evidence_text"),
@@ -192,9 +234,25 @@ class VerificationSessionDFTCandidateMixin:
             "dedupe_signature": payload.get("dedupe_signature"),
             "import_policy": "new_candidate_unverified_dft_result",
         }
+        source_dft_result_id = self._first_text(
+            corrected.get("source_dft_result_id"),
+            corrected.get("source_candidate_id"),
+            evidence_payload.get("source_dft_result_id"),
+            evidence_payload.get("source_candidate_id"),
+        )
+        source_paper_id = self._first_text(
+            corrected.get("source_paper_id"),
+            evidence_payload.get("source_paper_id"),
+            evidence_payload.get("related_paper_id"),
+        )
+        if source_dft_result_id:
+            merged_evidence_payload["source_dft_result_id"] = source_dft_result_id
+        if source_paper_id:
+            merged_evidence_payload["source_paper_id"] = source_paper_id
         signature = self._new_dft_signature(
             material_identity=material_identity,
             property_type=property_type,
+            adsorbate=adsorbate,
             value=value,
             unit=unit,
             reaction_step=reaction_step,
@@ -215,8 +273,43 @@ class VerificationSessionDFTCandidateMixin:
                 "confidence": payload.get("confidence"),
                 "evidence_payload": merged_evidence_payload,
                 "signature": signature,
+                "source_dft_result_id": source_dft_result_id,
+                "source_paper_id": source_paper_id,
             },
             "",
+        )
+
+    def _resolve_materialized_support_candidate(
+        self,
+        *,
+        paper_id: UUID,
+        candidate_item: dict[str, Any],
+        canonical_row: DFTResult,
+        action: str,
+        reviewer: str,
+    ) -> dict[str, Any] | None:
+        source_id = str(candidate_item.get("source_dft_result_id") or "").strip()
+        if not source_id:
+            return None
+        try:
+            support_candidate_id = UUID(source_id)
+        except ValueError as exc:
+            raise ValueError("invalid_source_dft_result_id") from exc
+        source_paper_id = str(candidate_item.get("source_paper_id") or "").strip()
+        if source_paper_id:
+            try:
+                expected_source_paper_id = UUID(source_paper_id)
+            except ValueError as exc:
+                raise ValueError("invalid_source_paper_id") from exc
+            source_row = self.session.get(DFTResult, support_candidate_id)
+            if source_row is None or source_row.paper_id != expected_source_paper_id:
+                raise ValueError("source_dft_result_does_not_belong_to_source_paper")
+        return SupplementaryDFTLifecycleService(self.session).resolve(
+            main_paper_id=paper_id,
+            support_candidate_id=support_candidate_id,
+            status="written_back" if action == "created" else "replaced",
+            actor=reviewer,
+            canonical_dft_result_id=canonical_row.id,
         )
 
     def _insert_new_dft_candidate(
@@ -301,6 +394,7 @@ class VerificationSessionDFTCandidateMixin:
             signature = self._new_dft_signature(
                 material_identity=material_identity,
                 property_type=row.property_type,
+                adsorbate=row.adsorbate,
                 value=row.value,
                 unit=row.unit,
                 reaction_step=row.reaction_step,
@@ -369,7 +463,12 @@ class VerificationSessionDFTCandidateMixin:
                 value_part,
                 candidate_item.get("unit"),
                 candidate_item.get("adsorbate"),
-                normalize_dft_reaction_step_for_identity(candidate_item.get("reaction_step")),
+                normalize_dft_reaction_step_for_identity(
+                    candidate_item.get("reaction_step"),
+                    property_type=candidate_item.get("property_type"),
+                    adsorbate=candidate_item.get("adsorbate"),
+                    material=candidate_item.get("material_identity"),
+                ),
             )
         )
 
@@ -425,6 +524,7 @@ class VerificationSessionDFTCandidateMixin:
         property_type: Any,
         value: Any,
         unit: Any,
+        adsorbate: Any,
         reaction_step: Any,
         source_figure: Any,
         page: Any,
@@ -437,11 +537,32 @@ class VerificationSessionDFTCandidateMixin:
                 property_type,
                 value_part,
                 unit,
-                normalize_dft_reaction_step_for_identity(reaction_step),
+                adsorbate,
+                normalize_dft_reaction_step_for_identity(
+                    reaction_step,
+                    property_type=property_type,
+                    adsorbate=adsorbate,
+                    material=material_identity,
+                ),
                 source_figure,
                 page,
             )
         )
+
+    @staticmethod
+    def _is_supporting_reference_dft_payload(payload: dict[str, Any]) -> bool:
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+        source_type = normalize_source_document_type(
+            payload.get("source_document_type")
+            or payload.get("source_type")
+            or evidence.get("source_document_type")
+            or evidence.get("source_type")
+            or corrected.get("source_document_type")
+            or corrected.get("source_type")
+        )
+        return source_type == "supporting_reference"
 
     @staticmethod
     def _normalize_dft_property(value: Any) -> str | None:

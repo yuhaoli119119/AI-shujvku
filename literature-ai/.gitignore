@@ -36,6 +36,5 @@ storage/docling_cache/
 frontend/test-results/
 frontend/playwright-report/
 
-# Database backups
-backups/
+# Database dumps
 *.dump

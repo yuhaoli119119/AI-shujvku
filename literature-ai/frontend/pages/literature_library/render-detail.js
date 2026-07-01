@@ -362,20 +362,24 @@ function renderDetail(detail, audit) {
     }
     if (dftEl && activeTab === "dft") {
         const dftCandidateItems = dftResultsWithSafety(detail);
-        const catalystSampleCards = dftCandidateItems.length
-            ? ""
-            : renderJSONCards("催化剂样本", detail.catalyst_samples_items || []);
+        const completeDftResults = hasCompleteDftResults(detail);
+        const catalystSampleCards = completeDftResults && !dftCandidateItems.length
+            ? renderJSONCards("催化剂样本", detail.catalyst_samples_items || [])
+            : "";
         const catalystSamplesById = {};
         (detail.catalyst_samples_items || []).forEach(function(sample) {
             if (sample && sample.id) {
                 catalystSamplesById[String(sample.id)] = sample;
             }
         });
+        const completeCandidateCards = completeDftResults
+            ? renderJSONCards("候选 DFT 数据", dftCandidateItems, { catalystSamplesById: catalystSamplesById })
+            : renderDftPageControls(detail);
         dftEl.innerHTML =
             renderDftExportReadiness(detail) +
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             catalystSampleCards +
-            renderJSONCards("候选 DFT 数据", dftCandidateItems, { catalystSamplesById: catalystSamplesById }) +
+            completeCandidateCards +
             renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
             renderJSONCards("机理声明", detail.mechanism_claims_items || []);
         decorateDftReadinessPanel(detail);
@@ -402,4 +406,37 @@ function renderDetail(detail, audit) {
             : renderPendingReviewCard("中文译文", "中文译文待 AI 核验或正式保存，不在详情页展示。");
     }
     if (aggregateEl) aggregateEl.innerHTML = "";
+}
+
+function hasCompleteDftResults(detail) {
+    const page = detail && detail.dft_results_page || {};
+    const loaded = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
+    const total = Number(page.total || (detail && detail.counts && detail.counts.dft_results) || loaded);
+    return page.has_more !== true && loaded >= total;
+}
+
+function renderDftPageControls(detail) {
+    const page = detail && detail.dft_results_page || {};
+    const loaded = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
+    const total = Number(page.total || (detail && detail.counts && detail.counts.dft_results) || loaded);
+    if (hasCompleteDftResults(detail)) return "";
+    const paperId = String(detail && (detail.paper_id || detail.id) || state.selectedPaperId || "");
+    const isLoading = Boolean(state.dftResultsInflight && state.dftResultsInflight[paperId]);
+    const loadError = state.dftResultsLoadErrors && state.dftResultsLoadErrors[paperId];
+    return '<div class="dft-pagination" data-role="dft-pagination">' +
+        '<span>' + (loadError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据") +
+            " " + loaded + " / " + total + " 条</span>" +
+        (loadError
+            ? '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">重新加载完整数据</button>'
+            : (isLoading ? "" : '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">立即加载完整数据</button>')) +
+    '</div>';
+}
+
+async function loadMoreSelectedDftResults(button) {
+    if (button) button.disabled = true;
+    try {
+        await ensureCompleteSelectedDftResults();
+    } finally {
+        if (button) button.disabled = false;
+    }
 }

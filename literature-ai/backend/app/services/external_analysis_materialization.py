@@ -29,6 +29,23 @@ logger = logging.getLogger("app.services.external_analysis_service")
 
 
 class ExternalAnalysisMaterializationMixin:
+    @staticmethod
+    def _is_dft_scoped_materialization_run(
+        run: ExternalAnalysisRun,
+        payload: dict[str, Any] | None = None,
+    ) -> bool:
+        payload = payload or {}
+        parts = [
+            run.source,
+            run.source_label,
+            payload.get("source"),
+            payload.get("source_label"),
+            payload.get("agent_role"),
+            payload.get("adjudication_scope"),
+        ]
+        text = " ".join(str(part or "") for part in parts).casefold()
+        return "dft" in text
+
     def materialize_candidates(
         self,
         run_id: UUID,
@@ -50,11 +67,39 @@ class ExternalAnalysisMaterializationMixin:
         result = MaterializationResult()
         review_service = ReviewService(self.session)
         for candidate in candidates:
+            payload = candidate.normalized_payload or {}
+            if (
+                candidate.candidate_type in {"note", "correction", "relationship"}
+                and self._is_dft_scoped_materialization_run(run, payload)
+            ):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                result.skipped_candidates += 1
+                continue
+            if (
+                candidate.candidate_type == "object_review_audit"
+                and candidate.status in {"candidate", "pending", "requires_resolution"}
+            ):
+                result.skipped_candidates += 1
+                result.deferred_review_candidates += 1
+                continue
+            if (
+                candidate.candidate_type == "correction"
+                and candidate.status in {"pending", "requires_resolution"}
+                and self._is_table_correction_payload(payload)
+            ):
+                candidate.status = "requires_resolution"
+                candidate.mapping_reason = "direct_mcp_tool_required:table_object_mutation"
+                self.session.add(candidate)
+                result.skipped_candidates += 1
+                continue
             if candidate.status not in {"pending", "requires_resolution"}:
                 result.skipped_candidates += 1
                 continue
 
-            payload = candidate.normalized_payload or {}
             if candidate.candidate_type == "note":
                 note = PaperNote(
                     paper_id=candidate.paper_id,
@@ -162,7 +207,9 @@ class ExternalAnalysisMaterializationMixin:
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
                     "auto_applied_corrections": result.auto_applied_corrections,
+                    "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
+                    "deferred_review_candidates": result.deferred_review_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
                     "writes_final_truth": result.auto_applied_corrections > 0,
@@ -203,6 +250,17 @@ class ExternalAnalysisMaterializationMixin:
                 result.skipped_candidates += 1
                 continue
             payload = candidate.normalized_payload or {}
+            if (
+                candidate.candidate_type in {"note", "correction", "relationship"}
+                and self._is_dft_scoped_materialization_run(run, payload)
+            ):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                result.skipped_candidates += 1
+                continue
 
             if candidate.candidate_type == "note":
                 note = PaperNote(
@@ -224,6 +282,12 @@ class ExternalAnalysisMaterializationMixin:
                 continue
 
             if candidate.candidate_type == "correction":
+                if self._is_table_correction_payload(payload):
+                    candidate.status = "requires_resolution"
+                    candidate.mapping_reason = "direct_mcp_tool_required:table_object_mutation"
+                    self.session.add(candidate)
+                    result.skipped_candidates += 1
+                    continue
                 if not self._is_auto_applicable_non_dft_correction(payload):
                     candidate.status = "requires_resolution"
                     self.session.add(candidate)
@@ -307,6 +371,7 @@ class ExternalAnalysisMaterializationMixin:
                     "created_corrections": result.created_corrections,
                     "created_relationships": result.created_relationships,
                     "auto_applied_corrections": result.auto_applied_corrections,
+                    "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
@@ -461,6 +526,7 @@ class ExternalAnalysisMaterializationMixin:
                 "created_corrections": non_dft_summary.created_corrections,
                 "created_relationships": non_dft_summary.created_relationships,
                 "auto_applied_corrections": non_dft_summary.auto_applied_corrections,
+                "idempotent_noops": non_dft_summary.idempotent_noops,
                 "skipped_candidates": non_dft_summary.skipped_candidates,
             },
         }
@@ -490,6 +556,8 @@ class ExternalAnalysisMaterializationMixin:
         field_name = str(payload.get("field_name") or "").strip()
         target_path = str(payload.get("target_path") or "").strip()
         operation = str(payload.get("operation") or "replace").strip().lower()
+        if ExternalAnalysisMaterializationMixin._is_table_correction_payload(payload):
+            return False
         if operation not in {"replace", "create", "delete"}:
             return False
         denied_fields = {
@@ -505,7 +573,6 @@ class ExternalAnalysisMaterializationMixin:
         allowed_top_level = ReviewService.ALLOWED_PAPER_FIELDS
         allowed_structured = {
             "figures",
-            "tables",
             "sections",
             "writing_cards",
             "mechanism_claims",
@@ -525,7 +592,7 @@ class ExternalAnalysisMaterializationMixin:
         if operation == "delete":
             parts = [part.strip() for part in target_path.split(":")]
             return (
-                field_name in {"figures", "tables"}
+                field_name == "figures"
                 and len(parts) == 3
                 and parts[0] == field_name
                 and parts[1]
@@ -541,6 +608,12 @@ class ExternalAnalysisMaterializationMixin:
                 return False
             return True
         return False
+
+    @staticmethod
+    def _is_table_correction_payload(payload: dict[str, Any]) -> bool:
+        field_name = str(payload.get("field_name") or "").strip().lower()
+        target_path = str(payload.get("target_path") or "").strip().lower()
+        return field_name in {"table", "tables"} or target_path.startswith("tables:")
 
     @staticmethod
     def _external_candidate_evidence_payload(
@@ -593,6 +666,17 @@ class ExternalAnalysisMaterializationMixin:
         blocked: list[str] = []
         for correction in normalized.correction_proposals:
             operation = str(correction.operation or "").strip().lower()
+            payload = correction.model_dump(mode="python")
+            if ExternalAnalysisMaterializationMixin._is_table_correction_payload(payload):
+                blocked.append(
+                    {
+                        "create": "create_table",
+                        "delete": "delete_table",
+                        "merge": "merge_table",
+                        "merge_table": "merge_table",
+                    }.get(operation, "update_table")
+                )
+                continue
             if operation in direct_tool_ops:
                 blocked.append(operation)
         if blocked:
@@ -600,5 +684,6 @@ class ExternalAnalysisMaterializationMixin:
             raise ValueError(
                 "direct_mcp_tool_required:"
                 f"{tools} must be called directly through MCP and must not be submitted through import_analysis. "
-                "Do the crop/create operation now with the real tool, then read back the figure image_path/crop_status."
+                "Table object mutations must use update_table/create_table/merge_table/delete_table; figure image "
+                "operations must use recrop_figure/create_figure_from_bbox. Call the real tool, then read back the object."
             )

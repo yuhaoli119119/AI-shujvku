@@ -6,7 +6,13 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.mcp.context import MCPAuthInfo, get_mcp_auth, reset_mcp_auth, set_mcp_auth
+from app.mcp.context import (
+    MCPAuthInfo,
+    canonical_mcp_source_identity,
+    get_mcp_auth,
+    reset_mcp_auth,
+    set_mcp_auth,
+)
 
 
 ALL_MCP_CAPABILITIES = frozenset(
@@ -17,6 +23,7 @@ ALL_MCP_CAPABILITIES = frozenset(
         "request_parse",
         "review_corrections",
         "review_dft",
+        "repair_dft_issues",
         "export_data",
         "create_share_links",
     }
@@ -50,6 +57,31 @@ def parse_mcp_api_keys(raw: str) -> dict[str, MCPKeyConfig]:
     return configs
 
 
+def _is_primary_repair_key(config: MCPKeyConfig) -> bool:
+    identity = f"{config.source_prefix} {config.display_name}".lower()
+    return "dft_primary_repair" in identity or ("primary" in identity and "repair" in identity)
+
+
+def validate_mcp_capability_assignments(configs: dict[str, MCPKeyConfig]) -> list[dict[str, object]]:
+    warnings: list[dict[str, object]] = []
+    for config in configs.values():
+        if "repair_dft_issues" not in config.capabilities:
+            continue
+        if _is_primary_repair_key(config):
+            continue
+        warnings.append(
+            {
+                "code": "repair_dft_issues_non_primary_repair_key",
+                "severity": "warning",
+                "message": "repair_dft_issues should only be assigned to a DFT primary repair AI key",
+                "source_prefix": config.source_prefix,
+                "display_name": config.display_name,
+                "capability": "repair_dft_issues",
+            }
+        )
+    return warnings
+
+
 def _unauthenticated_mcp_allowed(request: Request) -> bool:
     # Kept as a compatibility seam for callers/tests. HTTP MCP never accepts
     # anonymous clients; in-process MCP uses mcp_auth_context instead.
@@ -63,12 +95,30 @@ def _anonymous_mcp_auth() -> MCPAuthInfo:
         display_name="Open MCP",
         capabilities=ALL_MCP_CAPABILITIES,
         raw_key="",
+        source_identity="mcp:open_mcp",
+        identity_verified=False,
+    )
+
+
+def authenticate_mcp_api_key(raw_key: str) -> MCPAuthInfo:
+    settings = get_settings()
+    if not settings.mcp_enabled:
+        raise PermissionError("MCP is disabled")
+    config = parse_mcp_api_keys(settings.mcp_api_keys).get(str(raw_key or "").strip())
+    if config is None:
+        raise PermissionError("Invalid MCP API key")
+    return MCPAuthInfo(
+        source_prefix=config.source_prefix,
+        display_name=config.display_name,
+        capabilities=config.capabilities,
+        raw_key=config.raw_key,
+        source_identity=canonical_mcp_source_identity(config.source_prefix),
+        identity_verified=True,
     )
 
 
 def authenticate_mcp_request(request: Request) -> MCPAuthInfo:
     settings = get_settings()
-    configured_keys = parse_mcp_api_keys(settings.mcp_api_keys)
     auth_header = request.headers.get("Authorization", "")
     if not settings.mcp_enabled:
         raise HTTPException(status_code=503, detail="MCP is disabled")
@@ -76,16 +126,16 @@ def authenticate_mcp_request(request: Request) -> MCPAuthInfo:
         raise HTTPException(status_code=401, detail="Missing MCP API key")
 
     raw_key = auth_header.removeprefix("Bearer ").strip()
-    config = configured_keys.get(raw_key)
-    if not config:
+    try:
+        return authenticate_mcp_api_key(raw_key)
+    except PermissionError:
         raise HTTPException(status_code=401, detail="Invalid MCP API key")
 
-    return MCPAuthInfo(
-        source_prefix=config.source_prefix,
-        display_name=config.display_name,
-        capabilities=config.capabilities,
-        raw_key=config.raw_key,
-    )
+
+def get_optional_request_mcp_auth(request: Request) -> MCPAuthInfo | None:
+    if not request.headers.get("Authorization", "").strip():
+        return None
+    return authenticate_mcp_request(request)
 
 
 async def enforce_mcp_auth(request: Request, call_next):

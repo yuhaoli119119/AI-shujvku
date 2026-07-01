@@ -171,7 +171,10 @@ class ProjectLibraryQualityService:
 
         for bundle in bundle_payload.get("bundles", []):
             catalyst = bundle.get("catalyst_sample") or {}
-            descriptor_payload = build_metal_descriptor_payload(catalyst.get("metal_centers") or [])
+            descriptor_payload = build_metal_descriptor_payload(
+                catalyst.get("metal_centers") or [],
+                catalyst_type=catalyst.get("catalyst_type") or catalyst.get("catalyst_scope"),
+            )
             catalyst_scope = catalyst.get("catalyst_scope")
             for instance in bundle.get("active_site_instances", []):
                 counts["total_sample_count"] += 1

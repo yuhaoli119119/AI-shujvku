@@ -27,6 +27,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.main import app
+from app.services.dft_material_binding_service import DFTMaterialBindingService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
@@ -78,6 +79,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
     )
     revise = {
         "source_identity": "dynamic-review-source-a",
+        "source_identity_verified": True,
         "decision": "REVISE",
         "field_name": "dft_results",
         "corrected_value": {
@@ -91,6 +93,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
     }
     passed = {
         "source_identity": "dynamic-review-source-b",
+        "source_identity_verified": True,
         "decision": "PASS",
         "field_name": "dft_results",
         "corrected_value": {
@@ -120,6 +123,7 @@ def test_dft_revise_and_pass_with_equivalent_units_form_consensus():
 
     third_ai = {
         "source_identity": "dynamic-adjudicator",
+        "source_identity_verified": True,
         "decision": "PROPOSED",
         "field_name": "dft_results",
         "adjudication_role": "third_ai",
@@ -248,7 +252,305 @@ def test_new_dft_materialization_merges_method_only_step_with_specific_adsorptio
         assert [item["action"] for item in result["materialized_items"]] == ["created", "deduplicated"]
         assert len(dft_rows) == 1
         assert dft_rows[0].reaction_step == "Li2S adsorption on WN4@G side"
+        assert dft_rows[0].catalyst_sample_id is not None
+        sample = session.get(CatalystSample, dft_rows[0].catalyst_sample_id)
+        assert sample is not None
+        assert sample.name == "WN4@G/TiS2"
         assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
+
+
+def test_dft_material_binding_backfill_reuses_creates_and_skips_missing_identity(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="DFT material binding backfill", pdf_path="binding-backfill.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        existing_sample = CatalystSample(paper_id=paper.id, name="V-BP", catalyst_type="unknown")
+        session.add(existing_sample)
+        session.flush()
+        v_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            value=-4.96,
+            unit="eV",
+            evidence_payload={"material_identity": "V-BP", "page": 7},
+        )
+        sc_row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            value=-4.235,
+            unit="eV",
+            evidence_payload={
+                "corrected_value": {"material_identity": "Sc-BP"},
+                "page": 7,
+            },
+        )
+        rejected_row = DFTResult(
+            paper_id=paper.id,
+            property_type="binding_energy",
+            value=-5.63,
+            unit="eV",
+            candidate_status="Rejected",
+            evidence_payload={"page": 7},
+        )
+        session.add_all([v_row, sc_row, rejected_row])
+        session.flush()
+
+        result = DFTMaterialBindingService(session).backfill_paper(
+            paper_id=paper.id,
+            actor="pytest",
+        )
+
+        assert result["bound_count"] == 2
+        assert result["skipped_count"] == 1
+        assert result["created_sample_count"] == 1
+        assert v_row.catalyst_sample_id == existing_sample.id
+        assert sc_row.catalyst_sample_id is not None
+        assert session.get(CatalystSample, sc_row.catalyst_sample_id).name == "Sc-BP"
+        assert rejected_row.catalyst_sample_id is None
+
+
+def test_new_dft_candidate_without_adsorbate_does_not_default_to_h2():
+    service = _make_settle_service()
+    run = ExternalAnalysisRun(paper_id=uuid4(), source="ide_ai", source_label="adsorbate-null-test")
+    candidate_item, reason = service._new_dft_candidate_item(
+        {
+            "target_type": "dft_results",
+            "target_id": "new",
+            "field_name": "dft_results",
+            "decision": "new_candidate",
+            "corrected_value": {
+                "material": "V-BP",
+                "property_type": "reaction_barrier",
+                "value": 0.543,
+                "unit": "eV",
+                "reaction_step": "Li2S decomposition",
+            },
+            "evidence_location": {
+                "page": 4,
+                "quoted_text": "V-BP shows a Li2S decomposition barrier of 0.543 eV.",
+            },
+        },
+        run=run,
+    )
+
+    assert reason == ""
+    assert candidate_item is not None
+    assert candidate_item["adsorbate"] is None
+
+
+def test_new_dft_materialization_merges_generic_adsorption_step_aliases(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Generic adsorption dedupe paper", pdf_path="generic-adsorption.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="generic-adsorption-test")
+        session.add(run)
+        session.flush()
+
+        for reaction_step in ("adsorption", "Li2S4 adsorption", "adsorption of Li2S4"):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "Fe-GDY",
+                            "adsorbate": "Li2S4",
+                            "property_type": "adsorption_energy",
+                            "reaction_step": reaction_step,
+                            "value": -1.1,
+                            "unit": "eV",
+                        },
+                        "evidence_location": {
+                            "source_document_type": "main_text",
+                            "page": 5,
+                            "quoted_text": "Fe-GDY Li2S4 adsorption -1.10 eV",
+                        },
+                    },
+                    status="candidate",
+                )
+            )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id)
+        ).all()
+
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "deduplicated", "deduplicated"]
+        assert len(dft_rows) == 1
+        assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
+
+
+def test_new_dft_materialization_reuses_existing_generic_adsorption_row(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Existing generic adsorption row", pdf_path="existing-generic.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        existing = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="adsorption",
+            value=-1.1,
+            unit="eV",
+            evidence_payload={"material_identity": "Fe-GDY", "page": 5, "source_document_type": "main_text"},
+            candidate_status="new_candidate",
+        )
+        session.add(existing)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="existing-generic-test")
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "Fe-GDY",
+                        "adsorbate": "Li2S4",
+                        "property_type": "adsorption_energy",
+                        "reaction_step": "Li2S4 adsorption",
+                        "value": -1.1,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {
+                        "source_document_type": "supplementary_information",
+                        "page": 12,
+                        "quoted_text": "Fe-GDY Li2S4 adsorption -1.10 eV",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidate = session.scalar(select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id))
+
+        assert [item["action"] for item in result["materialized_items"]] == ["deduplicated"]
+        assert len(dft_rows) == 1
+        assert candidate is not None
+        assert candidate.materialized_target_id == str(existing.id)
+
+
+def test_new_dft_materialization_keeps_distinct_active_site_steps(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Distinct active site adsorption paper", pdf_path="specific-sites.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="specific-site-test")
+        session.add(run)
+        session.flush()
+        for reaction_step in ("Li2S adsorption on WN4@G side", "Li2S adsorption on TiS2 side"):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "corrected_value": {
+                            "material": "WN4@G/TiS2",
+                            "adsorbate": "Li2S",
+                            "property_type": "adsorption_energy",
+                            "reaction_step": reaction_step,
+                            "value": -5.21,
+                            "unit": "eV",
+                        },
+                        "evidence_location": {"page": 5, "quoted_text": reaction_step},
+                    },
+                    status="candidate",
+                )
+            )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == paper.id).order_by(DFTResult.reaction_step.asc())
+        ).all()
+
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "created"]
+        assert [row.reaction_step for row in dft_rows] == [
+            "Li2S adsorption on TiS2 side",
+            "Li2S adsorption on WN4@G side",
+        ]
+
+
+def test_new_dft_materialization_skips_supporting_reference_candidates(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Supporting reference candidate paper", pdf_path="supporting-ref.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="supporting-ref-test")
+        session.add(run)
+        session.flush()
+        session.add(
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material": "Fe-GDY",
+                        "adsorbate": "Li2S4",
+                        "property_type": "adsorption_energy",
+                        "reaction_step": "Li2S4 adsorption",
+                        "value": -1.1,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {
+                        "source_document_type": "supporting_reference",
+                        "page": 8,
+                        "quoted_text": "Cited reference reports -1.10 eV.",
+                    },
+                },
+                status="candidate",
+            )
+        )
+        session.flush()
+
+        service = VerificationSessionService(session, get_settings())
+        result = service._materialize_new_dft_candidates(paper_id=paper.id, reviewer="pytest")
+
+        dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        candidate = session.scalar(select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id))
+
+        assert result["materialized_count"] == 0
+        assert result["skipped_items"] == [{"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"}]
+        assert dft_rows == []
+        assert candidate.status == "ignored"
 
 
 def test_method_only_step_match_does_not_merge_ambiguous_specific_steps():
@@ -378,6 +680,8 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
             paper_id=UUID(paper_id),
             source="codex_primary",
             source_label=labels["primary"],
+            source_identity="mcp:codex-primary",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -386,6 +690,8 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
             paper_id=UUID(paper_id),
             source="claude_secondary",
             source_label=labels["secondary"],
+            source_identity="mcp:claude-secondary",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -394,6 +700,8 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
             paper_id=UUID(paper_id),
             source="codex_single",
             source_label=labels["single"],
+            source_identity="mcp:codex-single",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -446,13 +754,26 @@ def test_verification_session_settlement_auto_adopts_consensus_and_single_ai_not
     )
     assert settled.status_code == 200
     settlement = settled.json()["settlement"]
-    assert settlement["high_risk"]["auto_applied_count"] == 1
+    assert settlement["high_risk"]["auto_applied_count"] == 0
     assert settlement["low_risk_notes"]["auto_materialized_count"] == 1
-    assert settlement["high_risk"]["manual_conflict_count"] == 0
+    assert settlement["high_risk"]["manual_conflict_count"] == 1
 
     with Session() as session:
         stored = session.get(DFTResult, UUID(row_id))
-        assert stored.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"}
+        assert stored.candidate_status == "system_candidate"
+        assert session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == UUID(paper_id),
+                ExtractionFieldReview.target_id == row_id,
+            )
+        ).all() == []
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.paper_id == UUID(paper_id),
+                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+            )
+        ).all()
+        assert {candidate.status for candidate in candidates} == {"requires_resolution"}
         note = session.scalar(select(PaperNote).where(PaperNote.paper_id == UUID(paper_id)))
         assert note is not None
         assert note.section_title == "Discussion"
@@ -557,6 +878,8 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
                 paper_id=paper.id,
                 source="ide_ai",
                 source_label=source_label,
+                source_identity=f"mcp:{source_label}",
+                source_identity_verified=True,
                 raw_payload={},
                 normalized_payload={},
                 mapping_status="mapped",
@@ -591,13 +914,77 @@ def test_settle_ai_dft_reviews_endpoint_is_idempotent(verification_env):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert first.json()["auto_applied_count"] == 1
+    assert first.json()["auto_applied_count"] == 0
+    assert first.json()["audit_consensus_count"] == 1
     assert second.json()["auto_applied_count"] == 0
+    assert second.json()["audit_consensus_count"] == 1
 
     with Session() as session:
         reviews = session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == UUID(paper_id))).all()
         assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert {review.reviewer_status for review in reviews} == {"pending"}
+
+
+def test_auto_apply_dft_object_reviews_dedupes_same_source_identity(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Same source DFT review paper", pdf_path="same-source.pdf")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-0.95,
+            unit="eV",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="same_ai",
+            source_label="same_ai_dft_review",
+            source_identity="mcp:same-ai-dft-review",
+            source_identity_verified=True,
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        for idx, confidence in enumerate((0.72, 0.91), start=1):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    status="candidate",
+                    confidence=confidence,
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "corrected_value": -0.95,
+                        "confidence": confidence,
+                        "source": "same_ai",
+                        "source_label": "same_ai_dft_review",
+                        "normalized_material": "CoN4",
+                        "evidence_location": {"page": idx, "quoted_text": "CoN4 adsorption energy -0.95 eV"},
+                    },
+                )
+            )
+        session.flush()
+
+        result = VerificationSessionService(session, get_settings())._auto_apply_object_review_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+            include_target_types={"dft_results"},
+        )
+
+    assert result["applied_count"] == 0
+    assert result["pending_count"] == 1
+    assert result["pending_items"][0]["reason"] == "awaiting_two_ai_reviews"
+    assert result["pending_items"][0]["eligible_opinion_count"] == 1
 
 
 def test_li_s_project_library_v4_consensus_requires_user_submit(verification_env):
@@ -633,6 +1020,8 @@ def test_li_s_project_library_v4_consensus_requires_user_submit(verification_env
                 paper_id=paper.id,
                 source="ide_ai",
                 source_label=source_label,
+                source_identity=f"mcp:{source_label}",
+                source_identity_verified=True,
                 raw_payload={},
                 normalized_payload={},
                 mapping_status="mapped",
@@ -728,6 +1117,8 @@ def test_reset_dft_ai_reviews_clears_audits_and_returns_rows_to_pending(verifica
             paper_id=paper.id,
             source="ide_ai",
             source_label="old_dft_ai",
+            source_identity="mcp:old-dft-ai",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -895,6 +1286,8 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
         for source, label in (("ai_a", labels["primary"]), ("ai_b", labels["secondary"])):
             run = ExternalAnalysisRun(
                 paper_id=UUID(paper_id), source=source, source_label=label,
+                source_identity=f"mcp:{source}",
+                source_identity_verified=True,
                 raw_payload={}, normalized_payload={}, mapping_status="mapped",
             )
             session.add(run)
@@ -983,6 +1376,8 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-new",
+            source_identity="mcp:ai-lane-new",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -991,6 +1386,8 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-pass",
+            source_identity="mcp:ai-lane-pass",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1058,11 +1455,12 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
 
     with Session() as session:
         stored = session.get(DFTResult, row_id)
-        assert stored.catalyst_sample_id is not None
+        assert stored.catalyst_sample_id is None
         reviews = session.scalars(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == paper_id,
@@ -1070,8 +1468,7 @@ def test_materialized_new_candidate_can_settle_with_independent_value_pass(verif
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_env):
@@ -1117,6 +1514,8 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-new",
+            source_identity="mcp:ai-lane-new",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1125,6 +1524,8 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-pass",
+            source_identity="mcp:ai-lane-pass",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1193,7 +1594,8 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
     assert payload["need_third_ai_count"] == 0
 
     with Session() as session:
@@ -1204,8 +1606,7 @@ def test_materialized_new_candidate_can_settle_with_whole_row_pass(verification_
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env):
@@ -1238,6 +1639,8 @@ def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-new",
+            source_identity="mcp:ai-lane-new",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1302,9 +1705,9 @@ def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env
         row_id = row.id
 
     client = TestClient(app)
-    detail = client.get(f"/api/papers/{paper_id}?mode=light")
+    detail = client.get(f"/api/papers/{paper_id}/dft-results")
     assert detail.status_code == 200
-    items = detail.json()["dft_results_items"]
+    items = detail.json()["items"]
     target = next(item for item in items if item["id"] == str(row_id))
     assert target["object_review_audit_count"] == 1
     assert [audit["decision"] for audit in target["object_review_audits"]] == ["new_candidate"]
@@ -1352,6 +1755,8 @@ def test_dft_review_queue_includes_materialized_new_candidate_audits(verificatio
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-new-source",
+            source_identity="mcp:ai-new-source",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1360,6 +1765,8 @@ def test_dft_review_queue_includes_materialized_new_candidate_audits(verificatio
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-reject-source",
+            source_identity="mcp:ai-reject-source",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1468,6 +1875,8 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-proposal",
+            source_identity="mcp:ai-lane-proposal",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1476,6 +1885,8 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
             paper_id=paper.id,
             source="ide_ai",
             source_label="ai-lane-pass",
+            source_identity="mcp:ai-lane-pass",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1535,12 +1946,13 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
     settled = client.post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
     assert settled.status_code == 200
     payload = settled.json()
-    assert payload["auto_applied_count"] == 1
+    assert payload["auto_applied_count"] == 0
+    assert payload["audit_consensus_count"] == 1
     assert payload["need_repair_count"] == 0
 
     with Session() as session:
         stored = session.get(DFTResult, row_id)
-        assert stored.adsorbate == "OH*"
+        assert stored.adsorbate == "H"
         assert stored.catalyst_sample_id is not None
         reviews = session.scalars(
             select(ExtractionFieldReview).where(
@@ -1549,8 +1961,7 @@ def test_field_level_proposal_can_settle_with_independent_value_pass(verificatio
                 ExtractionFieldReview.target_id == str(row_id),
             )
         ).all()
-        assert len(reviews) == 1
-        assert {review.reviewer_status for review in reviews} == {"verified"}
+        assert reviews == []
 
 
 def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
@@ -1588,6 +1999,8 @@ def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
             paper_id=paper.id,
             source="manual_conflict",
             source_label="manual-conflict",
+            source_identity="mcp:manual-conflict",
+            source_identity_verified=True,
             raw_payload={},
             normalized_payload={},
             mapping_status="mapped",
@@ -1663,6 +2076,95 @@ def test_manual_conflict_decision_can_adopt_specific_opinion(verification_env):
         assert session.scalar(select(AuditLog).where(AuditLog.action == "manual_conflict_resolution")) is not None
 
 
+def test_manual_reject_all_dft_opinions_does_not_reject_underlying_result(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Manual reject-all DFT opinions", pdf_path="reject-all.pdf", workflow_status="Initial_Parsed")
+        session.add(paper)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S6",
+            value=-1.1,
+            unit="eV",
+            evidence_text="Stored candidate remains unresolved.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        run = ExternalAnalysisRun(
+            paper_id=paper.id,
+            source="manual_conflict",
+            source_label="manual-conflict",
+            source_identity="mcp:manual-conflict",
+            source_identity_verified=True,
+            raw_payload={},
+            normalized_payload={},
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        for value, confidence in ((-1.35, 0.87), (-1.45, 0.82)):
+            session.add(
+                ExternalAnalysisCandidate(
+                    run_id=run.id,
+                    paper_id=paper.id,
+                    candidate_type="object_review_audit",
+                    normalized_payload={
+                        "target_type": "dft_results",
+                        "target_id": str(row.id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "corrected_value": value,
+                        "confidence": confidence,
+                        "evidence_location": {
+                            "page": 4,
+                            "table": "Table 1",
+                            "evidence_text": f"Table 1 supports {value} eV.",
+                        },
+                    },
+                    status="pending",
+                )
+            )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/workbench/review-conflicts/manual-decision",
+        json={
+            "paper_id": paper_id,
+            "target_type": "dft_results",
+            "target_id": row_id,
+            "field_name": "value",
+            "resolution": "reject_all",
+            "reviewer": "manual_test",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["action"] == "audit_opinion_rejected"
+    assert payload["writes_final_truth"] is False
+
+    with Session() as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        assert stored.value == pytest.approx(-1.1)
+        assert stored.candidate_status == "system_candidate"
+        assert session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == UUID(paper_id),
+                ExtractionFieldReview.target_id == row_id,
+            )
+        ).all() == []
+        candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == UUID(paper_id))
+        ).all()
+        assert {candidate.status for candidate in candidates} == {"ai_reviewed"}
+
+
 # ---------------------------------------------------------------------------
 # Characterization tests for _settle_dft_row_from_existing_audits branch
 # priority.  Each test pins which branch fires for a given opinion
@@ -1695,6 +2197,7 @@ def _make_audit(
     """Build a minimal audit dict accepted by _settle_dft_row_from_existing_audits."""
     audit: dict = {
         "source_identity": source_identity,
+        "source_identity_verified": True,
         "candidate_id": candidate_id or f"cand-{source_identity}",
         "status": "materialized",
         "decision": decision,
@@ -1747,7 +2250,12 @@ def test_settle_third_ai_priority_over_pass_reject_conflict():
     service = _make_settle_service()
     # Mock the reject-all path so we don't need a real DFTResultReviewService.
     service._apply_reject_all = MagicMock(
-        return_value={"action": "reject", "target_type": "dft_results", "result": {"status": "rejected"}}
+        return_value={
+            "action": "audit_opinion_rejected",
+            "target_type": "dft_results",
+            "result": {"status": "audit_opinion_rejected"},
+            "writes_final_truth": False,
+        }
     )
 
     result = service._settle_dft_row_from_existing_audits(
@@ -1757,7 +2265,8 @@ def test_settle_third_ai_priority_over_pass_reject_conflict():
         write_lock_tokens=None,
     )
 
-    assert result["status"] == "auto_applied"
+    assert result["status"] == "audit_consensus_ready"
+    assert result["writes_final_truth"] is False
     assert result.get("reason") != "decision_conflict"
     service._apply_reject_all.assert_called_once()
 
@@ -1800,6 +2309,45 @@ def test_settle_missing_evidence_anchor_priority_over_waiting_second_ai():
 
     assert result["status"] == "need_repair"
     assert result["reason"] == "missing_evidence_anchor"
+
+
+def test_settle_dft_reviews_dedupes_same_source_identity_before_two_ai_gate():
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="Li2S4",
+        value=-0.95,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="same_ai",
+            candidate_id="submission-1",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV", "material_identity": "CoN4"},
+            confidence=0.7,
+        ),
+        _make_audit(
+            source_identity="same_ai",
+            candidate_id="submission-2",
+            decision="PASS",
+            corrected_value={"value": -0.95, "unit": "eV", "material_identity": "CoN4"},
+            confidence=0.9,
+        ),
+    ]
+
+    service = _make_settle_service()
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="test_reviewer",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "waiting_second_ai"
+    assert result["reason"] == "awaiting_two_ai_reviews"
+    assert result["eligible_opinion_count"] == 1
 
 
 def test_settle_whole_row_proposal_without_supporting_pass_returns_value_conflict():

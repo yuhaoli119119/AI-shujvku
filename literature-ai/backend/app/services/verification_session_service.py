@@ -23,6 +23,10 @@ from app.db.models import (
     utcnow,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.external_analysis_identity import (
+    UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+    review_source_identity,
+)
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -91,6 +95,20 @@ class VerificationSessionService(
         self.session = session
         self.settings = settings
         self.conflicts = ReviewConflictAggregationService(session)
+
+    @staticmethod
+    def _is_dft_scoped_external_run(run: ExternalAnalysisRun | None, payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
+        parts = [
+            getattr(run, "source", None),
+            getattr(run, "source_label", None),
+            payload.get("source"),
+            payload.get("source_label"),
+            payload.get("agent_role"),
+            payload.get("adjudication_scope"),
+        ]
+        text = " ".join(str(part or "") for part in parts).casefold()
+        return "dft" in text
 
     def create_session(
         self,
@@ -287,6 +305,7 @@ class VerificationSessionService(
         low_risk_summary = self._auto_materialize_single_ai_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
             write_lock_tokens=write_lock_tokens,
             write_lock_owner=write_lock_owner,
         )
@@ -300,6 +319,7 @@ class VerificationSessionService(
         object_review_summary = self._auto_apply_object_review_candidates(
             paper_id=paper_id,
             reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
             write_lock_tokens=write_lock_tokens,
             exclude_target_types={"dft_results"},
         )
@@ -311,12 +331,14 @@ class VerificationSessionService(
                 "applied_count": dft_settlement_summary["auto_applied_count"],
                 "applied_items": dft_settlement_summary["auto_applied_items"],
                 "pending_count": (
-                    dft_settlement_summary["waiting_second_ai_count"]
+                    dft_settlement_summary["audit_consensus_count"]
+                    + dft_settlement_summary["waiting_second_ai_count"]
                     + dft_settlement_summary["need_third_ai_count"]
                     + dft_settlement_summary["need_repair_count"]
                 ),
                 "pending_items": (
-                    dft_settlement_summary["waiting_second_ai_items"]
+                    dft_settlement_summary["audit_consensus_items"]
+                    + dft_settlement_summary["waiting_second_ai_items"]
                     + dft_settlement_summary["need_third_ai_items"]
                     + dft_settlement_summary["need_repair_items"]
                 ),
@@ -357,7 +379,11 @@ class VerificationSessionService(
             candidate_run_id=candidate_run_id,
         ):
             return self._empty_dft_settlement_summary(paper_id)
-        new_dft_summary = self._materialize_new_dft_candidates(paper_id=paper_id, reviewer=reviewer)
+        new_dft_summary = self._materialize_new_dft_candidates(
+            paper_id=paper_id,
+            reviewer=reviewer,
+            candidate_run_id=candidate_run_id,
+        )
         rows = self.session.scalars(
             select(DFTResult)
             .where(DFTResult.paper_id == paper_id)
@@ -365,6 +391,7 @@ class VerificationSessionService(
         ).all()
         audits_by_target = self._paper_dft_audit_candidates(paper_id)
         auto_applied: list[dict[str, Any]] = []
+        audit_consensus_ready: list[dict[str, Any]] = []
         need_third_ai: list[dict[str, Any]] = []
         need_repair: list[dict[str, Any]] = []
         waiting_second_ai: list[dict[str, Any]] = []
@@ -397,6 +424,8 @@ class VerificationSessionService(
             status = row_summary.pop("status")
             if status == "auto_applied":
                 auto_applied.append(row_summary)
+            elif status == "audit_consensus_ready":
+                audit_consensus_ready.append(row_summary)
             elif status == "need_third_ai":
                 need_third_ai.append(row_summary)
             elif status == "need_repair":
@@ -412,6 +441,8 @@ class VerificationSessionService(
             "new_dft_candidates": new_dft_summary,
             "auto_applied_count": len(auto_applied),
             "auto_applied_items": auto_applied,
+            "audit_consensus_count": len(audit_consensus_ready),
+            "audit_consensus_items": audit_consensus_ready,
             "need_third_ai_count": len(need_third_ai),
             "need_third_ai_items": need_third_ai,
             "need_repair_count": len(need_repair),
@@ -441,6 +472,7 @@ class VerificationSessionService(
                 payload={
                     "paper_id": str(paper_id),
                     "auto_applied_count": summary["auto_applied_count"],
+                    "audit_consensus_count": summary["audit_consensus_count"],
                     "need_third_ai_count": summary["need_third_ai_count"],
                     "need_repair_count": summary["need_repair_count"],
                     "blocked_reason_counts": summary["blocked_reason_counts"],
@@ -465,6 +497,8 @@ class VerificationSessionService(
             "new_dft_candidates": empty_candidates,
             "auto_applied_count": 0,
             "auto_applied_items": [],
+            "audit_consensus_count": 0,
+            "audit_consensus_items": [],
             "need_third_ai_count": 0,
             "need_third_ai_items": [],
             "need_repair_count": 0,
@@ -804,21 +838,38 @@ class VerificationSessionService(
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
         write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> dict[str, Any]:
-        candidates = self.session.scalars(
+        stmt = (
             select(ExternalAnalysisCandidate)
             .where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
                 ExternalAnalysisCandidate.candidate_type.in_(("note", "correction")),
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        candidates = self.session.scalars(stmt).all()
         external_service = ExternalAnalysisService(self.session, self.settings)
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            run = self.session.get(ExternalAnalysisRun, candidate.run_id)
+            if self._is_dft_scoped_external_run(run, payload):
+                candidate.status = "requires_resolution"
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_candidate"
+                self.session.add(candidate)
+                skipped.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "reason": "dft_scoped_run_rejects_non_dft_candidate",
+                    }
+                )
+                continue
             if candidate.status not in {"pending", "requires_resolution"}:
                 skipped.append({"candidate_id": str(candidate.id), "reason": f"status={candidate.status}"})
                 continue
@@ -867,11 +918,12 @@ class VerificationSessionService(
         *,
         paper_id: UUID,
         reviewer: str,
+        candidate_run_id: UUID | None = None,
         write_lock_tokens: list[str] | None = None,
         include_target_types: set[str] | None = None,
         exclude_target_types: set[str] | None = None,
     ) -> dict[str, Any]:
-        rows = self.session.execute(
+        stmt = (
             select(ExternalAnalysisCandidate, ExternalAnalysisRun)
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
@@ -879,11 +931,29 @@ class VerificationSessionService(
                 ExternalAnalysisCandidate.candidate_type == "object_review_audit",
             )
             .order_by(ExternalAnalysisCandidate.created_at.asc())
-        ).all()
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        rows = self.session.execute(stmt).all()
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+        skipped: list[dict[str, Any]] = []
         for candidate, run in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
+            if target_type != "dft_results" and self._is_dft_scoped_external_run(run, payload):
+                candidate.status = "requires_resolution"
+                candidate.materialized_target_type = None
+                candidate.materialized_target_id = None
+                candidate.mapping_reason = "dft_scoped_run_rejects_non_dft_target"
+                self.session.add(candidate)
+                skipped.append(
+                    {
+                        "candidate_id": str(candidate.id),
+                        "target_type": target_type,
+                        "reason": "dft_scoped_run_rejects_non_dft_target",
+                    }
+                )
+                continue
             if include_target_types is not None and target_type not in include_target_types:
                 continue
             if exclude_target_types is not None and target_type in exclude_target_types:
@@ -898,13 +968,11 @@ class VerificationSessionService(
                 or bool(payload.get("borrowed_from_reference"))
             ):
                 continue
-            identity = str(
-                payload.get("source_label")
-                or run.source_label
-                or payload.get("source")
-                or run.source
-                or candidate.id
-            ).strip()
+            identity = review_source_identity(
+                run.source_identity,
+                run.source_identity_verified,
+                default_untrusted=UNTRUSTED_LEGACY_SOURCE_IDENTITY,
+            )
             grouped[(target_type, target_id, field_name)].append(
                 {
                     "candidate_id": str(candidate.id),
@@ -928,6 +996,7 @@ class VerificationSessionService(
                     "source_label": run.source_label,
                     "source": payload.get("source") or run.source,
                     "source_identity": identity,
+                    "source_identity_verified": bool(run.source_identity_verified),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
                     "adjudication_role": payload.get("adjudication_role"),
                     "adjudication_scope": payload.get("adjudication_scope"),
@@ -938,13 +1007,16 @@ class VerificationSessionService(
 
         applied: list[dict[str, Any]] = []
         pending: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
         for (target_type, target_id, field_name), opinions in grouped.items():
             deduped: dict[str, dict[str, Any]] = {}
             for opinion in opinions:
                 if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
                     continue
-                key = opinion["candidate_id"] if target_type == "dft_results" else opinion["source_identity"]
+                key = (
+                    self._dft_review_submission_identity(opinion)
+                    if target_type == "dft_results"
+                    else opinion["source_identity"]
+                )
                 current = deduped.get(key)
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion
@@ -1069,6 +1141,25 @@ class VerificationSessionService(
                         "target_id": target_id,
                         "field_name": field_name,
                         "reason": str(exc),
+                    }
+                )
+                continue
+            if target_type == "tables" and result.get("action") == "requires_direct_table_tool":
+                for opinion in opinions:
+                    opinion["candidate"].status = "requires_resolution"
+                    opinion["candidate"].materialized_target_type = None
+                    opinion["candidate"].materialized_target_id = None
+                    opinion["candidate"].mapping_reason = str(
+                        result.get("reason") or "requires_direct_table_tool"
+                    )
+                    self.session.add(opinion["candidate"])
+                pending.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": result.get("reason") or "requires_direct_table_tool",
+                        "recommended_tool": result.get("recommended_tool"),
                     }
                 )
                 continue

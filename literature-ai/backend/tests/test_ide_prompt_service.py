@@ -11,14 +11,25 @@ def test_prompt_contract_has_one_canonical_mcp_path_and_all_modules():
 
     assert contract["schema_version"] == PROMPT_SCHEMA_VERSION
     assert contract["canonical_mcp_path"] == CANONICAL_MCP_PATH == "/mcp"
-    assert set(contract["templates"]) == {"overall", "dft", "figure", "table", "sections_writing", "text_review"}
+    assert set(contract["supported_kinds"]) == {
+        "overall",
+        "dft",
+        "dft_primary",
+        "figure",
+        "table",
+        "sections_writing",
+        "text_review",
+    }
+    assert set(contract["templates"]) == set(contract["supported_kinds"])
     assert set(contract["composite_templates"]) == {"figure_table"}
     assert contract["target_reaction_token"] == "{{TARGET_REACTION}}"
     assert set(contract["reaction_profile_templates"]) == {"SRR_LiS", "HER", "OER", "ORR", "CO2RR", "UNKNOWN"}
+    assert all("dft_primary" in templates for templates in contract["reaction_profile_templates"].values())
     assert set(contract["reaction_profile_contexts"]) == {"SRR_LiS", "HER", "OER", "ORR", "CO2RR", "UNKNOWN"}
     assert set(contract["project_library_contexts"]) == {"li_s_sac_dac"}
     assert set(contract["topic_field_dictionaries"]) == {"li_s_sac_dac"}
     assert set(contract["project_library_prompt_templates"]) == {"li_s_sac_dac"}
+    assert "dft_primary" in contract["project_library_prompt_templates"]["li_s_sac_dac"]
 
 
 def test_figure_table_composite_keeps_one_common_preamble_and_both_modules():
@@ -35,10 +46,14 @@ def test_figure_and_table_prompts_are_separate_and_si_aware():
 
     assert "本次模块：图片专项核验" in figure_prompt
     assert "本次模块：表格专项核验" not in figure_prompt
+    assert "主文图片审核和支撑文献图片审核是审核中心的两个独立入口" in figure_prompt
+    assert "不能把主文图片、SI 图片和表格混成同一个任务" in figure_prompt
     assert "Figure review defaults to main paper only" in figure_prompt
     assert "不自动全量核验已关联 SI figures" in figure_prompt
     assert "本次模块：表格专项核验" in table_prompt
     assert "本次模块：图片专项核验" not in table_prompt
+    assert "只允许从审核中心选择一篇主文献发起" in table_prompt
+    assert "同时检查主文表格和已关联 SI 表格" in table_prompt
     assert "已关联 SI 中的表格" in table_prompt
 
 
@@ -65,7 +80,7 @@ def test_common_prompt_preserves_controlled_in_process_fallback_and_safety_gates
     assert "merge_table" in prompt
     assert "不要只写“后台请求”笔记" in prompt
     assert "调用表格工具时必须使用该表对象真实归属的 paper_id" in prompt
-    assert "非 DFT 不申请写锁" in build_ide_review_prompt("dft")
+    assert "本轮允许写入的 target_type 只有 dft_results" in build_ide_review_prompt("dft")
     assert "POST /api/external-analysis/import" in prompt
     assert "object_review_audits 的 evidence_location" in prompt
     assert "优先用 get_paper 或 get_codex_item 回读字段值" in prompt
@@ -81,6 +96,9 @@ def test_common_prompt_preserves_controlled_in_process_fallback_and_safety_gates
     assert "blocked_by_supplementary_evidence_unavailable" in prompt
     assert "图片核验默认只核验主文 paper_id 的 figures" in prompt
     assert "include_supplementary_figures=true" in prompt
+    assert "英文专业系统词、状态码、字段名或工具名第一次出现时" in prompt
+    assert "candidate（候选数据）" in prompt
+    assert "JSON、代码块、工具参数和数据库字段值必须保持原样" in prompt
 
 
 def test_sections_prompt_keeps_heading_hierarchy_fields():
@@ -93,13 +111,94 @@ def test_sections_prompt_keeps_heading_hierarchy_fields():
 def test_dft_prompt_never_allows_single_ai_final_approval():
     prompt = build_ide_review_prompt("dft")
 
-    assert "单个 AI 不得最终确认 DFT" in prompt
+    assert "你是 Literature AI 的 DFT 数据审核员" in prompt
+    assert "你的职责：" in prompt
+    assert "审核员工具与权限：" in prompt
+    assert "审核员执行规则：" in prompt
+    assert "主 AI" not in prompt
+    assert "数据处理员" not in prompt
+    assert "dft_primary_repair" not in prompt
+    assert "needs_ordinary_ai_review" not in prompt
+    assert "双 AI" not in prompt
+    assert "多 AI" not in prompt
+    assert "第一审" not in prompt
+    assert "第二审" not in prompt
+    assert "本轮唯一目标：只核验 DFT 数据" in prompt
+    assert "本轮允许写入的 target_type 只有 dft_results" in prompt
+    assert "读取证据时必须允许读取主文和已关联 SI 中与 DFT 直接相关的正文、表格" in prompt
+    assert "DFT 漏项常在普通 tables 对象或 PDF 表格里" in prompt
+    assert "禁止处理或修改 figure、writing_card、mechanism_claim、metadata、普通表格对象" in prompt
+    assert "不得修改、合并、删除或新建任何普通表格对象" in prompt
+    assert "本轮不得写任何非 DFT correction_proposals、object_review_audits 或普通对象修正" in prompt
+    assert "非 DFT 普通文本/结构化字段修正或创建对象时" not in prompt
+    assert "表格对象生命周期是直接 MCP 工具路径" not in prompt
+    assert "核对元数据、摘要、章节、表格、figure 元信息" not in prompt
+    assert "本任务只处理审核中心选中的当前这一篇主文献" in prompt
+    assert "检查这篇主文献已有 DFT 数据有没有" in prompt
+    assert "同时检查主文与已关联 SI 的 DFT 表格/文本是否还有漏掉" in prompt
+    assert 'decision="new_candidate"' in prompt
+    assert "DFT 数据审核员不能调用 repair_dft_audit_issue" in prompt
+    assert "不能调用 verify_dft_result / reject_dft_result" in prompt
+    assert "不能写 human_verified、safe_verified 或 ML_Ready" in prompt
+    assert "不能说数据已经可导出" in prompt
     assert "PASS 仍不等于 safe_verified" in prompt
+    assert "ML-predicted 数量代替" in prompt
+    assert "不是 DFT 计算结果" in prompt
     assert "RDS 对应吉布斯自由能属于自由能变化" in prompt
     assert "自由能变化、反应能垒、迁移能垒、Li2S 分解能垒不得混用" in prompt
     assert "本次 target_reaction=未指定" in prompt
     assert "不按单一反应 profile 预先限制物种或性质" in prompt
-    assert "必须同时检查主文与已关联 SI" in prompt
+    assert "同时检查主文与已关联 SI 的 DFT 表格/文本" in prompt
+    assert "DFT AI 审核层已重置" in prompt
+    assert "从当前 PDF、SI 与系统候选重新审核" in prompt
+    assert "只生成本地 JSON" in prompt
+    assert "API 中仍为 0 条 AI 意见，都不得报告 completed" in prompt
+    assert "不得把计划提交数当成实际写入数" in prompt
+    assert "candidate（候选数据）" in prompt
+
+
+def test_dft_primary_prompt_is_paper_scoped_and_uses_fast_processing_path():
+    prompt = build_ide_review_prompt("dft_primary")
+
+    assert "你是 Literature AI 的 DFT 数据处理员" in prompt
+    assert "你的职责：" in prompt
+    assert "数据处理工具与权限：" in prompt
+    assert "数据处理执行规则：" in prompt
+    assert "普通 AI" not in prompt
+    assert "数据审核员" not in prompt
+    assert "审核员" not in prompt
+    assert "双 AI" not in prompt
+    assert "第一审" not in prompt
+    assert "第二审" not in prompt
+    assert "本轮唯一目标：只核验 DFT 数据" in prompt
+    assert "本轮允许写入的 target_type 只有 dft_results" in prompt
+    assert "issue_count=0 不是阻塞原因" in prompt
+    assert "不得切换到 overall、figure、table、sections 或 text_review 任务" in prompt
+    assert "非 DFT 普通文本/结构化字段修正或创建对象时" not in prompt
+    assert "表格对象生命周期是直接 MCP 工具路径" not in prompt
+    assert "核对元数据、摘要、章节、表格、figure 元信息" not in prompt
+    assert "本次模块：DFT 数据处理员快速处理" in prompt
+    assert "当前这一篇主文献的 DFT audit issue / DFT candidate" in prompt
+    assert "不要跨 paper_id 抓取全库队列" in prompt
+    assert "get_dft_audit_issues(paper_id=<当前 paper_id>)" in prompt
+    assert "blocked_by_missing_current_paper_id" in prompt
+    assert "已有 propose_corrections、review_dft 或 repair_dft_issues 任一 DFT 写权限即可处理" in prompt
+    assert "repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)" in prompt
+    assert "单条重试才使用 repair_dft_audit_issue" in prompt
+    assert "不得因为没有 dft_primary_repair key 或 repair_dft_issues capability 报告阻断" in prompt
+    assert "blocked_by_missing_primary_repair_identity" not in prompt
+    assert "issue_count=0 不是阻塞原因" in prompt
+    assert "object_review_audits 为 0 也不阻塞" in prompt
+    assert "context.dft_review_handoff" in prompt
+    assert "apply_analysis_review_rules" in prompt
+    assert "不得把已导入但尚未 apply 的审核意见误判为“0 条审核意见”" in prompt
+    assert "needs_ordinary_ai_review" not in prompt
+    assert "不因缺少第二身份、专用 repair key 或人工终审而停止" in prompt
+    assert "修复后直接调用确认或拒绝工具完成收口" in prompt
+    assert "只有批量返回的失败项才逐条重试" in prompt
+    assert "单项失败只记录该项错误并继续其余对象" in prompt
+    assert "详情页人工确认" not in prompt
+    assert "前置门可进入且存在 DFT candidates 时必须逐条写入 PASS/REVISE/REJECT/NEEDS_HUMAN" not in prompt
 
 
 def test_dft_prompt_can_inject_srr_lis_reaction_profile_without_forcing_labels():

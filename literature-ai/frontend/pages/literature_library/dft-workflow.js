@@ -204,27 +204,7 @@ async function settleDftConsensusBeforePrompt() {
 }
 
 async function copyNewDftReviewPrompt() {
-    if (!state.selectedPaperId) {
-        showToast("请先选择一篇文献。", "error");
-        return;
-    }
-    try {
-        showToast("正在写回一致意见并生成新数据审核提示词...", "info");
-        await settleDftConsensusBeforePrompt();
-        const pendingRows = await fetchSelectedDftReviewRows(200);
-        const rows = classifyDftAutomationRows(pendingRows).newReview;
-        if (!rows.length) {
-            showToast("当前没有新发现或缺少下一轮有效审核提交的 DFT 数据。", "info");
-            return;
-        }
-        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
-        await navigator.clipboard.writeText(
-            [canonicalPrompt, buildCompactBlockedDftBatchPrompt(rows)].filter(Boolean).join("\n\n")
-        );
-        showToast("新数据审核提示词已复制，请作为下一轮独立审核提交导入。", "success");
-    } catch (error) {
-        showToast("新数据审核提示词生成失败：" + error.message, "error");
-    }
+    showToast("正式 DFT 普通 AI 审核提示词请从审核中心按单篇文献复制。", "info");
 }
 
 function dftQueueUrlForSelectedPaper(limit, paperId) {
@@ -243,80 +223,12 @@ async function fetchSelectedDftReviewRows(limit, paperId) {
     }) : [];
 }
 
-async function applyImportedDftOpinion(resultId, opinion) {
-    return fetchJSON(
-        API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
-        "/dft-results/" + encodeURIComponent(resultId) + "/apply-imported-opinion",
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                reviewer: "literature_library_dft_auto",
-                opinion: opinion
-            })
-        }
-    );
-}
-
-async function rejectDftResultById(resultId, note) {
-    return fetchJSON(
-        API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
-        "/dft-results/" + encodeURIComponent(resultId) + "/reject",
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                confirm_reject_candidate: true,
-                reviewer: "literature_library_dft_auto",
-                reviewer_note: note || "Auto-rejected as a low-risk duplicate from the Literature Library DFT panel."
-            })
-        }
-    );
-}
-
 async function autoProcessLowRiskDftRows() {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
         return;
     }
-    showToast("低风险自动处理入口已暂停；请使用“重新检查写回”按后端 workflow 结算一致项。", "info");
-    return;
-    try {
-        showToast("正在分析低风险 DFT 候选...", "info");
-        const rows = await fetchSelectedDftReviewRows(200);
-        const classified = classifyDftAutomationRows(rows);
-        const acceptCount = classified.autoAccept.length;
-        const rejectCount = classified.autoReject.length;
-        if (!acceptCount && !rejectCount) {
-            showToast("当前没有可自动处理的低风险 DFT 候选。", "info");
-            return;
-        }
-        const ok = window.confirm(
-            "将自动采纳 " + acceptCount + " 条、自动拒绝重复项 " + rejectCount +
-            " 条；其余仍保留为第三轮 AI 仲裁或人工处理。继续吗？"
-        );
-        if (!ok) return;
-        let applied = 0;
-        let rejected = 0;
-        for (var i = 0; i < classified.autoAccept.length; i += 1) {
-            const row = classified.autoAccept[i];
-            const resultId = row.record_id || row.id;
-            const opinions = importedDftAcceptanceOpinions(row);
-            for (var j = 0; j < opinions.length; j += 1) {
-                await applyImportedDftOpinion(resultId, opinions[j]);
-            }
-            applied += 1;
-        }
-        for (var k = 0; k < classified.autoReject.length; k += 1) {
-            const row = classified.autoReject[k];
-            await rejectDftResultById(row.record_id || row.id, "Auto-rejected duplicate after AI duplicate opinion and normalized value check.");
-            rejected += 1;
-        }
-        showToast("低风险处理完成：采纳 " + applied + " 条，拒绝 " + rejected + " 条。", "success");
-        await refreshSelectedPaperDetail({ reason: "auto_process_dft", mode: "full" });
-    } catch (error) {
-        showToast("低风险自动处理失败：" + error.message, "error");
-    }
+    showToast("低风险自动处理入口已停用；DFT final truth 需在 DFT 详情页人工 verify/reject。", "info");
 }
 
 function buildThirdAiDftAdjudicationPrompt(rows) {
@@ -380,62 +292,11 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
 }
 
 async function copyThirdAiDftAdjudicationPrompt() {
-    if (!state.selectedPaperId) {
-        showToast("请先选择一篇文献。", "error");
-        return;
-    }
-    try {
-        showToast("正在写回一致意见并生成 DFT 冲突裁决提示词...", "info");
-        await settleDftConsensusBeforePrompt();
-        const rows = await fetchSelectedDftReviewRows(200);
-        const classified = classifyDftAutomationRows(rows);
-        if (!classified.conflicts.length) {
-            showToast("当前没有最终数据真正不一致的 DFT 意见。", "info");
-            return;
-        }
-        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
-        await navigator.clipboard.writeText(
-            [canonicalPrompt, buildThirdAiDftAdjudicationPrompt(classified.conflicts)].filter(Boolean).join("\n\n")
-        );
-        showToast("DFT 冲突裁决提示词已复制。", "success");
-    } catch (error) {
-        showToast("DFT 冲突裁决提示词生成失败：" + error.message, "error");
-    }
+    showToast("DFT 主 AI 判断/修复提示词请从审核中心按单篇文献复制。", "info");
 }
 
 async function copyNextDftAiReviewPrompt() {
-    if (!state.selectedPaperId) {
-        showToast("请先选择一篇文献。", "error");
-        return;
-    }
-    try {
-        showToast("正在自动写回一致项并生成下一轮 AI 审核任务...", "info");
-        await settleDftConsensusBeforePrompt();
-        const rows = await fetchSelectedDftReviewRows(200);
-        const classified = classifyDftAutomationRows(rows);
-        if (!classified.newReview.length && !classified.conflicts.length) {
-            await refreshSelectedPaperDetail({ reason: "dft_workflow_complete", mode: "full" });
-            showToast("当前 DFT 审核已经收口，没有下一轮任务。", "success");
-            return;
-        }
-        const canonicalPrompt = await canonicalIdePromptForSelectedPaper("dft");
-        const promptParts = [canonicalPrompt];
-        if (classified.newReview.length) {
-            promptParts.push(buildCompactBlockedDftBatchPrompt(classified.newReview));
-        }
-        if (classified.conflicts.length) {
-            promptParts.push(buildThirdAiDftAdjudicationPrompt(classified.conflicts));
-        }
-        await navigator.clipboard.writeText(promptParts.filter(Boolean).join("\n\n"));
-        await refreshSelectedPaperDetail({ reason: "dft_next_ai_prompt", mode: "full" });
-        showToast(
-            "下一轮任务已复制：下一轮审核 / 补证据 " + classified.newReview.length +
-            " 条，第三轮 AI 裁决 " + classified.conflicts.length + " 条。",
-            "success"
-        );
-    } catch (error) {
-        showToast("下一轮 DFT 审核任务生成失败：" + error.message, "error");
-    }
+    showToast("正式 DFT AI 任务请从审核中心按单篇文献发起；详情页只保留查看和人工处理。", "info");
 }
 
 function decorateDftReadinessPanel(detail) {
@@ -459,10 +320,9 @@ function decorateDftReadinessPanel(detail) {
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
                 '<span class="status-chip meta" data-role="dft-new-review-count">下一轮审核 / 补证据 ...</span>' +
                 '<span class="status-chip failed" data-role="dft-conflict-count">第三轮 AI 裁决 ...</span>' +
-              '</div>' +
-              '<button class="btn primary small" data-role="dft-next-action" type="button" onclick="copyNextDftAiReviewPrompt()">生成下一轮 AI 审核任务</button>'
+              '</div>'
             : "") +
-        '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">重新检查写回</button>' +
+        '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">刷新审核状态</button>' +
         '<button class="btn ghost small" type="button" onclick="resetDftAiReviewsForPaper()">清除 AI 审核重来</button>' +
         '<button class="btn ghost small" type="button" onclick="openSelectedReviewCenter()">打开审核中心</button>';
     const firstSubtle = card.querySelector(".subtle");

@@ -5,6 +5,69 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 
+CREATE TABLE journals (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	canonical_name VARCHAR(512) NOT NULL,
+	normalized_name VARCHAR(512) NOT NULL,
+	print_issn VARCHAR(32),
+	electronic_issn VARCHAR(32),
+	publisher VARCHAR(255),
+	status VARCHAR(32) DEFAULT 'active' NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (normalized_name)
+);
+
+
+CREATE TABLE element_properties (
+	symbol VARCHAR(3) NOT NULL,
+	name VARCHAR(64),
+	atomic_number INTEGER NOT NULL,
+	atomic_mass FLOAT,
+	period INTEGER,
+	group_number INTEGER,
+	block VARCHAR(1),
+	electronegativity_pauling FLOAT,
+	electronegativity_allen FLOAT,
+	covalent_radius_pyykko_pm FLOAT,
+	covalent_radius_cordero_pm FLOAT,
+	vdw_radius_pm FLOAT,
+	atomic_radius_pm FLOAT,
+	valence_electron_count INTEGER,
+	common_oxidation_states JSONB,
+	data_source VARCHAR(128) NOT NULL,
+	data_version VARCHAR(64) NOT NULL,
+	license VARCHAR(128),
+	source_url TEXT,
+	source_snapshot_hash VARCHAR(128),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (symbol),
+	UNIQUE (atomic_number)
+);
+
+
+CREATE TABLE element_ionic_radii (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	symbol VARCHAR(3) NOT NULL,
+	oxidation_state INTEGER NOT NULL,
+	coordination_number VARCHAR(16) NOT NULL,
+	spin_state VARCHAR(32),
+	ionic_radius_pm FLOAT NOT NULL,
+	data_source VARCHAR(128) NOT NULL,
+	data_version VARCHAR(64) NOT NULL,
+	license VARCHAR(128),
+	source_url TEXT,
+	source_snapshot_hash VARCHAR(128),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_element_ionic_radius_identity UNIQUE (symbol, oxidation_state, coordination_number, spin_state, data_source, data_version),
+	FOREIGN KEY(symbol) REFERENCES element_properties (symbol) ON DELETE CASCADE
+);
+
+
 CREATE TABLE literature_intake_sessions (
 	id UUID NOT NULL, 
 	library_name VARCHAR(255) DEFAULT '默认文献库' NOT NULL, 
@@ -28,6 +91,7 @@ CREATE TABLE papers (
 	title TEXT, 
 	year INTEGER, 
 	journal VARCHAR(512), 
+	journal_id UUID,
 	authors JSONB NOT NULL, 
 	abstract TEXT, 
 	pdf_path TEXT NOT NULL, 
@@ -50,7 +114,8 @@ CREATE TABLE papers (
 	workspace_path TEXT, 
 	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL, 
 	PRIMARY KEY (id), 
-	CONSTRAINT uq_papers_library_doi UNIQUE (library_name, doi)
+	CONSTRAINT uq_papers_library_doi UNIQUE (library_name, doi),
+	FOREIGN KEY(journal_id) REFERENCES journals (id) ON DELETE SET NULL
 );
 
 
@@ -141,6 +206,29 @@ CREATE TABLE catalyst_samples (
 );
 
 
+CREATE TABLE active_site_metals (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	paper_id UUID NOT NULL,
+	catalyst_sample_id UUID NOT NULL,
+	active_site_key VARCHAR(255) NOT NULL,
+	site_type VARCHAR(32) NOT NULL,
+	site_role VARCHAR(16) NOT NULL,
+	element_symbol VARCHAR(3) NOT NULL,
+	element_order INTEGER NOT NULL,
+	order_source VARCHAR(64) NOT NULL,
+	normalized_pair_key VARCHAR(32),
+	confidence FLOAT,
+	evidence_payload JSONB,
+	enrichment_status VARCHAR(32) DEFAULT 'system_enriched' NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_active_site_metal_role UNIQUE (catalyst_sample_id, active_site_key, site_role),
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE,
+	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE CASCADE
+);
+
+
 CREATE TABLE dft_settings (
 	id UUID NOT NULL, 
 	paper_id UUID NOT NULL, 
@@ -179,6 +267,8 @@ CREATE TABLE external_analysis_runs (
 	paper_id UUID NOT NULL, 
 	source VARCHAR(64) NOT NULL, 
 	source_label VARCHAR(128), 
+	source_identity VARCHAR(160) DEFAULT 'untrusted:external_analysis',
+	source_identity_verified BOOLEAN DEFAULT FALSE NOT NULL,
 	raw_text TEXT, 
 	raw_payload JSONB, 
 	normalized_payload JSONB, 
@@ -314,6 +404,38 @@ CREATE TABLE paper_impact_metadata (
 );
 
 
+CREATE TABLE journal_aliases (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	journal_id UUID NOT NULL,
+	alias VARCHAR(512) NOT NULL,
+	normalized_alias VARCHAR(512) NOT NULL,
+	source VARCHAR(64) DEFAULT 'manual' NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	UNIQUE (normalized_alias),
+	FOREIGN KEY(journal_id) REFERENCES journals (id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE journal_metrics (
+	id UUID NOT NULL DEFAULT gen_random_uuid(),
+	journal_id UUID NOT NULL,
+	metric_type VARCHAR(32) DEFAULT 'JIF' NOT NULL,
+	metric_value FLOAT NOT NULL,
+	data_year INTEGER,
+	release_year INTEGER,
+	source_name VARCHAR(128) NOT NULL,
+	source_url TEXT,
+	retrieved_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	source_snapshot_hash VARCHAR(128),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_journal_metric_identity UNIQUE (journal_id, metric_type, data_year, release_year, source_name),
+	FOREIGN KEY(journal_id) REFERENCES journals (id) ON DELETE CASCADE
+);
+
+
 CREATE TABLE paper_notes (
 	id UUID NOT NULL, 
 	paper_id UUID NOT NULL, 
@@ -446,10 +568,18 @@ CREATE TABLE dft_results (
 	evidence_payload JSONB, 
 	extraction_protocol_version VARCHAR(64), 
 	candidate_identity VARCHAR(64),
+	support_lifecycle_status VARCHAR(32),
+	support_writeback_paper_id UUID,
+	support_writeback_dft_result_id UUID,
+	support_lifecycle_reason TEXT,
+	support_lifecycle_actor VARCHAR(160),
+	support_lifecycle_updated_at TIMESTAMP WITHOUT TIME ZONE,
 	PRIMARY KEY (id), 
 	CONSTRAINT uq_dft_result_candidate_identity UNIQUE (paper_id, candidate_identity),
 	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE, 
-	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE SET NULL
+	FOREIGN KEY(catalyst_sample_id) REFERENCES catalyst_samples (id) ON DELETE SET NULL,
+	FOREIGN KEY(support_writeback_paper_id) REFERENCES papers (id) ON DELETE SET NULL,
+	FOREIGN KEY(support_writeback_dft_result_id) REFERENCES dft_results (id) ON DELETE SET NULL
 );
 
 
@@ -608,7 +738,28 @@ CREATE INDEX ix_papers_type_confidence ON papers (type_confidence);
 CREATE INDEX ix_papers_paper_type ON papers (paper_type);
 CREATE INDEX ix_papers_pdf_quality_status ON papers (pdf_quality_status);
 CREATE INDEX ix_papers_serial_number ON papers (serial_number);
+CREATE INDEX ix_papers_journal_id ON papers (journal_id);
 CREATE UNIQUE INDEX uq_papers_paper_code ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> '';
+CREATE INDEX ix_journals_normalized_name ON journals (normalized_name);
+CREATE INDEX ix_journals_print_issn ON journals (print_issn);
+CREATE INDEX ix_journals_electronic_issn ON journals (electronic_issn);
+CREATE INDEX ix_journals_status ON journals (status);
+CREATE INDEX ix_journal_aliases_journal_id ON journal_aliases (journal_id);
+CREATE INDEX ix_journal_aliases_normalized_alias ON journal_aliases (normalized_alias);
+CREATE INDEX ix_journal_metrics_journal_id ON journal_metrics (journal_id);
+CREATE INDEX ix_journal_metrics_metric_type ON journal_metrics (metric_type);
+CREATE INDEX ix_journal_metrics_metric_value ON journal_metrics (metric_value);
+CREATE INDEX ix_journal_metrics_data_year ON journal_metrics (data_year);
+CREATE INDEX ix_journal_metrics_release_year ON journal_metrics (release_year);
+CREATE INDEX ix_journal_metrics_source_name ON journal_metrics (source_name);
+CREATE INDEX ix_element_properties_atomic_number ON element_properties (atomic_number);
+CREATE INDEX ix_element_properties_period ON element_properties (period);
+CREATE INDEX ix_element_properties_group_number ON element_properties (group_number);
+CREATE INDEX ix_element_properties_block ON element_properties (block);
+CREATE INDEX ix_element_ionic_radii_symbol ON element_ionic_radii (symbol);
+CREATE INDEX ix_element_ionic_radii_oxidation_state ON element_ionic_radii (oxidation_state);
+CREATE INDEX ix_element_ionic_radii_coordination_number ON element_ionic_radii (coordination_number);
+CREATE INDEX ix_element_ionic_radii_spin_state ON element_ionic_radii (spin_state);
 
 CREATE UNIQUE INDEX ix_share_tokens_token ON share_tokens (token);
 
@@ -632,6 +783,14 @@ CREATE INDEX ix_module_write_locks_expires_at ON module_write_locks (expires_at)
 CREATE UNIQUE INDEX uq_module_write_locks_active_scope ON module_write_locks (paper_id, module_name) WHERE status = 'active';
 
 CREATE INDEX ix_catalyst_samples_paper_id ON catalyst_samples (paper_id);
+CREATE INDEX ix_active_site_metals_paper_id ON active_site_metals (paper_id);
+CREATE INDEX ix_active_site_metals_catalyst_sample_id ON active_site_metals (catalyst_sample_id);
+CREATE INDEX ix_active_site_metals_active_site_key ON active_site_metals (active_site_key);
+CREATE INDEX ix_active_site_metals_site_type ON active_site_metals (site_type);
+CREATE INDEX ix_active_site_metals_site_role ON active_site_metals (site_role);
+CREATE INDEX ix_active_site_metals_element_symbol ON active_site_metals (element_symbol);
+CREATE INDEX ix_active_site_metals_normalized_pair_key ON active_site_metals (normalized_pair_key);
+CREATE INDEX ix_active_site_metals_enrichment_status ON active_site_metals (enrichment_status);
 
 CREATE INDEX ix_dft_settings_paper_id ON dft_settings (paper_id);
 

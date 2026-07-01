@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
 from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
+from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
-from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score
+from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
 
 
@@ -171,7 +172,7 @@ def test_dft_export_default_excludes_unsafe_review_statuses(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_default_excludes_missing_evidence_reference(tmp_path):
+def test_dft_fast_mode_allows_verified_text_without_separate_evidence_reference(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -182,9 +183,9 @@ def test_dft_export_default_excludes_missing_evidence_reference(tmp_path):
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert response.headers["x-d1-blocked-count"] == "1"
-            assert "missing_evidence" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d1-exported-count"] == "1"
+            assert response.headers["x-d1-blocked-count"] == "0"
     finally:
         engine.dispose()
 
@@ -249,7 +250,7 @@ def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_path):
+def test_dft_fast_mode_allows_text_evidence_without_fabricating_page_or_bbox(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -261,10 +262,10 @@ def test_dft_export_blocks_missing_page_and_does_not_fabricate_page_or_bbox(tmp_
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert response.headers["x-d3-export-count"] == "0"
-            assert response.headers["x-d3-block-count"] == "1"
-            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d3-export-count"] == "1"
+            assert response.headers["x-d3-block-count"] == "0"
+            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
@@ -362,6 +363,31 @@ def test_dft_export_blocks_supporting_reference_rows_from_main_paper_export(tmp_
         engine.dispose()
 
 
+def test_rejected_dft_with_historical_safe_review_is_not_export_or_rag_eligible(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            row.candidate_status = "Rejected"
+            _safe_review(session, paper, row)
+            _evidence_ref(session, paper, row, page=6)
+            session.commit()
+
+            response, rows = _export_rows(session)
+            payload = build_dft_ml_dataset(session)
+
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert "target_rejected" in response.headers["x-d1-blocked-reasons"]
+            assert payload["records"] == []
+            assert payload["metadata"]["eligible_count"] == 0
+            assert payload["metadata"]["blocked_reasons"]["target_rejected"] == 1
+            assert is_rag_eligible(session, row, "dft_result") is False
+    finally:
+        engine.dispose()
+
+
 def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
@@ -392,7 +418,7 @@ def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
 
             assert rows == []
             assert "unsafe_review" in response.headers["x-d1-blocked-reasons"]
-            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
+            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 

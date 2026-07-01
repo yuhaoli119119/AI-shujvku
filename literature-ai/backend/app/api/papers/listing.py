@@ -205,6 +205,11 @@ async def stream_papers(
 
                 snapshot = await run_in_threadpool(fetch_paper_snapshot)
                 error_count = 0
+                if last_snapshot is None:
+                    last_snapshot = snapshot
+                    yield f"event: heartbeat\ndata: {json.dumps({'total': snapshot['total']})}\n\n"
+                    await asyncio.sleep(8)
+                    continue
                 if snapshot != last_snapshot:
                     last_snapshot = snapshot
                     papers, total_papers = await run_in_threadpool(fetch_updated_papers)

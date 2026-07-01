@@ -11,6 +11,136 @@ function jsonResponse(route, payload) {
 }
 
 test.describe('Review Center Conflict Modal', () => {
+  test('exposes single-paper prompt entrypoints and rejects multi-target copy', async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__clipboardText = '';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: async text => {
+            window.__clipboardText = text;
+          },
+        },
+      });
+    });
+
+    await page.route('**/api/**', async route => {
+      const url = new URL(route.request().url());
+      const pathname = url.pathname;
+
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: { returned: 2, quality_counts: { A_text_readable: 2 } },
+          rows: [
+            {
+              paper_id: 'main-paper',
+              paper_code: 'M0001',
+              title: 'Main DFT Paper',
+              year: 2026,
+              journal: 'Journal Main',
+              paper_type: 'research',
+              library_name: 'Default Library',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              figure_count: 2,
+              table_count: 1,
+              supplementary_group: {
+                role: 'main',
+                main_paper_id: 'main-paper',
+                main_paper_code: 'M0001',
+                member_paper_ids: ['main-paper', 'si-paper'],
+                support_papers: [{ paper_id: 'si-paper', paper_code: 'SI0001' }],
+              },
+            },
+            {
+              paper_id: 'si-paper',
+              paper_code: 'SI0001',
+              title: 'Supporting Information',
+              year: 2026,
+              journal: 'Journal Main',
+              paper_type: 'supplementary_information',
+              library_name: 'Default Library',
+              workflow_status: 'Parsed_Material_Ready',
+              pdf_quality_status: 'A_text_readable',
+              figure_count: 3,
+              table_count: 2,
+              supplementary_group: {
+                role: 'supplementary',
+                main_paper_id: 'main-paper',
+                main_paper_code: 'M0001',
+                member_paper_ids: ['main-paper', 'si-paper'],
+              },
+            },
+          ],
+        });
+      }
+
+      if (pathname === '/api/libraries') {
+        return jsonResponse(route, []);
+      }
+
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, {
+          prompt_contract: {
+            target_list_token: '{{TARGET_LIST}}',
+            source_label_token: '{{SOURCE_LABEL}}',
+            target_reaction_token: '{{TARGET_REACTION}}',
+            templates: {
+              figure: 'FIGURE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+              table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+              dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
+              dft_primary: 'DFT PRIMARY TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+            },
+            composite_templates: {},
+            reaction_profile_templates: {},
+            project_library_contexts: {},
+            project_library_prompt_templates: {},
+          },
+        });
+      }
+
+      return jsonResponse(route, {});
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html?paper_id=main-paper`);
+
+    const promptSelect = page.locator('#promptCopySelect');
+    await expect(promptSelect).toContainText('主文图片审核提示词');
+    await expect(promptSelect).toContainText('支撑文献图片审核提示词');
+    await expect(promptSelect).toContainText('表格审核提示词');
+    await expect(promptSelect).toContainText('DFT 普通 AI 审核提示词');
+    await expect(promptSelect).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(promptSelect).not.toContainText('图表指令');
+
+    const rowChecks = page.locator('#rows input[type="checkbox"]');
+    await expect(rowChecks).toHaveCount(2);
+    await rowChecks.nth(0).check();
+    await rowChecks.nth(1).check();
+    await page.selectOption('#promptCopySelect', 'dft');
+    await expect(page.locator('#toast')).toContainText('一次只能选择一个目标');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toBe('');
+
+    await rowChecks.nth(1).uncheck();
+    await page.selectOption('#promptCopySelect', 'dft');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('DFT TEMPLATE');
+    const dftPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(dftPrompt).toContain('paper_id: main-paper');
+    expect(dftPrompt).toContain('role: main_paper');
+    expect(dftPrompt).toContain('DFT 普通 AI 审核提示词');
+
+    await rowChecks.nth(0).uncheck();
+    await rowChecks.nth(1).check();
+    await page.selectOption('#promptCopySelect', 'table');
+    await expect(page.locator('#toast')).toContainText('只能选择主文献');
+
+    await page.selectOption('#promptCopySelect', 'support_figure');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('FIGURE TEMPLATE');
+    const supportPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(supportPrompt).toContain('paper_id: si-paper');
+    expect(supportPrompt).toContain('role: supplementary_information');
+    expect(supportPrompt).toContain('支撑文献图片审核提示词');
+  });
+
   test('links grouped conflicts to read-only evidence preview', async ({ page }) => {
     const writeCalls = [];
 
@@ -288,6 +418,12 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
 
+    await expect(page.locator('#promptCopySelect')).toContainText('主文图片审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('支撑文献图片审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('表格审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 普通 AI 审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
 
@@ -304,20 +440,43 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay).toContainText('自动推进 0');
     await expect(overlay).toContainText('建议裁定 1');
     await expect(overlay).toContainText('必须人工 1');
-    await expect(overlay).toContainText('接受 AI 裁定');
-    await expect(overlay).toContainText('生成修正草案');
-    await expect(overlay).toContainText('跳到对象审核');
+    await expect(overlay).not.toContainText('接受 AI 裁定');
+    await expect(overlay).not.toContainText('都不采用');
+    await expect(overlay).not.toContainText('生成修正草案');
+    await expect(overlay).toContainText('DFT final truth 请到详情页人工处理');
+    await expect(overlay).toContainText('前往 DFT 详情');
 
     const conflictItems = overlay.locator('.conflict-list-item');
     await expect(conflictItems).toHaveCount(2);
     await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
     const selectedPanel = overlay.locator('#selectedConflictPanel');
     await expect(selectedPanel).toContainText('dft-paper-2-1');
+    const dftLink = selectedPanel.getByRole('link', { name: '前往 DFT 详情' }).first();
+    const dftHref = await dftLink.getAttribute('href');
+    const dftUrl = new URL(dftHref, `${BASE_URL}/pages/review_center/index.html`);
+    expect(dftUrl.pathname).toBe('/pages/paper_detail/index.html');
+    expect(dftUrl.searchParams.get('paper_id')).toBe('paper-2');
+    expect(dftUrl.searchParams.get('tab')).toBe('dft');
+    expect(dftUrl.searchParams.get('target_type')).toBe('dft_results');
+    expect(dftUrl.searchParams.get('target_id')).toBe('dft-paper-2-1');
     await conflictItems.nth(1).click();
     await expect(conflictItems.nth(1)).toHaveClass(/is-active/);
     await expect(selectedPanel).toContainText('Catalyst-sample conflicts should stay in object review.');
     await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The catalyst sample uses an Fe-N4 coordination environment.');
     await expect(selectedPanel).not.toContainText('接受 AI 裁定');
+    await expect(selectedPanel.getByRole('link', { name: '跳到对象审核' })).toBeVisible();
+    const jumpLink = overlay.getByRole('link', { name: '跳到对象审核' }).first();
+    const jumpHref = await jumpLink.getAttribute('href');
+    const jumpUrl = new URL(jumpHref, `${BASE_URL}/pages/review_center/index.html`);
+    expect(jumpUrl.pathname).toBe('/pages/literature_library/index.html');
+    expect(jumpUrl.searchParams.get('paper_id')).toBe('paper-2');
+    expect(jumpUrl.searchParams.get('tab')).toBe('dft');
+    expect(jumpUrl.searchParams.get('target_type')).toBe('catalyst_sample');
+    expect(jumpUrl.searchParams.get('target_id')).toBe('catalyst-sample-2');
+    expect(jumpUrl.searchParams.get('field_name')).toBe('coordination');
+    expect(jumpUrl.searchParams.get('pdf_page')).toBe('2');
+    expect(jumpUrl.searchParams.get('pdf_locator_status')).toBe('exact_page');
+    expect(jumpUrl.searchParams.get('pdf_evidence_text')).toContain('The catalyst sample uses an Fe-N4 coordination environment.');
     await conflictItems.nth(0).click();
     await expect(conflictItems.nth(0)).toHaveClass(/is-active/);
     await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
@@ -360,32 +519,7 @@ test.describe('Review Center Conflict Modal', () => {
     await expandReason.click();
     await expect(overlay.getByRole('button', { name: '收起理由' }).first()).toBeVisible();
 
-    await overlay.getByRole('button', { name: '接受 AI 裁定' }).click();
-    await expect(page.locator('#toast')).toContainText('AI 裁定已执行');
-    expect(writeCalls).toContainEqual({
-      method: 'POST',
-      pathname: '/api/workbench/review-conflicts/accept-ai',
-      body: {
-        paper_id: 'paper-2',
-        target_type: 'dft_results',
-        target_id: 'dft-paper-2-1',
-        field_name: 'value',
-        reviewer: 'review_center',
-      },
-    });
-
-    const jumpLink = overlay.getByRole('link', { name: '跳到对象审核' }).first();
-    const jumpHref = await jumpLink.getAttribute('href');
-    const jumpUrl = new URL(jumpHref, `${BASE_URL}/pages/review_center/index.html`);
-    expect(jumpUrl.pathname).toBe('/pages/literature_library/index.html');
-    expect(jumpUrl.searchParams.get('paper_id')).toBe('paper-2');
-    expect(jumpUrl.searchParams.get('tab')).toBe('dft');
-    expect(jumpUrl.searchParams.get('target_type')).toBe('dft_results');
-    expect(jumpUrl.searchParams.get('target_id')).toBe('dft-paper-2-1');
-    expect(jumpUrl.searchParams.get('field_name')).toBe('value');
-    expect(jumpUrl.searchParams.get('pdf_page')).toBe('5');
-    expect(jumpUrl.searchParams.get('pdf_locator_status')).toBe('exact_page');
-    expect(jumpUrl.searchParams.get('pdf_evidence_text')).toContain('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
+    expect(writeCalls).toEqual([]);
 
     await overlay.getByRole('button', { name: '关闭' }).first().click();
     await expect(overlay).toBeHidden();

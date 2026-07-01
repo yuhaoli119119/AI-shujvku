@@ -297,6 +297,10 @@ function switchTab(tab) {
     document.querySelectorAll(".tab-panel").forEach(function(panel) {
         panel.classList.toggle("active", panel.id === "tab-" + tab);
     });
+    if (tab !== "summary") {
+        const locatorPanel = $("evidenceLocatorsPanel");
+        if (locatorPanel) locatorPanel.innerHTML = "";
+    }
     syncQueryParams();
     if (state.selectedPaper && typeof rerenderSelectedDetail === "function") {
         rerenderSelectedDetail(state.selectedPaperId);

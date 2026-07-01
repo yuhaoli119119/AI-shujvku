@@ -22,6 +22,18 @@
 - 默认不删除真实 `data/`、`artifacts/`、shadow report。
 - **27-Tool MCP 系统** 已全面激活，涵盖提取、裁切、审核流程。
 
+## 0.2 服务器优先协作基线
+
+- 当前用户要求以后默认在**服务器**上改代码，再通过 GitHub 同步回本地。
+- 服务器 Git 仓库根目录是 `/opt/AI-shujvku`。
+- 服务器稳定工作入口是 `/opt/literature-ai`，它当前指向 `/opt/AI-shujvku/literature-ai`。
+- Git 远端 `origin` 已配置为 `git@github.com:yuhaoli119119/AI-shujvku.git`，默认不要改回 HTTPS。
+- 服务器到 GitHub 的稳定路径是 SSH over 443，依赖 `~/.ssh/config` 和 `~/.ssh/id_ed25519_github`。
+- GitHub 只同步代码与已跟踪文档；**不会**同步 PostgreSQL、`data/`、`outputs/`、`.env`。
+- 未经明确要求，不要用本地 Windows 副本覆盖服务器数据库、`data/`、`outputs/` 或 `.env`。
+- 服务器端 `literature-ai/docker-compose.override.yml` 是保留的本机运行配置，当前通过 `.git/info/exclude` 屏蔽状态噪音；不要随手删除。
+- 详细步骤见 `docs/SERVER_GITHUB_WORKFLOW.md`。
+
 ## 1. 每轮开始前必须执行
 
 每次进入任务前，先在仓库根目录执行并回报结果：
@@ -53,9 +65,11 @@ git branch -vv
 
 ## 4. 文档同步原则
 
-- 优先维护当前有效文档：`../README.md`、`AGENTS.md`、`README.md`、`使用说明.md`、`docs/README.md`
+- 优先维护当前有效文档：`../README.md`（仓库主 README）、`AGENTS.md`、`docs/README.md`
+- `README.md` 仅保留 `literature-ai/` 目录落点与入口跳转，不再承载完整系统说明
+- 如仓库入口或目录跳转发生变化，再同步 `README.md`
 - 历史规划、旧报告统一放入 `docs/archive/`（若 archive 目录已删除，以 git history 为准）
-- 当前真实进度以 `README + AGENTS + git history` 为准
+- 当前真实进度以 `../README.md`、`AGENTS.md` 和 `git history` 为准
 
 ## 5. 数据安全原则
 
@@ -83,6 +97,13 @@ git branch -vv
 - 不要把候选图、预览图、调试输出当成数据库正式数据或长期资产。
 - 如产生临时文件，优先复用现有目录与清理约定，避免新增散落路径。
 - 如需清理已确认的临时产物，优先使用仓库根目录脚本 `scripts/cleanup_temp_artifacts.ps1`。
+
+## 6.2 论文编号语义
+
+- 用户说“论文号”或“文献号”时，默认指 `Paper.paper_code`，例如 `B0078`。
+- 禁止把数据库 UUID 当作论文号优先返回。
+- `serial_number` 只能明确标注为“库内序号”，DOI 只能明确标注为 DOI；二者均不能替代论文号。
+- 回答编号问题时，优先返回 `paper_code`；只有用户明确要求时，才补充 UUID、库内序号或 DOI。
 
 ## 7. 常用检查
 

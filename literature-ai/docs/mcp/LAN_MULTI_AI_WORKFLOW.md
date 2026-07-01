@@ -32,12 +32,21 @@ read_papers,append_notes,propose_corrections,request_parse
 ```
 
 不要给普通外部 AI `review_corrections`，除非它被明确指定为可信管理员。
+不要给普通外部 AI、DFT 审核 AI 或 propose-only key `repair_dft_issues`。DFT audit issue 修复使用单独的主修复 key：
+
+```text
+dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
+```
+
+审核 AI 可使用 `read_papers,propose_corrections` 创建候选、issue 或审核意见；主修复 AI 才能调用 `repair_dft_audit_issue`，且修复结果仍不是人工确认或 ML_Ready。
+修改 `LITAI_MCP_API_KEYS` 后，检查 `/api/system/agent-guide` 的 `mcp.capability_warnings` 或 `/api/settings/ide-prompts` 的 `mcp_capability_warnings`。如果出现 `repair_dft_issues_non_primary_repair_key`，说明 repair capability 被配到了非主修复 key；warning 只包含 source/display/capability，不包含 raw key。
 
 建议给不同电脑或不同 AI 使用不同 `source_prefix`，例如：
 
 ```text
 ai_pc_1|AI PC 1|<key>|read_papers,append_notes,propose_corrections,request_parse
 ai_pc_2|AI PC 2|<key>|read_papers,append_notes,propose_corrections,request_parse
+dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
 ```
 
 这样 `audit_logs`、`external_analysis_runs`、`workflow_jobs` 可以区分是谁做的。

@@ -38,24 +38,87 @@ class PaperQueryReviewMixin:
         dft_result_audits: dict[str, list[dict[str, Any]]],
         dft_result_conflicts: dict[str, list[dict[str, Any]]],
     ) -> dict[str, str]:
+        reviewed_fields = self._batch_ai_reviewed_fields(paper_id)
+
+        def collection_status(name: str, has_content: bool) -> str:
+            if not has_content:
+                return "missing"
+            aliases = {name, name.rstrip("s")}
+            return "ai_verified" if aliases.intersection(reviewed_fields) else "raw_only"
+
+        if not writing_cards:
+            writing_status = "missing"
+        elif any(self._audit_list_marks_ai_verified(audits_by_card) for audits_by_card in writing_card_audits.values()):
+            writing_status = "ai_verified"
+        elif any(writing_card_gate(card).can_use_for_writing for card in writing_cards):
+            writing_status = "ai_verified"
+        else:
+            writing_status = collection_status("writing_cards", True)
+
+        if not figures:
+            figure_status = "missing"
+        elif any(figure_conflicts.get(str(figure.id)) for figure in figures) or any(
+            self._figure_has_risk(figure) for figure in figures
+        ):
+            figure_status = "risk"
+        elif any(
+            self._audit_list_marks_ai_verified(figure_audits.get(str(figure.id), []))
+            for figure in figures
+        ):
+            figure_status = "ai_verified"
+        else:
+            figure_status = collection_status("figures", True)
+
         return {
-            "abstract_review_status": self._scalar_content_review_status(paper_id, "abstract", bool(paper.abstract)),
-            "sections_review_status": self._collection_review_status(paper_id, "sections", bool(sections)),
-            "writing_cards_review_status": self._writing_cards_review_status(
-                paper_id,
-                writing_cards,
-                writing_card_audits,
-                writing_card_conflicts,
-            ),
+            "abstract_review_status": collection_status("abstract", bool(paper.abstract)),
+            "sections_review_status": collection_status("sections", bool(sections)),
+            "writing_cards_review_status": writing_status,
             "translation_review_status": "final_trusted" if full_translation else "missing",
-            "figures_review_status": self._figures_review_status(
-                paper_id,
-                figures,
-                figure_audits,
-                figure_conflicts,
-            ),
+            "figures_review_status": figure_status,
             "dft_review_status": self._dft_review_status(dft_results, dft_result_audits, dft_result_conflicts),
         }
+
+    def _batch_ai_reviewed_fields(self, paper_id: UUID) -> set[str]:
+        reviewed: set[str] = set()
+        expected_decisions = {"approve", "approved", "accept", "verified", "revise", "update"}
+        for note in self.session.scalars(select(PaperNote).where(PaperNote.paper_id == paper_id)).all():
+            source = str(note.source or "").lower()
+            content = str(note.content or "").lower()
+            if source == "ide_ai" or "[ai_reviewed]" in content:
+                field_name = str(note.field_name or "").strip().lower()
+                reviewed.add(field_name)
+                reviewed.add(field_name.split(":", 1)[0])
+        for correction in self.session.scalars(
+            select(PaperCorrection).where(
+                PaperCorrection.paper_id == paper_id,
+                PaperCorrection.status == "approved",
+            )
+        ).all():
+            source = str(correction.source or "").lower()
+            reviewer = str(correction.reviewed_by or "").lower()
+            if source == "ide_ai" or "ide" in reviewer:
+                reviewed.add(str(correction.field_name or "").strip().lower())
+                reviewed.add(str(correction.target_path or "").split(":", 1)[0].strip().lower())
+        for candidate in self.session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
+        ).all():
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            decision = str(payload.get("decision") or payload.get("verdict") or "").strip().lower()
+            verification = str(payload.get("verification_status") or "").strip().lower()
+            source = str(payload.get("source") or "").lower()
+            is_reviewed = candidate.status in {"ai_applied", "ai_reviewed", "materialized"} or (
+                ("ide" in source or "[ai_reviewed]" in str(payload).lower())
+                and (decision in expected_decisions or verification in {"verified", "ai_verified", "reviewed"})
+            )
+            if not is_reviewed:
+                continue
+            field_name = str(payload.get("field_name") or "").strip().lower()
+            reviewed.add(field_name)
+            reviewed.add(field_name.split(":", 1)[0])
+            reviewed.add(str(payload.get("target_type") or "").strip().lower())
+            reviewed.add(str(payload.get("target_path") or "").split(":", 1)[0].strip().lower())
+        reviewed.discard("")
+        return reviewed
 
 
     def _scalar_content_review_status(self, paper_id: UUID, field_name: str, has_content: bool) -> str:

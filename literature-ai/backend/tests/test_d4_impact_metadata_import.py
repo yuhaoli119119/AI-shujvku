@@ -16,14 +16,19 @@ from app.db.models import (
     Base,
     EvidenceLocator,
     ExtractionFieldReview,
+    Journal,
+    JournalAlias,
+    JournalMetric,
     Paper,
     PaperCitationEligibility,
     PaperImpactMetadata,
+    PaperRelationship,
 )
 from app.db.session import get_db_session
 from app.main import app
 from app.services.impact_metadata_import_service import (
     ImpactMetadataImportService,
+    lis_dual_atom_ablesci_2026_items,
     normalize_journal_name,
     parse_impact_metadata_csv,
     parse_impact_metadata_json,
@@ -95,8 +100,8 @@ def test_journal_exact_normalized_match_works(impact_client):
         headers={"content-type": "text/csv"},
     )
     assert response.status_code == 200
-    assert response.json()["matched_paper_count"] == 2
-    assert response.json()["imported_count"] == 2
+    assert response.json()["matched_paper_count"] == 3
+    assert response.json()["imported_count"] == 3
 
     response = client.get("/api/library/papers/filter", params={"needs_metadata": False})
     assert response.status_code == 200
@@ -156,7 +161,7 @@ def test_upsert_does_not_duplicate_rows(impact_client):
     assert response.json()["imported_count"] == 0
     assert response.json()["updated_count"] == 0
     with Session() as session:
-        assert session.scalar(select(func.count(PaperImpactMetadata.paper_id))) == 3
+        assert session.scalar(select(func.count(PaperImpactMetadata.paper_id))) == 4
         assert session.get(PaperImpactMetadata, seed["advanced_one"]).impact_factor == 24.4
 
 
@@ -201,6 +206,85 @@ def test_main_paper_list_returns_imported_impact_metadata(impact_client):
     assert papers[str(seed["advanced_one"])]["impact_factor_year"] == 2024
     assert papers[str(seed["advanced_one"])]["impact_factor_source"] == "user_imported"
     assert papers[str(seed["missing_if"])]["impact_factor"] is None
+
+
+def test_import_writes_journal_metric_and_binds_papers(impact_client):
+    client, Session, seed = impact_client
+    response = client.post(
+        "/api/library/impact-metadata/import",
+        json={
+            "source": "user_imported",
+            "items": [
+                {
+                    "journal": "Advanced Energy Materials",
+                    "impact_factor": 26.0,
+                    "data_year": 2025,
+                    "release_year": 2026,
+                    "source_url": "https://www.ablesci.com/journal/detail?id=r8M8xp",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["matched_paper_count"] == 3
+    assert response.json()["journal_metric_upserted_count"] == 1
+
+    with Session() as session:
+        journal = session.scalar(
+            select(Journal).where(Journal.normalized_name == normalize_journal_name("Advanced Energy Materials"))
+        )
+        assert journal is not None
+        metric = session.scalar(select(JournalMetric).where(JournalMetric.journal_id == journal.id))
+        assert metric.metric_type == "JIF"
+        assert metric.metric_value == 26.0
+        assert metric.data_year == 2025
+        assert metric.release_year == 2026
+        assert metric.source_url == "https://www.ablesci.com/journal/detail?id=r8M8xp"
+        assert session.get(Paper, seed["advanced_one"]).journal_id == journal.id
+        assert session.get(PaperImpactMetadata, seed["advanced_one"]).impact_factor_year == 2025
+
+
+def test_supplementary_paper_inherits_main_journal_metric_without_extra_metric(impact_client):
+    client, Session, seed = impact_client
+    response = client.post(
+        "/api/library/impact-metadata/import",
+        json={
+            "source": "user_imported",
+            "items": [
+                {
+                    "journal": "Advanced Energy Materials",
+                    "impact_factor": 26.0,
+                    "data_year": 2025,
+                    "release_year": 2026,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["matched_paper_count"] == 3
+
+    with Session() as session:
+        assert session.scalar(select(func.count(JournalMetric.id))) == 1
+        main_impact = session.get(PaperImpactMetadata, seed["advanced_one"])
+        si_impact = session.get(PaperImpactMetadata, seed["advanced_si"])
+        assert main_impact.impact_factor == 26.0
+        assert main_impact.impact_factor_source == "user_imported"
+        assert si_impact.impact_factor == 26.0
+        assert si_impact.impact_factor_source == "user_imported:inherited_from_main"
+        assert session.get(Paper, seed["advanced_si"]).journal_id == session.get(Paper, seed["advanced_one"]).journal_id
+
+
+def test_lis_dual_atom_ablesci_seed_has_abbreviation_aliases(impact_client):
+    client, Session, _ = impact_client
+    response = client.post("/api/library/impact-metadata/import/lis-dual-atom-ablesci-2026")
+    assert response.status_code == 200
+
+    with Session() as session:
+        assert session.scalar(select(func.count(JournalMetric.id))) >= 1
+        alias = session.scalar(select(JournalAlias).where(JournalAlias.normalized_alias == normalize_journal_name("JACS")))
+        assert alias is not None
+        metrics = session.scalars(select(JournalMetric).where(JournalMetric.release_year == 2026)).all()
+        assert all(metric.data_year == 2025 for metric in metrics)
 
 
 def test_year_and_source_fields_are_persisted(impact_client):
@@ -248,10 +332,19 @@ def _seed(Session):
     with Session() as session:
         advanced_one = Paper(title="A", year=2024, journal="Advanced Energy Materials", abstract="", pdf_path="a.pdf")
         advanced_two = Paper(title="B", year=2023, journal="Advanced-Energy Materials", abstract="", pdf_path="b.pdf")
+        advanced_si = Paper(title="A SI", year=2024, journal=None, abstract="", pdf_path="a-si.pdf", paper_type="SI")
         low_if = Paper(title="C", year=2022, journal="Archive Journal", abstract="", pdf_path="c.pdf")
         missing_if = Paper(title="D", year=2021, journal="Unknown Journal", abstract="", pdf_path="d.pdf")
-        session.add_all([advanced_one, advanced_two, low_if, missing_if])
+        session.add_all([advanced_one, advanced_two, advanced_si, low_if, missing_if])
         session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=advanced_one.id,
+                target_paper_id=advanced_si.id,
+                relationship_type="supplementary",
+                created_by="test",
+            )
+        )
         session.add(PaperImpactMetadata(paper_id=low_if.id, impact_factor=2.0, impact_factor_source="manual", impact_factor_year=2022))
         session.add(
             ExtractionFieldReview(
@@ -279,6 +372,7 @@ def _seed(Session):
         return {
             "advanced_one": advanced_one.id,
             "advanced_two": advanced_two.id,
+            "advanced_si": advanced_si.id,
             "low_if": low_if.id,
             "missing_if": missing_if.id,
         }

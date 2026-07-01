@@ -7,13 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, PaperFigure, WritingCard
 from app.rag.eligibility import (
-    dft_result_is_rag_eligible,
     figure_is_rag_eligible,
     writing_card_is_rag_eligible,
     _figure_has_safe_review,
 )
 from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
-from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
+from app.utils.review_safety import ExportGateResult, bulk_export_gate_results, writing_card_gate
 
 
 def build_rag_quality_summary(
@@ -22,14 +21,23 @@ def build_rag_quality_summary(
     figures: list[PaperFigure],
     dft_results: list[DFTResult],
     writing_cards: list[WritingCard],
+    dft_gate_by_id: dict[str, ExportGateResult] | None = None,
 ) -> dict[str, Any]:
+    figure_eligibility = {
+        str(item.id): figure_is_rag_eligible(session, item)
+        for item in figures
+    }
     figure_summary = _summarize_items(
         figures,
-        lambda item: figure_is_rag_eligible(session, item),
+        lambda item: figure_eligibility.get(str(item.id), False),
         lambda item: _figure_block_reasons(session, item),
     )
-    figure_summary["blocked_items"] = _figure_blocked_items(session, figures)
-    dft_summary = _summarize_dft(session, dft_results)
+    figure_summary["blocked_items"] = _figure_blocked_items(
+        session,
+        figures,
+        eligibility_by_id=figure_eligibility,
+    )
+    dft_summary = _summarize_dft(session, dft_results, gate_by_id=dft_gate_by_id)
     writing_summary = _summarize_items(
         writing_cards,
         lambda item: writing_card_is_rag_eligible(session, item),
@@ -69,16 +77,23 @@ def _summarize_items(items: list[Any], eligible_fn: Any, reasons_fn: Any) -> dic
     }
 
 
-def _summarize_dft(session: Session, rows: list[DFTResult]) -> dict[str, Any]:
+def _summarize_dft(
+    session: Session,
+    rows: list[DFTResult],
+    *,
+    gate_by_id: dict[str, ExportGateResult] | None = None,
+) -> dict[str, Any]:
     reason_counts: Counter[str] = Counter()
     eligible = 0
-    gate_by_id = bulk_export_gate_results(session, rows, target_type="dft_results") if rows else {}
+    gate_by_id = gate_by_id if gate_by_id is not None else (
+        bulk_export_gate_results(session, rows, target_type="dft_results") if rows else {}
+    )
     for row in rows:
-        if dft_result_is_rag_eligible(session, row):
+        gate = gate_by_id.get(str(row.id))
+        if gate is not None and gate.eligible and not _dft_minimum_field_reasons(row):
             eligible += 1
             continue
         row_reasons: list[str] = []
-        gate = gate_by_id.get(str(row.id))
         if gate is not None:
             row_reasons.extend(gate.reasons)
         for reason in _dft_minimum_field_reasons(row):
@@ -128,10 +143,20 @@ def _figure_block_reasons(session: Session, figure: PaperFigure) -> list[str]:
     return reasons
 
 
-def _figure_blocked_items(session: Session, figures: list[PaperFigure]) -> list[dict[str, Any]]:
+def _figure_blocked_items(
+    session: Session,
+    figures: list[PaperFigure],
+    *,
+    eligibility_by_id: dict[str, bool] | None = None,
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for figure in figures:
-        if figure_is_rag_eligible(session, figure):
+        eligible = (
+            eligibility_by_id.get(str(figure.id), False)
+            if eligibility_by_id is not None
+            else figure_is_rag_eligible(session, figure)
+        )
+        if eligible:
             continue
         items.append(
             {

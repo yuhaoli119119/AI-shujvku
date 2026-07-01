@@ -103,7 +103,7 @@ def catalyst_basic_info_payload(
     normalized_type, raw_type = normalize_catalyst_type(catalyst_type)
     normalized_support, raw_support, support_alias = normalize_support(support)
     normalized_metals, rejected_metals = normalize_metal_centers(metal_centers)
-    descriptor_payload = build_metal_descriptor_payload(normalized_metals)
+    descriptor_payload = build_metal_descriptor_payload(normalized_metals, catalyst_type=normalized_type)
     return {
         "schema_version": CATALYST_BASIC_INFO_SCHEMA_VERSION,
         "fields": {

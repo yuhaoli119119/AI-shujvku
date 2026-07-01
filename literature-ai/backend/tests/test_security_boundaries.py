@@ -18,7 +18,7 @@ from app.db.models import Base, Paper, PaperNote, ShareToken
 from app.db.session import get_db_session
 from app.main import app
 from app.mcp.auth import authenticate_mcp_request, require_mcp_capability
-from app.mcp.context import MCPAuthInfo, mcp_auth_context
+from app.mcp.context import mcp_auth_context
 from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
 from app.security.urls import UnsafeOutboundURL, get_public_url, validate_public_http_url
 
@@ -194,8 +194,9 @@ def test_http_mcp_requires_key_even_for_loopback_or_private_network(monkeypatch)
 
     auth = authenticate_mcp_request(_request("192.168.1.30", "Bearer mcp-secret"))
     assert auth.capabilities == frozenset({"read_papers"})
-    with mcp_auth_context(auth):
-        assert require_mcp_capability("read_papers") is auth
+    with mcp_auth_context("mcp-secret"):
+        context_auth = require_mcp_capability("read_papers")
+        assert context_auth.source_identity == auth.source_identity
     get_settings.cache_clear()
 
 
@@ -245,9 +246,9 @@ def test_exports_default_off_blocks_remote_non_owner_but_not_owner_http_access(m
 
 def test_exports_default_off_still_disables_mcp_export_capabilities(monkeypatch):
     monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")
+    monkeypatch.setenv("LITAI_MCP_API_KEYS", "reader|Reader|key|read_papers")
     get_settings.cache_clear()
-    reader = MCPAuthInfo("reader", "Reader", frozenset({"read_papers"}), "key")
-    with mcp_auth_context(reader):
+    with mcp_auth_context("key"):
         with pytest.raises(PermissionError, match="export_data"):
             require_mcp_capability("export_data")
         with pytest.raises(PermissionError, match="create_share_links"):

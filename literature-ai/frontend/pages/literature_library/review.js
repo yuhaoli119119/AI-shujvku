@@ -77,12 +77,9 @@ async function loadAgentGuide() {
             const entry = guide.recommended_entrypoint || {};
             const endpoints = Array.isArray(guide.http_endpoints) ? guide.http_endpoints : [];
             const tools = guide.mcp && Array.isArray(guide.mcp.common_tools) ? guide.mcp.common_tools : [];
-            const overallPrompt = guide.suggested_client_prompt || "";
             mcpGuide.innerHTML =
                 '<div class="section-card"><h3>IDE AI 审阅指南</h3>' +
-                '<div class="subtle">IDE AI 优先使用当前会话的 MCP 工具；工具未注入时，可通过仓库内 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 受控调用同一套公开 MCP 工具。正式 HTTP API只补充其已覆盖的读取和操作，不能替代没有 HTTP 等价入口的 MCP 工具。本区只展示入口，不会自动写入正式数据。</div>' +
-                (overallPrompt ? '<div class="modal-actions" style="justify-content:flex-start;margin-top:10px;"><button class="btn primary small" onclick="copyOverallParseInstruction()">复制总体解析指令</button></div>' : '') +
-                (overallPrompt ? '<details style="margin-top:10px;"><summary>总体解析指令</summary><div id="overallParseInstruction" class="mono prewrap">' + esc(overallPrompt) + '</div></details>' : '') +
+                '<div class="subtle">IDE AI 优先使用当前会话的 MCP 工具；工具未注入时，可通过仓库内 `app.mcp.context.mcp_auth_context` 与 `app.mcp.server` 受控调用同一套公开 MCP 工具。正式 HTTP API只补充其已覆盖的读取和操作，不能替代没有 HTTP 等价入口的 MCP 工具。本区只展示入口，不复制正式任务提示词；请回审核中心按单篇文献发起 AI 审核任务。</div>' +
                 '<div class="readable-grid" style="margin-top:10px;">' +
                     '<div class="readable-field"><div class="k">推荐入口</div><div class="v">' + esc((entry.method || "") + " " + (entry.path || "")) + '</div></div>' +
                     '<div class="readable-field"><div class="k">适用场景</div><div class="v">' + esc(entry.description || "通过外部工具读取和审阅文献。") + '</div></div>' +
@@ -98,17 +95,6 @@ async function loadAgentGuide() {
     } catch (error) {
         showToast("读取 IDE AI 指南失败：" + error.message, "error");
     }
-}
-
-async function copyOverallParseInstruction() {
-    const el = $("overallParseInstruction");
-    const text = el ? el.textContent : "";
-    if (!text) {
-        showToast("暂无总体解析指令。", "error");
-        return;
-    }
-    await navigator.clipboard.writeText(text);
-    showToast("总体解析指令已复制。", "success");
 }
 
 async function importExternalAnalysis() {
@@ -150,15 +136,45 @@ async function importExternalAnalysis() {
     hideProgress();
 }
 
+function externalCandidateAction(item) {
+    item = item || {};
+    const explicitMode = String(item.action_mode || "").trim();
+    const explicitScope = String(item.action_scope || "").trim();
+    if (["materialize", "apply_review_rules", "readonly"].includes(explicitMode)) {
+        return {
+            mode: explicitMode,
+            scope: explicitScope === "run" ? "run" : "candidate"
+        };
+    }
+    const candidateType = String(item.candidate_type || "").trim().toLowerCase();
+    const status = String(item.status || "").trim().toLowerCase();
+    if (
+        candidateType === "object_review_audit" &&
+        ["candidate", "pending", "requires_resolution"].includes(status)
+    ) {
+        return { mode: "apply_review_rules", scope: "run" };
+    }
+    if (["note", "correction", "relationship"].includes(candidateType) && status === "pending") {
+        return { mode: "materialize", scope: "candidate" };
+    }
+    return { mode: "readonly", scope: "candidate" };
+}
+
+function externalRunActions(run) {
+    const candidates = Array.isArray(run && run.candidates) ? run.candidates : [];
+    return {
+        reviewRules: candidates.filter(function(item) {
+            return externalCandidateAction(item).mode === "apply_review_rules";
+        }),
+        materializable: candidates.filter(function(item) {
+            return externalCandidateAction(item).mode === "materialize";
+        })
+    };
+}
+
 async function loadExternalRuns() {
     if (!state.selectedPaperId) return;
     const extRuns = $("externalRuns");
-    if (state.currentTab === "review" && state.selectedPaperId) {
-        state.externalRuns = [];
-        rerenderSelectedDetail(state.selectedPaperId);
-        if (extRuns) extRuns.innerHTML = "";
-        return;
-    }
     const reasonBanner = state.qualityReasonContext
         ? '<div class="section-card" style="border-color:var(--color-warning);"><h3>DFT 质量处理入口</h3><div class="subtle">来自 blocked reason：' + esc(state.qualityReasonContext) + '。请核对本论文的 review 状态、证据链和定位信息。</div></div>'
         : "";
@@ -182,9 +198,16 @@ async function loadExternalRuns() {
         }
         if (extRuns) {
             extRuns.innerHTML = state.externalRuns.map(function(run) {
-                const pending = (run.candidates || []).filter(function(item) {
-                    return item.status === "pending" || item.status === "requires_resolution";
-                });
+                const actions = externalRunActions(run);
+                const actionableCount = actions.reviewRules.length + actions.materializable.length;
+                const primaryAction = actions.reviewRules.length
+                    ? '<button class="btn blue small" onclick="applyReviewRulesForRun(\'' + run.id + '\')">应用本 run 审核规则（含 DFT）</button>'
+                    : (actions.materializable.length
+                        ? '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量应用/记录</button>'
+                        : '');
+                const selectedAction = actions.materializable.length
+                    ? '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中应用/记录</button>'
+                    : '';
                 return (
                     '<div class="run-card">' +
                         '<h4>' + esc(run.source_label || uiLabel("source", run.source) || "未命名候选源") + "</h4>" +
@@ -192,16 +215,16 @@ async function loadExternalRuns() {
                         '<div class="subtle" style="margin-top:8px;">用途：这里显示 IDE AI 通过 import_analysis 回写的结果。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。DFT 数据仍按审核中心的多 AI 冲突流程处理。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
-                            '<button class="btn blue small" onclick="materializeRun(\'' + run.id + '\')">批量应用/记录</button>' +
-                            '<button class="btn ghost small" onclick="materializeSelectedCandidates(\'' + run.id + '\')">选中应用/记录</button>' +
+                            primaryAction +
+                            selectedAction +
                             '<button class="btn ghost small" onclick="toggleRunCandidates(\'' + run.id + '\')">展开审阅项（' + (run.candidates || []).length + "）</button>" +
                             '<button class="btn ghost small" onclick="deleteExternalRun(\'' + run.id + '\')">删除记录</button>' +
                         "</div>" +
                         '<div id="run-candidates-' + run.id + '" style="display:none;">' +
                             renderCandidates(run.id, run.candidates || []) +
                         "</div>" +
-                        (pending.length
-                            ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + pending.length + " 个</div>"
+                        (actionableCount
+                            ? '<div class="subtle" style="margin-top:10px;">待处理候选项：' + actionableCount + " 个</div>"
                             : '<div class="subtle" style="margin-top:10px;">当前 run 没有待处理候选项。</div>') +
                     "</div>"
                 );
@@ -218,13 +241,24 @@ function renderCandidates(runId, candidates) {
     }
     return candidates.map(function(item) {
         var candidateId = String(item.id || "");
-        var isPending = item.status === "pending" || item.status === "requires_resolution";
-        var checkbox = isPending && candidateId
+        var action = externalCandidateAction(item);
+        var checkbox = action.mode === "materialize" && candidateId
             ? '<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:700;margin:0;"><input type="checkbox" class="candidate-select" data-run-id="' + escAttr(runId) + '" value="' + escAttr(candidateId) + '">选择</label>'
-            : '<span class="muted" style="font-size:12px;">已处理</span>';
-        var singleAction = isPending && candidateId
-            ? '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">应用/记录</button>'
             : "";
+        var singleAction = "";
+        if (action.mode === "materialize" && candidateId) {
+            singleAction = '<button class="btn ghost small" onclick="materializeCandidate(\'' + escAttr(runId) + '\', \'' + escAttr(candidateId) + '\')">应用/记录</button>';
+        } else if (action.mode === "apply_review_rules") {
+            singleAction = '<button class="btn ghost small" onclick="applyReviewRulesForRun(\'' + escAttr(runId) + '\')">按本 run 审核规则处理</button>';
+        } else if (item.status === "requires_resolution") {
+            singleAction = '<span class="muted" style="font-size:12px;">需人工处理</span>';
+        } else if (["materialized", "ai_reviewed", "ai_applied"].includes(String(item.status || "").toLowerCase())) {
+            singleAction = '<span class="muted" style="font-size:12px;">已处理</span>';
+        } else if (String(item.status || "").toLowerCase() === "skipped") {
+            singleAction = '<span class="muted" style="font-size:12px;">已跳过</span>';
+        } else {
+            singleAction = '<span class="muted" style="font-size:12px;">只读候选</span>';
+        }
         var candidateLabel = "";
         if (item.candidate_type === "correction") {
             candidateLabel = '<span style="background:var(--color-warning-bg);color:var(--color-warning);border:1px solid var(--color-warning)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 建议 / 待应用</span>';
@@ -232,6 +266,8 @@ function renderCandidates(runId, candidates) {
             candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 笔记建议 / 待记录</span>';
         } else if (item.candidate_type === "relationship") {
             candidateLabel = '<span style="background:var(--color-primary-bg);color:var(--color-primary);border:1px solid var(--color-primary)40;padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">AI 关联建议 / 待记录</span>';
+        } else if (item.candidate_type === "object_review_audit") {
+            candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">审核候选 / 按 run 处理</span>';
         } else {
             candidateLabel = '<span style="background:var(--color-surface-alt);color:var(--color-text-secondary);border:1px solid var(--color-border);padding:1px 6px;font-size:10px;font-weight:700;border-radius:var(--radius-pill);margin-left:4px;">候选建议 / 待记录</span>';
         }
@@ -256,17 +292,19 @@ function toggleRunCandidates(runId) {
 
 async function materializeRun(runId) {
     var run = (state.externalRuns || []).find(function(item) { return item.id === runId; });
-    var pendingCount = run ? (run.candidates || []).filter(function(item) {
-        return item.status === "pending" || item.status === "requires_resolution";
-    }).length : 0;
-    if (!pendingCount) {
+    var actions = externalRunActions(run);
+    if (actions.reviewRules.length) {
+        await applyReviewRulesForRun(runId);
+        return;
+    }
+    var candidateIds = actions.materializable.map(function(item) { return String(item.id || ""); }).filter(Boolean);
+    if (!candidateIds.length) {
         showToast("当前 run 没有可生成的候选建议。", "error");
         return;
     }
     var ok = confirm(
-        "将处理 " + pendingCount + " 个 IDE AI 回写项。\n\n" +
-        "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
-        "这不是人工 verified，也不会绕过 DFT 安全门。\n\n" +
+        "将应用/记录 " + candidateIds.length + " 个非 DFT IDE AI 回写项。\n\n" +
+        "后续 AI 可再次覆盖这些非 DFT 字段。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
@@ -275,13 +313,45 @@ async function materializeRun(runId) {
         await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/materialize", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ explicit_all: true, created_by: "web_user" })
+            body: JSON.stringify({ candidate_ids: candidateIds, created_by: "web_user" })
         });
-        showToast("AI 回写已处理。", "success");
+        showToast("非 DFT AI 回写已处理。", "success");
         await loadExternalRuns();
         await refreshSelectedPaperDetail({ reason: "external_run_materialized" });
     } catch (error) {
         showToast("处理 AI 回写失败：" + error.message, "error");
+    }
+    hideProgress();
+}
+
+async function applyReviewRulesForRun(runId) {
+    var run = (state.externalRuns || []).find(function(item) { return item.id === runId; });
+    var actions = externalRunActions(run);
+    if (!actions.reviewRules.length) {
+        showToast("当前 run 没有待应用的审核规则候选。", "error");
+        return;
+    }
+    var totalCount = actions.reviewRules.length + actions.materializable.length;
+    var ok = confirm(
+        "这是整 run 操作，将按审核规则处理该 run 的 " + totalCount + " 个可处理项。\n\n" +
+        "DFT 项只会生成或更新审核候选、issue 和共识状态，不会自动变成人工 verified，也不会绕过导出安全门。\n\n" +
+        "是否继续？"
+    );
+    if (!ok) return;
+    showProgress("正在应用本 run 审核规则...");
+    try {
+        var result = await fetchJSON(EXTERNAL_API + "/runs/" + runId + "/apply-review-rules", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reviewer: "web_user" })
+        });
+        var summary = result && result.auto_apply_summary ? result.auto_apply_summary : {};
+        var newDft = summary.new_dft_candidates || {};
+        showToast("审核规则已执行；新物化 DFT 候选 " + Number(newDft.materialized_count || 0) + " 个。", "success");
+        await loadExternalRuns();
+        await refreshSelectedPaperDetail({ reason: "external_run_review_rules_applied" });
+    } catch (error) {
+        showToast("应用审核规则失败：" + error.message, "error");
     }
     hideProgress();
 }
@@ -317,10 +387,19 @@ async function materializeSelectedCandidates(runId) {
 
 async function materializeCandidateIds(runId, candidateIds) {
     if (!candidateIds.length) return;
+    var run = (state.externalRuns || []).find(function(item) { return item.id === runId; });
+    var byId = new Map(((run && run.candidates) || []).map(function(item) { return [String(item.id || ""), item]; }));
+    var invalidIds = candidateIds.filter(function(candidateId) {
+        var candidate = byId.get(String(candidateId));
+        return !candidate || externalCandidateAction(candidate).mode !== "materialize";
+    });
+    if (invalidIds.length) {
+        showToast("所选项目包含不能按单候选应用的审核项；DFT 审核必须按整个 run 处理。", "error");
+        return;
+    }
     var ok = confirm(
         "将处理 " + candidateIds.length + " 个 IDE AI 回写项。\n\n" +
-        "非 DFT 修正会直接应用，后续 AI 可再次覆盖；DFT 数据仍按审核中心流程处理。\n\n" +
-        "这不是人工 verified，也不会绕过 DFT 安全门。\n\n" +
+        "这里只包含可按单候选执行的非 DFT 项，后续 AI 可再次覆盖。\n\n" +
         "是否继续？"
     );
     if (!ok) return;

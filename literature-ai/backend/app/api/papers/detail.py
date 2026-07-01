@@ -29,6 +29,8 @@ from app.schemas.api import (
     CodexItemContextResponse,
     DFTResultCorrectionProposalRequest,
     DFTResultCorrectionProposalResponse,
+    DFTResultManualUpdateRequest,
+    DFTResultManualUpdateResponse,
     DFTResultRejectRequest,
     DFTResultRejectResponse,
     DFTResultVerifyRequest,
@@ -105,6 +107,7 @@ class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
     dft_result_ids: list[UUID] = Field(min_length=1)
 
 from app.services.codex_context_service import CodexContextService
+from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
 from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
@@ -267,7 +270,7 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
 
 
 @router.get("/{paper_id}", response_model=PaperDetailResponse)
-async def get_paper(
+def get_paper(
     paper_id: UUID,
     mode: str = Query("full", pattern="^(light|full)$"),
     session: Session = Depends(get_db_session),
@@ -278,6 +281,25 @@ async def get_paper(
     if mode == "light":
         return _lightweight_paper_detail(detail)
     return detail
+
+
+@router.get("/{paper_id}/dft-results")
+def get_paper_dft_results(
+    paper_id: UUID,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=50),
+    result_id: UUID | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    payload = PaperQueryService(session).get_dft_results_page(
+        paper_id,
+        offset=offset,
+        limit=limit,
+        result_id=result_id,
+    )
+    if payload is None:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    return payload
 
 
 @router.post("/{paper_id}/figures/{figure_id}/delete-proposal")
@@ -577,6 +599,8 @@ async def update_catalyst_sample_basic_info(
         "evidence_strength": sample.evidence_strength,
     }
     session.add(sample)
+    session.flush()
+    active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
     session.add(
         AuditLog(
             paper_id=paper_id,
@@ -595,6 +619,7 @@ async def update_catalyst_sample_basic_info(
                     "normalization_source": normalized["normalization_source"],
                 },
                 "metal_descriptors": normalized["metal_descriptors"],
+                "active_site_refresh": active_site_refresh,
                 "evidence_payload": payload.evidence_payload or {},
                 "note": payload.note,
             },
@@ -625,6 +650,7 @@ async def update_catalyst_sample_basic_info(
             **detail_payload["metal_descriptors"],
         },
         "allowed_values": detail_payload["allowed_values"],
+        "active_site_refresh": active_site_refresh,
     }
 
 
@@ -711,6 +737,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
         row.catalyst_sample_id = sample.id
         session.add(row)
 
+    active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
     source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
     after = {
         "name": sample.name,
@@ -740,6 +767,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
                     "normalization_source": normalized["normalization_source"],
                 },
                 "metal_descriptors": normalized["metal_descriptors"],
+                "active_site_refresh": active_site_refresh,
                 "evidence_payload": payload.evidence_payload or {},
                 "note": payload.note,
             },
@@ -752,6 +780,7 @@ async def create_or_bind_catalyst_sample_from_dft_group(
         "catalyst_sample_id": str(sample.id),
         "bound_dft_result_ids": [str(row.id) for row in rows],
         "created": created,
+        "active_site_refresh": active_site_refresh,
     }
 
 
@@ -900,6 +929,33 @@ async def propose_dft_result_correction(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return DFTResultCorrectionProposalResponse(correction=correction)
+
+
+@router.patch("/{paper_id}/dft-results/{result_id}", response_model=DFTResultManualUpdateResponse)
+async def manually_update_dft_result(
+    paper_id: UUID,
+    result_id: UUID,
+    payload: DFTResultManualUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultManualUpdateResponse:
+    try:
+        result = DFTResultReviewService(session).manually_update_result(
+            paper_id=paper_id,
+            result_id=result_id,
+            confirm_manual_update=payload.confirm_manual_update,
+            updates=payload.updates,
+            reason=payload.reason,
+            reviewer=payload.reviewer,
+            evidence_payload=payload.evidence_payload,
+        )
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return DFTResultManualUpdateResponse.model_validate(result)
 
 
 @router.post("/{paper_id}/dft-results/{result_id}/apply-imported-opinion")
@@ -1310,14 +1366,15 @@ def recrop_paper_figures(
 
 
 @router.get("/{paper_id}/evidence/locators", response_model=list[EvidenceLocatorResponse])
-async def get_paper_evidence_locators(
+def get_paper_evidence_locators(
     paper_id: UUID,
+    limit: int = Query(default=40, ge=1, le=200),
     session: Session = Depends(get_db_session),
 ) -> list[EvidenceLocatorResponse]:
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    return EvidenceLocatorService(session).list_locators_for_paper(paper_id)
+    return EvidenceLocatorService(session).list_locators_for_paper(paper_id, limit=limit)
 
 
 def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:

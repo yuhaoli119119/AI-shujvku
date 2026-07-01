@@ -3,8 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 
-ELEMENT_DESCRIPTOR_SOURCE = "literature_ai_static_element_descriptors"
-ELEMENT_DESCRIPTOR_SOURCE_VERSION = "li_s_sac_dac_v1"
+ELEMENT_DESCRIPTOR_SOURCE = "literature_ai_element_properties"
+ELEMENT_DESCRIPTOR_SOURCE_VERSION = "periodic_table_118_v1"
 
 
 _ELEMENT_DESCRIPTORS: dict[str, dict[str, float | int]] = {
@@ -24,6 +24,15 @@ _ELEMENT_DESCRIPTORS: dict[str, dict[str, float | int]] = {
     "Pt": {"atomic_number": 78, "electronegativity": 2.28, "valence_electron_count": 10},
     "Pd": {"atomic_number": 46, "electronegativity": 2.20, "valence_electron_count": 10},
     "Rh": {"atomic_number": 45, "electronegativity": 2.28, "valence_electron_count": 9},
+    "Sc": {"atomic_number": 21, "electronegativity": 1.36, "valence_electron_count": 3},
+    "Y": {"atomic_number": 39, "electronegativity": 1.22, "valence_electron_count": 3},
+    "Zr": {"atomic_number": 40, "electronegativity": 1.33, "valence_electron_count": 4},
+    "Nb": {"atomic_number": 41, "electronegativity": 1.60, "valence_electron_count": 5},
+    "Tc": {"atomic_number": 43, "electronegativity": 1.90, "valence_electron_count": 7},
+    "Ag": {"atomic_number": 47, "electronegativity": 1.93, "valence_electron_count": 11},
+    "Ge": {"atomic_number": 32, "electronegativity": 2.01, "valence_electron_count": 4},
+    "Hf": {"atomic_number": 72, "electronegativity": 1.30, "valence_electron_count": 4},
+    "Au": {"atomic_number": 79, "electronegativity": 2.54, "valence_electron_count": 11},
 }
 
 
@@ -53,7 +62,7 @@ def element_descriptor(symbol: Any) -> dict[str, Any]:
     return {**base, **data}
 
 
-def build_metal_descriptor_payload(metal_centers: Any) -> dict[str, Any]:
+def build_metal_descriptor_payload(metal_centers: Any, *, catalyst_type: Any = None) -> dict[str, Any]:
     symbols = _metal_symbols(metal_centers)
     descriptors = [element_descriptor(symbol) for symbol in symbols]
     descriptor_blockers = [
@@ -61,21 +70,28 @@ def build_metal_descriptor_payload(metal_centers: Any) -> dict[str, Any]:
         for descriptor in descriptors
         if descriptor["atomic_number"] is None
     ]
+    scope = _catalyst_scope(catalyst_type)
+    active_site_valid = _active_site_valid(symbols, scope)
+    if not active_site_valid:
+        descriptor_blockers.extend(_identity_blockers(symbols, scope))
     descriptor_blockers = sorted(set(descriptor_blockers))
-    metal_1 = descriptors[0] if descriptors else None
-    metal_2 = descriptors[1] if len(descriptors) > 1 else None
+    metal_1 = descriptors[0] if active_site_valid and descriptors else None
+    metal_2 = descriptors[1] if active_site_valid and len(descriptors) > 1 else None
     return {
         "metal_descriptor_summary": {
             "metal_centers": symbols,
+            "catalyst_scope": scope,
+            "active_site_identity_status": "confirmed" if active_site_valid else "blocked",
             "descriptor_source": ELEMENT_DESCRIPTOR_SOURCE,
             "descriptor_source_version": ELEMENT_DESCRIPTOR_SOURCE_VERSION,
             "descriptor_available_count": sum(1 for item in descriptors if item["atomic_number"] is not None),
             "descriptor_missing_count": sum(1 for item in descriptors if item["atomic_number"] is None),
             "metal_center_order_source": "catalyst_sample.metal_centers" if symbols else None,
+            "descriptor_generation_rule": "single_atom_requires_1_metal_dual_atom_requires_2_metals",
         },
         "metal_1_descriptors": metal_1,
         "metal_2_descriptors": metal_2,
-        "dac_combined_descriptors": _combined_descriptors(descriptors),
+        "dac_combined_descriptors": _combined_descriptors(descriptors) if active_site_valid and scope == "dual_atom" else None,
         "descriptor_blockers": descriptor_blockers,
     }
 
@@ -92,7 +108,7 @@ def _metal_symbols(metal_centers: Any) -> list[str]:
 
 
 def _combined_descriptors(descriptors: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if len(descriptors) < 2:
+    if len(descriptors) != 2:
         return None
     first, second = descriptors[0], descriptors[1]
     pair = _canonical_pair(first.get("element_symbol"), second.get("element_symbol"))
@@ -131,3 +147,36 @@ def _mean(first: dict[str, Any], second: dict[str, Any], key: str) -> float | in
     if left is None or right is None:
         return None
     return (left + right) / 2
+
+
+def _catalyst_scope(value: Any) -> str:
+    token = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if token in {"sac", "single_atom", "single_atom_catalyst"}:
+        return "single_atom"
+    if token in {"dac", "dual_atom", "dual_atom_catalyst", "double_atom"}:
+        return "dual_atom"
+    if token in {"screening_set", "screening_collection", "multi_metal_screening_set"}:
+        return "screening_set"
+    if token in {"multi_atom_cluster", "cluster"}:
+        return "multi_atom_cluster"
+    return "unknown"
+
+
+def _active_site_valid(symbols: list[str], scope: str) -> bool:
+    if scope == "single_atom":
+        return len(symbols) == 1
+    if scope == "dual_atom":
+        return len(symbols) == 2
+    return False
+
+
+def _identity_blockers(symbols: list[str], scope: str) -> list[str]:
+    if len(symbols) > 2:
+        return ["screening_set_not_active_site", "too_many_metal_centers_for_descriptor"]
+    if scope == "single_atom" and len(symbols) != 1:
+        return ["single_atom_requires_exactly_one_metal"]
+    if scope == "dual_atom" and len(symbols) != 2:
+        return ["dual_atom_requires_exactly_two_metals"]
+    if scope in {"screening_set", "multi_atom_cluster"}:
+        return ["not_single_or_dual_active_site"]
+    return ["unconfirmed_active_site_identity"]
