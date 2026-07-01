@@ -30,6 +30,9 @@ literature-ai/outputs/tmp/**
 literature-ai/outputs/exports/**
 !literature-ai/outputs/exports/
 !literature-ai/outputs/exports/.gitkeep
+/local/**
+!/local/
+!/local/README.md
 
 # Root-level ad-hoc analysis previews and temp outputs
 /_*.png
@@ -54,10 +57,6 @@ literature-ai/outputs/exports/**
 literature-ai/ctx.json
 literature-ai/paper.json
 test-results/
-outputs/node_modules/
-outputs/tmp/**
-!outputs/tmp/
-!outputs/tmp/.gitkeep
 
 # Local run metadata
 *#U*
@@ -89,9 +88,3 @@ fix.py
 .workbuddy/
 111/
 backend.log
-
-# Local acceptance artifacts; keep only the reproducible runner script.
-test-artifacts/**
-!test-artifacts/
-!test-artifacts/pdf-regression/
-!test-artifacts/pdf-regression/run_new_real_papers_e2e.py

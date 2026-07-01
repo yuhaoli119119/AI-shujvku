@@ -19,7 +19,8 @@
 - `docs/`: current docs, MCP docs, schema notes, plans, and audit records.
 - `deploy/`: deployment and gateway configuration.
 - `data/`: runtime data, library registry, and storage root.
-- `outputs/`: system-level exports.
+- `outputs/`: system-level runtime exports and disposable working outputs.
+- `deliverables/`: checked-in deliverable snapshots and preserved exports.
 
 ## Notes
 

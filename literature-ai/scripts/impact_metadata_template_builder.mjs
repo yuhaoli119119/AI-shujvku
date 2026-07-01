@@ -2,13 +2,15 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { SpreadsheetFile, Workbook } from "@oai/artifact-tool";
 
 const execFileAsync = promisify(execFile);
-const workspaceRoot = process.cwd();
-const exportsRoot = path.join(workspaceRoot, "outputs", "exports");
-const outputDir = path.join(exportsRoot, "literature_ai_impact_metadata_20260621");
-const composeArgs = ["compose", "-f", "literature-ai/docker-compose.yml", "exec", "-T", "postgres"];
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const systemRoot = path.resolve(scriptDir, "..");
+const repoRoot = path.resolve(systemRoot, "..");
+const outputDir = path.join(systemRoot, "deliverables", "impact_metadata_20260621");
+const composeArgs = ["compose", "-f", path.join(systemRoot, "docker-compose.yml"), "exec", "-T", "postgres"];
 
 const punctuationRegex = /[\s\.,;:!?'"]+|[()\[\]{}\-_/\\]+/g;
 
@@ -463,7 +465,7 @@ const recoveryImpactByJournal = {
 
 async function runSqlJson(sql) {
   const args = [...composeArgs, "psql", "-U", "literature_ai", "-d", "literature_ai", "-t", "-A", "-c", sql];
-  const { stdout, stderr } = await execFileAsync("docker", args, { cwd: workspaceRoot, maxBuffer: 8 * 1024 * 1024 });
+  const { stdout, stderr } = await execFileAsync("docker", args, { cwd: repoRoot, maxBuffer: 8 * 1024 * 1024 });
   if (stderr && stderr.trim()) {
     console.error(stderr);
   }
@@ -471,7 +473,6 @@ async function runSqlJson(sql) {
 }
 
 async function main() {
-  await fs.mkdir(exportsRoot, { recursive: true });
   await fs.mkdir(outputDir, { recursive: true });
 
   const journalSql = `

@@ -2,7 +2,14 @@ $ErrorActionPreference = "Stop"
 
 $workspaceRoot = Split-Path -Parent $PSScriptRoot
 $scratchDir = Join-Path $workspaceRoot "literature-ai\backend\scratch"
-$outputsTmpDir = Join-Path $workspaceRoot "outputs\tmp"
+$outputsTmpDirs = @(
+    (Join-Path $workspaceRoot "literature-ai\outputs\tmp"),
+    (Join-Path $workspaceRoot "outputs\tmp")
+)
+$pdfRegressionRunDirs = @(
+    (Join-Path $workspaceRoot "local\test-runs\pdf-regression"),
+    (Join-Path $workspaceRoot "test-artifacts\pdf-regression")
+)
 $cacheDirs = @(
     (Join-Path $workspaceRoot "literature-ai\.pytest_cache"),
     (Join-Path $workspaceRoot "literature-ai\backend\.pytest_cache"),
@@ -12,6 +19,8 @@ $localSnapshotPaths = @(
     (Join-Path $workspaceRoot "literature-ai\.codex-artifacts"),
     (Join-Path $workspaceRoot "literature-ai\ctx.json"),
     (Join-Path $workspaceRoot "literature-ai\paper.json"),
+    (Join-Path $workspaceRoot "local\test-runs\review_center_live.png"),
+    (Join-Path $workspaceRoot "local\test-runs\tmp-figure-layout-check"),
     (Join-Path $workspaceRoot "test-artifacts\review_center_live.png"),
     (Join-Path $workspaceRoot "test-artifacts\tmp-figure-layout-check")
 )
@@ -21,10 +30,8 @@ $pycacheRoots = @(
     (Join-Path $workspaceRoot "literature-ai\backend\scripts"),
     (Join-Path $workspaceRoot "literature-ai\backend\tests"),
     (Join-Path $workspaceRoot "literature-ai\backend\tools"),
-    (Join-Path $workspaceRoot "literature-ai\scripts"),
-    (Join-Path $workspaceRoot "test-artifacts\pdf-regression")
+    (Join-Path $workspaceRoot "literature-ai\scripts")
 )
-$pdfRegressionDir = Join-Path $workspaceRoot "test-artifacts\pdf-regression"
 
 $removed = New-Object System.Collections.Generic.List[string]
 
@@ -113,18 +120,20 @@ function Remove-LocalSnapshots {
 }
 
 function Remove-TestRegressionOutputs {
-    if (-not (Test-Path -LiteralPath $pdfRegressionDir)) {
-        return
-    }
-
-    Get-ChildItem -LiteralPath $pdfRegressionDir -Force -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.PSIsContainer -and $_.Name -match '^(existing(_fixed2?)?_\d+|new_real_\d+|rerun_[a-z_]+_\d+)$'
-        } |
-        ForEach-Object {
-            Remove-Item -LiteralPath $_.FullName -Force -Recurse
-            $removed.Add($_.FullName) | Out-Null
+    foreach ($dir in $pdfRegressionRunDirs) {
+        if (-not (Test-Path -LiteralPath $dir)) {
+            continue
         }
+
+        Get-ChildItem -LiteralPath $dir -Force -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.PSIsContainer -and $_.Name -match '^(existing(_fixed2?)?_\d+|new_real_\d+|rerun_[a-z_]+_\d+)$'
+            } |
+            ForEach-Object {
+                Remove-Item -LiteralPath $_.FullName -Force -Recurse
+                $removed.Add($_.FullName) | Out-Null
+            }
+    }
 }
 
 Remove-RootTempFiles
@@ -134,7 +143,11 @@ Remove-PythonCaches
 Remove-LocalSnapshots
 Remove-TestRegressionOutputs
 
-if (Test-Path -LiteralPath $outputsTmpDir) {
+foreach ($outputsTmpDir in $outputsTmpDirs) {
+    if (-not (Test-Path -LiteralPath $outputsTmpDir)) {
+        continue
+    }
+
     Get-ChildItem -LiteralPath $outputsTmpDir -Force -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne ".gitkeep" } |
         ForEach-Object {

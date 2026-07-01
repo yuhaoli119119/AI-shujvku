@@ -9,13 +9,14 @@ import time
 from pathlib import Path
 from uuid import UUID, uuid4
 
-ROOT = Path(__file__).resolve().parents[2]
-BACKEND = ROOT / "literature-ai" / "backend"
+SYSTEM_ROOT = Path(__file__).resolve().parents[2]
+ROOT = SYSTEM_ROOT.parent
+BACKEND = SYSTEM_ROOT / "backend"
 sys.path.insert(0, str(BACKEND))
 
-RUN_DIR = ROOT / "test-artifacts" / "pdf-regression" / f"new_real_{int(time.time())}"
+RUN_DIR = ROOT / "local" / "test-runs" / "pdf-regression" / f"new_real_{int(time.time())}"
 STORAGE_DIR = RUN_DIR / "storage"
-PDF_DIR = ROOT / "test-artifacts" / "pdf-regression" / "new_real_papers"
+PDF_DIR = ROOT / "local" / "test-fixtures" / "pdf-regression" / "new_real_papers"
 
 PAPERS = [
     {
@@ -161,6 +162,9 @@ def mark_one_review_verified(session, paper_id: UUID, detail) -> dict:
 
 
 async def run() -> dict:
+    if not PDF_DIR.exists():
+        raise FileNotFoundError(f"Missing PDF regression fixture directory: {PDF_DIR}")
+
     schema, admin_engine = configure_environment()
     if RUN_DIR.exists():
         shutil.rmtree(RUN_DIR)
@@ -186,13 +190,13 @@ async def run() -> dict:
             service = PaperIngestionService(session, settings)
             for item in PAPERS:
                 paper = await service.ingest_pdf(
-                source_path=item["path"],
-                original_filename=item["path"].name,
-                external_metadata=item["metadata"],
-                source_reference=item["source"],
-                library_name="新真实文献验收库",
-                ingest_source="downloaded_semantic_scholar_pdf",
-            )
+                    source_path=item["path"],
+                    original_filename=item["path"].name,
+                    external_metadata=item["metadata"],
+                    source_reference=item["source"],
+                    library_name="新真实文献验收库",
+                    ingest_source="downloaded_semantic_scholar_pdf",
+                )
 
                 review_service = ExtractionReviewService(session)
                 prepared = review_service.prepare_pending_reviews(paper.id)

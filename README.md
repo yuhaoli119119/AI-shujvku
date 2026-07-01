@@ -15,7 +15,7 @@
 - **IDE 后备路径**：若当前 IDE 会话未暴露 MCP 工具，可改走 `literature-ai/backend` 中 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 的仓库内后备路径。
 - **服务暴露**：Docker 默认暴露本机 `8000` Owner 网关，以及 `8080` 只读分享网关；数据库和内部服务不直接暴露到 LAN。
 - **DFT / project-library**：DFT 抽取结果默认只是候选，必须经过证据、审核、材料绑定和导出安全门。
-- **本地产物边界**：`outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 和临时 scratch 脚本不属于源码，不应作为正式提交内容。
+- **本地产物边界**：`local/`、`literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/` 和临时 scratch 脚本不属于源码，不应作为正式提交内容。
 
 ## 快速启动
 
@@ -42,18 +42,17 @@ AI-shujvku/
     docs/                  ← 当前文档索引、MCP 文档、schema、plans/audits
     deploy/                ← 部署配置
     data/                  ← 运行期数据与存储根
-    outputs/               ← 系统内导出物
+    outputs/               ← 系统运行期导出目录
+    deliverables/          ← 需要保留的交付快照与受控导出
   scripts/                 ← 仓库级运维/清理脚本
-  outputs/                 ← 仓库级临时输出与导出辅助目录
-  backups/                 ← 本地备份与修复副产物
-  test-artifacts/          ← 本地测试副产物与审计脚本
+  local/                   ← 本地备份、测试样本、回归运行结果
 ```
 
 说明：
 
 - `literature-ai/` 是唯一系统根目录。
-- 根目录的 `scripts/`、`outputs/`、`backups/`、`test-artifacts/` 属于仓库级运维脚本或本地副产物区，不是主系统源码入口。
-- 后续若继续做结构整理，优先先整理这些根目录副产物，不直接搬动 `literature-ai/backend`、`frontend`、`data`。
+- 根目录只保留仓库入口、运维脚本和 `local/` 本地资产区；业务源码统一留在 `literature-ai/`。
+- `local/` 仅存放本机备份、测试样本和验收运行结果；需要保留进仓库的正式产物应放入 `literature-ai/deliverables/`。
 
 ## 文档分工
 
@@ -69,7 +68,7 @@ AI-shujvku/
 ## 运行与提交边界
 
 - 不要提交本地 token、数据库连接串、临时探针脚本或本地调试输出。
-- 根目录与 `literature-ai/` 下的 `outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 默认按“可清理本地产物”处理。
+- 根目录下的 `local/` 与 `literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/` 默认按“可清理或本地保留产物”处理。
 - 如 IDE 会话缺少 MCP 工具，优先走仓库内受控后备路径，不要绕过权限边界直接操作 service、session、model 或数据库。
 
 ## 给新协作者的提醒

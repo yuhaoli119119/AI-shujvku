@@ -3,13 +3,11 @@ backend/.pytest_cache/
 backend/data/
 backend/tests/
 backend/reports/
-backend/test-artifacts/
 backend/outputs/
 backend/scratch/
 frontend/node_modules/
 frontend/test-results/
 frontend/playwright-report/
-backups/
 data/
 outputs/
 test-results/
