@@ -147,7 +147,7 @@ async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) 
             if (el) el.textContent = value;
         };
         setText("dft-new-review-count", "下一轮审核 / 补证据 " + classified.newReview.length);
-        setText("dft-conflict-count", "第三轮 AI 裁决 " + classified.conflicts.length);
+        setText("dft-conflict-count", "主 AI 判断 " + classified.conflicts.length);
     } catch (_) {
         const pending = container.querySelector('[data-role="dft-new-review-count"]');
         if (pending) pending.textContent = "新数据审核 ?";
@@ -168,7 +168,7 @@ async function settleAiDftReviews() {
         showToast(
             "已结算 " + Number(summary && summary.auto_applied_count || 0) +
             " 条；可导出 " + Number(summary && summary.exportable_count || 0) +
-            "；需第三AI裁决 " + Number(summary && summary.need_third_ai_count || 0) +
+            "；需主AI判断 " + Number(summary && summary.need_third_ai_count || 0) +
             "；需补字段 " + Number(summary && summary.need_repair_count || 0),
             "success"
         );

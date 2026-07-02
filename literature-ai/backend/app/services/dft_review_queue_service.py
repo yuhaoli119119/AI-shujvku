@@ -24,7 +24,7 @@ from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.external_analysis_identity import review_submission_identity
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
+from app.utils.review_safety import bulk_export_gate_results
 
 
 DFT_TARGET_TYPES = ("dft_results", "dft_result", "DFTResult")
@@ -104,7 +104,7 @@ class DFTReviewQueueService:
             parsed_by_paper[pid] += 1
             if gate.eligible:
                 exportable_by_paper[pid] += 1
-            else:
+            elif self.counts_as_pending_review_block(gate):
                 blocked_by_paper[pid] += 1
             if reason and reason not in gate.reasons:
                 continue
@@ -196,7 +196,7 @@ class DFTReviewQueueService:
                 }
             )
 
-        gate_summary = summarize_gate_results(gate_results)
+        gate_summary = self.summarize_pending_review_gates(gate_results)
         return {
             "metadata": {
                 "schema_version": schema_version,
@@ -784,6 +784,7 @@ class DFTReviewQueueService:
         ]
         valid = [opinion for opinion in effective if opinion["has_anchor"]]
         valid_count = len(valid)
+        has_primary_ai = any(DFTReviewQueueService._is_primary_dft_opinion(opinion) for opinion in valid)
         decisions = [DFTReviewQueueService._normalize_ai_review_decision(opinion["decision"]) for opinion in valid]
         has_reject = any(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
         has_positive = any(decision in {"PASS", "PROPOSED", "REVISE"} for decision in decisions)
@@ -822,9 +823,11 @@ class DFTReviewQueueService:
             action = "run_second_ai_with_evidence"
         elif has_reject and has_positive:
             state = "needs_third_ai"
-            label = "需第三轮 AI 裁决"
-            reason = "不能入库：有效审核提交同时包含拒绝和通过/修正，需要第三轮 AI 审核提交根据 PDF 证据裁决。"
-            action = "run_third_ai_adjudication"
+            label = "需主 AI 判断"
+            reason = (
+                "不能入库：有效审核提交同时包含拒绝和通过/修正，需要主 AI 依据 PDF 证据直接判断并收口。"
+            )
+            action = "refresh_primary_ai_settlement" if has_primary_ai else "run_primary_ai_decision"
         elif valid_count >= 2 and all_reject:
             state = "rejected_consensus_pending_write"
             label = "一致拒绝待写回"
@@ -894,6 +897,9 @@ class DFTReviewQueueService:
         has_anchor = DFTReviewQueueService._has_valid_evidence_anchor(location)
         return {
             "source_label": audit.get("source_label") or audit.get("source") or "unknown",
+            "source": audit.get("source"),
+            "agent_role": audit.get("agent_role"),
+            "model_name": audit.get("model_name"),
             "source_identity": audit.get("source_identity"),
             "source_identity_verified": bool(audit.get("source_identity_verified")),
             "decision": DFTReviewQueueService._normalize_ai_review_decision(audit.get("decision")),
@@ -901,6 +907,24 @@ class DFTReviewQueueService:
             "anchor_summary": DFTReviewQueueService._anchor_summary(location),
             "reason_short": DFTReviewQueueService._shorten(audit.get("reason"), 160),
         }
+
+    @staticmethod
+    def _is_primary_dft_opinion(audit: dict[str, Any]) -> bool:
+        markers = ("dft_primary", "primary_ai", "primary ai", "main_ai", "main ai")
+        for value in (
+            audit.get("source_label"),
+            audit.get("source"),
+            audit.get("agent_role"),
+            audit.get("model_name"),
+        ):
+            normalized = str(value or "").strip().lower()
+            if not normalized:
+                continue
+            if normalized.startswith("verify:") and normalized.endswith(":primary"):
+                return True
+            if any(marker in normalized for marker in markers):
+                return True
+        return False
 
     @staticmethod
     def _has_valid_evidence_anchor(location: Any) -> bool:
@@ -955,6 +979,35 @@ class DFTReviewQueueService:
         if len(text) <= limit:
             return text
         return text[: limit - 1].rstrip() + "..."
+
+    @classmethod
+    def counts_as_pending_review_block(cls, gate: Any) -> bool:
+        if cls._gate_is_eligible(gate):
+            return False
+        review_status = gate.get("review_status") if isinstance(gate, dict) else getattr(gate, "review_status", None)
+        return "rejected" not in cls._review_statuses(review_status)
+
+    @classmethod
+    def summarize_pending_review_gates(cls, gate_results: list[Any]) -> dict[str, Any]:
+        blocked_reasons: Counter[str] = Counter()
+        eligible_count = 0
+        blocked_count = 0
+        for gate in gate_results:
+            if cls._gate_is_eligible(gate):
+                eligible_count += 1
+                continue
+            if not cls.counts_as_pending_review_block(gate):
+                continue
+            blocked_count += 1
+            reasons = gate.get("reasons") if isinstance(gate, dict) else getattr(gate, "reasons", None)
+            for reason in reasons or []:
+                blocked_reasons[str(reason)] += 1
+        return {
+            "eligible": eligible_count,
+            "blocked": blocked_count,
+            "blocked_reasons": dict(sorted(blocked_reasons.items())),
+            "total_candidates": len(gate_results),
+        }
 
     @staticmethod
     def _review_statuses(value: str | None) -> set[str]:

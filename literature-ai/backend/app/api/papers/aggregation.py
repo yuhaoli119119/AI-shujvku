@@ -36,7 +36,7 @@ from app.services.dft_export_service import (
 )
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
+from app.utils.review_safety import bulk_export_gate_results
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -163,7 +163,7 @@ async def dft_dataset_quality(
         parsed_by_paper[paper_id] += 1
         if gate.eligible:
             exportable_by_paper[paper_id] += 1
-        else:
+        elif DFTReviewQueueService.counts_as_pending_review_block(gate):
             blocked_by_paper[paper_id] += 1
         if reason and reason not in gate.reasons:
             continue
@@ -214,7 +214,7 @@ async def dft_dataset_quality(
             }
         )
 
-    gate_summary = summarize_gate_results(gate_results)
+    gate_summary = DFTReviewQueueService.summarize_pending_review_gates(gate_results)
     return {
         "metadata": {
             "schema_version": "dft_quality_v1",

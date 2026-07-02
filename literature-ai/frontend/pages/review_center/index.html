@@ -3148,7 +3148,7 @@
     function adjudicationRoleBadge(opinion) {
       const role = String(opinion && opinion.adjudication_role || "").trim().toLowerCase();
       if (!role) return "";
-      return '<span class="chip warn">' + esc(role === "third_ai" ? "third AI" : role) + '</span>';
+      return '<span class="chip warn">' + esc(role === "third_ai" ? "主 AI 判断" : role) + '</span>';
     }
 
     function formatLocatorSummary(opinion) {
@@ -3610,7 +3610,7 @@
       if (raw === "codex_live_test") return "现场核验";
       if (/^verify:.*:primary$/i.test(raw)) return "主审核 AI";
       if (/^verify:.*:secondary$/i.test(raw)) return "第二审核 AI";
-      if (/^verify:.*:third_ai$/i.test(raw)) return "第三裁定 AI";
+      if (/^verify:.*:(third_ai|primary)$/i.test(raw)) return "主 AI 判断";
       if (raw === "manual_adjudication") return "人工裁定";
       return raw;
     }

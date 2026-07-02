@@ -3005,6 +3005,243 @@ def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
             engine.dispose()
 
 
+def test_external_analysis_primary_ai_opinion_overrides_conflicting_audit_without_third_ai():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Primary AI DFT Paper", pdf_path="primary-ai.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S6",
+                    value=-1.10,
+                    unit="eV",
+                    source_section="Results",
+                    evidence_text="Table 3 reports the adsorption energies.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            client = TestClient(app)
+
+            def payload_for(
+                source: str,
+                source_label: str,
+                decision: str,
+                corrected_value: float | None,
+                confidence: float,
+            ):
+                return {
+                    "paper_id": str(paper_id),
+                    "source": source,
+                    "source_label": source_label,
+                    "auto_apply_review_rules": True,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "dft_result",
+                                "target_id": str(row_id),
+                                "field_name": "value",
+                                "decision": decision,
+                                "corrected_value": corrected_value,
+                                "confidence": confidence,
+                                "reason": "Compare against Table 3 and the surrounding paragraph.",
+                                "normalized_energy_type": "adsorption_energy",
+                                "normalized_material": "Co-N-C host",
+                                "structure_name": "CoN4 single-atom site",
+                                "adsorbate": "Li2S6",
+                                "reaction_step": "adsorption",
+                                "evidence_location": {
+                                    "page": 8,
+                                    "section": "Results",
+                                    "table": "Table 3",
+                                    "quoted_text": "-1.26 eV",
+                                },
+                            }
+                        ]
+                    },
+                }
+
+            first = client.post(
+                "/api/external-analysis/import",
+                json=payload_for("reasonix_dft", "reasonix_dft_20260703_020100", "PASS", -1.10, 0.81),
+            )
+            second = client.post(
+                "/api/external-analysis/import",
+                json=payload_for(
+                    "codex_dft_primary",
+                    "codex_dft_primary_20260703_020200",
+                    "REVISE",
+                    -1.26,
+                    0.92,
+                ),
+            )
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                corrections = session.query(PaperCorrection).all()
+                issues = session.query(DFTAuditIssue).all()
+
+            assert stored_row is not None
+            assert stored_row.value == -1.26
+            assert any(
+                correction.field_name == "dft_results"
+                and str(correction.target_path or "").endswith(":value")
+                and correction.proposed_value == -1.26
+                for correction in corrections
+            )
+            assert all(correction.status == "approved" for correction in corrections)
+            assert {candidate.status for candidate in candidates} == {"ai_applied"}
+            assert issues == []
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_external_analysis_primary_pass_overrides_proposed_audit_without_third_ai():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(title="Primary PASS DFT Paper", pdf_path="primary-pass.pdf", authors=[])
+                session.add(paper)
+                session.flush()
+                row = DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate="Li2S6",
+                    value=-1.23,
+                    unit="eV",
+                    source_section="Results",
+                    evidence_text="The text contrasts -1.59 eV and -1.23 eV adsorption energies.",
+                    candidate_status="system_candidate",
+                )
+                session.add(row)
+                session.commit()
+                paper_id = paper.id
+                row_id = row.id
+
+            client = TestClient(app)
+
+            def payload_for(
+                source: str,
+                source_label: str,
+                decision: str,
+                corrected_value: float,
+                confidence: float,
+            ):
+                return {
+                    "paper_id": str(paper_id),
+                    "source": source,
+                    "source_label": source_label,
+                    "auto_apply_review_rules": True,
+                    "raw_payload": {
+                        "object_review_audits": [
+                            {
+                                "paper_id": str(paper_id),
+                                "target_type": "dft_result",
+                                "target_id": str(row_id),
+                                "field_name": "value",
+                                "decision": decision,
+                                "corrected_value": corrected_value,
+                                "confidence": confidence,
+                                "reason": "Compare against the contrastive adsorption-energy sentence.",
+                                "normalized_energy_type": "adsorption_energy",
+                                "normalized_material": "Co-N-C host",
+                                "structure_name": "CoN4 single-atom site",
+                                "adsorbate": "Li2S6",
+                                "reaction_step": "adsorption",
+                                "evidence_location": {
+                                    "page": 8,
+                                    "section": "Results",
+                                    "quoted_text": "-1.59 eV versus -1.23 eV for Li2S6-Co-N4",
+                                },
+                            }
+                        ]
+                    },
+                }
+
+            first = client.post(
+                "/api/external-analysis/import",
+                json=payload_for("reasonix_dft", "reasonix_dft_20260703_020100", "PROPOSED", None, 0.84),
+            )
+            second = client.post(
+                "/api/external-analysis/import",
+                json=payload_for(
+                    "codex_dft_primary",
+                    "codex_dft_primary_20260703_020200",
+                    "PASS",
+                    -1.23,
+                    0.96,
+                ),
+            )
+
+            assert first.status_code == 200
+            assert second.status_code == 200
+
+            with Session(engine) as session:
+                stored_row = session.get(DFTResult, row_id)
+                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                corrections = session.query(PaperCorrection).all()
+                issues = session.query(DFTAuditIssue).all()
+                reviews = session.query(ExtractionFieldReview).all()
+
+            assert stored_row is not None
+            assert stored_row.value == -1.23
+            assert stored_row.candidate_status == "ML_Ready"
+            assert not any(
+                correction.field_name == "dft_results"
+                and str(correction.target_path or "").endswith(":value")
+                for correction in corrections
+            )
+            assert all(correction.status == "approved" for correction in corrections)
+            assert not {candidate.status for candidate in candidates} & {"candidate", "pending", "requires_resolution"}
+            assert issues == []
+            assert len(reviews) == 1
+            assert reviews[0].reviewer_status == "verified"
+            assert reviews[0].reviewer == "codex_dft_primary_20260703_020200"
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
 def test_external_analysis_delete_post_alias_and_utc_created_at():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)

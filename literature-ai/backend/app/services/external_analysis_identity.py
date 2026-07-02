@@ -47,8 +47,45 @@ def review_submission_identity(
     *,
     default_untrusted: str = UNTRUSTED_EXTERNAL_SOURCE_IDENTITY,
 ) -> str:
-    return review_source_identity(
+    identity = review_source_identity(
         payload.get("source_identity"),
         payload.get("source_identity_verified"),
         default_untrusted=default_untrusted,
-    ).casefold()
+    )
+    verified = _truthy(payload.get("source_identity_verified"))
+    normalized_identity = identity.casefold()
+    if verified and not normalized_identity.startswith("untrusted:"):
+        return normalized_identity
+
+    # HTTP imports without MCP auth all share the same untrusted identity.
+    # Fall back to caller-supplied review labels so independently imported AI
+    # opinions still count as distinct submissions instead of collapsing into
+    # one synthetic reviewer.
+    source_label = str(payload.get("source_label") or "").strip().casefold()
+    source = str(payload.get("source") or "").strip().casefold()
+    agent_role = str(payload.get("agent_role") or "").strip().casefold()
+    model_name = str(payload.get("model_name") or "").strip().casefold()
+    if source_label:
+        return "|".join(
+            part
+            for part in (
+                normalized_identity,
+                f"source_label:{source_label}",
+                f"source:{source}" if source else "",
+                f"agent_role:{agent_role}" if agent_role else "",
+                f"model:{model_name}" if model_name else "",
+            )
+            if part
+        )
+    if source:
+        return "|".join(
+            part
+            for part in (
+                normalized_identity,
+                f"source:{source}",
+                f"agent_role:{agent_role}" if agent_role else "",
+                f"model:{model_name}" if model_name else "",
+            )
+            if part
+        )
+    return normalized_identity

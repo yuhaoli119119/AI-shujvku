@@ -75,6 +75,8 @@ class VerificationSessionDFTConsensusMixin:
                     "normalized_energy_type": payload.get("normalized_energy_type"),
                     "source_label": str(payload.get("source_label") or run.source_label or run.source or "").strip(),
                     "source": str(payload.get("source") or run.source or "").strip(),
+                    "agent_role": str(payload.get("agent_role") or "").strip(),
+                    "model_name": str(payload.get("model_name") or "").strip(),
                     "source_identity": review_source_identity(
                         run.source_identity,
                         run.source_identity_verified,
@@ -170,6 +172,13 @@ class VerificationSessionDFTConsensusMixin:
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
+        primary_ai = [
+            audit
+            for audit in anchored
+            if self._is_primary_dft_opinion(audit)
+            and str(audit.get("decision") or "").strip().upper() != "NEEDS_HUMAN"
+        ]
+
         if len(anchored) < 2:
             row_ref["reason"] = "awaiting_two_ai_reviews"
             row_ref["eligible_opinion_count"] = len(anchored)
@@ -201,11 +210,39 @@ class VerificationSessionDFTConsensusMixin:
             return row_ref
 
         has_reject = any(self._is_negative_dft_decision(audit.get("decision")) for audit in anchored)
-        has_positive = any(str(audit.get("decision") or "").strip().upper() in {"PASS", "PROPOSED"} for audit in anchored)
+        has_positive = any(
+            str(audit.get("decision") or "").strip().upper() in {"PASS", "PROPOSED", "REVISE"}
+            for audit in anchored
+        )
         if has_reject and has_positive:
+            if primary_ai:
+                return self._settle_dft_row_from_primary_ai(
+                    row=row,
+                    row_ref=row_ref,
+                    audits=audits,
+                    anchored=anchored,
+                    primary_audits=primary_ai,
+                    reviewer=reviewer,
+                    write_lock_tokens=write_lock_tokens,
+                )
             row_ref["reason"] = "decision_conflict"
             row_ref["status"] = "need_third_ai"
             return row_ref
+
+        if primary_ai and self._has_conflicting_primary_dft_opinion(
+            row=row,
+            anchored=anchored,
+            primary_audits=primary_ai,
+        ):
+            return self._settle_dft_row_from_primary_ai(
+                row=row,
+                row_ref=row_ref,
+                audits=audits,
+                anchored=anchored,
+                primary_audits=primary_ai,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
 
         whole_row = self._latest_dft_whole_row_proposal(anchored)
         supporting_pass = self._supporting_pass_for_row(row, anchored, whole_row)
@@ -224,6 +261,16 @@ class VerificationSessionDFTConsensusMixin:
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
         if whole_row:
+            if primary_ai:
+                return self._settle_dft_row_from_primary_ai(
+                    row=row,
+                    row_ref=row_ref,
+                    audits=audits,
+                    anchored=anchored,
+                    primary_audits=primary_ai,
+                    reviewer=reviewer,
+                    write_lock_tokens=write_lock_tokens,
+                )
             row_ref["reason"] = "value_conflict"
             row_ref["status"] = "need_third_ai"
             return row_ref
@@ -231,6 +278,19 @@ class VerificationSessionDFTConsensusMixin:
         supported_field_proposal = self._latest_supported_dft_field_proposal(row, anchored)
         if supported_field_proposal is not None:
             proposal, supporting_pass = supported_field_proposal
+            if primary_ai and proposal.get("corrected_value") in (None, "") and any(
+                str(audit.get("decision") or "").strip().upper() == "PASS"
+                for audit in primary_ai
+            ):
+                return self._settle_dft_row_from_primary_ai(
+                    row=row,
+                    row_ref=row_ref,
+                    audits=audits,
+                    anchored=anchored,
+                    primary_audits=primary_ai,
+                    reviewer=reviewer,
+                    write_lock_tokens=write_lock_tokens,
+                )
             result = self._apply_dft_whole_row_consensus(
                 row=row,
                 proposal=self._synthesize_dft_whole_row_proposal(
@@ -319,9 +379,133 @@ class VerificationSessionDFTConsensusMixin:
             row_ref["status"] = self._dft_settlement_status_for_result(result)
             return row_ref
 
+        if primary_ai:
+            return self._settle_dft_row_from_primary_ai(
+                row=row,
+                row_ref=row_ref,
+                audits=audits,
+                anchored=anchored,
+                primary_audits=primary_ai,
+                reviewer=reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+
         row_ref["reason"] = "value_conflict"
         row_ref["status"] = "need_third_ai"
         return row_ref
+
+    def _settle_dft_row_from_primary_ai(
+        self,
+        *,
+        row: DFTResult,
+        row_ref: dict[str, Any],
+        audits: list[dict[str, Any]],
+        anchored: list[dict[str, Any]],
+        primary_audits: list[dict[str, Any]],
+        reviewer: str,
+        write_lock_tokens: list[str] | None,
+    ) -> dict[str, Any]:
+        adopted = max(
+            primary_audits,
+            key=lambda item: ((item.get("confidence") or 0), str(item.get("candidate_id") or "")),
+        )
+        adopted_field = str(adopted.get("field_name") or "").strip() or "value"
+        effective_reviewer = self._primary_dft_reviewer(adopted, fallback=reviewer)
+        direct_adoption = adopted
+        if adopted_field == "dft_results":
+            corrected = adopted.get("corrected_value")
+            if isinstance(corrected, dict) and corrected.get("value") not in (None, ""):
+                direct_adoption = {
+                    **adopted,
+                    "field_name": "value",
+                    "corrected_value": corrected.get("value"),
+                }
+                adopted_field = "value"
+        if self._is_negative_dft_decision(adopted.get("decision")) and adopted.get("corrected_value") in (None, ""):
+            result = self._apply_reject_all(
+                paper_id=row.paper_id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                reviewer=effective_reviewer,
+                opinion=adopted,
+            )
+        elif adopted_field == "dft_results":
+            result = self._apply_dft_consensus_outcome(
+                row=row,
+                adopted=adopted,
+                reviewer=effective_reviewer,
+                write_lock_tokens=write_lock_tokens,
+            )
+        else:
+            result = self._apply_selected_opinion(
+                paper_id=row.paper_id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name=adopted_field,
+                reviewer=effective_reviewer,
+                opinion=direct_adoption,
+                write_lock_tokens=write_lock_tokens,
+            )
+        for audit in audits:
+            audit["candidate"].status = self._object_review_candidate_status_for_result(result)
+            self.session.add(audit["candidate"])
+        self._merge_dft_issue_sources(
+            row=row,
+            audits=anchored,
+            result=result,
+            negative=result.get("action") == "audit_opinion_rejected",
+        )
+        row_ref.update(result)
+        row_ref["status"] = self._dft_settlement_status_for_result(result)
+        return row_ref
+
+    def _has_conflicting_primary_dft_opinion(
+        self,
+        *,
+        row: DFTResult,
+        anchored: list[dict[str, Any]],
+        primary_audits: list[dict[str, Any]],
+    ) -> bool:
+        if not primary_audits:
+            return False
+        if any(
+            not self._dft_has_material_identity(
+                audit,
+                target_id=str(row.id),
+                field_name=str(audit.get("field_name") or ""),
+            )
+            for audit in anchored
+        ):
+            return False
+        identity_keys = {
+            self._dft_identity_key(
+                audit,
+                target_id=str(row.id),
+                field_name=str(audit.get("field_name") or ""),
+            )
+            for audit in anchored
+        }
+        if len(identity_keys) > 1:
+            return False
+
+        primary = max(
+            primary_audits,
+            key=lambda item: ((item.get("confidence") or 0), str(item.get("candidate_id") or "")),
+        )
+        primary_negative = self._is_negative_dft_decision(primary.get("decision"))
+        primary_target = self._normalized_dft_audit_target(row, primary)
+
+        for audit in anchored:
+            if self._same_dft_review_submission(primary, audit):
+                continue
+            audit_negative = self._is_negative_dft_decision(audit.get("decision"))
+            if primary_negative != audit_negative:
+                return True
+            if primary_negative and audit_negative:
+                continue
+            if not self._same_normalized_dft_value(primary_target, self._normalized_dft_audit_target(row, audit)):
+                return True
+        return False
 
     def _merge_dft_issue_sources(
         self,
@@ -436,6 +620,12 @@ class VerificationSessionDFTConsensusMixin:
             if len(anchored) < 2 and audits:
                 waiting_second_ai_count += 1
                 continue
+            if any(
+                DFTReviewQueueService._is_primary_dft_opinion(audit)
+                and DFTReviewQueueService._normalize_ai_review_decision(audit.get("decision")) != "NEEDS_HUMAN"
+                for audit in anchored
+            ):
+                continue
             if audits:
                 need_third_ai_count += 1
         return {
@@ -500,6 +690,53 @@ class VerificationSessionDFTConsensusMixin:
             candidate.status = "ai_reviewed"
             self.session.add(candidate)
         return True
+
+    @staticmethod
+    def _primary_dft_reviewer(opinion: dict[str, Any], *, fallback: str) -> str:
+        for value in (
+            opinion.get("source_label"),
+            opinion.get("source"),
+            opinion.get("agent_role"),
+            opinion.get("model_name"),
+            fallback,
+        ):
+            text = str(value or "").strip()
+            if text:
+                return text
+        return fallback
+
+    @staticmethod
+    def _is_primary_dft_opinion(audit: dict[str, Any]) -> bool:
+        tokens = ("dft_primary", "primary_ai", "primary ai", "main_ai", "main ai")
+        raw_payload = audit.get("raw_payload") if isinstance(audit.get("raw_payload"), dict) else {}
+        role_values = (
+            audit.get("adjudication_role"),
+            audit.get("agent_role"),
+            raw_payload.get("adjudication_role"),
+            raw_payload.get("agent_role"),
+        )
+        for value in role_values:
+            normalized = str(value or "").strip().lower()
+            if normalized in {"primary", "primary_ai", "main", "main_ai", "dft_primary"}:
+                return True
+        for value in (
+            audit.get("source_label"),
+            audit.get("source"),
+            audit.get("agent_role"),
+            audit.get("model_name"),
+            raw_payload.get("source_label"),
+            raw_payload.get("source"),
+            raw_payload.get("agent_role"),
+            raw_payload.get("model_name"),
+        ):
+            normalized = str(value or "").strip().lower()
+            if not normalized:
+                continue
+            if normalized.startswith("verify:") and normalized.endswith(":primary"):
+                return True
+            if any(token in normalized for token in tokens):
+                return True
+        return False
 
     def _dft_adjudication_matches_row(self, *, row: DFTResult, adjudication: dict[str, Any]) -> bool:
         corrected = adjudication.get("corrected_value")

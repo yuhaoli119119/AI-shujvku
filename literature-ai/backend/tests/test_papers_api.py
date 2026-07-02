@@ -14,7 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.main import app
 from app.config import get_settings
-from app.db.models import AuditLog, Base, CatalystSample, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
+from app.db.models import AuditLog, Base, CatalystSample, DFTResult, DFTSetting, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
@@ -1949,6 +1949,110 @@ def test_compare_dft_results_only_attaches_bound_catalyst_sample(setup_test_db):
 
     assert items["adsorption_energy"]["catalysts"][0]["name"] == "Fe-GDY"
     assert items["cohesive_energy"]["catalysts"] == []
+
+
+def test_rejected_dft_rows_do_not_count_as_pending_review_blocks(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(
+            title="Rejected review completion paper",
+            year=2026,
+            library_name="Rejected completion lib",
+            pdf_path="rejected-completion.pdf",
+        )
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", support="graphene")
+        session.add(catalyst)
+        session.add(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
+        session.flush()
+        verified = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.23,
+            unit="eV",
+            evidence_text="Table 1 reports Li2S4 adsorption energy of -1.23 eV on Fe-N4.",
+            candidate_status="ML_Ready",
+        )
+        rejected = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="CO",
+            value=-0.45,
+            unit="eV",
+            evidence_text="This parser artifact should be rejected rather than treated as pending review work.",
+            candidate_status="Rejected",
+        )
+        session.add_all([verified, rejected])
+        session.flush()
+        for row, page, reviewer_status, reviewed_value in (
+            (verified, 4, "verified", verified.value),
+            (rejected, 5, "rejected", None),
+        ):
+            session.add(
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="table",
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="value",
+                    page=page,
+                    evidence_text=row.evidence_text,
+                    locator_status="exact_page",
+                    locator_confidence=0.95,
+                )
+            )
+            session.add(
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="value",
+                    original_value=row.value,
+                    reviewed_value=reviewed_value,
+                    unit=row.unit,
+                    evidence_text=row.evidence_text,
+                    reviewer_status=reviewer_status,
+                    reviewer="human_review",
+                    target_resolution_status="active",
+                    last_resolved_target_id=str(row.id),
+                )
+            )
+        session.commit()
+        paper_id = str(paper.id)
+
+    client = TestClient(app)
+    queue_response = client.get(
+        "/api/papers/export/dft-review-queue",
+        params={"paper_id": paper_id, "status": "all", "limit": 10},
+    )
+    assert queue_response.status_code == 200
+    queue_payload = queue_response.json()
+    assert queue_payload["metadata"]["eligible_count"] == 1
+    assert queue_payload["metadata"]["blocked_count"] == 0
+    assert queue_payload["metadata"]["blocked_reasons"] == {}
+    assert queue_payload["metadata"]["review_status_counts"] == {"rejected": 1, "verified": 1}
+    assert queue_payload["paper_completeness"][0]["exportable_dft_results"] == 1
+    assert queue_payload["paper_completeness"][0]["blocked_dft_results"] == 0
+    assert queue_payload["paper_completeness"][0]["dft_completeness_status"] == "DB_Ready"
+    assert "has_blocked_dft_results" not in queue_payload["paper_completeness"][0]["hints"]
+
+    quality_response = client.get(
+        "/api/papers/export/dft-quality",
+        params={"library_name": "Rejected completion lib"},
+    )
+    assert quality_response.status_code == 200
+    quality_payload = quality_response.json()
+    assert quality_payload["metadata"]["eligible_count"] == 1
+    assert quality_payload["metadata"]["blocked_count"] == 0
+    assert quality_payload["metadata"]["blocked_reasons"] == {}
+    assert quality_payload["paper_completeness"][0]["blocked_dft_results"] == 0
+    assert quality_payload["paper_completeness"][0]["dft_completeness_status"] == "DB_Ready"
+    assert "has_blocked_dft_results" not in quality_payload["paper_completeness"][0]["hints"]
 
 
 def test_compare_dft_results_exposes_specific_and_canonical_property_types(setup_test_db):

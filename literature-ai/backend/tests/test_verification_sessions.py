@@ -2193,6 +2193,9 @@ def _make_audit(
     confidence: float = 0.8,
     material: str | None = None,
     candidate_id: str | None = None,
+    source_label: str | None = None,
+    source: str | None = None,
+    agent_role: str | None = None,
 ) -> dict:
     """Build a minimal audit dict accepted by _settle_dft_row_from_existing_audits."""
     audit: dict = {
@@ -2207,6 +2210,12 @@ def _make_audit(
         "confidence": confidence,
         "candidate": MagicMock(),
     }
+    if source_label:
+        audit["source_label"] = source_label
+    if source:
+        audit["source"] = source
+    if agent_role:
+        audit["agent_role"] = agent_role
     if adjudication_role:
         audit["adjudication_role"] = adjudication_role
     if material:
@@ -2214,6 +2223,28 @@ def _make_audit(
     return audit
 
 
+@pytest.mark.no_test_database
+def test_untrusted_http_dft_reviews_with_distinct_source_labels_count_as_distinct_submissions():
+    service = _make_settle_service()
+    first = _make_audit(
+        source_identity="untrusted:http_external_analysis",
+        source_label="reasonix_dft_20260703_010000",
+        source="reasonix_dft",
+        decision="PASS",
+    )
+    second = _make_audit(
+        source_identity="untrusted:http_external_analysis",
+        source_label="codex_dft_primary_20260703_010500",
+        source="codex_dft_primary",
+        decision="REVISE",
+    )
+    first["source_identity_verified"] = False
+    second["source_identity_verified"] = False
+
+    assert service._same_dft_review_submission(first, second) is False
+
+
+@pytest.mark.no_test_database
 def test_settle_third_ai_priority_over_pass_reject_conflict():
     """When PASS + REJECT conflict AND a third_ai adjudication exists, the
     third_ai branch must fire — NOT the has_reject+has_positive → need_third_ai
@@ -2400,6 +2431,124 @@ def test_settle_whole_row_proposal_without_supporting_pass_returns_value_conflic
 
     assert result["status"] == "need_third_ai"
     assert result["reason"] == "value_conflict"
+
+
+@pytest.mark.no_test_database
+def test_settle_conflicting_primary_ai_opinion_is_adopted_without_third_ai():
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="Li2S6",
+        value=-1.10,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="audit_ai",
+            source_label="reasonix_dft_20260703_010000",
+            decision="PASS",
+            field_name="value",
+            corrected_value=-1.10,
+            confidence=0.82,
+            material="Co-N-C host",
+        ),
+        _make_audit(
+            source_identity="primary_ai",
+            source_label="codex_dft_primary_20260703_010500",
+            decision="REVISE",
+            field_name="value",
+            corrected_value=-1.26,
+            confidence=0.93,
+            material="Co-N-C host",
+        ),
+    ]
+
+    service = _make_settle_service()
+    service._apply_selected_opinion = MagicMock(
+        return_value={
+            "action": "approve_correction",
+            "target_type": "dft_results",
+            "target_id": str(row.id),
+            "candidate_status": "ai_applied",
+            "result": {"status": "approved"},
+        }
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="literature_library_dft",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "auto_applied"
+    assert result["action"] == "approve_correction"
+    service._apply_selected_opinion.assert_called_once()
+    call = service._apply_selected_opinion.call_args.kwargs
+    assert call["field_name"] == "value"
+    assert call["reviewer"] == "codex_dft_primary_20260703_010500"
+    assert call["opinion"]["corrected_value"] == -1.26
+
+
+@pytest.mark.no_test_database
+def test_settle_primary_pass_overrides_supported_proposed_opinion_without_third_ai():
+    row = DFTResult(
+        id=uuid4(),
+        paper_id=uuid4(),
+        property_type="adsorption_energy",
+        adsorbate="Li2S6",
+        value=-1.23,
+        unit="eV",
+    )
+    audits = [
+        _make_audit(
+            source_identity="reasonix_ai",
+            source_label="reasonix_dft_20260703_012131",
+            source="reasonix",
+            decision="PROPOSED",
+            field_name="value",
+            corrected_value=None,
+            confidence=0.84,
+            material="Co-N-C host",
+        ),
+        _make_audit(
+            source_identity="primary_ai",
+            source_label="codex_dft_primary_20260703_012131",
+            source="codex_dft_primary",
+            decision="PASS",
+            field_name="value",
+            corrected_value=-1.23,
+            confidence=0.96,
+            material="Co-N-C host",
+        ),
+    ]
+
+    service = _make_settle_service()
+    service._apply_selected_opinion = MagicMock(
+        return_value={
+            "action": "verify",
+            "target_type": "dft_results",
+            "target_id": str(row.id),
+            "candidate_status": "ai_applied",
+            "result": {"status": "verified"},
+        }
+    )
+
+    result = service._settle_dft_row_from_existing_audits(
+        row=row,
+        audits=audits,
+        reviewer="literature_library_dft",
+        write_lock_tokens=None,
+    )
+
+    assert result["status"] == "auto_applied"
+    assert result["action"] == "verify"
+    service._apply_selected_opinion.assert_called_once()
+    call = service._apply_selected_opinion.call_args.kwargs
+    assert call["field_name"] == "value"
+    assert call["reviewer"] == "codex_dft_primary_20260703_012131"
+    assert call["opinion"]["corrected_value"] == -1.23
 
 
 def test_settle_incompatible_material_identity_returns_need_repair_not_auto_apply():
