@@ -204,7 +204,7 @@ async function settleDftConsensusBeforePrompt() {
 }
 
 async function copyNewDftReviewPrompt() {
-    showToast("正式 DFT 普通 AI 审核提示词请从审核中心按单篇文献复制。", "info");
+    showToast("正式 DFT 数据审核提示词请从审核中心按单篇文献复制。", "info");
 }
 
 function dftQueueUrlForSelectedPaper(limit, paperId) {
@@ -292,7 +292,7 @@ function buildThirdAiDftAdjudicationPrompt(rows) {
 }
 
 async function copyThirdAiDftAdjudicationPrompt() {
-    showToast("DFT 主 AI 判断/修复提示词请从审核中心按单篇文献复制。", "info");
+    showToast("DFT 数据处理提示词请从审核中心按单篇文献复制。", "info");
 }
 
 async function copyNextDftAiReviewPrompt() {

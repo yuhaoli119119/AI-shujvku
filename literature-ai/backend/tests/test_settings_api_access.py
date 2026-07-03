@@ -154,7 +154,7 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v16"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v17"
     by_source = {item["source_prefix"]: item for item in payload["mcp_key_role_examples"]}
     assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
@@ -169,8 +169,8 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_prompt_templates"]
     assert "app.mcp.context.mcp_auth_context" in payload["suggested_prompt"]
-    assert "禁止直接导入 service/session/model" in payload["suggested_prompt"]
-    assert "后写入的 AI 结果允许覆盖先前 AI 结果" in payload["suggested_prompt"]
+    assert "禁止直接调用 service/session/model" in payload["suggested_prompt"]
+    assert "只处理本提示词指定的模块" in payload["suggested_prompt"]
     get_settings.cache_clear()
 
 

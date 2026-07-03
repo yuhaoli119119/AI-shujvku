@@ -4899,7 +4899,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(prompt).toContain('统一 DFT 提示词');
     expect(prompt).toContain('source_label=<agent_name>_dft_');
     expect(prompt).toContain('role: main_paper');
-    expect(prompt).toContain('DFT 普通 AI 审核提示词');
+    expect(prompt).toContain('DFT 数据审核提示词');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
     expect(prompt).not.toContain('{{SOURCE_LABEL}}');
   });
@@ -4912,8 +4912,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#promptCopySelect option[value="main_figure"]')).toHaveText('主文图片审核提示词');
     await expect(page.locator('#promptCopySelect option[value="support_figure"]')).toHaveText('支撑文献图片审核提示词');
     await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveText('表格审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 普通 AI 审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveText('DFT 主 AI 判断/修复提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 数据审核提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveText('DFT 数据处理提示词');
     await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveCount(0);
     await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
 

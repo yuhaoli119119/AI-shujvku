@@ -1223,8 +1223,8 @@
           <option value="main_figure">主文图片审核提示词</option>
           <option value="support_figure">支撑文献图片审核提示词</option>
           <option value="table">表格审核提示词</option>
-          <option value="dft">DFT 普通 AI 审核提示词</option>
-          <option value="dft_primary">DFT 主 AI 判断/修复提示词</option>
+          <option value="dft">DFT 数据审核提示词</option>
+          <option value="dft_primary">DFT 数据处理提示词</option>
         </select>
       </div>
     </div>
@@ -1333,10 +1333,9 @@
         label: "主文图片审核提示词",
         targetScope: "main",
         scopeNote: [
-          "本次审核中心入口：主文图片审核提示词。",
-          "- 只处理上方唯一目标主文献的图片对象和主文 PDF figure 证据。",
-          "- 不处理表格，不扫描支撑文献/SI 图片，不把图片与表格合并成同一个任务。",
-          "- 如图片中发现明确 DFT 数值，只能提交 DFT candidate/object_review_audit，不能写成最终 verified 或 ML_Ready。"
+          "目标：只审核当前唯一主文献的图片和主文 PDF 证据。",
+          "- 不处理支撑文献/SI 图片、表格或其他模块。",
+          "- 只有图片或图注明确给出可结构化的 DFT 结果时，才创建未验证 DFT 候选并保留图片证据。"
         ].join("\n")
       },
       support_figure: {
@@ -1345,10 +1344,10 @@
         label: "支撑文献图片审核提示词",
         targetScope: "support",
         scopeNote: [
-          "本次审核中心入口：支撑文献图片审核提示词。",
-          "- 只处理上方唯一目标支撑文献/SI 行的图片对象和 SI PDF figure 证据。",
-          "- 不处理主文图片，不处理表格，不把支撑文献图片与主文图片合并成同一个任务。",
-          "- 需要回写到主文科学候选时，必须按 codex context 的 writeback_paper_id 与 source_document_type 规则保留 SI 证据来源。"
+          "目标：只审核当前唯一支撑文献/SI 的图片和 SI PDF 证据。",
+          "- 不处理主文图片、表格或其他模块。",
+          "- 只有图片或图注明确给出可结构化的 DFT 结果时，才创建未验证 DFT 候选。",
+          "- DFT 候选按 codex context 的 writeback_paper_id 写回主文，并保留 SI paper_id、figure_id、页码和 source_document_type。"
         ].join("\n")
       },
       table: {
@@ -1357,45 +1356,32 @@
         label: "表格审核提示词",
         targetScope: "main",
         scopeNote: [
-          "本次审核中心入口：表格审核提示词。",
-          "- 只从上方唯一主文献发起任务。",
-          "- 同时检查主文表格和已关联 SI 表格；SI 表对象修改必须使用该 SI 表真实 paper_id。",
-          "- 不处理图片；发现 DFT 表格漏项只提交 DFT candidate/audit，不在表格任务里最终确认 DFT。"
+          "目标：只审核当前唯一主文献及其已关联 SI 的表格。",
+          "- SI 表格修改必须使用该表真实 paper_id。",
+          "- 只处理表格对象；其他问题交给对应专项任务。"
         ].join("\n")
       },
       dft: {
         kind: "dft",
         sourceKind: "dft",
-        label: "DFT 普通 AI 审核提示词",
+        label: "DFT 数据审核提示词",
         targetScope: "main",
         scopeNote: [
-          "本次审核中心入口：DFT 普通 AI 审核提示词。",
-          "你的角色：DFT 数据审核员。只负责核对已有 DFT 数据、发现漏项并提交审核意见或候选。",
-          "本轮唯一目标：只核验 DFT 数据。",
-          "- 执行前自检：本轮允许写入的 target_type 只有 dft_results；如果准备写入非 dft_results，立即停止。",
-          "- 禁止修改 figure、writing_card、mechanism_claim、metadata、普通表格对象、章节、摘要；即使发现缺陷也不能顺手修。",
-          "- 只处理上方唯一主文献；必须读取主文与已关联 SI 的 DFT 文本/表格证据。DFT 漏项常在普通 tables 或 PDF 表格里，不能跳过。",
-          "- 发现漏项必须写 object_review_audits decision=new_candidate，让前端可见候选进入后续受控处理。",
-          "- 审核员不能 repair_dft_audit_issue，不能 verify/reject，不能写 human_verified/safe_verified/ML_Ready，不能说可导出。"
+          "目标：只审核当前唯一主文献的 DFT 数据及其已关联 SI 证据。",
+          "- 核对已有候选，发现漏项时创建 new_candidate。",
+          "- 只提交审核意见和未验证候选，不修复、确认、拒绝或解锁导出。"
         ].join("\n")
       },
       dft_primary: {
         kind: "dft_primary",
         sourceKind: "dft_primary",
-        label: "DFT 主 AI 判断/修复提示词",
+        label: "DFT 数据处理提示词",
         targetScope: "main",
         scopeNote: [
-          "本次审核中心入口：DFT 主 AI 判断/修复提示词。",
-          "你的角色：DFT 数据处理员。只负责读取已有审核结果，判断、修复、回填并回读确认。",
-          "本轮唯一目标：只核验 DFT 数据。",
-          "- 执行前自检：本轮允许写入的 target_type 只有 dft_results；如果准备写入非 dft_results，立即停止。",
-          "- 禁止修改 figure、writing_card、mechanism_claim、metadata、普通表格对象、章节、摘要；但必须读取其中与 DFT issue/candidate 直接相关的表格证据。",
-          "- 只处理上方唯一主文献的 DFT audit issue / DFT candidate。",
-          "- 必须按当前 paper_id 调用 get_dft_audit_issues；不要全库混抓或跨 paper_id 批量处理。",
-          "- 直接使用当前已认证的 DFT 写身份；不再要求切换 dft_primary_repair key，也不因缺少 repair_dft_issues capability 阻断。",
-          "- 优先调用 repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)，一次修复并确认当前论文的可处理 issue。",
-          "- issue_count=0 或 candidate 为 0 条审核意见都不是阻塞原因；继续依据 PDF、表格和 SI 证据直接判断、修复、确认或拒绝。",
-          "- 批量失败只重试失败项；不得让单项失败阻断整篇论文。回读后 open issue=0 且没有未定 candidate 才报告 completed。"
+          "目标：只处理当前唯一主文献的 DFT handoff、candidate 和 audit issue。",
+          "- 按当前 paper_id 处理，禁止读取全库队列。",
+          "- 先处理 pending handoff，再批量修复问题并确认或拒绝剩余候选。",
+          "- 只重试批量失败项；回读后无 open issue 和未定 candidate 才完成。"
         ].join("\n")
       }
     };

@@ -22,8 +22,8 @@ test('review center is the formal AI prompt entrypoint surface', () => {
   expect(reviewCenter).toContain('主文图片审核提示词');
   expect(reviewCenter).toContain('支撑文献图片审核提示词');
   expect(reviewCenter).toContain('表格审核提示词');
-  expect(reviewCenter).toContain('DFT 普通 AI 审核提示词');
-  expect(reviewCenter).toContain('DFT 主 AI 判断/修复提示词');
+  expect(reviewCenter).toContain('DFT 数据审核提示词');
+  expect(reviewCenter).toContain('DFT 数据处理提示词');
   expect(reviewCenter).toContain('本轮唯一目标：只核验 DFT 数据。');
   expect(reviewCenter).toContain('本轮允许写入的 target_type 只有 dft_results');
   expect(reviewCenter).toContain('如果准备写入非 dft_results，立即停止');
@@ -70,5 +70,5 @@ test('DFT audit center is not a daily primary prompt entrypoint', () => {
   expect(topnav).not.toContain('label: "DFT 核验"');
   expect(auditCenter).not.toContain('copyQueueHintBtn');
   expect(auditCenter).not.toContain('复制主 AI 处理提示');
-  expect(auditCenter).toContain('日常 DFT 主 AI 判断/修复提示词必须回审核中心选择一篇主文献后复制');
+  expect(auditCenter).toContain('日常 DFT 数据处理提示词必须回审核中心选择一篇主文献后复制');
 });

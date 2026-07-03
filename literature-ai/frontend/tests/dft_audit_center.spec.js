@@ -120,7 +120,7 @@ test('copies individual issue ids and keeps API access readonly', async ({ page 
     .toBe('11111111-1111-4111-8111-111111111111');
 
   await expect(page.getByRole('button', { name: '复制主 AI 处理提示' })).toHaveCount(0);
-  await expect(page.locator('body')).toContainText('日常 DFT 主 AI 判断/修复提示词必须回审核中心选择一篇主文献后复制');
+  await expect(page.locator('body')).toContainText('日常 DFT 数据处理提示词必须回审核中心选择一篇主文献后复制');
 
   expect(requests).toHaveLength(2);
   expect(requests.every(request => request.method === 'GET')).toBe(true);

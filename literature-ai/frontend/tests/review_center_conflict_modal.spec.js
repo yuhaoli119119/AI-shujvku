@@ -108,8 +108,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(promptSelect).toContainText('主文图片审核提示词');
     await expect(promptSelect).toContainText('支撑文献图片审核提示词');
     await expect(promptSelect).toContainText('表格审核提示词');
-    await expect(promptSelect).toContainText('DFT 普通 AI 审核提示词');
-    await expect(promptSelect).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(promptSelect).toContainText('DFT 数据审核提示词');
+    await expect(promptSelect).toContainText('DFT 数据处理提示词');
     await expect(promptSelect).not.toContainText('图表指令');
 
     const rowChecks = page.locator('#rows input[type="checkbox"]');
@@ -126,7 +126,7 @@ test.describe('Review Center Conflict Modal', () => {
     const dftPrompt = await page.evaluate(() => window.__clipboardText);
     expect(dftPrompt).toContain('paper_id: main-paper');
     expect(dftPrompt).toContain('role: main_paper');
-    expect(dftPrompt).toContain('DFT 普通 AI 审核提示词');
+    expect(dftPrompt).toContain('DFT 数据审核提示词');
 
     await rowChecks.nth(0).uncheck();
     await rowChecks.nth(1).check();
@@ -421,8 +421,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(page.locator('#promptCopySelect')).toContainText('主文图片审核提示词');
     await expect(page.locator('#promptCopySelect')).toContainText('支撑文献图片审核提示词');
     await expect(page.locator('#promptCopySelect')).toContainText('表格审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('DFT 普通 AI 审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('DFT 主 AI 判断/修复提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据处理提示词');
     await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);
