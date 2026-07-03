@@ -1306,6 +1306,7 @@
       <div class="page-actions">
         <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新审核中心">↻ 刷新</button>
         <button class="btn btn-ghost" id="webAiReturnEntryBtn" type="button" onclick="openWebAiReturnDialog()" disabled>回传网页 AI 结果</button>
+        <button class="btn btn-ghost" id="webAiBundlePromptBtn" type="button" onclick="copyWebAiBundlePrompt()" title="复制上传 DFT 核验包时使用的网页 AI 提示词">复制网页 AI 提示词</button>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
           <option value="prepare_filtered">AI 重建</option>
@@ -1770,6 +1771,29 @@
       box.select();
       document.execCommand("copy");
       document.body.removeChild(box);
+    }
+
+    async function copyWebAiBundlePrompt() {
+      const prompt = [
+        "请解压并阅读这个 AI 核验包中的审核说明、manifest、返回 schema 和 JSON 模板。",
+        "",
+        "请结合主文与 SI 证据逐条核验其中的 DFT 数据：",
+        "- 正确填 PASS；",
+        "- 需要修正填 REVISE；",
+        "- 错误或重复填 REJECT；",
+        "- 发现漏提数据填 new_candidate；",
+        "- 无法确认填 NEEDS_HUMAN。",
+        "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。",
+        "",
+        "最终只输出一份严格符合返回 schema 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
+      ].join("\n");
+      try {
+        await copyTextToClipboard(prompt);
+        showToast("网页 AI 核验提示词已复制");
+      } catch (error) {
+        console.error(error);
+        showToast("复制失败，请检查浏览器剪贴板权限");
+      }
     }
 
     function currentPromptTargets(rows) {

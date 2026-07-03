@@ -103,6 +103,15 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html?paper_id=main-paper`);
 
+    await page.locator('#webAiBundlePromptBtn').click();
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('请解压并阅读这个 AI 核验包');
+    const webAiPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(webAiPrompt).toContain('PASS');
+    expect(webAiPrompt).toContain('new_candidate');
+    expect(webAiPrompt).toContain('evidence_id');
+    expect(webAiPrompt).toContain('最终只输出一份严格符合返回 schema 的完整 JSON');
+    await page.evaluate(() => { window.__clipboardText = ''; });
+
     const promptSelect = page.locator('#promptCopySelect');
     await expect(promptSelect).toContainText('主文图片审核提示词');
     await expect(promptSelect).toContainText('支撑文献图片审核提示词');
