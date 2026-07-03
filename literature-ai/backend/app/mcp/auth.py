@@ -79,6 +79,31 @@ def validate_mcp_capability_assignments(configs: dict[str, MCPKeyConfig]) -> lis
                 "capability": "repair_dft_issues",
             }
         )
+    dft_audit_identities: dict[str, dict[str, str]] = {}
+    for config in configs.values():
+        if "propose_corrections" not in config.capabilities:
+            continue
+        identity = canonical_mcp_source_identity(config.source_prefix)
+        dft_audit_identities.setdefault(
+            identity,
+            {
+                "source_prefix": config.source_prefix,
+                "display_name": config.display_name,
+            },
+        )
+    if len(dft_audit_identities) == 1:
+        warnings.append(
+            {
+                "code": "dft_second_ai_identity_unavailable",
+                "severity": "warning",
+                "message": (
+                    "Independent DFT second-AI review requires at least two distinct authenticated "
+                    "MCP identities with propose_corrections; current config exposes only one."
+                ),
+                "configured_identity_count": 1,
+                "configured_identities": list(dft_audit_identities.values()),
+            }
+        )
     return warnings
 
 

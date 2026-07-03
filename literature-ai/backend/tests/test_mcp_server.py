@@ -204,6 +204,27 @@ def test_repair_capability_lint_warns_without_raw_key(raw_config, source_prefix,
     assert "litmcp_" not in str(warning)
 
 
+@pytest.mark.no_test_database
+def test_dft_second_ai_identity_warning_omits_raw_key():
+    warnings = validate_mcp_capability_assignments(
+        parse_mcp_api_keys(
+            "owner|Local Owner|litmcp_owner_secret|read_papers,append_notes,propose_corrections,request_parse"
+        )
+    )
+
+    assert len(warnings) == 1
+    warning = warnings[0]
+    assert warning["code"] == "dft_second_ai_identity_unavailable"
+    assert warning["configured_identity_count"] == 1
+    assert warning["configured_identities"] == [
+        {
+            "source_prefix": "owner",
+            "display_name": "Local Owner",
+        }
+    ]
+    assert "litmcp_owner_secret" not in str(warning)
+
+
 def test_agent_guide_documents_optional_fast_dft_roles():
     import asyncio
 
@@ -241,6 +262,34 @@ def test_agent_guide_returns_repair_capability_lint_warning_without_raw_key(monk
     assert warnings[0]["source_prefix"] == "admin"
     assert warnings[0]["display_name"] == "Admin"
     assert "litmcp_admin_secret" not in str(warnings)
+
+
+@pytest.mark.no_test_database
+def test_agent_guide_warns_when_only_one_authenticated_dft_audit_identity(monkeypatch):
+    import asyncio
+
+    from app.api.system import get_agent_guide
+
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "owner|Local Owner|litmcp_owner_secret|read_papers,append_notes,propose_corrections,request_parse",
+    )
+    get_settings.cache_clear()
+    try:
+        guide = asyncio.run(get_agent_guide())
+    finally:
+        get_settings.cache_clear()
+
+    warnings = guide["mcp"]["capability_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
+    assert warnings[0]["configured_identities"] == [
+        {
+            "source_prefix": "owner",
+            "display_name": "Local Owner",
+        }
+    ]
+    assert "litmcp_owner_secret" not in str(warnings)
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:

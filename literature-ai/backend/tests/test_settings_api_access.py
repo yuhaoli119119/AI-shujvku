@@ -199,6 +199,35 @@ def test_ide_prompts_returns_repair_capability_warning_without_raw_key(monkeypat
     get_settings.cache_clear()
 
 
+@pytest.mark.no_test_database
+def test_ide_prompts_warns_when_only_one_authenticated_dft_audit_identity(monkeypatch):
+    import asyncio
+
+    from app.api import settings as settings_api
+
+    monkeypatch.setenv(
+        "LITAI_MCP_API_KEYS",
+        "owner|Local Owner|litmcp_owner_secret|read_papers,append_notes,propose_corrections,request_parse",
+    )
+    get_settings.cache_clear()
+    monkeypatch.setattr(settings_api, "_read_persisted_settings", lambda: {})
+
+    payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
+
+    warnings = payload["mcp_capability_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
+    assert warnings[0]["configured_identities"] == [
+        {
+            "source_prefix": "owner",
+            "display_name": "Local Owner",
+        }
+    ]
+    assert "litmcp_owner_secret" not in str(warnings)
+    assert "litmcp_owner_secret" not in payload["suggested_prompt"]
+    get_settings.cache_clear()
+
+
 def test_services_status_reports_web_ai_disabled(setup_test_db, monkeypatch):
     monkeypatch.setenv("LITAI_WRITER_API_BASE", "https://writer.example.test")
     monkeypatch.setenv("LITAI_WRITER_API_KEY", "secret")

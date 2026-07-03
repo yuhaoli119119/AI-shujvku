@@ -201,6 +201,27 @@ def test_dft_audit_report_include_closed_and_mcp_capability_warnings(setup_test_
     assert "litmcp_audit_secret" not in str(closed_report["mcp_capability_warnings"])
 
 
+def test_dft_audit_report_warns_when_only_one_authenticated_dft_audit_identity(setup_test_db):
+    with Session(setup_test_db) as session:
+        report = DFTAuditReportService(session).build_report(
+            mcp_api_keys=(
+                "owner|Local Owner|litmcp_owner_secret|"
+                "read_papers,append_notes,propose_corrections,request_parse"
+            )
+        )
+
+    warnings = report["mcp_capability_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
+    assert warnings[0]["configured_identities"] == [
+        {
+            "source_prefix": "owner",
+            "display_name": "Local Owner",
+        }
+    ]
+    assert "litmcp_owner_secret" not in str(warnings)
+
+
 def test_dft_audit_report_api_is_read_only_and_returns_payload(setup_test_db, monkeypatch):
     from app.config import get_settings
 
