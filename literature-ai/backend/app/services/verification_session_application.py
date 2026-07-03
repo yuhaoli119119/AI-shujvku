@@ -15,7 +15,6 @@ from app.db.models import (
     ExtractionFieldReview,
     PaperCorrection,
 )
-from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.review_conflict_service import DECISION_NEGATIVE, DECISION_POSITIVE
 from app.services.review_service import ReviewService
@@ -78,14 +77,22 @@ class VerificationSessionReviewApplicationMixin:
         pending_conflicts: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for (paper_id_text, target_type, target_id, field_name), opinions in grouped.items():
-            decision = self._consensus_opinion(
-                opinions,
-                primary_label=primary_label,
-                secondary_label=secondary_label,
-                target_type=target_type,
-                target_id=target_id,
-                field_name=field_name,
-            )
+            if target_type == "dft_results":
+                anchored = [opinion for opinion in opinions if self._opinion_has_anchor(opinion)]
+                decision = (
+                    {"status": "consensus", "reason": "single_ai_dft_review", "opinion": anchored[-1]}
+                    if anchored
+                    else {"status": "manual", "reason": "missing_evidence_anchor"}
+                )
+            else:
+                decision = self._consensus_opinion(
+                    opinions,
+                    primary_label=primary_label,
+                    secondary_label=secondary_label,
+                    target_type=target_type,
+                    target_id=target_id,
+                    field_name=field_name,
+                )
             if decision["status"] != "consensus":
                 pending_conflicts.append(
                     {
@@ -138,28 +145,7 @@ class VerificationSessionReviewApplicationMixin:
                 candidate.materialized_target_type = materialized_target_type
                 candidate.materialized_target_id = materialized_target_id
                 self.session.add(candidate)
-            if target_type == "dft_results":
-                for opinion in opinions:
-                    candidate = opinion.get("candidate")
-                    if candidate is None:
-                        continue
-                    candidate.status = self._object_review_candidate_status_for_result(adopted)
-                    candidate.materialized_target_type = None
-                    candidate.materialized_target_id = None
-                    self.session.add(candidate)
-                pending_conflicts.append(
-                    {
-                        "paper_id": paper_id_text,
-                        "target_type": target_type,
-                        "target_id": target_id,
-                        "field_name": field_name,
-                        "reason": "dual_ai_dft_audit_consensus_ready",
-                        "opinion_count": len(opinions),
-                        "result": adopted,
-                    }
-                )
-            else:
-                auto_applied.append(adopted)
+            auto_applied.append(adopted)
         self.session.flush()
         missing_dual = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
         if missing_dual:
@@ -200,21 +186,10 @@ class VerificationSessionReviewApplicationMixin:
         secondary = by_label[secondary_label]
         if not self._opinion_has_anchor(primary) or not self._opinion_has_anchor(secondary):
             return {"status": "manual", "reason": "missing_evidence_anchor"}
-        if target_type == "dft_results" and (
-            not self._dft_has_material_identity(primary, target_id=target_id, field_name=field_name)
-            or not self._dft_has_material_identity(secondary, target_id=target_id, field_name=field_name)
-        ):
-            return {"status": "manual", "reason": "missing_dft_material_identity"}
         if str(primary.get("decision") or "") != str(secondary.get("decision") or ""):
             return {"status": "manual", "reason": "decision_conflict"}
         if self._value_key(primary.get("corrected_value")) != self._value_key(secondary.get("corrected_value")):
             return {"status": "manual", "reason": "value_conflict"}
-        if target_type == "dft_results" and self._dft_identity_key(primary, target_id=target_id, field_name=field_name) != self._dft_identity_key(
-            secondary,
-            target_id=target_id,
-            field_name=field_name,
-        ):
-            return {"status": "manual", "reason": "identity_conflict"}
         adopted = primary if (primary.get("confidence") or 0) >= (secondary.get("confidence") or 0) else secondary
         return {"status": "consensus", "reason": "dual_ai_match", "opinion": adopted}
 
@@ -234,30 +209,12 @@ class VerificationSessionReviewApplicationMixin:
         decision = str(opinion.get("decision") or "").upper()
         evidence_payload = self._materialize_evidence_payload(opinion)
         if target_type == "dft_results":
-            if decision in {"REJECT", "REJECTED", "BLOCK"} and opinion.get("corrected_value") in (None, ""):
-                return self._apply_reject_all(
-                    paper_id=paper_id,
-                    target_type=target_type,
-                    target_id=target_id,
-                    reviewer=reviewer,
-                    opinion=opinion,
-                )
-            if dual_ai_consensus or adjudicated_by_third_ai:
-                return self._record_dft_audit_consensus(
-                    paper_id=paper_id,
-                    target_id=target_id,
-                    field_name=field_name,
-                    opinion=opinion,
-                    adjudicated_by_third_ai=adjudicated_by_third_ai,
-                )
             return self._apply_dft_opinion(
                 paper_id=paper_id,
                 target_id=target_id,
                 field_name=field_name,
                 reviewer=reviewer,
                 opinion=opinion,
-                dual_ai_consensus=dual_ai_consensus,
-                adjudicated_by_third_ai=adjudicated_by_third_ai,
                 evidence_payload=evidence_payload,
                 write_lock_tokens=write_lock_tokens,
             )
@@ -290,116 +247,6 @@ class VerificationSessionReviewApplicationMixin:
             write_lock_tokens=write_lock_tokens,
         )
 
-    def _apply_reject_all(
-        self,
-        *,
-        paper_id: UUID,
-        target_type: str,
-        target_id: str,
-        reviewer: str,
-        opinion: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        if target_type != "dft_results":
-            raise ValueError("reject_all is currently only supported for DFT result candidates.")
-        row = self.session.get(DFTResult, UUID(str(target_id)))
-        if row is not None and row.paper_id == paper_id:
-            issue_service = DFTAuditIssueService(self.session)
-            issue_service.create_or_update_consensus_issue(
-                paper_id=paper_id,
-                row=row,
-                field_name="dft_results",
-                opinion=opinion
-                or {
-                    "decision": "REJECT",
-                    "corrected_value": None,
-                    "source_identity": reviewer,
-                    "evidence_payload": row.evidence_payload,
-                },
-                negative=True,
-            )
-        self._mark_dft_audit_candidates(
-            paper_id=paper_id,
-            target_id=target_id,
-            status="ai_reviewed",
-        )
-        return {
-            "action": "audit_opinion_rejected",
-            "target_type": target_type,
-            "target_id": target_id,
-            "auto_applied": False,
-            "writes_final_truth": False,
-            "candidate_status": "ai_reviewed",
-            "result": {
-                "status": "audit_opinion_rejected",
-                "needs_user_decision": False,
-                "message": "Rejected AI audit opinions without changing the underlying DFT result.",
-            },
-        }
-
-    def _record_dft_audit_consensus(
-        self,
-        *,
-        paper_id: UUID,
-        target_id: str,
-        field_name: str,
-        opinion: dict[str, Any],
-        adjudicated_by_third_ai: bool = False,
-    ) -> dict[str, Any]:
-        row = self.session.get(DFTResult, UUID(str(target_id)))
-        if row is None or row.paper_id != paper_id:
-            raise LookupError("DFT result not found for adjudication.")
-        issue = DFTAuditIssueService(self.session).create_or_update_consensus_issue(
-            paper_id=paper_id,
-            row=row,
-            field_name=self.DFT_FIELD_ALIASES.get(field_name, field_name),
-            opinion=opinion,
-            adjudicated_by_third_ai=adjudicated_by_third_ai,
-        )
-        return {
-            "action": "record_dft_audit_consensus",
-            "target_type": "dft_results",
-            "target_id": target_id,
-            "field_name": self.DFT_FIELD_ALIASES.get(field_name, field_name),
-            "proposed_value": opinion.get("corrected_value", opinion.get("value")),
-            "issue_id": str(issue.id),
-            "issue_status": issue.status,
-            "issue_type": issue.issue_type,
-            "auto_applied": False,
-            "writes_final_truth": False,
-            "candidate_status": "requires_resolution",
-            "result": {
-                "status": "needs_user_decision",
-                "reason": "third_ai_audit_opinion" if adjudicated_by_third_ai else "dual_ai_dft_audit_consensus",
-                "message": "DFT AI audit consensus was recorded as an opinion only; it did not verify, reject, or edit the DFT result.",
-            },
-        }
-
-    def _mark_dft_audit_candidates(
-        self,
-        *,
-        paper_id: UUID,
-        target_id: str,
-        status: str,
-    ) -> None:
-        rows = self.session.scalars(
-            select(ExternalAnalysisCandidate).where(
-                ExternalAnalysisCandidate.paper_id == paper_id,
-                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
-            )
-        ).all()
-        for candidate in rows:
-            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            if self._normalize_object_review_target_type(payload.get("target_type")) != "dft_results":
-                continue
-            payload_target_id = str(payload.get("target_id") or "").strip()
-            materialized_target_id = str(candidate.materialized_target_id or "").strip()
-            if payload_target_id != str(target_id) and materialized_target_id != str(target_id):
-                continue
-            if candidate.status not in {"candidate", "pending", "requires_resolution", "materialized"}:
-                continue
-            candidate.status = status
-            self.session.add(candidate)
-
     def _apply_dft_opinion(
         self,
         *,
@@ -408,60 +255,35 @@ class VerificationSessionReviewApplicationMixin:
         field_name: str,
         reviewer: str,
         opinion: dict[str, Any],
-        dual_ai_consensus: bool,
-        adjudicated_by_third_ai: bool,
         evidence_payload: Any,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
-        row = self.session.get(DFTResult, UUID(str(target_id)))
-        if row is None or row.paper_id != paper_id:
-            raise LookupError("DFT result not found for adjudication.")
-        mapped_field = self.DFT_FIELD_ALIASES.get(field_name, field_name)
-        proposed_value = opinion.get("corrected_value", opinion.get("value"))
-        current_value = getattr(row, mapped_field, None) if hasattr(row, mapped_field) else None
-        if not (mapped_field == "catalyst_sample_id" and proposed_value not in (None, "")):
-            self._apply_dft_material_binding_if_needed(
-                row=row,
-                opinion=opinion,
-                reviewer=reviewer,
-                evidence_payload=evidence_payload,
-                write_lock_tokens=write_lock_tokens,
-            )
-            self.session.flush()
-            self.session.refresh(row)
-        note = self._materialization_note(
-            dual_ai_consensus=dual_ai_consensus,
-            adjudicated_by_third_ai=adjudicated_by_third_ai,
-        )
-        if mapped_field == "value" and self._value_key(proposed_value) == self._value_key(current_value):
-            result = DFTResultReviewService(self.session).verify_result(
-                paper_id=paper_id,
-                result_id=UUID(str(target_id)),
-                confirm_reviewed_against_pdf=True,
-                reviewer=reviewer,
-                reviewer_note=note,
-                field_names=["value"],
-                expected_write_versions=self._current_dft_review_versions(
-                    paper_id=paper_id,
-                    target_id=target_id,
-                    field_names=["value"],
-                ),
-                evidence_payload=evidence_payload,
-                commit=False,
-            )
-            return {"action": "verify", "target_type": "dft_results", "target_id": target_id, "result": result}
-        return self._apply_structured_correction(
+        imported_opinion = {
+            **opinion,
+            "field_name": field_name,
+            "evidence_payload": evidence_payload,
+        }
+        result = DFTResultReviewService(self.session).apply_imported_opinion(
             paper_id=paper_id,
-            target_type="dft_results",
-            target_id=target_id,
-            field_name=mapped_field,
+            result_id=UUID(str(target_id)),
+            opinion=imported_opinion,
             reviewer=reviewer,
-            proposed_value=proposed_value,
-            evidence_payload=evidence_payload,
-            dual_ai_consensus=dual_ai_consensus,
-            adjudicated_by_third_ai=adjudicated_by_third_ai,
+            expected_write_versions=self._current_dft_review_versions(
+                paper_id=paper_id,
+                target_id=target_id,
+            ),
             write_lock_tokens=write_lock_tokens,
+            commit=False,
         )
+        return {
+            "action": "apply_imported_dft_opinion",
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "auto_applied": True,
+            "writes_final_truth": True,
+            "candidate_status": "ai_applied",
+            "result": result,
+        }
 
     def _current_dft_review_versions(
         self,
@@ -577,39 +399,6 @@ class VerificationSessionReviewApplicationMixin:
             "result": {"status": approved.status, "reviewed_by": approved.reviewed_by},
         }
 
-    def _apply_dft_material_binding_if_needed(
-        self,
-        *,
-        row: DFTResult,
-        opinion: dict[str, Any],
-        reviewer: str,
-        evidence_payload: Any,
-        write_lock_tokens: list[str] | None = None,
-    ) -> None:
-        corrected_value = opinion.get("corrected_value")
-        raw_payload = opinion.get("raw_payload") if isinstance(opinion.get("raw_payload"), dict) else {}
-        material_identity = self._first_text(
-            corrected_value.get("material_identity") if isinstance(corrected_value, dict) else None,
-            corrected_value.get("material") if isinstance(corrected_value, dict) else None,
-            corrected_value.get("catalyst") if isinstance(corrected_value, dict) else None,
-            opinion.get("normalized_material"),
-            opinion.get("normalized_material_or_catalyst"),
-            raw_payload.get("normalized_material"),
-            raw_payload.get("normalized_material_or_catalyst"),
-            raw_payload.get("material"),
-            raw_payload.get("catalyst"),
-        )
-        if not material_identity and not row.catalyst_sample_id:
-            return
-        DFTResultReviewService(self.session)._apply_material_binding(  # noqa: SLF001 - reuse existing safe binding flow
-            row=row,
-            material_identity=material_identity,
-            reviewer=reviewer,
-            reason=str(opinion.get("reason") or "").strip() or "Applied AI-reviewed DFT material binding through the verification safety gate.",
-            evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
-            write_lock_tokens=write_lock_tokens,
-        )
-
     @staticmethod
     def _correction_collection_name(target_type: str) -> str:
         lowered = str(target_type or "").strip().lower()
@@ -702,8 +491,6 @@ class VerificationSessionReviewApplicationMixin:
             str(opinion.get("decision") or ""),
             self._value_key(opinion.get("corrected_value")),
         )
-        if target_type == "dft_results":
-            key = key + self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)
         return key
 
     def _consensus_disagreement_reason(
@@ -714,20 +501,6 @@ class VerificationSessionReviewApplicationMixin:
         target_id: str,
         field_name: str,
     ) -> str:
-        if target_type != "dft_results":
-            return "ai_disagreement"
-        value_keys = {
-            (str(item.get("decision") or ""), self._value_key(item.get("corrected_value")))
-            for item in opinions
-        }
-        if len(value_keys) > 1:
-            return "ai_disagreement"
-        identity_keys = {
-            self._dft_identity_key(item, target_id=target_id, field_name=field_name)
-            for item in opinions
-        }
-        if len(identity_keys) > 1:
-            return "ai_identity_disagreement"
         return "ai_disagreement"
 
     def _dft_identity_key(
@@ -805,38 +578,6 @@ class VerificationSessionReviewApplicationMixin:
     ) -> bool:
         identity = self._dft_identity_key(opinion, target_id=target_id, field_name=field_name)
         return len(identity) > 1 and bool(identity[1])
-
-    @classmethod
-    def _is_project_library_v4_opinion(cls, opinion: dict[str, Any]) -> bool:
-        markers = list(cls._iter_payload_markers(opinion))
-        text = " ".join(markers)
-        has_context = "li_s_sac_dac" in text
-        has_v4_contract = (
-            "project_library_ml_export_v4" in text
-            or "project_library_bundles_v1" in text
-            or "project_library_v4" in text
-        )
-        user_submit_only = "database_write_authority=user_submit_only" in text
-        auto_adopt_disabled = "ai_consensus_auto_adopt_allowed=false" in text
-        return has_context and (has_v4_contract or user_submit_only or auto_adopt_disabled)
-
-    @classmethod
-    def _iter_payload_markers(cls, value: Any, *, prefix: str = ""):
-        if isinstance(value, dict):
-            for key, nested in value.items():
-                key_text = str(key or "").strip().lower()
-                next_prefix = f"{prefix}.{key_text}" if prefix else key_text
-                if isinstance(nested, (dict, list, tuple)):
-                    yield from cls._iter_payload_markers(nested, prefix=next_prefix)
-                elif nested is not None:
-                    nested_text = str(nested).strip().lower()
-                    if nested_text:
-                        yield nested_text
-                        yield f"{key_text}={nested_text}"
-                        yield f"{next_prefix}={nested_text}"
-        elif isinstance(value, (list, tuple)):
-            for item in value:
-                yield from cls._iter_payload_markers(item, prefix=prefix)
 
     @staticmethod
     def _materialization_note(*, dual_ai_consensus: bool, adjudicated_by_third_ai: bool) -> str:

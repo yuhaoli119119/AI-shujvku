@@ -13,7 +13,7 @@ from app.domain.project_library_context import (
 from app.domain.reaction_taxonomy import REACTION_TYPES, get_reaction_profile, normalize_reaction_type
 
 
-PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v17"
+PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v18"
 CANONICAL_MCP_PATH: Final = "/mcp"
 TARGET_LIST_TOKEN: Final = "{{TARGET_LIST}}"
 SOURCE_LABEL_TOKEN: Final = "{{SOURCE_LABEL}}"
@@ -23,7 +23,6 @@ TARGET_REACTION_TOKEN: Final = "{{TARGET_REACTION}}"
 SUPPORTED_REVIEW_PROMPTS: Final = (
     "overall",
     "dft",
-    "dft_primary",
     "figure",
     "table",
     "text_review",
@@ -69,29 +68,19 @@ _DFT_SHARED_RULES = """目标文献：
 - 写入后必须回读 DFT rows、审核记录和 issue 状态。"""
 
 
-_DFT_REVIEW_RULES = """任务：审核当前论文的 DFT 数据。
+_DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
 
 职责：
 - 核验已有 DFT candidate，并检查主文和 SI 是否漏提 DFT 数据。
 - 已有数据提交 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项提交 new_candidate。
-- 只提交审核意见和未验证候选；禁止调用 repair_dft_audit_issue、verify_dft_result 或 reject_dft_result，禁止写 human_verified、safe_verified 或 ML_Ready。
+- 一份证据合格的 AI 意见即可通过 import_analysis 的受控校验和写入入口直接确认、修正、拒绝或新增 DFT 数据；不需要第二个 AI，也不按 AI 身份计票。
 
 执行：
 1. 读取当前 paper_id 的 context、DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
 2. 对每条已有 candidate 写入带证据的 object_review_audit。
 3. 漏项使用 target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"；corrected_value 至少包含 material_identity、property_type、value、unit，能确认时补充 adsorbate、reaction_step、method。
-4. 使用 import_analysis(auto_apply_review_rules=true) 写入审核结果；材料身份不清或证据冲突时写 NEEDS_HUMAN，不得猜测。
-5. 回读本轮 object_review_audits、新增候选和失败记录；没有可回读记录时不得报告 completed。"""
-
-
-_DFT_PRIMARY_RULES = """任务：处理当前论文的 DFT 候选和问题。
-
-执行：
-1. 只按当前 paper_id 读取 get_codex_context、dft_review_handoff、get_dft_audit_issues 和 DFT candidates，禁止读取全库队列。
-2. handoff.state=requires_apply_review_rules 时，按 run_id 调用 apply_analysis_review_rules 后重新读取数据。
-3. 优先调用 repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)；只对批量失败项使用 repair_dft_audit_issue 重试。
-4. 没有 issue 的 candidate 也必须判断：可信项批量确认，错误项批量拒绝，证据冲突项保留 needs_user_decision。
-5. 单项失败不阻断其他项。回读后 open issue=0 且没有未定 candidate，才报告 completed。"""
+4. 写入前获取 dft_results 模块写锁，然后使用 import_analysis(auto_apply_review_rules=true) 写入审核结果。PASS 会确认当前值，REVISE 会修改后确认，REJECT 会直接拒绝，new_candidate 会新增后确认；NEEDS_HUMAN 保持待人工，不得猜测。
+5. 回读本轮 object_review_audits、DFT rows、审核状态和失败记录；确认实际值、candidate_status 与 export_safety 后才能报告 completed。"""
 
 
 _MODULE_RULES = {
@@ -186,7 +175,7 @@ def _project_library_prompt_fragment(context_key: Any, target_reaction: Any = No
 
 def build_project_library_prompt_templates() -> dict[str, dict[str, str]]:
     fragment = _project_library_prompt_fragment("li_s_sac_dac", "SRR_LiS")
-    return {"li_s_sac_dac": {"dft": fragment, "dft_primary": fragment}}
+    return {"li_s_sac_dac": {"dft": fragment}}
 
 
 def _module_rule(
@@ -197,8 +186,6 @@ def _module_rule(
 ) -> str:
     if module_kind == "dft":
         parts = [_DFT_REVIEW_RULES.strip(), _reaction_profile_context(target_reaction).strip()]
-    elif module_kind == "dft_primary":
-        parts = [_DFT_PRIMARY_RULES.strip(), _reaction_profile_context(target_reaction).strip()]
     else:
         return _MODULE_RULES[module_kind].strip()
     if project_library_context is not None and str(project_library_context).strip():
@@ -215,7 +202,7 @@ def build_ide_review_prompt(
     project_library_context: Any = None,
 ) -> str:
     module_kind = kind if kind in SUPPORTED_REVIEW_PROMPTS else "overall"
-    common_rules = _DFT_SHARED_RULES if module_kind in {"dft", "dft_primary"} else _COMMON_RULES
+    common_rules = _DFT_SHARED_RULES if module_kind == "dft" else _COMMON_RULES
     common = common_rules.replace(TARGET_LIST_TOKEN, target_list).replace(SOURCE_LABEL_TOKEN, source_label)
     module = _module_rule(
         module_kind,
@@ -233,7 +220,6 @@ def build_reaction_profile_templates() -> dict[str, dict[str, str]]:
     return {
         reaction_type: {
             "dft": build_ide_review_prompt("dft", target_reaction=reaction_type),
-            "dft_primary": build_ide_review_prompt("dft_primary", target_reaction=reaction_type),
         }
         for reaction_type in REACTION_TYPES
     }

@@ -12,37 +12,16 @@ test('review center is the formal AI prompt entrypoint surface', () => {
   const reviewCenter = readFrontendFile('pages/review_center/index.html');
   const dftReviewerScope = reviewCenter.slice(
     reviewCenter.indexOf('      dft: {'),
-    reviewCenter.indexOf('      dft_primary: {')
-  );
-  const dftPrimaryScope = reviewCenter.slice(
-    reviewCenter.indexOf('      dft_primary: {'),
     reviewCenter.indexOf('    const conflictState')
   );
 
   expect(reviewCenter).toContain('主文图片审核提示词');
   expect(reviewCenter).toContain('支撑文献图片审核提示词');
   expect(reviewCenter).toContain('表格审核提示词');
-  expect(reviewCenter).toContain('DFT 数据审核提示词');
-  expect(reviewCenter).toContain('DFT 数据处理提示词');
-  expect(reviewCenter).toContain('本轮唯一目标：只核验 DFT 数据。');
-  expect(reviewCenter).toContain('本轮允许写入的 target_type 只有 dft_results');
-  expect(reviewCenter).toContain('如果准备写入非 dft_results，立即停止');
-  expect(reviewCenter).toContain('必须读取主文与已关联 SI 的 DFT 文本/表格证据');
-  expect(reviewCenter).toContain('DFT 漏项常在普通 tables 或 PDF 表格里，不能跳过');
-  expect(reviewCenter).toContain('禁止修改 figure、writing_card、mechanism_claim、metadata、普通表格对象');
-  expect(reviewCenter).toContain('不再要求切换 dft_primary_repair key');
-  expect(reviewCenter).toContain('repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)');
-  expect(reviewCenter).toContain('issue_count=0 或 candidate 为 0 条审核意见都不是阻塞原因');
-  expect(reviewCenter).toContain('0 条审核意见都不是阻塞原因');
-  expect(reviewCenter).toContain('批量失败只重试失败项');
-  expect(reviewCenter).not.toContain('blocked_by_missing_primary_repair_identity');
-  expect(dftReviewerScope).toContain('你的角色：DFT 数据审核员');
-  expect(dftReviewerScope).not.toContain('主 AI');
-  expect(dftReviewerScope).not.toContain('数据处理员');
-  expect(dftPrimaryScope).toContain('你的角色：DFT 数据处理员');
-  expect(dftPrimaryScope).not.toContain('普通 AI');
-  expect(dftPrimaryScope).not.toContain('审核员');
-  expect(reviewCenter).not.toContain('前置门可进入且存在 DFT candidates 时必须逐条写入 PASS/REVISE/REJECT/NEEDS_HUMAN');
+  expect(reviewCenter).toContain('DFT 数据审核与入库提示词');
+  expect(reviewCenter).not.toContain('value="dft_primary"');
+  expect(dftReviewerScope).toContain('一份证据合格的 AI 意见即可通过受控入口直接确认、修正、拒绝或新增');
+  expect(dftReviewerScope).toContain('不需要第二 AI、主 AI 或按 AI 身份计票');
   expect(reviewCenter).toContain('一次只能选择一个目标');
   expect(reviewCenter).toContain('return actionConfig.scopeNote + "\\n\\n" + rendered;');
   expect(reviewCenter).toContain('const template = profileTemplates[kind] || templates[kind] || compositeTemplates[kind];');
@@ -70,5 +49,5 @@ test('DFT audit center is not a daily primary prompt entrypoint', () => {
   expect(topnav).not.toContain('label: "DFT 核验"');
   expect(auditCenter).not.toContain('copyQueueHintBtn');
   expect(auditCenter).not.toContain('复制主 AI 处理提示');
-  expect(auditCenter).toContain('日常 DFT 数据处理提示词必须回审核中心选择一篇主文献后复制');
+  expect(auditCenter).toContain('日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制');
 });

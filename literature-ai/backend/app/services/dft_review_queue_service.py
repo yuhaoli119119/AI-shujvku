@@ -772,7 +772,7 @@ class DFTReviewQueueService:
         object_review_audits: list[dict[str, Any]] | None,
         candidate_status: str | None = None,
     ) -> dict[str, Any]:
-        audits = DFTReviewQueueService._unique_dft_review_submissions(object_review_audits or [])
+        audits = list(object_review_audits or [])
         exportable = DFTReviewQueueService._gate_is_eligible(gate)
         blocked_reasons = set(DFTReviewQueueService._gate_reasons(gate))
         review_statuses = DFTReviewQueueService._gate_review_statuses(gate)
@@ -784,11 +784,11 @@ class DFTReviewQueueService:
         ]
         valid = [opinion for opinion in effective if opinion["has_anchor"]]
         valid_count = len(valid)
-        has_primary_ai = any(DFTReviewQueueService._is_primary_dft_opinion(opinion) for opinion in valid)
-        decisions = [DFTReviewQueueService._normalize_ai_review_decision(opinion["decision"]) for opinion in valid]
-        has_reject = any(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
-        has_positive = any(decision in {"PASS", "PROPOSED", "REVISE"} for decision in decisions)
-        all_reject = bool(decisions) and all(DFTReviewQueueService._is_reject_decision(decision) for decision in decisions)
+        latest_effective_decision = (
+            DFTReviewQueueService._normalize_ai_review_decision(effective[-1]["decision"])
+            if effective
+            else ""
+        )
 
         is_rejected = (
             str(candidate_status or "").strip().lower() == "rejected"
@@ -811,33 +811,26 @@ class DFTReviewQueueService:
             label = "缺材料/结构绑定"
             reason = "不能入库：当前候选缺少可核验的材料/结构身份绑定，需要先补齐材料 identity 或 catalyst_sample 绑定。"
             action = "bind_material_identity"
-        elif raw_count >= 2 and valid_count < 2:
+        elif latest_effective_decision == "NEEDS_HUMAN":
+            state = "needs_human"
+            label = "需要人工确认"
+            reason = "AI 明确标记为无法可靠判断，系统不会自动写入这条意见。"
+            action = "human_review"
+        elif raw_count > 0 and valid_count == 0:
             state = "missing_evidence_anchor"
-            label = "第二意见缺证据定位"
-            reason = "不能入库：已有多个 AI 审核记录，但带 page 和 quoted_text 的有效证据定位不足 2 条。"
+            label = "AI 意见缺证据定位"
+            reason = "不能入库：AI 审核结果缺少可核验的 page 和 quoted_text 证据定位。"
             action = "provide_evidence_anchor"
-        elif raw_count > 0 and valid_count < 2:
-            state = "waiting_second_ai"
-            label = "等待第二个有效 AI 意见"
-            reason = "不能入库：当前只有一个带证据定位的有效审核提交，需要再导入一轮包含 page 和 quoted_text 的审核意见。"
-            action = "run_second_ai_with_evidence"
-        elif has_reject and has_positive:
-            state = "needs_third_ai"
-            label = "需主 AI 判断"
-            reason = (
-                "不能入库：有效审核提交同时包含拒绝和通过/修正，需要主 AI 依据 PDF 证据直接判断并收口。"
-            )
-            action = "refresh_primary_ai_settlement" if has_primary_ai else "run_primary_ai_decision"
-        elif valid_count >= 2 and all_reject:
-            state = "rejected_consensus_pending_write"
-            label = "一致拒绝待写回"
-            reason = "不能入库：至少两个带证据定位的有效 AI 意见一致拒绝，需点击重新检查写回或等待系统结算为已拒绝。"
-            action = "settle_consensus"
         elif raw_count == 0:
-            state = "waiting_second_ai"
-            label = "等待第二个有效 AI 意见"
-            reason = "不能入库：当前没有可计数的对象级 AI 审核意见，需要生成下一轮 AI 审核任务并提供证据定位。"
-            action = "run_second_ai_with_evidence"
+            state = "waiting_ai_review"
+            label = "等待 AI 审核"
+            reason = "当前没有可执行的 AI 审核意见。"
+            action = "run_ai_review"
+        elif valid_count > 0:
+            state = "review_pending_apply"
+            label = "AI 意见待写回"
+            reason = "已有一个带证据定位的 AI 意见；重新检查写回即可通过受控入口应用。"
+            action = "apply_latest_ai_review"
         else:
             state = "unknown_blocked"
             label = "阻塞原因待判定"
@@ -907,24 +900,6 @@ class DFTReviewQueueService:
             "anchor_summary": DFTReviewQueueService._anchor_summary(location),
             "reason_short": DFTReviewQueueService._shorten(audit.get("reason"), 160),
         }
-
-    @staticmethod
-    def _is_primary_dft_opinion(audit: dict[str, Any]) -> bool:
-        markers = ("dft_primary", "primary_ai", "primary ai", "main_ai", "main ai")
-        for value in (
-            audit.get("source_label"),
-            audit.get("source"),
-            audit.get("agent_role"),
-            audit.get("model_name"),
-        ):
-            normalized = str(value or "").strip().lower()
-            if not normalized:
-                continue
-            if normalized.startswith("verify:") and normalized.endswith(":primary"):
-                return True
-            if any(marker in normalized for marker in markers):
-                return True
-        return False
 
     @staticmethod
     def _has_valid_evidence_anchor(location: Any) -> bool:

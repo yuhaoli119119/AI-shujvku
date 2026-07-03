@@ -13,11 +13,10 @@ function dftMissingReviewLabel(item) {
         (Array.isArray(item.object_review_audits) ? item.object_review_audits : []).filter(dftOpinionHasAnchor)
     );
     if (audits.length === 0) return "尚无 AI 对象审核";
-    if (audits.length === 1) return "仅有一个审核提交，等待下一轮";
     const classified = classifyDftAutomationRows([item]);
-    if (classified.consensus.length) return "双 AI 一致，待系统写回";
-    if (classified.conflicts.length) return "多 AI 意见有冲突，待裁决";
-    return "多 AI 审核尚未形成可写回结论";
+    if (classified.readyToApply.length) return "AI 意见待系统写回";
+    if (classified.needsHuman.length) return "AI 无法确认，待人工处理";
+    return "已有 AI 意见，等待受控写回";
 }
 
 function dftBlockedReasonText(reasons, item) {
@@ -33,11 +32,11 @@ function dftWorkflowMeta(item) {
     if (!stateValue && !(item && item.dft_workflow_label)) return null;
     const classByState = {
         exportable: "parsed",
-        waiting_second_ai: "meta",
+        waiting_ai_review: "meta",
         missing_evidence_anchor: "failed",
         missing_material_binding: "failed",
-        needs_third_ai: "failed",
-        rejected_consensus_pending_write: "failed",
+        needs_human: "failed",
+        review_pending_apply: "meta",
         rejected: "failed",
         unknown_blocked: "meta"
     };

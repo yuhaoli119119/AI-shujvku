@@ -196,12 +196,10 @@ def test_dft_audit_report_include_closed_and_mcp_capability_warnings(setup_test_
 
     assert closed_report["issue_status_counts"] == {"closed": 1}
     assert open_report["issue_status_counts"] == {}
-    assert len(closed_report["mcp_capability_warnings"]) == 1
-    assert closed_report["mcp_capability_warnings"][0]["source_prefix"] == "assigned_dft_audit"
-    assert "litmcp_audit_secret" not in str(closed_report["mcp_capability_warnings"])
+    assert closed_report["mcp_capability_warnings"] == []
 
 
-def test_dft_audit_report_warns_when_only_one_authenticated_dft_audit_identity(setup_test_db):
+def test_dft_audit_report_accepts_one_authenticated_dft_ai(setup_test_db):
     with Session(setup_test_db) as session:
         report = DFTAuditReportService(session).build_report(
             mcp_api_keys=(
@@ -211,15 +209,7 @@ def test_dft_audit_report_warns_when_only_one_authenticated_dft_audit_identity(s
         )
 
     warnings = report["mcp_capability_warnings"]
-    assert len(warnings) == 1
-    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
-    assert warnings[0]["configured_identities"] == [
-        {
-            "source_prefix": "owner",
-            "display_name": "Local Owner",
-        }
-    ]
-    assert "litmcp_owner_secret" not in str(warnings)
+    assert warnings == []
 
 
 def test_dft_audit_report_api_is_read_only_and_returns_payload(setup_test_db, monkeypatch):

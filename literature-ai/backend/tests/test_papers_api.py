@@ -549,7 +549,7 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v17"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v18"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in data["prompt_contract"]["project_library_contexts"]

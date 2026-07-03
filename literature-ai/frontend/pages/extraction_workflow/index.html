@@ -739,7 +739,7 @@
             <div class="tool-icon emerald">3</div>
             <h3 class="tool-name">入库门槛</h3>
           </div>
-          <p class="tool-desc">高风险对象必须带 section、quoted text、table、figure、PDF page 等原文锚点，并经过双 AI 一致或主 AI 判断后才能入库。普通内容也必须有原文锚点，没有证据一律不入库。</p>
+          <p class="tool-desc">高风险对象必须带 section、quoted text、table、figure、PDF page 等原文锚点，通过结构校验、写锁和受控导入后才能入库。AI 名称和来源只记录于审计日志，不作为入库门槛；没有证据一律不入库。</p>
         </div>
       </div>
     </section>
@@ -961,7 +961,7 @@
         description: "指定 AI、其它第二 AI 或人工依据明文协议和证据包复核。AI 可重点审图，指定 AI 可重点审 DFT 行；角色可变，但记录必须可追溯。只有已审核、证据完整、PDF 定位准确且通过最终闸门的数据才进入 DFT 数据库和可信可视化。",
         worker: ["读取第二 AI 审核协议。", "记录 agent_role、model_name、protocol version/hash。", "先用 get_review_coverage 查看 latest_external_audits、external_audit_count、source_distribution 和未审核盲区。", "复核候选字段、证据、定位、重复和既有外部审核意见。", "输出 internal_data_read_status 与可否 promote_to_exportable_database。"],
         review: ["accept 仍需满足项目设定的人审或最终门槛。", "未读取到 artifact_status、review coverage 或 prior external audits 时，不得输出可入库。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
-        prompt: "任务：按 second AI audit protocol 审核候选记录。声明 agent_role 和 model_name；先读取 artifact_status 与 get_review_coverage，检查 latest_external_audits/external_audit_count/source_distribution。不要发明值；不要从常识修复；只基于 evidence packet 和内部核验数据给出 decision、reasons、internal_data_read_status、prior_external_audit_summary、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
+        prompt: "任务：按 evidence audit protocol 审核候选记录。记录当前 agent_name 仅用于审计；先读取 artifact_status 与 get_review_coverage，检查 latest_external_audits/external_audit_count/source_distribution。不要发明值；不要从常识修复；只基于 evidence packet 和内部核验数据给出 decision、reasons、internal_data_read_status、prior_external_audit_summary、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
       }
     ];
     let currentStep = steps[0];

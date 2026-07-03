@@ -192,68 +192,29 @@ function dftIsAutoRejectDuplicate(row) {
 }
 
 function classifyDftAutomationRows(rows) {
-    const result = { consensus: [], conflicts: [], newReview: [], autoAccept: [], autoReject: [] };
+    const result = { readyToApply: [], needsHuman: [], newReview: [] };
     (rows || []).forEach(function(row) {
         if (!row || row.is_exportable === true) return;
         const workflowState = String(row.dft_workflow_state || "").trim();
-        if (workflowState === "needs_third_ai") {
-            result.conflicts.push(row);
+        if (workflowState === "needs_human") {
+            result.needsHuman.push(row);
             return;
         }
-        if (workflowState === "waiting_second_ai" || workflowState === "missing_evidence_anchor" || workflowState === "missing_material_binding") {
+        if (["waiting_ai_review", "missing_evidence_anchor", "missing_material_binding"].includes(workflowState)) {
             result.newReview.push(row);
             return;
         }
-        if (workflowState === "rejected_consensus_pending_write") {
-            result.consensus.push(row);
+        if (workflowState === "review_pending_apply") {
+            result.readyToApply.push(row);
             return;
         }
-        const submissions = uniqueDftReviewSubmissions(
-            (Array.isArray(row.object_review_audits) ? row.object_review_audits : [])
-                .filter(dftOpinionHasAnchor)
-                .sort(sortDftAuditsNewestFirst)
-        );
         const repairReasons = new Set(["missing_material_identity", "missing_evidence", "missing_evidence_text", "unsafe_locator"]);
         const blockedReasons = Array.isArray(row.blocked_reasons) ? row.blocked_reasons : [];
-        const hasReject = submissions.some(function(audit) { return isNegativeDftDecision(audit && audit.decision); });
-        const hasPositive = submissions.some(function(audit) {
-            const decision = dftOpinionDecision(audit);
-            return ["PASS", "PROPOSED", "REVISE", "NEW_CANDIDATE"].includes(decision);
-        });
-        const allReject = submissions.length > 0 && submissions.every(function(audit) {
-            return isNegativeDftDecision(audit && audit.decision);
-        });
-        if (hasReject && hasPositive) {
-            result.conflicts.push(row);
-            return;
-        }
-        if (submissions.length < 2 || blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
+        if (blockedReasons.some(function(reason) { return repairReasons.has(reason); })) {
             result.newReview.push(row);
             return;
         }
-        if (dftIsAutoRejectDuplicate(row)) {
-            result.consensus.push(row);
-            return;
-        }
-        if (allReject) {
-            result.consensus.push(row);
-            return;
-        }
-        const proposal = dftWholeRowProposal(row);
-        const support = dftSupportingValuePass(row, proposal);
-        if (proposal && support && dftIndependentOpinionsAgree(row, submissions)) {
-            result.consensus.push(row);
-            return;
-        }
-        if (proposal) {
-            result.conflicts.push(row);
-            return;
-        }
-        if (dftIndependentOpinionsAgree(row, submissions)) {
-            result.consensus.push(row);
-            return;
-        }
-        result.conflicts.push(row);
+        result.newReview.push(row);
     });
     return result;
 }

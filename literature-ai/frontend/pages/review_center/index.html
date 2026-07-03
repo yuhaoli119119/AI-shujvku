@@ -1317,8 +1317,7 @@
           <option value="main_figure">主文图片审核提示词</option>
           <option value="support_figure">支撑文献图片审核提示词</option>
           <option value="table">表格审核提示词</option>
-          <option value="dft">DFT 数据审核提示词</option>
-          <option value="dft_primary">DFT 数据处理提示词</option>
+          <option value="dft">DFT 数据审核与入库提示词</option>
         </select>
       </div>
     </div>
@@ -1496,24 +1495,13 @@
       dft: {
         kind: "dft",
         sourceKind: "dft",
-        label: "DFT 数据审核提示词",
+        label: "DFT 数据审核与入库提示词",
         targetScope: "main",
         scopeNote: [
           "目标：只审核当前唯一主文献的 DFT 数据及其已关联 SI 证据。",
           "- 核对已有候选，发现漏项时创建 new_candidate。",
-          "- 只提交审核意见和未验证候选，不修复、确认、拒绝或解锁导出。"
-        ].join("\n")
-      },
-      dft_primary: {
-        kind: "dft_primary",
-        sourceKind: "dft_primary",
-        label: "DFT 数据处理提示词",
-        targetScope: "main",
-        scopeNote: [
-          "目标：只处理当前唯一主文献的 DFT handoff、candidate 和 audit issue。",
-          "- 按当前 paper_id 处理，禁止读取全库队列。",
-          "- 先处理 pending handoff，再批量修复问题并确认或拒绝剩余候选。",
-          "- 只重试批量失败项；回读后无 open issue 和未定 candidate 才完成。"
+          "- 一份证据合格的 AI 意见即可通过受控入口直接确认、修正、拒绝或新增；NEEDS_HUMAN 才留待人工。",
+          "- 不需要第二 AI、主 AI 或按 AI 身份计票。"
         ].join("\n")
       }
     };
@@ -2052,7 +2040,7 @@
         targetList,
         "",
         "目标说明：human_ref 是给人沟通用的稳定短号；调用 MCP/API 时必须使用同一行的 paper_id(UUID)，不要使用页面序号或旧 #001 编号。",
-        "source_label 必须写成：" + sourceLabel + "。请把 <agent_name> 替换成你的实际模型或窗口名，例如 gemini、kimi、codex、claude；source_label 只用于展示和追踪本轮运行，不是 AI 身份，双 AI 判重只认服务端认证 key 写入的 source_identity。",
+        "source_label 必须写成：" + sourceLabel + "。请把 <agent_name> 替换成你的实际模型或窗口名，例如 gemini、kimi、codex、claude；source_label 只用于展示和追踪本轮运行，不参与 DFT 入库资格判断。",
         "",
         "必须执行：",
         "0. 先检查当前可用工具列表：应能看到 literature-ai/query_papers、get_paper、get_codex_context、get_codex_item、read_paper_page、import_analysis 等 MCP 工具；如果 IDE 会话里没有这些工具，只能把服务端已配置的 MCP API key 传给 literature-ai/backend 的 app.mcp.context.mcp_auth_context，再受控调用 app.mcp.server 已公开的 MCP 工具。禁止构造 MCPAuthInfo、自填 source_identity，禁止直接调用 service/session/model 或数据库。受控入口不可用时报告 blocked_by_missing_mcp_tool。不要自行写 mcp_config.json。",
@@ -2063,7 +2051,7 @@
         "4. 每篇目标文献最终必须至少有一次受控回写：元数据、章节、figure 元信息等普通非表格字段使用 import_analysis；表格对象修改使用 update_table/create_table/merge_table/delete_table。优先走当前 IDE 暴露的 MCP 工具，缺失时走项目内后端 MCP 兜底路径。import_analysis 参数固定包含 source='ide_ai'、source_label='" + sourceLabel + "'、reviewer='<agent_name>'。",
         "4-apply. 如果本次要直接应用非 DFT 修正、创建对象或写 [AI_REVIEWED] 状态，直接使用 auto_apply_review_rules=true；非 DFT AI 写入允许后写覆盖先写，不需要模块写锁。",
         "4-candidate. 如果只是提交 object_review_audits / paper-level audit candidate，通常可以使用 auto_apply_review_rules=false；这只表示候选意见已导入，状态仍是 unverified/candidate，不等于审核完成、通过或已应用。",
-        "4-candidate-dft-new. 但如果本次 DFT 审核发现 parser 漏项，并且你要把漏掉的 DFT 行稳定补进系统候选队列，必须写 decision='new_candidate' + 结构化 corrected_value，并使用 auto_apply_review_rules=true。这样系统会自动把它 materialize 成未验证的 DFTResult candidate；这仍不是最终通过，也不会直接解锁导出。",
+        "4-dft. DFT 审核必须写 PASS、REVISE、REJECT、NEEDS_HUMAN 或 new_candidate，并使用 auto_apply_review_rules=true。取得 dft_results 写锁后，一份证据合格的意见即可通过受控入口直接确认、修正、拒绝或新增；NEEDS_HUMAN 才保留待人工。",
         "4a. 图像操作是强例外：recrop_figure 和 create_figure_from_bbox 必须 direct MCP tool 调用，绝不能把 recrop、bbox、补图、裁图请求伪装成 import_analysis 或 correction_proposals。",
         "4b. 在尝试图像修复前，先确认当前 MCP 会话里实际暴露了 recrop_figure / create_figure_from_bbox。若工具不存在、不可调用或 capability 缺失，必须停止并明确报告 blocked_by_missing_mcp_tool 或 missing_request_parse_capability；不要谎称系统没有该工具，也不要改走 import_analysis 假装完成。",
         "5. 工具/API 返回错误时必须停止并报告错误；不要伪造已回写，不要只给用户文字报告。",
@@ -2090,7 +2078,7 @@
       }
 
       if (kind === "dft") {
-        return commonWithHardening + "\n\n本次任务模块：DFT 数据专项核验\n目标：只核验 DFT 结果对象和漏提 DFT 数据，必须回写 raw_payload.object_review_audits。不要用 correction_proposals 直接修改 DFT。\n\n开始前必须读取 codex-context.context.source_assets.pdf_path，记录原 PDF 文件名。凡是数值异常、单位异常、材料身份缺失、表格列错位、疑似漏提，都必须用原 PDF 文件名 + read_paper_page 页码证据核对。\n\n关键要求：\n- 每条意见必须绑定具体材料/结构/位点/吸附物或反应步/性质/数值/单位/证据位置。\n- 无法确认 material identity 时不要 PASS，写 PROPOSED 或 REJECT，并说明缺哪一维身份。\n- 发现 parser 漏提的 DFT 数据，用 decision='new_candidate'、target_type='dft_results'、target_id='new'、field_name='dft_results'，corrected_value 写完整结构化对象；每条新增候选必须能唯一定位到材料/性质/条件/方法/来源表格行，至少包含 material、property 或 energy_type、value、unit、method 或 calculation_setting、source_table、source_row_or_condition。\n- 对任何文献都是同一规则：如果你希望这些漏提 DFT 行稳定进入系统候选队列，而不是只停在外部审稿意见，实际调用 import_analysis 时必须用 auto_apply_review_rules=true。系统会把它 materialize 成未验证的 DFTResult candidate；这仍不是最终通过，也不会直接解锁导出。\n- 不要把正文对表格数值的重复描述当成新的 DFT 行；若已有表格行覆盖，只核验或拒绝重复候选。\n- 不要从图片曲线估读数值；图像只能作为定位证据，数值必须来自正文、表格或明确文字。\n- SI 数据若属于主文 SI，source_document_type='si' 且归属主文；引用文献/支撑文献的数据必须 borrowed_from_reference=true，不计入当前主文导出。\n\nraw_payload 示例：\n{\n  \"object_review_audits\": [\n    {\"paper_id\":\"<paper_id>\", \"target_type\":\"dft_results\", \"target_id\":\"<dft_result_uuid>\", \"field_name\":\"value\", \"decision\":\"PASS\", \"corrected_value\":1.23, \"confidence\":0.86, \"reason\":\"value matches table text\", \"normalized_material\":\"2-AGDYNR under 1 GPa\", \"normalized_energy_type\":\"band_gap\", \"evidence_location\":{\"page\":5,\"quoted_text\":\"band gap is 1.23 eV\",\"source_document_type\":\"main\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}},\n    {\"paper_id\":\"<paper_id>\", \"target_type\":\"dft_results\", \"target_id\":\"new\", \"field_name\":\"dft_results\", \"decision\":\"new_candidate\", \"corrected_value\":{\"material\":\"具体材料/结构\", \"property\":\"band_gap\", \"energy_type\":\"band_gap\", \"value\":1.23, \"unit\":\"eV\", \"method\":\"DFT\", \"calculation_setting\":\"PBE-D3\", \"source_table\":\"Table 1\", \"source_row_or_condition\":\"row label / temperature / method column\"}, \"confidence\":0.8, \"reason\":\"DFT table row was missing from parser output\", \"normalized_material\":\"具体材料/结构\", \"normalized_energy_type\":\"band_gap\", \"evidence_location\":{\"page\":5,\"table\":\"Table 1\",\"quoted_text\":\"Table row text\",\"source_document_type\":\"main\",\"source_pdf\":\"<source_assets.pdf_path 文件名>\"}}\n  ]\n}\n\nimport_analysis 调用规则：\n- 普通 object_review_audits candidate-only 导入可用 auto_apply_review_rules=false。\n- 但只要 payload 里包含你希望进入系统候选队列的 DFT new_candidate，import_analysis 必须改用 auto_apply_review_rules=true。";
+        return commonWithHardening + "\n\n本次任务模块：DFT 数据专项核验与入库\n目标：核验已有 DFT 结果并补齐漏项，必须回写 raw_payload.object_review_audits；不要用 correction_proposals 修改 DFT。\n\n开始前读取 codex-context.context.source_assets.pdf_path，并用 read_paper_page 核对主文和 SI 证据。\n\n规则：\n- 每条意见必须绑定材料/结构、性质或反应步、数值、单位以及 page + quoted_text。\n- 已有行使用 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项使用 new_candidate。材料身份或证据不能确认时必须写 NEEDS_HUMAN，不得猜测。\n- new_candidate 的 corrected_value 至少包含 material_identity、property_type、value、unit；能确认时补充 adsorbate、reaction_step 和 method。\n- 正文、SI、表格或图片对同一计算结果的重复证据应合并到同一行，不要创建重复 DFT 结果。\n- 不从曲线估读数值；图像只有明确标注数值时才可作为结果证据。\n- 写入前获取 dft_results 模块写锁，然后调用 import_analysis(auto_apply_review_rules=true)。一份证据合格的 AI 意见即可直接确认、修正、拒绝或新增，不需要第二 AI 或主 AI。\n- 回读 DFT row、candidate_status、审核记录和 export_safety，确认实际写入后才报告 completed。";
       }
 
       if (kind === "figure") {
@@ -3580,7 +3568,7 @@
     function adjudicationRoleBadge(opinion) {
       const role = String(opinion && opinion.adjudication_role || "").trim().toLowerCase();
       if (!role) return "";
-      return '<span class="chip warn">' + esc(role === "third_ai" ? "主 AI 判断" : role) + '</span>';
+      return '<span class="chip warn">' + esc(role === "third_ai" ? "历史裁决意见" : role) + '</span>';
     }
 
     function formatLocatorSummary(opinion) {
@@ -4041,8 +4029,8 @@
       const raw = String(opinion.source_label || opinion.source || opinion.agent_role || opinion.model_name || opinion.source_type || "review");
       if (raw === "codex_live_test") return "现场核验";
       if (/^verify:.*:primary$/i.test(raw)) return "主审核 AI";
-      if (/^verify:.*:secondary$/i.test(raw)) return "第二审核 AI";
-      if (/^verify:.*:(third_ai|primary)$/i.test(raw)) return "主 AI 判断";
+      if (/^verify:.*:secondary$/i.test(raw)) return "AI 审核意见";
+      if (/^verify:.*:(third_ai|primary)$/i.test(raw)) return "历史裁决意见";
       if (raw === "manual_adjudication") return "人工裁定";
       return raw;
     }

@@ -66,7 +66,7 @@ class DFTAuditIssueRepairService:
         evidence_payload: dict[str, Any] | list[Any] | None,
         repaired_by: str,
         required_capability: str = "repair_dft_issues",
-        repair_actor_role: str = "primary_ai_repair",
+        repair_actor_role: str = "dft_issue_repair",
     ) -> dict[str, Any]:
         action = str(action or "").strip()
         if action not in self.ACTIONS:
@@ -118,7 +118,7 @@ class DFTAuditIssueRepairService:
                 issue,
                 status="needs_user_decision",
                 repaired_by=repaired_by,
-                note=reason or f"{issue.issue_type} requires user decision before primary-AI repair.",
+                note=reason or f"{issue.issue_type} requires user decision before automated repair.",
                 action_result="needs_user_decision",
             )
             return {
@@ -662,7 +662,7 @@ class DFTAuditIssueRepairService:
 
     def _candidate_identity_for_issue(self, issue: DFTAuditIssue, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:
         signature = self._dedupe_signature_for_suggested(paper_id=issue.paper_id, suggested=suggested, evidence=evidence)
-        return hashlib.sha256(f"primary_ai_repair:{signature}".encode("utf-8")).hexdigest()
+        return hashlib.sha256(f"dft_issue_repair:{signature}".encode("utf-8")).hexdigest()
 
     def _stale_fields(self, issue: DFTAuditIssue, row: DFTResult) -> list[str]:
         snapshot = issue.current_snapshot if isinstance(issue.current_snapshot, dict) else {}

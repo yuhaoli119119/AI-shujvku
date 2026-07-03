@@ -1446,11 +1446,10 @@ async function mockApi(route) {
         target_list_token: '{{TARGET_LIST}}',
         source_label_token: '{{SOURCE_LABEL}}',
         target_reaction_token: '{{TARGET_REACTION}}',
-        supported_kinds: ['overall', 'dft', 'dft_primary', 'figure', 'table', 'sections_writing', 'text_review'],
+        supported_kinds: ['overall', 'dft', 'figure', 'table', 'sections_writing', 'text_review'],
         templates: {
           overall: '统一总体提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n受控调用 app.mcp.context.mcp_auth_context + app.mcp.server；禁止直接操作数据库。',
-          dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n单个 AI 不得最终确认 DFT。',
-          dft_primary: '统一 DFT 主 AI 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nget_dft_audit_issues(paper_id=<当前 paper_id>)',
+          dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n一份证据合格的 AI 意见即可通过受控入口写入。',
           figure: '统一图片提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           table: '统一表格提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           sections_writing: '统一章节提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nsection_level section_number parent_heading heading_path',
@@ -3318,8 +3317,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         twoAi: dftBlockedReasonText(['missing_review'], { ...base, object_review_audits: [first, second] }),
       };
     });
-    expect(missingReviewLabels.oneAi).toBe('仅有一个审核提交，等待下一轮');
-    expect(missingReviewLabels.twoAi).toBe('双 AI 一致，待系统写回');
+    expect(missingReviewLabels.oneAi).toBe('已有 AI 意见，等待受控写回');
+    expect(missingReviewLabels.twoAi).toBe('已有 AI 意见，等待受控写回');
     const dftConflictClassification = await page.evaluate(() => {
       const rejectAudit = {
         source_label: 'ai-reject',
@@ -3341,8 +3340,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         object_review_audits: [rejectAudit, reviseAudit],
       }]);
     });
-    expect(dftConflictClassification.conflicts).toHaveLength(1);
-    expect(dftConflictClassification.newReview).toHaveLength(0);
+    expect(dftConflictClassification.readyToApply).toHaveLength(0);
+    expect(dftConflictClassification.needsHuman).toHaveLength(0);
+    expect(dftConflictClassification.newReview).toHaveLength(1);
     await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(4);
     const dftSampleGroups = page.locator('#dftContent [data-role="dft-sample-group"]');
     await expect(dftSampleGroups).toHaveCount(1);
@@ -3522,8 +3522,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           paper_id: 'paper-1',
           auto_applied_count: 0,
           exportable_count: 0,
-          waiting_second_ai_count: 1,
-          need_third_ai_count: 0,
+          needs_human_count: 0,
           need_repair_count: 0,
           blocked_reason_counts: { missing_review: 1 },
         });
@@ -3690,7 +3689,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#dftContent button:has-text("刷新审核状态")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
-      await expect(page.locator('#dftContent')).toContainText('正式 DFT 普通 AI 和主 AI 任务请回审核中心按单篇文献复制提示词');
+      await expect(page.locator('#dftContent')).toContainText('正式 DFT 任务请回审核中心按单篇文献复制提示词');
+      await expect(page.locator('#dftContent')).toContainText('一份证据合格的 AI 意见');
       await expect(page.locator('#dftContent')).toContainText('page 和 quoted_text');
       await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
 
@@ -4899,21 +4899,21 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(prompt).toContain('统一 DFT 提示词');
     expect(prompt).toContain('source_label=<agent_name>_dft_');
     expect(prompt).toContain('role: main_paper');
-    expect(prompt).toContain('DFT 数据审核提示词');
+    expect(prompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
     expect(prompt).not.toContain('{{SOURCE_LABEL}}');
   });
 
-  test('business flow: review center exposes separate figure table and DFT primary entries', async ({ page }) => {
+  test('business flow: review center exposes figure table and unified DFT entry', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    await expect(page.locator('#promptCopySelect option')).toHaveCount(6);
+    await expect(page.locator('#promptCopySelect option')).toHaveCount(5);
     await expect(page.locator('#promptCopySelect option[value="main_figure"]')).toHaveText('主文图片审核提示词');
     await expect(page.locator('#promptCopySelect option[value="support_figure"]')).toHaveText('支撑文献图片审核提示词');
     await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveText('表格审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 数据审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveText('DFT 数据处理提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 数据审核与入库提示词');
+    await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveCount(0);
     await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveCount(0);
     await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
 
@@ -4923,19 +4923,19 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       return {
         mainFigure: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.main_figure),
         table: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.table),
-        dftPrimary: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.dft_primary),
+        dft: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.dft),
       };
     });
 
     expect(prompts.mainFigure).toContain('统一图片提示词');
     expect(prompts.mainFigure).toContain('source_label=<agent_name>_main_figure_');
-    expect(prompts.mainFigure).toContain('主文图片审核提示词');
+    expect(prompts.mainFigure).toContain('只审核当前唯一主文献的图片');
     expect(prompts.table).toContain('统一表格提示词');
     expect(prompts.table).toContain('source_label=<agent_name>_table_');
-    expect(prompts.table).toContain('同时检查主文表格和已关联 SI 表格');
-    expect(prompts.dftPrimary).toContain('统一 DFT 主 AI 提示词');
-    expect(prompts.dftPrimary).toContain('source_label=<agent_name>_dft_primary_');
-    expect(prompts.dftPrimary).toContain('get_dft_audit_issues');
+    expect(prompts.table).toContain('只审核当前唯一主文献及其已关联 SI 的表格');
+    expect(prompts.dft).toContain('统一 DFT 提示词');
+    expect(prompts.dft).toContain('source_label=<agent_name>_dft_');
+    expect(prompts.dft).toContain('一份证据合格的 AI 意见即可通过受控入口');
   });
 
   test('business flow: review center legacy prompts keep table mutations on direct tools', async ({ page }) => {

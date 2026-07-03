@@ -827,12 +827,12 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
                 assert payload["evidence_location"]["source_document_type"] == "supplementary_information"
                 assert payload["dedupe_signature"].startswith("dft:")
                 assert candidate.evidence_payload["source_document_type"] == "supplementary_information"
-                assert candidate.status == "materialized"
+                assert candidate.status == "ai_applied"
                 assert candidate.materialized_target_type == "dft_results"
                 assert candidate.materialized_target_id is not None
                 stored_row = session.get(DFTResult, UUID(candidate.materialized_target_id))
                 assert stored_row is not None
-                assert stored_row.candidate_status == "new_candidate"
+                assert stored_row.candidate_status == "ML_Ready"
                 assert stored_row.property_type == "adsorption_energy"
                 assert stored_row.value == -1.23
                 assert stored_row.unit == "eV"
@@ -842,8 +842,8 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
                 assert locator.target_type == "dft_results"
                 assert locator.page == 14
                 gate = is_export_eligible_extraction(session, stored_row, target_type="dft_results")
-                assert not gate.eligible
-                assert "missing_review" in gate.reasons
+                assert gate.eligible
+                assert gate.reasons == ()
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -1338,7 +1338,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
             assert len(payload["candidates"]) == 1
             candidate = payload["candidates"][0]
             assert candidate["candidate_type"] == "object_review_audit"
-            assert candidate["status"] == "candidate"
+            assert candidate["status"] == "requires_resolution"
             assert candidate["normalized_payload"]["target_type"] == "dft_results"
             assert candidate["normalized_payload"]["target_id"] == str(row_id)
             assert candidate["normalized_payload"]["field_name"] == "value"
@@ -1683,127 +1683,7 @@ def test_external_analysis_import_rejects_empty_payload():
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_requires_dual_ai_for_dft(monkeypatch):
-    with TemporaryDirectory() as tmpdir:
-        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
-        Base.metadata.create_all(engine)
-
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
-        try:
-            with Session(engine) as session:
-                paper = Paper(title="Dual AI DFT Paper", pdf_path="dual-dft.pdf", authors=[])
-                session.add(paper)
-                session.flush()
-                catalyst = CatalystSample(
-                    paper_id=paper.id,
-                    name="Li2S4 on graphdiyne",
-                    catalyst_type="graphdiyne",
-                    support="graphdiyne",
-                )
-                session.add(catalyst)
-                session.flush()
-                row = DFTResult(
-                    paper_id=paper.id,
-                    catalyst_sample_id=catalyst.id,
-                    property_type="adsorption_energy",
-                    adsorbate="Li2S4",
-                    value=-1.20,
-                    unit="eV",
-                    source_section="Results",
-                    evidence_text="Table 1 reports -1.20 eV.",
-                    candidate_status="system_candidate",
-                )
-                session.add(row)
-                session.commit()
-                paper_id = paper.id
-                row_id = row.id
-
-            client = TestClient(app)
-            first_headers, second_headers = _configure_dual_ai_http_auth(monkeypatch)
-            base_payload = {
-                "paper_id": str(paper_id),
-                "source": "ide_ai",
-                "auto_apply_review_rules": True,
-                "raw_payload": {
-                    "object_review_audits": [
-                        {
-                            "paper_id": str(paper_id),
-                            "target_type": "dft_results",
-                            "target_id": str(row_id),
-                            "field_name": "value",
-                            "decision": "PASS",
-                            "corrected_value": -1.20,
-                            "confidence": 0.91,
-                            "reason": "Table 1 confirms the value.",
-                            "evidence_location": {"page": 7, "section": "Results", "table": "Table 1", "quoted_text": "-1.20 eV"},
-                        }
-                    ]
-                },
-            }
-            first = client.post(
-                "/api/external-analysis/import",
-                json={**base_payload, "source_label": "ide-ai-1"},
-                headers=first_headers,
-            )
-            second = client.post(
-                "/api/external-analysis/import",
-                json={**base_payload, "source_label": "ide-ai-2"},
-                headers=second_headers,
-            )
-            assert first.status_code == 200
-            assert second.status_code == 200
-            with Session(engine) as session:
-                stored_row = session.get(DFTResult, row_id)
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
-                issues = session.query(DFTAuditIssue).all()
-
-            assert stored_row is not None
-            assert stored_row.candidate_status == "system_candidate"
-            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
-            assert len(issues) == 1
-            assert issues[0].status == "needs_primary_ai"
-            assert issues[0].target_id == str(row_id)
-
-            conflict = client.post(
-                "/api/external-analysis/import",
-                json={
-                    **base_payload,
-                    "source_label": "ide-ai-3",
-                    "raw_payload": {
-                        "object_review_audits": [
-                            {
-                                "paper_id": str(paper_id),
-                                "target_type": "dft_results",
-                                "target_id": str(row_id),
-                                "field_name": "value",
-                                "decision": "REVISE",
-                                "corrected_value": -1.35,
-                                "confidence": 0.88,
-                                "reason": "Conflicting audit after settlement.",
-                                "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "-1.35 eV"},
-                            }
-                        ]
-                    },
-                },
-            )
-            assert conflict.status_code == 200
-        finally:
-            app.dependency_overrides.clear()
-            get_settings.cache_clear()
-            engine.dispose()
-
-
-def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending(monkeypatch):
+def test_external_analysis_dft_missing_material_identity_stays_pending(monkeypatch):
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -1839,7 +1719,7 @@ def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending(m
                 row_id = row.id
 
             client = TestClient(app)
-            first_headers, second_headers = _configure_dual_ai_http_auth(monkeypatch)
+            first_headers, _ = _configure_dual_ai_http_auth(monkeypatch)
             payload = {
                 "paper_id": str(paper_id),
                 "source": "ide_ai",
@@ -1867,14 +1747,7 @@ def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending(m
                 json={**payload, "source_label": "ide-ai-1"},
                 headers=first_headers,
             )
-            second = client.post(
-                "/api/external-analysis/import",
-                json={**payload, "source_label": "ide-ai-2"},
-                headers=second_headers,
-            )
-
             assert first.status_code == 200
-            assert second.status_code == 200
             with Session(engine) as session:
                 stored_row = session.get(DFTResult, row_id)
                 candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
@@ -1884,103 +1757,6 @@ def test_external_analysis_dft_dual_ai_missing_material_identity_stays_pending(m
             assert stored_row.candidate_status == "system_candidate"
             assert {candidate.status for candidate in candidates} == {"requires_resolution"}
             assert reviews == []
-        finally:
-            app.dependency_overrides.clear()
-            engine.dispose()
-
-
-def test_external_analysis_dft_dual_ai_requires_same_material_identity():
-    with TemporaryDirectory() as tmpdir:
-        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
-        Base.metadata.create_all(engine)
-
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
-        try:
-            with Session(engine) as session:
-                paper = Paper(title="DFT identity conflict paper", pdf_path="dft-identity.pdf", authors=[])
-                session.add(paper)
-                session.flush()
-                catalyst = CatalystSample(
-                    paper_id=paper.id,
-                    name="alpha-GDY",
-                    catalyst_type="graphdiyne",
-                    support="graphdiyne",
-                )
-                session.add(catalyst)
-                session.flush()
-                row = DFTResult(
-                    paper_id=paper.id,
-                    catalyst_sample_id=catalyst.id,
-                    property_type="band_gap",
-                    value=1.20,
-                    unit="eV",
-                    source_section="Results",
-                    evidence_text="Table 1 reports a 1.20 eV band gap.",
-                    candidate_status="system_candidate",
-                )
-                session.add(row)
-                session.commit()
-                paper_id = paper.id
-                row_id = row.id
-
-            client = TestClient(app)
-            write_lock_tokens = [
-                _acquire_write_lock(client, paper_id, module_name="catalyst_samples", locked_by="ide_ai"),
-                _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="ide_ai"),
-            ]
-
-            def payload_for(source_label: str, material: str) -> dict[str, Any]:
-                return {
-                    "paper_id": str(paper_id),
-                    "source": "ide_ai",
-                    "source_label": source_label,
-                    "auto_apply_review_rules": True,
-                    "reviewer": "ide_ai",
-                    "write_lock_tokens": write_lock_tokens,
-                    "raw_payload": {
-                        "object_review_audits": [
-                            {
-                                "paper_id": str(paper_id),
-                                "target_type": "dft_results",
-                                "target_id": str(row_id),
-                                "field_name": "value",
-                                "decision": "PASS",
-                                "corrected_value": 1.20,
-                                "confidence": 0.9,
-                                "reason": "Table 1 confirms the value.",
-                                "normalized_energy_type": "band_gap",
-                                "normalized_material": material,
-                                "evidence_location": {"page": 4, "table": "Table 1", "quoted_text": "1.20 eV"},
-                            }
-                        ]
-                    },
-                }
-
-            first = client.post("/api/external-analysis/import", json=payload_for("ide-ai-1", "alpha-GDY"))
-            second = client.post("/api/external-analysis/import", json=payload_for("ide-ai-2", "beta-GDY"))
-
-            assert first.status_code == 200
-            assert second.status_code == 200
-            with Session(engine) as session:
-                stored_row = session.get(DFTResult, row_id)
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
-                conflicts = ReviewConflictAggregationService(session).list_conflicts(paper_id=paper_id)
-
-            assert stored_row is not None
-            assert stored_row.candidate_status == "system_candidate"
-            assert {candidate.status for candidate in candidates} == {"candidate"}
-            assert conflicts["conflict_count"] == 1
-            assert "identity_conflict" in conflicts["rows"][0]["conflict_types"]
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2691,7 +2467,7 @@ def test_import_analysis_rejects_legacy_codex_item_table_correction():
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_sample(monkeypatch):
+def test_external_analysis_single_ai_review_can_bind_dft_to_catalyst_sample(monkeypatch):
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2736,7 +2512,7 @@ def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_samp
                 catalyst_id = catalyst.id
 
             client = TestClient(app)
-            first_headers, second_headers = _configure_dual_ai_http_auth(monkeypatch)
+            first_headers, _ = _configure_dual_ai_http_auth(monkeypatch)
             base_payload = {
                 "paper_id": str(paper_id),
                 "source": "ide_ai",
@@ -2766,14 +2542,7 @@ def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_samp
                 json={**base_payload, "source_label": "ide-ai-1"},
                 headers=first_headers,
             )
-            second = client.post(
-                "/api/external-analysis/import",
-                json={**base_payload, "source_label": "ide-ai-2"},
-                headers=second_headers,
-            )
-
             assert first.status_code == 200
-            assert second.status_code == 200
 
             with Session(engine) as session:
                 stored_row = session.get(DFTResult, row_id)
@@ -2783,15 +2552,13 @@ def test_external_analysis_auto_apply_review_rules_can_bind_dft_to_catalyst_samp
                 issues = session.query(DFTAuditIssue).all()
 
             assert stored_row is not None
-            assert stored_row.catalyst_sample_id is None
-            assert corrections == []
-            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
-            material_issues = [issue for issue in issues if issue.issue_type == "wrong_material"]
-            assert material_issues
-            assert {issue.status for issue in material_issues} == {"needs_primary_ai"}
-            assert {issue.suggested_value for issue in material_issues} == {str(catalyst_id)}
-            assert "missing_material_identity" in gate.reasons
-            assert "missing_review" in gate.reasons
+            assert stored_row.catalyst_sample_id == catalyst_id
+            assert corrections
+            assert {correction.status for correction in corrections} == {"approved"}
+            assert {candidate.status for candidate in candidates} == {"ai_applied"}
+            assert "missing_material_identity" not in gate.reasons
+            assert gate.eligible
+            assert gate.reasons == ()
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2883,360 +2650,6 @@ def test_object_level_audit_payloads_participate_in_conflict_aggregation():
             assert {item["source_type"] for item in conflict["opinions"]} == {"object_review_audit"}
             assert stored_row.candidate_status == "system_candidate"
             assert stored_row.value == -0.50
-        finally:
-            app.dependency_overrides.clear()
-            engine.dispose()
-
-
-def test_external_analysis_third_ai_can_adjudicate_dual_ai_disagreement():
-    with TemporaryDirectory() as tmpdir:
-        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
-        Base.metadata.create_all(engine)
-
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
-        try:
-            with Session(engine) as session:
-                paper = Paper(title="Third AI DFT Paper", pdf_path="third-ai.pdf", authors=[])
-                session.add(paper)
-                session.flush()
-                row = DFTResult(
-                    paper_id=paper.id,
-                    property_type="adsorption_energy",
-                    adsorbate="Li2S6",
-                    value=-1.10,
-                    unit="eV",
-                    source_section="Results",
-                    evidence_text="Table 3 reports the adsorption energies.",
-                    candidate_status="system_candidate",
-                )
-                session.add(row)
-                session.commit()
-                paper_id = paper.id
-                row_id = row.id
-
-            client = TestClient(app)
-            def payload_for(
-                source_label: str,
-                decision: str,
-                corrected_value: float,
-                confidence: float,
-                adjudication_role: str | None = None,
-                write_lock_tokens: list[str] | None = None,
-            ):
-                body = {
-                    "paper_id": str(paper_id),
-                    "source": "ide_ai",
-                    "source_label": source_label,
-                    "auto_apply_review_rules": True,
-                    "raw_payload": {
-                        "object_review_audits": [
-                            {
-                                "paper_id": str(paper_id),
-                                "target_type": "dft_result",
-                                "target_id": str(row_id),
-                                "field_name": "value",
-                                "decision": decision,
-                                "corrected_value": corrected_value,
-                                "confidence": confidence,
-                                "reason": "Compare against Table 3 and the surrounding paragraph.",
-                                "normalized_energy_type": "adsorption_energy",
-                                "normalized_material": "Co-N-C host",
-                                "structure_name": "CoN4 single-atom site",
-                                "adsorbate": "Li2S6",
-                                "reaction_step": "adsorption",
-                                "selected_source_ids": ["ide-ai-1", "ide-ai-2"],
-                                "evidence_location": {"page": 8, "section": "Results", "table": "Table 3", "quoted_text": "-1.26 eV"},
-                                **({"adjudication_role": adjudication_role, "adjudication_scope": "conflict_resolution"} if adjudication_role else {}),
-                            }
-                        ]
-                    },
-                }
-                if write_lock_tokens:
-                    body["write_lock_tokens"] = write_lock_tokens
-                return body
-
-            first = client.post(
-                "/api/external-analysis/import",
-                json=payload_for("ide-ai-1", "PASS", -1.10, 0.81),
-            )
-            second = client.post(
-                "/api/external-analysis/import",
-                json=payload_for("ide-ai-2", "REVISE", -1.26, 0.84),
-            )
-            third = client.post(
-                "/api/external-analysis/import",
-                json=payload_for(
-                    "ide-ai-3",
-                    "REVISE",
-                    -1.26,
-                    0.92,
-                    adjudication_role="third_ai",
-                ),
-            )
-
-            assert first.status_code == 200
-            assert second.status_code == 200
-            assert third.status_code == 200
-
-            with Session(engine) as session:
-                stored_row = session.get(DFTResult, row_id)
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
-                corrections = session.query(PaperCorrection).all()
-                issues = session.query(DFTAuditIssue).all()
-
-            assert stored_row is not None
-            assert stored_row.value == -1.10
-            assert corrections == []
-            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
-            assert any(issue.status == "needs_user_decision" for issue in issues)
-            assert any(issue.suggested_value == -1.26 for issue in issues)
-        finally:
-            app.dependency_overrides.clear()
-            engine.dispose()
-
-
-def test_external_analysis_primary_ai_opinion_overrides_conflicting_audit_without_third_ai():
-    with TemporaryDirectory() as tmpdir:
-        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
-        Base.metadata.create_all(engine)
-
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
-        try:
-            with Session(engine) as session:
-                paper = Paper(title="Primary AI DFT Paper", pdf_path="primary-ai.pdf", authors=[])
-                session.add(paper)
-                session.flush()
-                row = DFTResult(
-                    paper_id=paper.id,
-                    property_type="adsorption_energy",
-                    adsorbate="Li2S6",
-                    value=-1.10,
-                    unit="eV",
-                    source_section="Results",
-                    evidence_text="Table 3 reports the adsorption energies.",
-                    candidate_status="system_candidate",
-                )
-                session.add(row)
-                session.commit()
-                paper_id = paper.id
-                row_id = row.id
-
-            client = TestClient(app)
-
-            def payload_for(
-                source: str,
-                source_label: str,
-                decision: str,
-                corrected_value: float | None,
-                confidence: float,
-            ):
-                return {
-                    "paper_id": str(paper_id),
-                    "source": source,
-                    "source_label": source_label,
-                    "auto_apply_review_rules": True,
-                    "raw_payload": {
-                        "object_review_audits": [
-                            {
-                                "paper_id": str(paper_id),
-                                "target_type": "dft_result",
-                                "target_id": str(row_id),
-                                "field_name": "value",
-                                "decision": decision,
-                                "corrected_value": corrected_value,
-                                "confidence": confidence,
-                                "reason": "Compare against Table 3 and the surrounding paragraph.",
-                                "normalized_energy_type": "adsorption_energy",
-                                "normalized_material": "Co-N-C host",
-                                "structure_name": "CoN4 single-atom site",
-                                "adsorbate": "Li2S6",
-                                "reaction_step": "adsorption",
-                                "evidence_location": {
-                                    "page": 8,
-                                    "section": "Results",
-                                    "table": "Table 3",
-                                    "quoted_text": "-1.26 eV",
-                                },
-                            }
-                        ]
-                    },
-                }
-
-            first = client.post(
-                "/api/external-analysis/import",
-                json=payload_for("reasonix_dft", "reasonix_dft_20260703_020100", "PASS", -1.10, 0.81),
-            )
-            second = client.post(
-                "/api/external-analysis/import",
-                json=payload_for(
-                    "codex_dft_primary",
-                    "codex_dft_primary_20260703_020200",
-                    "REVISE",
-                    -1.26,
-                    0.92,
-                ),
-            )
-
-            assert first.status_code == 200
-            assert second.status_code == 200
-
-            with Session(engine) as session:
-                stored_row = session.get(DFTResult, row_id)
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
-                corrections = session.query(PaperCorrection).all()
-                issues = session.query(DFTAuditIssue).all()
-
-            assert stored_row is not None
-            assert stored_row.value == -1.26
-            assert any(
-                correction.field_name == "dft_results"
-                and str(correction.target_path or "").endswith(":value")
-                and correction.proposed_value == -1.26
-                for correction in corrections
-            )
-            assert all(correction.status == "approved" for correction in corrections)
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
-            assert issues == []
-        finally:
-            app.dependency_overrides.clear()
-            engine.dispose()
-
-
-def test_external_analysis_primary_pass_overrides_proposed_audit_without_third_ai():
-    with TemporaryDirectory() as tmpdir:
-        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
-        Base.metadata.create_all(engine)
-
-        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-        def override_get_db_session():
-            db = TestingSessionLocal()
-            try:
-                yield db
-            finally:
-                db.close()
-
-        app.dependency_overrides[get_db_session] = override_get_db_session
-
-        try:
-            with Session(engine) as session:
-                paper = Paper(title="Primary PASS DFT Paper", pdf_path="primary-pass.pdf", authors=[])
-                session.add(paper)
-                session.flush()
-                row = DFTResult(
-                    paper_id=paper.id,
-                    property_type="adsorption_energy",
-                    adsorbate="Li2S6",
-                    value=-1.23,
-                    unit="eV",
-                    source_section="Results",
-                    evidence_text="The text contrasts -1.59 eV and -1.23 eV adsorption energies.",
-                    candidate_status="system_candidate",
-                )
-                session.add(row)
-                session.commit()
-                paper_id = paper.id
-                row_id = row.id
-
-            client = TestClient(app)
-
-            def payload_for(
-                source: str,
-                source_label: str,
-                decision: str,
-                corrected_value: float,
-                confidence: float,
-            ):
-                return {
-                    "paper_id": str(paper_id),
-                    "source": source,
-                    "source_label": source_label,
-                    "auto_apply_review_rules": True,
-                    "raw_payload": {
-                        "object_review_audits": [
-                            {
-                                "paper_id": str(paper_id),
-                                "target_type": "dft_result",
-                                "target_id": str(row_id),
-                                "field_name": "value",
-                                "decision": decision,
-                                "corrected_value": corrected_value,
-                                "confidence": confidence,
-                                "reason": "Compare against the contrastive adsorption-energy sentence.",
-                                "normalized_energy_type": "adsorption_energy",
-                                "normalized_material": "Co-N-C host",
-                                "structure_name": "CoN4 single-atom site",
-                                "adsorbate": "Li2S6",
-                                "reaction_step": "adsorption",
-                                "evidence_location": {
-                                    "page": 8,
-                                    "section": "Results",
-                                    "quoted_text": "-1.59 eV versus -1.23 eV for Li2S6-Co-N4",
-                                },
-                            }
-                        ]
-                    },
-                }
-
-            first = client.post(
-                "/api/external-analysis/import",
-                json=payload_for("reasonix_dft", "reasonix_dft_20260703_020100", "PROPOSED", None, 0.84),
-            )
-            second = client.post(
-                "/api/external-analysis/import",
-                json=payload_for(
-                    "codex_dft_primary",
-                    "codex_dft_primary_20260703_020200",
-                    "PASS",
-                    -1.23,
-                    0.96,
-                ),
-            )
-
-            assert first.status_code == 200
-            assert second.status_code == 200
-
-            with Session(engine) as session:
-                stored_row = session.get(DFTResult, row_id)
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
-                corrections = session.query(PaperCorrection).all()
-                issues = session.query(DFTAuditIssue).all()
-                reviews = session.query(ExtractionFieldReview).all()
-
-            assert stored_row is not None
-            assert stored_row.value == -1.23
-            assert stored_row.candidate_status == "ML_Ready"
-            assert not any(
-                correction.field_name == "dft_results"
-                and str(correction.target_path or "").endswith(":value")
-                for correction in corrections
-            )
-            assert all(correction.status == "approved" for correction in corrections)
-            assert not {candidate.status for candidate in candidates} & {"candidate", "pending", "requires_resolution"}
-            assert issues == []
-            assert len(reviews) == 1
-            assert reviews[0].reviewer_status == "verified"
-            assert reviews[0].reviewer == "codex_dft_primary_20260703_020200"
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -3559,7 +2972,7 @@ def test_http_import_dft_new_candidate_defaults_to_apply_and_auto_acquires_lock(
 
             assert response.status_code == 200, response.text
             body = response.json()
-            assert body["candidates"][0]["status"] == "materialized"
+            assert body["candidates"][0]["status"] == "ai_applied"
             assert body["candidates"][0]["normalized_payload"]["target_type"] == "dft_results"
             assert body["candidates"][1]["status"] == "requires_resolution"
             assert body["candidates"][1]["materialized_target_id"] is None
@@ -3571,7 +2984,7 @@ def test_http_import_dft_new_candidate_defaults_to_apply_and_auto_acquires_lock(
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
                 assert len(dft_rows) == 1
-                assert dft_rows[0].candidate_status == "new_candidate"
+                assert dft_rows[0].candidate_status == "ML_Ready"
                 assert dft_rows[0].value == -1.23
                 ml_issues = [issue for issue in issues if issue.issue_type == "source_scope_error"]
                 assert len(ml_issues) == 1
@@ -3671,13 +3084,13 @@ def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates()
             assert apply_response.status_code == 200, apply_response.text
             apply_body = apply_response.json()
             assert apply_body["candidate_count"] == 1
-            assert apply_body["candidates"][0]["status"] == "materialized"
+            assert apply_body["candidates"][0]["status"] == "ai_applied"
             assert apply_body["candidates"][0]["materialized_target_type"] == "dft_results"
 
             with Session(engine) as session:
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 assert len(dft_rows) == 1
-                assert dft_rows[0].candidate_status == "new_candidate"
+                assert dft_rows[0].candidate_status == "ML_Ready"
                 assert dft_rows[0].value == -0.95
                 from app.db.models import ModuleWriteLock
                 active_locks = session.scalars(
@@ -3779,7 +3192,7 @@ def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_
 
             with Session(engine) as session:
                 assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "candidate"
-                assert session.get(ExternalAnalysisCandidate, current_candidate_id).status == "materialized"
+                assert session.get(ExternalAnalysisCandidate, current_candidate_id).status == "ai_applied"
                 rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 assert len(rows) == 1
                 assert rows[0].value == -0.9
@@ -3793,7 +3206,7 @@ def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_
             )
             assert applied_old.status_code == 200, applied_old.text
             with Session(engine) as session:
-                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "materialized"
+                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "ai_applied"
                 assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 2
                 assert session.query(DFTAuditIssue).filter(DFTAuditIssue.paper_id == paper_id).count() == 2
         finally:
@@ -3894,7 +3307,7 @@ def test_materialize_endpoint_defers_object_review_audit_without_consuming_it():
             )
             assert apply_response.status_code == 200, apply_response.text
             with Session(engine) as session:
-                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "materialized"
+                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "ai_applied"
                 assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 1
         finally:
             app.dependency_overrides.clear()

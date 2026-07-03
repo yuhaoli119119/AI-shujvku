@@ -388,8 +388,7 @@ async def settle_ai_dft_reviews(
         reviewer="literature_library_dft",
     )
     if (
-        summary.get("waiting_second_ai_count", 0) == 0
-        and summary.get("need_third_ai_count", 0) == 0
+        summary.get("needs_human_count", 0) == 0
         and summary.get("need_repair_count", 0) == 0
     ):
         analysis = dict(paper.comprehensive_analysis or {})

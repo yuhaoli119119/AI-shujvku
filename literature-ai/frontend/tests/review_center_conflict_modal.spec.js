@@ -89,7 +89,6 @@ test.describe('Review Center Conflict Modal', () => {
               figure: 'FIGURE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
-              dft_primary: 'DFT PRIMARY TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
             },
             composite_templates: {},
             reaction_profile_templates: {},
@@ -108,8 +107,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(promptSelect).toContainText('主文图片审核提示词');
     await expect(promptSelect).toContainText('支撑文献图片审核提示词');
     await expect(promptSelect).toContainText('表格审核提示词');
-    await expect(promptSelect).toContainText('DFT 数据审核提示词');
-    await expect(promptSelect).toContainText('DFT 数据处理提示词');
+    await expect(promptSelect).toContainText('DFT 数据审核与入库提示词');
+    await expect(promptSelect).not.toContainText('DFT 数据处理提示词');
     await expect(promptSelect).not.toContainText('图表指令');
 
     const rowChecks = page.locator('#rows input[type="checkbox"]');
@@ -126,7 +125,7 @@ test.describe('Review Center Conflict Modal', () => {
     const dftPrompt = await page.evaluate(() => window.__clipboardText);
     expect(dftPrompt).toContain('paper_id: main-paper');
     expect(dftPrompt).toContain('role: main_paper');
-    expect(dftPrompt).toContain('DFT 数据审核提示词');
+    expect(dftPrompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
 
     await rowChecks.nth(0).uncheck();
     await rowChecks.nth(1).check();
@@ -138,7 +137,7 @@ test.describe('Review Center Conflict Modal', () => {
     const supportPrompt = await page.evaluate(() => window.__clipboardText);
     expect(supportPrompt).toContain('paper_id: si-paper');
     expect(supportPrompt).toContain('role: supplementary_information');
-    expect(supportPrompt).toContain('支撑文献图片审核提示词');
+    expect(supportPrompt).toContain('只审核当前唯一支撑文献/SI 的图片');
   });
 
   test('links grouped conflicts to read-only evidence preview', async ({ page }) => {
@@ -421,8 +420,8 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(page.locator('#promptCopySelect')).toContainText('主文图片审核提示词');
     await expect(page.locator('#promptCopySelect')).toContainText('支撑文献图片审核提示词');
     await expect(page.locator('#promptCopySelect')).toContainText('表格审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据处理提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据审核与入库提示词');
+    await expect(page.locator('#promptCopySelect')).not.toContainText('DFT 数据处理提示词');
     await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');
     const rows = page.locator('#rows tr');
     await expect(rows).toHaveCount(2);

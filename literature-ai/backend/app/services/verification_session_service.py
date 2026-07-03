@@ -59,8 +59,7 @@ class VerificationSessionService(
     VerificationSessionDFTConsensusMixin,
     VerificationSessionReviewApplicationMixin,
 ):
-    HIGH_RISK_IDE_TARGET_TYPES = {"dft_results", "catalyst_samples"}
-    PROJECT_LIBRARY_V4_USER_SUBMIT_REASON = "project_library_v4_requires_user_submit"
+    HIGH_RISK_IDE_TARGET_TYPES = {"catalyst_samples"}
     HIGH_RISK_SCOPES = {
         "all": {"dft_results", "mechanism_claims", "electrochemical_performance", "catalyst_samples", "dft_settings"},
         "dft_only": {"dft_results"},
@@ -331,15 +330,11 @@ class VerificationSessionService(
                 "applied_count": dft_settlement_summary["auto_applied_count"],
                 "applied_items": dft_settlement_summary["auto_applied_items"],
                 "pending_count": (
-                    dft_settlement_summary["audit_consensus_count"]
-                    + dft_settlement_summary["waiting_second_ai_count"]
-                    + dft_settlement_summary["need_third_ai_count"]
+                    dft_settlement_summary["needs_human_count"]
                     + dft_settlement_summary["need_repair_count"]
                 ),
                 "pending_items": (
-                    dft_settlement_summary["audit_consensus_items"]
-                    + dft_settlement_summary["waiting_second_ai_items"]
-                    + dft_settlement_summary["need_third_ai_items"]
+                    dft_settlement_summary["needs_human_items"]
                     + dft_settlement_summary["need_repair_items"]
                 ),
                 "skipped_count": dft_settlement_summary["skipped_count"],
@@ -389,32 +384,20 @@ class VerificationSessionService(
             .where(DFTResult.paper_id == paper_id)
             .order_by(DFTResult.id.asc())
         ).all()
-        audits_by_target = self._paper_dft_audit_candidates(paper_id)
+        audits_by_target = self._paper_dft_audit_candidates(
+            paper_id,
+            candidate_run_id=candidate_run_id,
+        )
         auto_applied: list[dict[str, Any]] = []
-        audit_consensus_ready: list[dict[str, Any]] = []
-        need_third_ai: list[dict[str, Any]] = []
+        needs_human: list[dict[str, Any]] = []
         need_repair: list[dict[str, Any]] = []
-        waiting_second_ai: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
 
         for row in rows:
             row_id = str(row.id)
             audits = audits_by_target.get(row_id, [])
-            if self._has_settled_dft_review(paper_id=paper_id, target_id=row_id):
-                if not self._has_pending_dft_adjudication(audits):
-                    continue
-                if self._consume_matching_settled_dft_adjudication(row=row, audits=audits):
-                    auto_applied.append(
-                        {
-                            "record_id": row_id,
-                            "field_name": "dft_results",
-                            "property_type": row.property_type,
-                            "value": row.value,
-                            "unit": row.unit,
-                            "action": "already_settled",
-                        }
-                    )
-                    continue
+            if not audits:
+                continue
             row_summary = self._settle_dft_row_from_existing_audits(
                 row=row,
                 audits=audits,
@@ -424,14 +407,10 @@ class VerificationSessionService(
             status = row_summary.pop("status")
             if status == "auto_applied":
                 auto_applied.append(row_summary)
-            elif status == "audit_consensus_ready":
-                audit_consensus_ready.append(row_summary)
-            elif status == "need_third_ai":
-                need_third_ai.append(row_summary)
+            elif status == "needs_human":
+                needs_human.append(row_summary)
             elif status == "need_repair":
                 need_repair.append(row_summary)
-            elif status == "waiting_second_ai":
-                waiting_second_ai.append(row_summary)
             else:
                 skipped.append(row_summary)
 
@@ -441,14 +420,10 @@ class VerificationSessionService(
             "new_dft_candidates": new_dft_summary,
             "auto_applied_count": len(auto_applied),
             "auto_applied_items": auto_applied,
-            "audit_consensus_count": len(audit_consensus_ready),
-            "audit_consensus_items": audit_consensus_ready,
-            "need_third_ai_count": len(need_third_ai),
-            "need_third_ai_items": need_third_ai,
+            "needs_human_count": len(needs_human),
+            "needs_human_items": needs_human,
             "need_repair_count": len(need_repair),
             "need_repair_items": need_repair,
-            "waiting_second_ai_count": len(waiting_second_ai),
-            "waiting_second_ai_items": waiting_second_ai,
             "skipped_count": len(skipped),
             "skipped_items": skipped,
         }
@@ -457,9 +432,8 @@ class VerificationSessionService(
             {
                 "exportable_count": gate_counts["exportable_count"],
                 "blocked_reason_counts": gate_counts["blocked_reason_counts"],
-                "gate_need_third_ai_count": gate_counts["need_third_ai_count"],
+                "gate_needs_human_count": gate_counts["needs_human_count"],
                 "gate_need_repair_count": gate_counts["need_repair_count"],
-                "gate_waiting_second_ai_count": gate_counts["waiting_second_ai_count"],
             }
         )
         self.session.add(
@@ -472,12 +446,10 @@ class VerificationSessionService(
                 payload={
                     "paper_id": str(paper_id),
                     "auto_applied_count": summary["auto_applied_count"],
-                    "audit_consensus_count": summary["audit_consensus_count"],
-                    "need_third_ai_count": summary["need_third_ai_count"],
+                    "needs_human_count": summary["needs_human_count"],
                     "need_repair_count": summary["need_repair_count"],
                     "blocked_reason_counts": summary["blocked_reason_counts"],
                     "exportable_count": summary["exportable_count"],
-                    "waiting_second_ai_count": summary["waiting_second_ai_count"],
                 },
             )
         )
@@ -497,21 +469,16 @@ class VerificationSessionService(
             "new_dft_candidates": empty_candidates,
             "auto_applied_count": 0,
             "auto_applied_items": [],
-            "audit_consensus_count": 0,
-            "audit_consensus_items": [],
-            "need_third_ai_count": 0,
-            "need_third_ai_items": [],
+            "needs_human_count": 0,
+            "needs_human_items": [],
             "need_repair_count": 0,
             "need_repair_items": [],
-            "waiting_second_ai_count": 0,
-            "waiting_second_ai_items": [],
             "skipped_count": 0,
             "skipped_items": [],
             "exportable_count": gate_counts["exportable_count"],
             "blocked_reason_counts": gate_counts["blocked_reason_counts"],
-            "gate_need_third_ai_count": gate_counts["need_third_ai_count"],
+            "gate_needs_human_count": gate_counts["needs_human_count"],
             "gate_need_repair_count": gate_counts["need_repair_count"],
-            "gate_waiting_second_ai_count": gate_counts["waiting_second_ai_count"],
         }
 
     def _required_direct_write_modules_for_paper(
@@ -618,7 +585,17 @@ class VerificationSessionService(
         if row is None:
             raise LookupError("Conflict target not found.")
         if resolution == "reject_all":
-            result = self._apply_reject_all(paper_id=paper_id, target_type=target_type, target_id=target_id, reviewer=reviewer)
+            result = self._apply_selected_opinion(
+                paper_id=paper_id,
+                target_type=target_type,
+                target_id=target_id,
+                field_name=field_name,
+                reviewer=reviewer,
+                opinion={
+                    "decision": "REJECT",
+                    "reason": "Rejected through manual conflict resolution.",
+                },
+            )
         else:
             if not opinion_source_id:
                 raise ValueError("opinion_source_id is required when adopting a specific opinion.")
@@ -740,8 +717,8 @@ class VerificationSessionService(
         if self.HIGH_RISK_SCOPES.get(scope):
             lanes.append(
                 {
-                    "lane": "high_risk_dual_ai",
-                    "review_mode": "dual_ai",
+                    "lane": "structured_ai_review",
+                    "review_mode": "single_ai",
                     "source_labels": [lane_labels.get("primary"), lane_labels.get("secondary")],
                     "import_mode": "object_review_audits",
                     "required_fields": ["target_type", "target_id", "field_name", "decision", "corrected_value", "evidence_location"],
@@ -749,7 +726,8 @@ class VerificationSessionService(
                         "First compare the parsed materials with the original PDF page via read_paper_page, then use "
                         "MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence. "
                         "Record parse defects if the system split tables/figures/locators incorrectly, then import "
-                        "object_review_audits through import_analysis with the assigned source_label."
+                        "object_review_audits through import_analysis. Each evidence-backed DFT opinion is applied "
+                        "independently through the controlled verification and write path."
                     ),
                 }
             )
@@ -958,15 +936,12 @@ class VerificationSessionService(
                 continue
             if exclude_target_types is not None and target_type in exclude_target_types:
                 continue
+            if target_type == "dft_results":
+                # DFT is owned exclusively by settle_ai_dft_reviews_for_paper.
+                continue
             target_id = str(payload.get("target_id") or "").strip()
             field_name = str(payload.get("field_name") or "").strip()
             if not target_type or not target_id or not field_name:
-                continue
-            if target_type == "dft_results" and (
-                target_id.lower() == "new"
-                or str(payload.get("decision") or "").strip().lower() == "new_candidate"
-                or bool(payload.get("borrowed_from_reference"))
-            ):
                 continue
             identity = review_source_identity(
                 run.source_identity,
@@ -1012,48 +987,12 @@ class VerificationSessionService(
             for opinion in opinions:
                 if opinion["candidate"].status not in {"candidate", "pending", "requires_resolution"}:
                     continue
-                key = (
-                    self._dft_review_submission_identity(opinion)
-                    if target_type == "dft_results"
-                    else opinion["source_identity"]
-                )
+                key = opinion["source_identity"]
                 current = deduped.get(key)
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion
             eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
             third_ai = [item for item in eligible if str(item.get("adjudication_role") or "").strip().lower() == "third_ai"]
-            resolves_as_rejected = (
-                any(self._is_negative_dft_decision(item.get("decision")) for item in third_ai)
-                or (
-                    len(eligible) >= 2
-                    and all(self._is_negative_dft_decision(item.get("decision")) for item in eligible)
-                )
-            )
-            if target_type == "dft_results" and any(self._is_project_library_v4_opinion(item) for item in eligible):
-                pending.append(
-                    {
-                        "target_type": target_type,
-                        "target_id": target_id,
-                        "field_name": field_name,
-                        "reason": self.PROJECT_LIBRARY_V4_USER_SUBMIT_REASON,
-                        "eligible_opinion_count": len(eligible),
-                    }
-                )
-                continue
-            if target_type == "dft_results" and eligible and not all(
-                self._dft_has_material_identity(item, target_id=target_id, field_name=field_name)
-                for item in eligible
-            ) and not resolves_as_rejected:
-                pending.append(
-                    {
-                        "target_type": target_type,
-                        "target_id": target_id,
-                        "field_name": field_name,
-                        "reason": "missing_dft_material_identity",
-                        "eligible_opinion_count": len(eligible),
-                    }
-                )
-                continue
             if target_type in self.HIGH_RISK_IDE_TARGET_TYPES:
                 if third_ai:
                     adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)

@@ -77,8 +77,8 @@ test('renders DFT audit report summary and issue list', async ({ page }) => {
   await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html?paper_id=paper-1`);
 
   await expect(page.getByRole('heading', { name: 'DFT 核验中心' })).toBeVisible();
-  await expect(page.locator('#reportSummary')).toContainText('待主 AI');
-  await expect(page.locator('#reportSummary')).toContainText('主 AI 修复待复核');
+  await expect(page.locator('#reportSummary')).toContainText('待 AI 处理');
+  await expect(page.locator('#reportSummary')).toContainText('AI 修复待复核');
   await expect(page.locator('#reportSummary')).toContainText('create_missing_dft');
   await expect(page.locator('#issueList')).toContainText('missing_dft_result');
   await expect(page.locator('#issueList')).toContainText('Fe-GDY');
@@ -120,7 +120,7 @@ test('copies individual issue ids and keeps API access readonly', async ({ page 
     .toBe('11111111-1111-4111-8111-111111111111');
 
   await expect(page.getByRole('button', { name: '复制主 AI 处理提示' })).toHaveCount(0);
-  await expect(page.locator('body')).toContainText('日常 DFT 数据处理提示词必须回审核中心选择一篇主文献后复制');
+  await expect(page.locator('body')).toContainText('日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制');
 
   expect(requests).toHaveLength(2);
   expect(requests.every(request => request.method === 'GET')).toBe(true);

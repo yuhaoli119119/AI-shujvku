@@ -79,7 +79,7 @@
     <header class="page-head">
       <div>
         <h1>DFT 核验中心</h1>
-        <p class="subtitle">后台诊断只读队列，用于查看 DFT audit issue、修复状态和 repair 审计健康情况；日常主 AI 任务请从审核中心按单篇文献发起。</p>
+        <p class="subtitle">后台诊断只读队列，用于查看 DFT audit issue、修复状态和 repair 审计健康情况；日常 DFT 任务请从审核中心按单篇文献发起。</p>
       </div>
     </header>
 
@@ -161,7 +161,7 @@
         <div class="panel-head"><div class="panel-title">Warnings</div></div>
         <div class="panel-body">
           <div id="warningList" class="warning-list"><div class="empty">暂无 warning。</div></div>
-          <div class="copy-hint" style="margin-top:12px;">本页仅供后台诊断和复制单个 issue_id。日常 DFT 数据处理提示词必须回审核中心选择一篇主文献后复制；不要从这里发起全库混合处理。</div>
+          <div class="copy-hint" style="margin-top:12px;">本页仅供后台诊断和复制单个 issue_id。日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制；不要从这里发起全库混合处理。</div>
         </div>
       </aside>
     </section>
@@ -259,9 +259,9 @@
       document.getElementById("reportMeta").textContent = "days " + (filters.days || clampDays()) + " · include_closed " + Boolean(filters.include_closed);
       document.getElementById("reportSummary").innerHTML = `
         <div class="summary-grid">
-          ${metric("待主 AI", report.open_needs_primary_ai_count)}
+          ${metric("待 AI 处理", report.open_needs_primary_ai_count)}
           ${metric("需用户判断", report.open_needs_user_decision_count)}
-          ${metric("主 AI 修复待复核", report.fixed_by_primary_ai_pending_review_count)}
+          ${metric("AI 修复待复核", report.fixed_by_primary_ai_pending_review_count)}
         </div>
         <div class="count-grid">
           ${countBox("issue_status_counts", report.issue_status_counts)}
@@ -400,9 +400,9 @@
     function statusLabel(status) {
       const labels = {
         open: "open",
-        needs_primary_ai: "待主 AI",
+        needs_primary_ai: "待 AI 处理",
         needs_user_decision: "需用户判断",
-        fixed_by_primary_ai: "主 AI 修复待复核",
+        fixed_by_primary_ai: "AI 修复待复核",
         false_positive: "false_positive",
         closed: "closed"
       };

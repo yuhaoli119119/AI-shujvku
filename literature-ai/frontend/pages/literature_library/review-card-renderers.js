@@ -146,8 +146,8 @@ async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) 
             const el = container.querySelector('[data-role="' + role + '"]');
             if (el) el.textContent = value;
         };
-        setText("dft-new-review-count", "下一轮审核 / 补证据 " + classified.newReview.length);
-        setText("dft-conflict-count", "主 AI 判断 " + classified.conflicts.length);
+        setText("dft-new-review-count", "待审核 / 补证据 " + classified.newReview.length);
+        setText("dft-needs-human-count", "需人工确认 " + classified.needsHuman.length);
     } catch (_) {
         const pending = container.querySelector('[data-role="dft-new-review-count"]');
         if (pending) pending.textContent = "新数据审核 ?";
@@ -168,7 +168,7 @@ async function settleAiDftReviews() {
         showToast(
             "已结算 " + Number(summary && summary.auto_applied_count || 0) +
             " 条；可导出 " + Number(summary && summary.exportable_count || 0) +
-            "；需主AI判断 " + Number(summary && summary.need_third_ai_count || 0) +
+            "；需人工确认 " + Number(summary && summary.needs_human_count || 0) +
             "；需补字段 " + Number(summary && summary.need_repair_count || 0),
             "success"
         );
@@ -221,11 +221,11 @@ function dftResultsWithSafety(detail) {
         const bExportable = String(b.dft_workflow_state || "") === "exportable" || (b.export_safety && (b.export_safety.is_exportable || b.export_safety.eligible));
         if (aExportable !== bExportable) return aExportable ? 1 : -1;
         const priority = {
-            needs_third_ai: 0,
+            needs_human: 0,
             missing_evidence_anchor: 1,
-            waiting_second_ai: 2,
+            waiting_ai_review: 2,
             missing_material_binding: 3,
-            rejected_consensus_pending_write: 4,
+            review_pending_apply: 4,
             unknown_blocked: 5,
             exportable: 9
         };
@@ -262,7 +262,7 @@ function renderDftExportReadiness(detail) {
                 : '<span class="status-chip meta">安全状态加载中</span>' +
                   '<span class="status-chip">候选总数 ' + fallbackTotal + '</span>') +
         '</div>' +
-        '<div class="subtle">处理方式：正式 DFT 普通 AI 和主 AI 任务请回审核中心按单篇文献复制提示词；详情页用于查看候选、导入结果、刷新审核状态，以及人工修改、接受、拒绝或撤销。每条有效意见仍必须提供 evidence_location.page 和 quoted_text；最终 verify/reject 仍需人工处理。</div>' +
+        '<div class="subtle">处理方式：正式 DFT 任务请回审核中心按单篇文献复制提示词；详情页用于查看候选、导入结果和刷新审核状态。每条有效意见必须提供 evidence_location.page 和 quoted_text；一份证据合格的 AI 意见可通过受控入口直接确认、修正、拒绝或新增，NEEDS_HUMAN 才留给用户判断。</div>' +
         (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
     '</div>';
 }

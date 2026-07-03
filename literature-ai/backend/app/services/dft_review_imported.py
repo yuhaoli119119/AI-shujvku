@@ -26,6 +26,8 @@ class DFTImportedOpinionMixin:
         reviewer: str | None = None,
         expected_row_state: dict[str, Any] | None = None,
         expected_write_versions: dict[str, int] | None = None,
+        write_lock_tokens: list[str] | None = None,
+        commit: bool = True,
     ) -> dict[str, Any]:
         row = self.session.get(DFTResult, result_id)
         if row is None or row.paper_id != paper_id:
@@ -52,6 +54,7 @@ class DFTImportedOpinionMixin:
                 confirm_reject_candidate=True,
                 reviewer=reviewer_name,
                 reviewer_note=f"Applied imported AI rejection from {source_label}. {reason}".strip(),
+                commit=commit,
             )
             return {
                 "paper_id": str(paper_id),
@@ -93,6 +96,7 @@ class DFTImportedOpinionMixin:
                     reviewer=reviewer_name,
                     reason=reason,
                     evidence_payload=evidence_payload,
+                    write_lock_tokens=write_lock_tokens,
                 )
             )
 
@@ -110,6 +114,7 @@ class DFTImportedOpinionMixin:
             field_names=verify_field_names or None,
             expected_write_versions=expected_write_versions or {},
             evidence_payload=evidence_payload,
+            commit=False,
         )
         audit = AuditLog(
             paper_id=paper_id,
@@ -126,7 +131,10 @@ class DFTImportedOpinionMixin:
             },
         )
         self.session.add(audit)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
         self.session.refresh(audit)
         return {
             "paper_id": str(paper_id),

@@ -167,7 +167,7 @@ def test_in_process_mcp_context_rejects_direct_identity_injection_even_if_pytest
             pass
 
 
-def test_repair_capability_lint_allows_primary_repair_keys():
+def test_repair_capability_lint_does_not_depend_on_ai_identity():
     configs = parse_mcp_api_keys(
         "dft_primary_repair|DFT Primary Repair AI|litmcp_primary|read_papers,repair_dft_issues;"
         "lab_primary_repair|Lab Primary Repair|litmcp_lab|read_papers,repair_dft_issues"
@@ -193,36 +193,18 @@ def test_repair_capability_lint_allows_primary_repair_keys():
 )
 def test_repair_capability_lint_warns_without_raw_key(raw_config, source_prefix, display_name):
     warnings = validate_mcp_capability_assignments(parse_mcp_api_keys(raw_config))
-
-    assert len(warnings) == 1
-    warning = warnings[0]
-    assert warning["code"] == "repair_dft_issues_non_primary_repair_key"
-    assert warning["message"] == "repair_dft_issues should only be assigned to a DFT primary repair AI key"
-    assert warning["source_prefix"] == source_prefix
-    assert warning["display_name"] == display_name
-    assert warning["capability"] == "repair_dft_issues"
-    assert "litmcp_" not in str(warning)
+    assert warnings == []
 
 
 @pytest.mark.no_test_database
-def test_dft_second_ai_identity_warning_omits_raw_key():
+def test_single_dft_ai_identity_is_valid():
     warnings = validate_mcp_capability_assignments(
         parse_mcp_api_keys(
             "owner|Local Owner|litmcp_owner_secret|read_papers,append_notes,propose_corrections,request_parse"
         )
     )
 
-    assert len(warnings) == 1
-    warning = warnings[0]
-    assert warning["code"] == "dft_second_ai_identity_unavailable"
-    assert warning["configured_identity_count"] == 1
-    assert warning["configured_identities"] == [
-        {
-            "source_prefix": "owner",
-            "display_name": "Local Owner",
-        }
-    ]
-    assert "litmcp_owner_secret" not in str(warning)
+    assert warnings == []
 
 
 def test_agent_guide_documents_optional_fast_dft_roles():
@@ -233,7 +215,7 @@ def test_agent_guide_documents_optional_fast_dft_roles():
     guide = asyncio.run(get_agent_guide())
     by_source = {item["source_prefix"]: item for item in guide["mcp"]["key_role_examples"]}
 
-    assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
+    assert "dft_primary_repair" not in by_source
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
     assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
@@ -242,7 +224,7 @@ def test_agent_guide_documents_optional_fast_dft_roles():
     assert guide["mcp"]["capability_warnings"] == []
 
 
-def test_agent_guide_returns_repair_capability_lint_warning_without_raw_key(monkeypatch):
+def test_agent_guide_accepts_repair_capability_without_identity_role(monkeypatch):
     import asyncio
 
     from app.api.system import get_agent_guide
@@ -258,14 +240,11 @@ def test_agent_guide_returns_repair_capability_lint_warning_without_raw_key(monk
         get_settings.cache_clear()
 
     warnings = guide["mcp"]["capability_warnings"]
-    assert len(warnings) == 1
-    assert warnings[0]["source_prefix"] == "admin"
-    assert warnings[0]["display_name"] == "Admin"
-    assert "litmcp_admin_secret" not in str(warnings)
+    assert warnings == []
 
 
 @pytest.mark.no_test_database
-def test_agent_guide_warns_when_only_one_authenticated_dft_audit_identity(monkeypatch):
+def test_agent_guide_accepts_one_authenticated_dft_ai(monkeypatch):
     import asyncio
 
     from app.api.system import get_agent_guide
@@ -281,15 +260,7 @@ def test_agent_guide_warns_when_only_one_authenticated_dft_audit_identity(monkey
         get_settings.cache_clear()
 
     warnings = guide["mcp"]["capability_warnings"]
-    assert len(warnings) == 1
-    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
-    assert warnings[0]["configured_identities"] == [
-        {
-            "source_prefix": "owner",
-            "display_name": "Local Owner",
-        }
-    ]
-    assert "litmcp_owner_secret" not in str(warnings)
+    assert warnings == []
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:
@@ -786,7 +757,7 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         stored_candidate = session.scalar(select(ExternalAnalysisCandidate))
         assert stored_row.candidate_status == "system_candidate"
         assert stored_candidate.candidate_type == "object_review_audit"
-        assert stored_candidate.status == "candidate"
+        assert stored_candidate.status == "requires_resolution"
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
 
 
@@ -1012,7 +983,7 @@ def test_mcp_codex_context_and_item_use_full_candidate_detail_query(mcp_test_env
     assert item["context"]["item"]["caption"] == "Figure 1. Compact detail figure."
 
 
-def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_test_env):
+def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="MCP Auto Apply DFT Paper", pdf_path="mcp-auto-apply.pdf", authors=[])
         session.add(paper)
@@ -1096,11 +1067,11 @@ def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_
     assert first["candidate_count"] == 1
     assert rerun["candidate_count"] == 1
     assert second["candidate_count"] == 1
-    assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
-    assert rerun["auto_apply_summary"]["dft_settlement"]["audit_consensus_count"] == 0
-    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 0
-    assert second["auto_apply_summary"]["object_reviews"]["pending_count"] == 1
-    assert second["auto_apply_summary"]["dft_settlement"]["audit_consensus_count"] == 1
+    assert first["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+    assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 0
+    assert rerun["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
+    assert second["auto_apply_summary"]["object_reviews"]["pending_count"] == 0
 
     with Session(mcp_test_env["engine"]) as session:
         stored_row = session.get(DFTResult, UUID(row_id))
@@ -1110,12 +1081,105 @@ def test_mcp_import_analysis_records_dual_ai_dft_reviews_without_auto_apply(mcp_
         audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
-    assert stored_row.candidate_status == "system_candidate"
+    assert stored_row.candidate_status == "ML_Ready"
     assert [run.source_identity for run in runs] == ["mcp:claude", "mcp:claude", "mcp:admin"]
     assert all(run.source_identity_verified for run in runs)
-    assert {candidate.status for candidate in candidates} == {"requires_resolution"}
-    assert reviews == []
-    assert audit_logs == []
+    assert {candidate.status for candidate in candidates} == {"ai_applied"}
+    assert reviews
+    assert {review.reviewer_status for review in reviews} == {"verified"}
+    assert len(audit_logs) == 3
+
+
+@pytest.mark.parametrize(
+    ("decision", "corrected_value", "expected_value", "expected_status", "expected_review_status", "expected_pending"),
+    [
+        ("REVISE", -1.45, -1.45, "ML_Ready", "verified", 0),
+        ("REJECT", None, -1.2, "Rejected", "rejected", 0),
+        ("NEEDS_HUMAN", None, -1.2, "system_candidate", None, 1),
+    ],
+)
+def test_mcp_single_dft_ai_revision_rejection_and_human_hold(
+    mcp_test_env,
+    decision,
+    corrected_value,
+    expected_value,
+    expected_status,
+    expected_review_status,
+    expected_pending,
+):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title=f"Single AI DFT {decision}", pdf_path="single-ai-dft.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4")
+        session.add(catalyst)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 1 reports the adsorption energy.",
+            candidate_status="system_candidate",
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=7,
+                evidence_text="Table 1 reports the adsorption energy.",
+                locator_status="exact_page",
+                locator_confidence=0.95,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = str(paper.id)
+        row_id = str(row.id)
+
+    audit = {
+        "target_type": "dft_results",
+        "target_id": row_id,
+        "field_name": "value",
+        "decision": decision,
+        "corrected_value": corrected_value,
+        "normalized_material": "Fe-N4",
+        "reason": f"Single AI decision: {decision}",
+        "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "adsorption energy"},
+    }
+    with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(paper_id=paper_id, module_name="dft_results")
+        imported = import_analysis(
+            paper_id=paper_id,
+            source="ide_ai",
+            source_label=f"arbitrary_model_{decision.lower()}",
+            raw_payload={"object_review_audits": [audit]},
+            auto_apply_review_rules=True,
+            write_lock_token=lock["lock_token"],
+        )
+
+    summary = imported["auto_apply_summary"]
+    assert summary["object_reviews"]["pending_count"] == expected_pending
+    assert summary["object_reviews"]["applied_count"] == (0 if expected_pending else 1)
+    with Session(mcp_test_env["engine"]) as session:
+        stored = session.get(DFTResult, UUID(row_id))
+        reviews = session.scalars(
+            select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == row_id)
+        ).all()
+
+    assert stored is not None
+    assert stored.value == expected_value
+    assert stored.candidate_status == expected_status
+    if expected_review_status is None:
+        assert reviews == []
+    else:
+        assert {review.reviewer_status for review in reviews} == {expected_review_status}
 
 
 def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer_and_mcp_lock_owner(mcp_test_env):
@@ -1171,7 +1235,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
         assert len(rows) == 1
-        assert rows[0].candidate_status == "new_candidate"
+        assert rows[0].candidate_status == "ML_Ready"
         assert rows[0].property_type == "adsorption_energy"
 
 
@@ -2169,7 +2233,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
     assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
 
     candidate_payload = result["candidates"][0]
-    assert candidate_payload["status"] == "materialized"
+    assert candidate_payload["status"] == "ai_applied"
     assert candidate_payload["materialized_target_type"] == "dft_results"
     assert candidate_payload["materialized_target_id"] is not None
 
@@ -2178,7 +2242,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].candidate_status == "ML_Ready"
         assert dft_rows[0].value == pytest.approx(-0.95)
         assert dft_rows[0].adsorbate == "H"
 
@@ -2270,7 +2334,7 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "new_candidate"
+        assert dft_rows[0].candidate_status == "ML_Ready"
         assert dft_rows[0].adsorbate == "Li2S4"
 
         # No active dft_results lock leaked after explicit release

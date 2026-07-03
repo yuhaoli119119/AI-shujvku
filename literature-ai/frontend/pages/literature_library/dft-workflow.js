@@ -231,74 +231,6 @@ async function autoProcessLowRiskDftRows() {
     showToast("低风险自动处理入口已停用；DFT final truth 需在 DFT 详情页人工 verify/reject。", "info");
 }
 
-function buildThirdAiDftAdjudicationPrompt(rows) {
-    const paper = state.selectedPaper || {};
-    const paperId = paper.paper_id || paper.id || state.selectedPaperId || "-";
-    const sourcePdf = (
-        paper.codex_context &&
-        paper.codex_context.source_assets &&
-        paper.codex_context.source_assets.pdf_path
-    ) || "<source_pdf>";
-    const compactRows = (rows || []).map(function(row, index) {
-        return {
-            index: index + 1,
-            target_id: row.record_id || row.id,
-            current: {
-                property_type: row.property_type,
-                adsorbate: row.adsorbate,
-                value: row.value,
-                unit: row.unit,
-                reaction_step: row.reaction_step,
-                blocked_reasons: row.blocked_reasons || [],
-                workflow_state: row.dft_workflow_state || null,
-                workflow_reason: row.dft_workflow_reason || null,
-                next_required_action: row.next_required_action || null
-            },
-            prior_ai_opinions: (row.object_review_audits || []).map(function(audit) {
-                return {
-                    candidate_id: audit.candidate_id,
-                    source: audit.source_label || audit.source || "unknown",
-                    decision: audit.decision,
-                    field_name: audit.field_name,
-                    corrected_value: audit.corrected_value,
-                    reason: audit.reason,
-                    evidence_location: audit.evidence_location
-                };
-            })
-        };
-    });
-    return [
-        "任务：你是主 AI 判断员，只处理下面最终数据真正不一致的 DFT 候选。",
-        "必须读取原始 PDF 或 PDF 证据包；不要只复述前两个 AI 的意见。",
-        "如果当前 IDE 没有暴露 MCP 工具，请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具读取证据；禁止直接操作 service/session/model 或数据库。",
-        "只需输出有争议字段的最终值；未争议字段由系统从当前记录和 selected_source_ids 自动补齐。",
-        "如果你只是给出主 AI 的最终判断，可填写 agent_role='primary_ai'，并保持 source_label 含 dft_primary。系统会优先采用主 AI 判断，不再要求第三个 AI。",
-        "选择已有意见时填写 selected_source_ids，优先填写准确的 candidate_id，避免同来源多次提交时产生歧义。",
-        "可以给出新的 evidence_location；若沿用被选意见的证据，系统会从 selected_source_ids 自动继承。",
-        "有效裁决必须在 evidence_location 同时包含 page 和 quoted_text；如果既有意见缺证据页码或原文，请主动在 PDF 中定位；确实找不到时输出 NEEDS_HUMAN，记录继续留在冲突裁决队列。",
-        "单位标准：能量统一为 eV，meV 除以 1000；渗透率统一为 GPU，10^3 GPU 乘以 1000；原始表达写入 raw_value/raw_unit 或 evidence quoted_text。",
-        "重复项/REJECT 也必须给出 evidence_location.page 和 quoted_text，并明确 duplicate_of 或 PDF 证据，说明保留哪条、拒绝哪条。",
-        "只输出 JSON：顶层 object_review_audits，不要长解释。",
-        "",
-        "输出字段：decision=PASS|PROPOSED|REJECT|NEEDS_HUMAN；target_type=dft_results；field_name=dft_results；selected_source_ids=[]；corrected_value 只写判断后需要覆盖的字段；如这是主 AI 判断，额外填写 agent_role=primary_ai；evidence_location 写新证据时包含 page、quoted_text、source_document_type、source_pdf。",
-        "",
-        "paper_id=" + paperId,
-        "title=" + (paper.title_zh || paper.title || "-"),
-        "doi=" + (paper.doi || "-"),
-        "source_pdf=" + sourcePdf,
-        "",
-        JSON.stringify({ disputed_dft_candidates: compactRows }, null, 2)
-    ].join("\n");
-}
-
-async function copyThirdAiDftAdjudicationPrompt() {
-    showToast("DFT 数据处理提示词请从审核中心按单篇文献复制。", "info");
-}
-
-async function copyNextDftAiReviewPrompt() {
-    showToast("正式 DFT AI 任务请从审核中心按单篇文献发起；详情页只保留查看和人工处理。", "info");
-}
-
 function decorateDftReadinessPanel(detail) {
     const panel = $("dftContent");
     if (!panel) return;
@@ -318,8 +250,8 @@ function decorateDftReadinessPanel(detail) {
     actions.innerHTML =
         (blockedCount
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
-                '<span class="status-chip meta" data-role="dft-new-review-count">下一轮审核 / 补证据 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-conflict-count">主 AI 判断 ...</span>' +
+                '<span class="status-chip meta" data-role="dft-new-review-count">待审核 / 补证据 ...</span>' +
+                '<span class="status-chip failed" data-role="dft-needs-human-count">需人工确认 ...</span>' +
               '</div>'
             : "") +
         '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">刷新审核状态</button>' +

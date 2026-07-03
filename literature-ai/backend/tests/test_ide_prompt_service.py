@@ -12,12 +12,11 @@ NON_DFT_KINDS = {"overall", "figure", "table", "sections_writing", "text_review"
 def test_prompt_contract_has_separate_templates_and_no_composite_prompt():
     contract = prompt_contract()
 
-    assert contract["schema_version"] == PROMPT_SCHEMA_VERSION == "ide_review_prompt_v17"
+    assert contract["schema_version"] == PROMPT_SCHEMA_VERSION == "ide_review_prompt_v18"
     assert contract["canonical_mcp_path"] == CANONICAL_MCP_PATH == "/mcp"
     assert set(contract["supported_kinds"]) == {
         "overall",
         "dft",
-        "dft_primary",
         "figure",
         "table",
         "sections_writing",
@@ -27,7 +26,7 @@ def test_prompt_contract_has_separate_templates_and_no_composite_prompt():
     assert contract["composite_templates"] == {}
     assert contract["target_reaction_token"] == "{{TARGET_REACTION}}"
     assert set(contract["reaction_profile_templates"]) == {"SRR_LiS", "HER", "OER", "ORR", "CO2RR", "UNKNOWN"}
-    assert all(set(templates) == {"dft", "dft_primary"} for templates in contract["reaction_profile_templates"].values())
+    assert all(set(templates) == {"dft"} for templates in contract["reaction_profile_templates"].values())
     assert set(contract["project_library_prompt_templates"]) == {"li_s_sac_dac"}
 
 
@@ -37,7 +36,7 @@ def test_prompts_are_concise_and_keep_target_tokens():
     for kind, prompt in contract["templates"].items():
         assert "{{TARGET_LIST}}" in prompt
         assert "{{SOURCE_LABEL}}" in prompt
-        assert len(prompt) < (4200 if kind in {"dft", "dft_primary"} else 3000)
+        assert len(prompt) < (4200 if kind == "dft" else 3000)
 
 
 def test_common_rules_keep_only_shared_execution_safety():
@@ -109,32 +108,20 @@ def test_text_modules_have_non_overlapping_scopes():
         assert "repair_dft" not in prompt
 
 
-def test_dft_review_prompt_is_dft_only_and_cannot_finalize():
+def test_dft_review_prompt_is_dft_only_and_directly_applies_one_ai_opinion():
     prompt = build_ide_review_prompt("dft")
 
-    assert "任务：审核当前论文的 DFT 数据" in prompt
+    assert "任务：审核并处理当前论文的 DFT 数据" in prompt
     assert "只处理当前 paper_id 的 dft_results" in prompt
     assert "禁止修改图片、表格、章节、元数据或其他对象" in prompt
     assert "主文及已关联 SI" in prompt
     assert "PASS、REVISE、REJECT 或 NEEDS_HUMAN" in prompt
     assert 'decision="new_candidate"' in prompt
     assert "import_analysis(auto_apply_review_rules=true)" in prompt
-    assert "禁止调用 repair_dft_audit_issue、verify_dft_result 或 reject_dft_result" in prompt
-    assert "禁止写 human_verified、safe_verified 或 ML_Ready" in prompt
-    assert "update_table" not in prompt
-    assert "review_figure" not in prompt
-
-
-def test_dft_processing_prompt_handles_handoff_and_current_paper_only():
-    prompt = build_ide_review_prompt("dft_primary")
-
-    assert "任务：处理当前论文的 DFT 候选和问题" in prompt
-    assert "禁止读取全库队列" in prompt
-    assert "dft_review_handoff" in prompt
-    assert "apply_analysis_review_rules" in prompt
-    assert "repair_dft_audit_issues_batch(paper_id=<当前 paper_id>, auto_finalize=true)" in prompt
-    assert "只对批量失败项使用 repair_dft_audit_issue" in prompt
-    assert "open issue=0 且没有未定 candidate" in prompt
+    assert "一份证据合格的 AI 意见" in prompt
+    assert "不需要第二个 AI" in prompt
+    assert "PASS 会确认当前值" in prompt
+    assert "NEEDS_HUMAN 保持待人工" in prompt
     assert "update_table" not in prompt
     assert "review_figure" not in prompt
 

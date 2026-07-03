@@ -73,100 +73,6 @@ def _dft_row(session: Session, paper: Paper, *, status: str = "system_candidate"
     return row
 
 
-def test_dual_ai_dft_positive_consensus_creates_issue_without_verifying_result(setup_test_db):
-    with Session(setup_test_db) as session:
-        paper = _paper(session, "Positive consensus issue")
-        row = DFTResult(
-            paper_id=paper.id,
-            property_type="adsorption_energy",
-            adsorbate="Li2S4",
-            value=-1.20,
-            unit="eV",
-            evidence_text="Table 1 reports -1.20 eV.",
-            candidate_status="system_candidate",
-        )
-        session.add(row)
-        session.flush()
-        for label in ("ai-1", "ai-2"):
-            run = _run(session, paper, label)
-            _candidate(
-                session,
-                paper,
-                run,
-                {
-                    "target_type": "dft_results",
-                    "target_id": str(row.id),
-                    "field_name": "value",
-                    "decision": "PASS",
-                    "corrected_value": -1.20,
-                    "confidence": 0.91,
-                    "normalized_material": "Fe-GDY",
-                    "normalized_energy_type": "adsorption_energy",
-                    "evidence_location": {"page": 4, "table": "Table 1", "quoted_text": "-1.20 eV"},
-                },
-            )
-        session.commit()
-        paper_id = str(paper.id)
-        row_id = str(row.id)
-
-    response = TestClient(app).post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
-
-    assert response.status_code == 200
-    assert response.json()["auto_applied_count"] == 0
-    with Session(setup_test_db) as session:
-        stored = session.get(DFTResult, UUID(row_id))
-        assert stored.candidate_status == "system_candidate"
-        issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == UUID(paper_id))).all()
-        assert len(issues) == 1
-        assert issues[0].issue_type == "consensus_ready"
-        assert issues[0].status == "needs_primary_ai"
-        assert issues[0].source_identities == ["ai-1", "ai-2"]
-
-
-def test_dft_negative_consensus_creates_issue_without_rejecting_result(setup_test_db):
-    with Session(setup_test_db) as session:
-        paper = _paper(session, "Negative consensus issue")
-        row = DFTResult(
-            paper_id=paper.id,
-            property_type="adsorption_energy",
-            adsorbate="Li2S4",
-            value=-1.20,
-            unit="eV",
-            evidence_text="Table 1 reports -1.20 eV.",
-            candidate_status="system_candidate",
-        )
-        session.add(row)
-        session.flush()
-        for label in ("ai-1", "ai-2"):
-            run = _run(session, paper, label)
-            _candidate(
-                session,
-                paper,
-                run,
-                {
-                    "target_type": "dft_results",
-                    "target_id": str(row.id),
-                    "field_name": "dft_results",
-                    "decision": "REJECT",
-                    "confidence": 0.9,
-                    "evidence_location": {"page": 5, "quoted_text": "No DFT value appears."},
-                },
-            )
-        session.commit()
-        paper_id = str(paper.id)
-        row_id = str(row.id)
-
-    response = TestClient(app).post(f"/api/papers/{paper_id}/settle-ai-dft-reviews")
-
-    assert response.status_code == 200
-    with Session(setup_test_db) as session:
-        stored = session.get(DFTResult, UUID(row_id))
-        assert stored.candidate_status == "system_candidate"
-        issue = session.scalar(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == UUID(paper_id)))
-        assert issue.issue_type == "negative_consensus"
-        assert issue.status == "needs_user_decision"
-
-
 def test_missing_dft_result_issue_is_idempotent_and_merges_sources(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Missing issue dedupe")
@@ -203,7 +109,7 @@ def test_missing_dft_result_issue_is_idempotent_and_merges_sources(setup_test_db
         assert issues[0].issue_type == "missing_dft_result"
         assert issues[0].status == "needs_primary_ai"
         assert issues[0].suggested_dft["material_identity"] == "Fe-GDY"
-        assert issues[0].source_identities == ["ai-1", "ai-2"]
+        assert issues[0].source_identities == ["untrusted:external_analysis"]
         assert issues[0].source_candidate_ids == [str(first.id), str(second.id)]
 
 

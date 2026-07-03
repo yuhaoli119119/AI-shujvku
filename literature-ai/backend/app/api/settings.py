@@ -611,7 +611,6 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
     mcp_capability_warnings = validate_mcp_capability_assignments(parse_mcp_api_keys(settings.mcp_api_keys))
 
     sample_key = "litmcp_your_key"
-    primary_repair_sample_key = "litmcp_dft_primary_repair"
     mcp_key_role_examples = [
         {
             "source_prefix": "ide_ai",
@@ -626,13 +625,6 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             "sample_key": "litmcp_assigned_dft_audit",
             "capabilities": ["read_papers", "propose_corrections"],
             "purpose": "DFT audit AI creates issue/candidate evidence; this authenticated identity may also enter the fast processing path",
-        },
-        {
-            "source_prefix": "dft_primary_repair",
-            "display_name": "DFT Primary Repair AI",
-            "sample_key": primary_repair_sample_key,
-            "capabilities": ["read_papers", "repair_dft_issues"],
-            "purpose": "optional dedicated repair identity; not required by the fast DFT workflow",
         },
         {
             "source_prefix": "human_reviewer",
@@ -679,14 +671,13 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "- The web-side writer/internal parser is disabled. Use MCP tools and import_analysis for review and write-back.\n"
         "- Do not only write an audit report. For evidence-backed non-DFT content, write fixes back with import_analysis(auto_apply_review_rules=true); later AI writes may overwrite earlier AI writes and no module write lock is required.\n"
         "- Non-DFT direct-write modules include metadata, sections, tables, figure metadata/captions/summaries, writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, notes, and relationships.\n"
-        "- DFT is the hard safety boundary. Do not single-AI-final-approve dft_results or dft_settings. For DFT, create review/audit/correction candidates and keep export behind explicit evidence review.\n"
+        "- DFT writes must use the controlled import/review APIs, a dft_results module lock, structured evidence, and readback. One evidence-backed AI opinion may directly PASS, REVISE, REJECT, or create a DFT result; NEEDS_HUMAN remains pending.\n"
         "- Figure image/crop operations are direct MCP actions only: use recrop_figure or create_figure_from_bbox. Do not submit bbox/image crop requests through import_analysis.\n"
         "- Use review_figure when you need to record a figure verdict such as verified, needs_repair, or rejected. Use import_analysis when you need to correct figure_role, content_summary, key_elements, page, or caption metadata.\n"
         "- For auto-apply, prefer structured evidence dicts. object_review_audits.evidence_location and correction_proposals.evidence_payload should include anchor keys such as page, table, figure, section, quoted_text, bbox, or evidence_text.\n"
         "- For RAG-ready facts, preserve source_type, source_id, paper_code, page, evidence_text, review_status, and evidence_locator when available.\n"
         "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be shown as final content or used by RAG/writing until an IDE AI review writes back ai_reviewed/ai_applied content with PDF evidence.\n"
-        "- DFT fast processing reuses the current authenticated DFT write identity. A key with propose_corrections, review_dft, or repair_dft_issues may call repair_dft_audit_issues_batch(auto_finalize=true); a dedicated repair key is optional.\n"
-        "- Keep structured evidence, readback, deduplication, and audit logs, but do not block the workflow on key-role separation or a separate human-finalization step.\n"
+        "- AI product names, source labels, and authenticated identities are audit metadata only; they are not counted as first/second/primary AI roles.\n"
         "- Catalyst samples must have a material identity and evidence anchor before being used for writing/RAG or linked to mechanism, electrochemical, or DFT records.\n"
         "- Writing support should use writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, figure cards, and verified DFT candidates where allowed by the safety gate.\n"
         "- Do not overwrite English evidence fields with Chinese translations. Put Chinese only in derived *_zh fields where available, writing cards, or review notes.\n"
@@ -704,7 +695,6 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "local_ip": local_ip,
         "hostname": hostname,
         "sample_key": sample_key,
-        "primary_repair_sample_key": primary_repair_sample_key,
         "mcp_key_role_examples": mcp_key_role_examples,
         "mcp_capability_warnings": mcp_capability_warnings,
         "auth_required": auth_required,
@@ -722,8 +712,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             f"只有当用户明确要求手工配置 MCP 时，才使用下面的兜底信息：\n"
             f"服务地址：{mcp_url}\n"
             f"认证方式：Bearer {sample_key}\n"
-            f"DFT 快速处理直接复用当前已认证的 DFT 写身份；propose_corrections、review_dft 或 repair_dft_issues 任一权限都可调用 repair_dft_audit_issues_batch(auto_finalize=true)。\n"
-            f"专用修复 key 仅为可选配置，不再是流程前置条件：dft_primary_repair|DFT Primary Repair AI|{primary_repair_sample_key}|read_papers,repair_dft_issues\n"
+            f"DFT 使用统一受控入口：取得 dft_results 写锁后，一份证据合格的 AI 意见即可确认、修正、拒绝或新增；AI 名称和身份不参与计票。\n"
             f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"

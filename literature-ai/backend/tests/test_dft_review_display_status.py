@@ -81,7 +81,7 @@ def test_ai_review_display_status_matrix_matches_export_gate_authority():
     assert exportable_proposed["label"] == "已采纳 AI 修正"
 
 
-def test_dft_queue_dedupes_same_authenticated_identity_across_run_labels():
+def test_dft_queue_does_not_use_authenticated_identity_as_an_admission_vote():
     anchor = {"page": 5, "quoted_text": "reported value"}
     state = DFTReviewQueueService.build_dft_workflow_state(
         gate=_gate(False),
@@ -105,9 +105,9 @@ def test_dft_queue_dedupes_same_authenticated_identity_across_run_labels():
         ],
     )
 
-    assert state["raw_ai_opinion_count"] == 1
-    assert state["valid_ai_opinion_count"] == 1
-    assert state["state"] == "waiting_second_ai"
+    assert state["raw_ai_opinion_count"] == 2
+    assert state["valid_ai_opinion_count"] == 2
+    assert state["state"] == "review_pending_apply"
 
 
 def test_non_dft_detail_dedupe_key_still_uses_existing_display_semantics():

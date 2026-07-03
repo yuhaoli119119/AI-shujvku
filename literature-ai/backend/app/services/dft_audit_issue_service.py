@@ -255,7 +255,7 @@ class DFTAuditIssueService:
                 if is_supporting_reference
                 else "ML-predicted value is outside the DFTResult lane and requires user-controlled prediction-data review."
                 if is_ml_predicted
-                else "Missing DFT result draft queued for primary AI or user-controlled follow-up."
+                else "Missing DFT result draft queued for authorized AI or user-controlled follow-up."
             ),
         )
 

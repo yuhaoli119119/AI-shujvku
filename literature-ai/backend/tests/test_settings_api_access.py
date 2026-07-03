@@ -129,7 +129,7 @@ def test_ide_prompts_never_return_real_mcp_key(monkeypatch):
     payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
 
     assert payload["sample_key"] == "litmcp_your_key"
-    assert payload["primary_repair_sample_key"] == "litmcp_dft_primary_repair"
+    assert "primary_repair_sample_key" not in payload
     assert payload["mcp_capability_warnings"] == []
     assert "litmcp_real_secret" not in payload["cursor_config_json"]
     assert "litmcp_real_secret" not in payload["suggested_prompt"]
@@ -154,16 +154,15 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v17"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v18"
     by_source = {item["source_prefix"]: item for item in payload["mcp_key_role_examples"]}
-    assert by_source["dft_primary_repair"]["capabilities"] == ["read_papers", "repair_dft_issues"]
+    assert "dft_primary_repair" not in by_source
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]
     assert "repair_dft_issues" not in by_source["assigned_dft_audit"]["capabilities"]
     assert "repair_dft_issues" not in by_source["human_reviewer"]["capabilities"]
-    assert "repair_dft_audit_issues_batch(auto_finalize=true)" in payload["legacy_english_suggested_prompt"]
-    assert "dedicated repair key is optional" in payload["legacy_english_suggested_prompt"]
-    assert "DFT 快速处理直接复用当前已认证的 DFT 写身份" in payload["legacy_suggested_prompt"]
-    assert "专用修复 key 仅为可选配置" in payload["legacy_suggested_prompt"]
+    assert "One evidence-backed AI opinion" in payload["legacy_english_suggested_prompt"]
+    assert "AI product names, source labels, and authenticated identities are audit metadata only" in payload["legacy_english_suggested_prompt"]
+    assert "一份证据合格的 AI 意见即可确认、修正、拒绝或新增" in payload["legacy_suggested_prompt"]
     assert "SRR_LiS" in payload["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["project_library_contexts"]
     assert "li_s_sac_dac" in payload["prompt_contract"]["topic_field_dictionaries"]
@@ -174,7 +173,7 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     get_settings.cache_clear()
 
 
-def test_ide_prompts_returns_repair_capability_warning_without_raw_key(monkeypatch):
+def test_ide_prompts_accepts_repair_capability_without_identity_role(monkeypatch):
     import asyncio
 
     from app.api import settings as settings_api
@@ -189,18 +188,14 @@ def test_ide_prompts_returns_repair_capability_warning_without_raw_key(monkeypat
     payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
 
     warnings = payload["mcp_capability_warnings"]
-    assert len(warnings) == 1
-    assert warnings[0]["source_prefix"] == "assigned_dft_audit"
-    assert warnings[0]["display_name"] == "Assigned DFT Audit"
-    assert warnings[0]["capability"] == "repair_dft_issues"
-    assert "litmcp_audit_secret" not in str(warnings)
+    assert warnings == []
     assert "litmcp_audit_secret" not in payload["legacy_english_suggested_prompt"]
     assert "litmcp_audit_secret" not in payload["legacy_suggested_prompt"]
     get_settings.cache_clear()
 
 
 @pytest.mark.no_test_database
-def test_ide_prompts_warns_when_only_one_authenticated_dft_audit_identity(monkeypatch):
+def test_ide_prompts_accepts_one_authenticated_dft_ai(monkeypatch):
     import asyncio
 
     from app.api import settings as settings_api
@@ -215,15 +210,7 @@ def test_ide_prompts_warns_when_only_one_authenticated_dft_audit_identity(monkey
     payload = asyncio.run(settings_api.get_ide_prompts(_make_request("127.0.0.1", {"host": "localhost:8000"})))
 
     warnings = payload["mcp_capability_warnings"]
-    assert len(warnings) == 1
-    assert warnings[0]["code"] == "dft_second_ai_identity_unavailable"
-    assert warnings[0]["configured_identities"] == [
-        {
-            "source_prefix": "owner",
-            "display_name": "Local Owner",
-        }
-    ]
-    assert "litmcp_owner_secret" not in str(warnings)
+    assert warnings == []
     assert "litmcp_owner_secret" not in payload["suggested_prompt"]
     get_settings.cache_clear()
 
