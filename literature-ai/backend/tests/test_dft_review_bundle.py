@@ -247,3 +247,17 @@ def test_offline_review_validation_rejects_wrong_paper_code(setup_test_db):
     assert response.status_code == 200
     assert response.json()["valid"] is False
     assert any(error["code"] == "paper_code_mismatch" for error in response.json()["errors"])
+
+
+def test_loopback_owner_can_export_review_bundle_when_bulk_exports_are_disabled(
+    setup_test_db,
+    monkeypatch,
+):
+    paper_id, _ = _seed_review_materials(setup_test_db)
+    monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "false")
+    get_settings.cache_clear()
+
+    response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/zip")
