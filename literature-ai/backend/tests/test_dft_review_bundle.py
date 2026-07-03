@@ -163,6 +163,7 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
         manifest = json.loads(archive.read("manifest.json"))
         candidates = json.loads(archive.read("parsed/initial_dft_candidates.json"))
         metadata = json.loads(archive.read("parsed/paper_metadata.json"))
+        return_schema = json.loads(archive.read("return_schema.json"))
         instructions = archive.read("instructions_for_web_ai.md").decode("utf-8")
 
     assert manifest["paper"]["paper_code"] == "B0078"
@@ -170,6 +171,9 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     assert candidates["existing_candidates"][0]["material_identity"] == "Fe-N-C"
     assert candidates["supporting_si_candidates"][0]["source_document_type"] == "supplementary_information"
     assert {doc["role"] for doc in metadata["source_documents"]} == {"main", "si"}
+    assert "every current main-paper DFT candidate" in return_schema["properties"]["overall_status"]["description"]
+    assert '`overall_status="completed"`' in instructions
+    assert "未覆盖全部已有候选" in instructions
     assert "不得声称已写数据库" in instructions
 
 

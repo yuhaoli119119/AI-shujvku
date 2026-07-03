@@ -112,7 +112,12 @@ class OfflineDFTReviewResult(BaseModel):
     paper_id: str = Field(min_length=1, max_length=64)
     paper_code: str = Field(min_length=1, max_length=64)
     review_source: OfflineReviewSource
-    overall_status: OverallReviewStatus
+    overall_status: OverallReviewStatus = Field(
+        description=(
+            "Use completed only after reviewing every current main-paper DFT candidate; "
+            "use uncertain or needs_human when candidate coverage is incomplete."
+        )
+    )
     object_review_audits: list[OfflineObjectReviewAudit] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
