@@ -10,6 +10,10 @@ const FEATURE_SCOPE = REVIEW_CENTER.slice(
   REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_START'),
   REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_END')
 );
+const FILE_DROP_SCOPE = FEATURE_SCOPE.slice(
+  FEATURE_SCOPE.indexOf('async function handleWebAiFileDrop'),
+  FEATURE_SCOPE.indexOf('function clearWebAiReturnInput')
+);
 
 test('review center exposes a selected-paper web AI result return entry', () => {
   expect(REVIEW_CENTER).toContain('id="webAiReturnEntryBtn"');
@@ -33,6 +37,18 @@ test('failed validation never imports and temporary review data is not persisted
   expect(FEATURE_SCOPE).not.toContain('indexedDB');
   expect(FEATURE_SCOPE).not.toContain('IndexedDB');
   expect(FEATURE_SCOPE).toContain('valid=false，立即停止，不调用 import_analysis');
+});
+
+test('a dropped JSON file is read only into current-page memory', () => {
+  expect(REVIEW_CENTER).toContain('ondrop="handleWebAiFileDrop(event)"');
+  expect(REVIEW_CENTER).toContain('或把 .json 文件直接拖到这里');
+  expect(FILE_DROP_SCOPE).toContain('const rawText = await file.text();');
+  expect(FILE_DROP_SCOPE).toContain('textarea.value = rawText;');
+  expect(FILE_DROP_SCOPE).toContain('JSON 文件不能超过 5 MB');
+  expect(FILE_DROP_SCOPE).not.toContain('fetch(');
+  expect(FILE_DROP_SCOPE).not.toContain('localStorage');
+  expect(FILE_DROP_SCOPE).not.toContain('sessionStorage');
+  expect(FILE_DROP_SCOPE).not.toContain('indexedDB');
 });
 
 test('switching papers clears pasted content, validation state, and copy permission', () => {

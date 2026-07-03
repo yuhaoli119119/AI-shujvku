@@ -1167,6 +1167,21 @@
       outline: 2px solid var(--color-primary-bg);
       border-color: var(--color-primary);
     }
+    .web-ai-return-textarea.is-dragging {
+      outline: 2px solid var(--color-primary);
+      border-color: var(--color-primary);
+      background: var(--color-primary-bg);
+    }
+    .web-ai-return-file-hint {
+      color: var(--color-text-tertiary, var(--color-text-secondary));
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+    .web-ai-return-file-hint strong {
+      color: var(--color-primary);
+      font-weight: 800;
+    }
     .web-ai-validation-box {
       min-height: 76px;
       border: 1px solid var(--color-border);
@@ -1403,8 +1418,9 @@
       <div class="modal-body">
         <div class="web-ai-return-layout">
           <label class="web-ai-return-label" for="webAiReturnJson">
-            粘贴网页 AI 返回 JSON
-            <textarea class="web-ai-return-textarea" id="webAiReturnJson" spellcheck="false" placeholder="粘贴严格符合 return_schema.json 的 JSON；内容只保留在当前页面内存中。" oninput="handleWebAiReturnInput()"></textarea>
+            粘贴网页 AI 返回 JSON，或直接拖入 JSON 文件
+            <textarea class="web-ai-return-textarea" id="webAiReturnJson" spellcheck="false" placeholder="粘贴严格符合 return_schema.json 的 JSON，或把 .json 文件直接拖到这里；内容只保留在当前页面内存中。" oninput="handleWebAiReturnInput()" ondragenter="handleWebAiFileDrag(event)" ondragover="handleWebAiFileDrag(event)" ondragleave="handleWebAiFileDragLeave(event)" ondrop="handleWebAiFileDrop(event)"></textarea>
+            <span class="web-ai-return-file-hint"><strong>支持桌面拖放：</strong>文件只在当前页面内存中读取，不会上传保存；读取后仍需点击“校验结果”。</span>
           </label>
           <div class="web-ai-validation-box" id="webAiValidationResult">尚未校验。校验成功也不会自动入库。</div>
         </div>
@@ -2290,6 +2306,72 @@
       setWebAiValidationBox("内容已修改，请重新校验。校验成功前不能复制导入指令。", "");
     }
 
+    const WEB_AI_RETURN_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+    function setWebAiFileDropActive(active) {
+      const textarea = document.getElementById("webAiReturnJson");
+      if (textarea) textarea.classList.toggle("is-dragging", Boolean(active));
+    }
+
+    function handleWebAiFileDrag(event) {
+      if (event) {
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      }
+      setWebAiFileDropActive(true);
+    }
+
+    function handleWebAiFileDragLeave(event) {
+      if (event) event.preventDefault();
+      setWebAiFileDropActive(false);
+    }
+
+    async function handleWebAiFileDrop(event) {
+      if (event) event.preventDefault();
+      setWebAiFileDropActive(false);
+      const files = Array.from(event && event.dataTransfer && event.dataTransfer.files || []);
+      if (files.length !== 1) {
+        handleWebAiReturnInput();
+        renderWebAiValidationFailure([
+          { code: "file_read_error", message: "请一次只拖入一个 .json 文件" }
+        ], []);
+        return;
+      }
+      const file = files[0];
+      const fileName = String(file.name || "");
+      if (!fileName.toLowerCase().endsWith(".json")) {
+        handleWebAiReturnInput();
+        renderWebAiValidationFailure([
+          { code: "file_read_error", message: "仅支持 .json 文件" }
+        ], []);
+        return;
+      }
+      if (Number(file.size || 0) > WEB_AI_RETURN_MAX_FILE_BYTES) {
+        handleWebAiReturnInput();
+        renderWebAiValidationFailure([
+          { code: "file_read_error", message: "JSON 文件不能超过 5 MB" }
+        ], []);
+        return;
+      }
+      try {
+        const rawText = await file.text();
+        if (!String(rawText || "").trim()) throw new Error("文件内容为空");
+        const textarea = document.getElementById("webAiReturnJson");
+        textarea.value = rawText;
+        handleWebAiReturnInput();
+        setWebAiValidationBox(
+          "已在当前页面内存中读取文件：" + esc(fileName) + "。请点击“校验结果”。",
+          ""
+        );
+        textarea.focus();
+      } catch (error) {
+        handleWebAiReturnInput();
+        renderWebAiValidationFailure([
+          { code: "file_read_error", message: error.message || "无法读取文件" }
+        ], []);
+      }
+    }
+
     function clearWebAiReturnInput() {
       clearWebAiReturnTransientState();
       const textarea = document.getElementById("webAiReturnJson");
@@ -2307,6 +2389,7 @@
       evidence_not_checked: "该结论要求 evidence_checked=true",
       incomplete_candidate_coverage: "标记完成时仍有 DFT 候选未逐条审核",
       invalid_json: "无法解析为 JSON",
+      file_read_error: "无法读取拖入的 JSON 文件",
       validation_request_failed: "校验请求失败"
     };
 
