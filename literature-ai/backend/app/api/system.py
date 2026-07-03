@@ -83,6 +83,18 @@ async def get_agent_guide() -> dict:
         },
         "http_endpoints": [
             {
+                "name": "export_offline_dft_review_bundle",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-review-bundle",
+                "purpose": "Manually stream a temporary, compact DFT evidence package for a web AI or human reviewer. The ZIP is generated in memory and is not retained on the server.",
+            },
+            {
+                "name": "validate_offline_dft_review_result",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-review-result/validate",
+                "purpose": "Validate a returned offline review proposal against schema, paper identity, current targets, evidence ids, and bundle fingerprint without writing the database.",
+            },
+            {
                 "name": "prepare_external_ai_context",
                 "method": "POST",
                 "path": "/api/papers/{paper_id}/prepare-ai-context",

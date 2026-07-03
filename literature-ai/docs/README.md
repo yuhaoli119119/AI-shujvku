@@ -11,6 +11,7 @@
 - [mcp/MCP_API.md](mcp/MCP_API.md): MCP API 与工具说明。
 - [schema/dft_ml_dataset_schema.md](schema/dft_ml_dataset_schema.md): DFT ML dataset 导出契约。
 - [schemas/dft_results_ml_v1.md](schemas/dft_results_ml_v1.md): DFT results 相关 schema 说明。
+- [plans/offline_web_ai_dft_review_bundle.md](plans/offline_web_ai_dft_review_bundle.md): 离线网页 AI DFT 核验包、返回校验和受控导入方案。
 
 ## 当前稳定边界
 

@@ -143,6 +143,49 @@ function addToEvidencePack() {
     showToast("已切到写作卡与整理区，可基于当前文献生成证据整理。", "info");
 }
 
+async function exportSelectedDftReviewBundle() {
+    closeDropdowns();
+    if (!state.selectedPaperId || !state.selectedPaper) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    try {
+        showProgress("正在生成离线 AI 核验包...");
+        const response = await fetch(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/dft-review-bundle",
+            { method: "POST" }
+        );
+        if (!response.ok) {
+            let message = "HTTP " + response.status;
+            try {
+                const payload = await response.json();
+                message = payload.detail || message;
+            } catch (_) {
+                // Keep the HTTP status when the response is not JSON.
+            }
+            throw new Error(message);
+        }
+        const blob = await response.blob();
+        const disposition = response.headers.get("Content-Disposition") || "";
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        const fallbackCode = state.selectedPaper.paper_code || "paper";
+        const filename = match ? match[1] : fallbackCode + "_dft_review_bundle.zip";
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        hideProgress(true);
+        showToast("AI 核验包已生成并开始下载。服务器未长期保存该压缩包。", "success");
+    } catch (error) {
+        hideProgress(true);
+        showToast("AI 核验包导出失败：" + error.message, "error");
+    }
+}
+
 function openAggregateView() {
     closeDropdowns();
     switchTab("dft");
