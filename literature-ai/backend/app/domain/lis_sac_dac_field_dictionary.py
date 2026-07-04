@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 
-LI_S_SAC_DAC_FIELD_DICTIONARY_VERSION = "li_s_sac_dac_field_dictionary_v3"
+LI_S_SAC_DAC_FIELD_DICTIONARY_VERSION = "li_s_sac_dac_field_dictionary_v4"
 
 
 @dataclass(frozen=True)
@@ -69,6 +69,7 @@ _FIELD_GROUPS = MappingProxyType(
             _field("support_material", "载体", "support material", "structure", "string", None, False, True, ("DFT", "experiment"), "兼容旧字段；新 bundle/export 必须同时保留 support_raw、support_normalized、support_confidence。"),
             _field("coordination_environment", "配位环境", "coordination environment", "structure", "string", None, False, True, ("DFT",), "如 Fe-N4、CoN3S1；结构未定型或只见示意图时保持 UNKNOWN。"),
             _field("metal_metal_distance", "M-M 距离", "M-M distance", "structure", "number", "angstrom", False, True, ("DFT",), "仅在文中明确给出金属-金属距离时记录，单位建议 Angstrom。"),
+            _field("li_s_bond_length", "Li-S 键长", "Li-S bond length", "structure", "number", "angstrom", False, True, ("DFT",), "仅在表头或上下文明示为 Li-S bond length、Li-S distance、dLi-S 或 Li-S 且给出数值时记录；单位归一为 Angstrom，必须绑定 catalyst_sample_id，不要求绑定到同一活性位点。"),
             _field("srr_lis_intermediate", "LiPS/Li2S 中间体", "LiPS/Li2S intermediate", "dft_label", "enum", None, False, True, ("DFT",), "推荐使用 S8、Li2S8、Li2S6、Li2S4、Li2S2、Li2S；共享语境不足时不要强行归类。"),
             _field("adsorption_energy", "吸附能", "adsorption energy", "dft_label", "number", "eV", False, True, ("DFT",), "默认用于 LiPS/Li2S 吸附；若原文语义更接近 binding energy，应保留原 canonical property 再另行映射。"),
             _field("energy_kind", "能量类型", "energy kind", "dft_label", "enum", None, False, True, ("DFT",), "区分 thermodynamic_energy、activation_barrier、free_energy_change；不得混成一个 ML 标签。"),

@@ -74,6 +74,8 @@ _DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
 - 核验已有 DFT candidate，并检查主文和 SI 是否漏提 DFT 数据。
 - 已有数据提交 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项提交 new_candidate。
 - 一份证据合格的 AI 意见即可通过 import_analysis 的受控校验和写入入口直接确认、修正、拒绝或新增 DFT 数据；不需要第二个 AI，也不按 AI 身份计票。
+- 系统不得根据“没有报错”“已验证”或“没有冲突”自行推断可导出。只有本地 AI 或网页 AI 明确给出 PASS/REVISE，并同时设置 recommended_action="ready_for_ml_export"，才构成导出授权。
+- new_candidate、NEEDS_HUMAN、REJECT、缺少 recommended_action 或其他模糊建议都不得导出；单位缺失、占位单位或键相关性质缺少 bond/bond_pair 时也不得建议导出。
 
 执行：
 1. 读取当前 paper_id 的 context、DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
@@ -89,9 +91,12 @@ _MODULE_RULES = {
 - 元数据错误可通过 import_analysis 修正；专项对象问题只列入对应专项任务，不在本任务中处理。
 - 回读元数据和模块状态后，简要列出已修正项及待处理专项。""",
     "figure": """任务：审核当前唯一目标文献的图片。
-- 按 PDF 核对图片总数、编号、页码、caption、子图、裁剪范围、content_summary 和 key_elements；不处理表格或其他模块。
+- 按 PDF 核对图片总数、编号、页码、caption、子图、裁剪范围、figure_role、content_summary 和 key_elements；不处理表格或其他模块。
 - 审核结论使用 review_figure；元数据修正使用 import_analysis；重裁使用 recrop_figure；漏图使用 create_figure_from_bbox。
+- 每张科学图必须写回具体 figure_role，不能保留 unknown/unclassified/other。常用类型包括 structural_model、characterization、electrochemical_performance、computational_results、dft_calculation、electronic_property、free_energy_diagram、mechanism_diagram、schematic_illustration、property_data。
+- 非科学图片必须明确标为 noise、noisy、decorative 或 publisher_logo；不要把噪声图标成 verified scientific figure。
 - content_summary 应描述实际视觉内容，不能照抄 caption；所有修改必须附 page、figure、quoted_text 或 bbox 证据。
+- verified 图必须同时具备有效 figure_role、content_summary 和具体 key_elements；缺任一项不得报告图片审核完成。
 - 不从曲线估读、插值或推算精确数值。
 - 只有图片或图注明确给出 DFT 结果，且能确认数值、单位、property_type 及对应材料/结构/吸附物或反应步骤时，才用 import_analysis(auto_apply_review_rules=true) 创建未验证 DFT 候选：target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"。候选必须保留 figure_id/figure_label、page、图中标注或 bbox；不得直接确认、拒绝或标记为可导出。
 - 写入后回读图片对象；创建 DFT 候选时还要回读候选是否已进入 DFT 专项处理链路。""",
@@ -148,6 +153,7 @@ def _project_library_prompt_fragment(context_key: Any, target_reaction: Any = No
             "support_material",
             "coordination_environment",
             "metal_metal_distance",
+            "li_s_bond_length",
         )
         if key in field_map
     ]

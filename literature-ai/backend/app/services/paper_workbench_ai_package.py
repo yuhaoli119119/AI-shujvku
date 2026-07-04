@@ -162,9 +162,9 @@ class PaperWorkbenchAiPackageMixin:
                     "figure_derived_dft_policy": (
                         "If a main-paper figure contains explicit DFT values such as adsorption energy, binding "
                         "energy, dissociation energy, decomposition barrier, reaction barrier, free energy/Delta G, "
-                        "Bader charge, or charge transfer, extract them only as DFT candidates with figure/page/text/"
-                        "value/unit/property/material anchors. They must not become ML_Ready until the existing DFT "
-                        "second review and export safety gate pass."
+                        "Bader charge, charge transfer, or Li-S bond length/distance, extract them only as DFT "
+                        "candidates with figure/page/text/value/unit/property/material anchors. They must not become "
+                        "ML_Ready until the existing DFT second review and export safety gate pass."
                     ),
                 },
                 "figure_dft_candidate_extraction_policy": {
@@ -177,6 +177,7 @@ class PaperWorkbenchAiPackageMixin:
                         "free energy / Delta G",
                         "Bader charge",
                         "charge transfer",
+                        "Li-S bond length / distance",
                     ],
                     "required_fields": [
                         "figure_id or figure_label",

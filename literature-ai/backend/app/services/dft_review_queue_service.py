@@ -282,10 +282,13 @@ class DFTReviewQueueService:
             object_review_audits=object_review_audits or [],
             conflicts=conflicts or [],
         )
+        candidate_status = row.candidate_status or "system_candidate"
+        if not gate.eligible and candidate_status == "ML_Ready":
+            candidate_status = "blocked_from_export"
         workflow_state = self.build_dft_workflow_state(
             gate=gate,
             object_review_audits=object_review_audits or [],
-            candidate_status=row.candidate_status,
+            candidate_status=candidate_status,
         )
         return {
             "record_id": result_id,
@@ -320,8 +323,8 @@ class DFTReviewQueueService:
                 else None
             ),
             "confidence": row.confidence,
-            "candidate_status": row.candidate_status or "system_candidate",
-            "candidate_source_label": self._candidate_source_label(row.candidate_status),
+            "candidate_status": candidate_status,
+            "candidate_source_label": self._candidate_source_label(candidate_status),
             "normalized_dedup_key": self._normalized_candidate_key(row),
             "review_status": gate.review_status,
             "decision_status": self._decision_status(gate.review_status),
@@ -334,7 +337,11 @@ class DFTReviewQueueService:
             "is_exportable": gate.eligible,
             "sanity_flags": sanity_flags,
             "figure_reliability": figure_reliability,
-            "can_mark_verified": set(reasons) == {"missing_review"} and not sanity_flags,
+            "can_mark_verified": (
+                "missing_review" in set(reasons)
+                and set(reasons).issubset({"missing_review", "missing_explicit_ai_export_approval"})
+                and not sanity_flags
+            ),
             "recommended_action": self._recommended_action(reasons, gate, sanity_flags),
             "evidence_locators": locators,
             "latest_external_audit_opinions": (external_audits or [])[:5],
@@ -942,8 +949,14 @@ class DFTReviewQueueService:
             return "repair_evidence_reference"
         if "unsafe_locator" in reason_set:
             return "repair_pdf_locator"
-        if reason_set == {"missing_review"}:
+        if "missing_required_unit" in reason_set:
+            return "add_source_supported_unit"
+        if "missing_bond_identity" in reason_set:
+            return "add_bond_identity"
+        if "missing_review" in reason_set:
             return "verify_against_pdf"
+        if "missing_explicit_ai_export_approval" in reason_set:
+            return "request_explicit_ai_export_decision"
         if "unsafe_review" in reason_set:
             return "resolve_review_status"
         return "review_candidate"
@@ -1055,6 +1068,7 @@ class DFTReviewQueueService:
             "Gemini_Verified": "AI 复核候选",
             "Human_Confirmed": "人工确认",
             "ML_Ready": "已审核可导出",
+            "blocked_from_export": "当前不可导出",
             "Rejected": "已拒绝",
             "human_reviewed_needs_evidence": "人工审核后仍缺证据",
         }.get(normalized, normalized)
@@ -1102,6 +1116,9 @@ class DFTReviewQueueService:
             "missing_evidence_text": ("缺证据原文", "danger"),
             "missing_evidence": ("缺 PDF 定位", "danger"),
             "unsafe_locator": ("PDF 定位不可靠", "danger"),
+            "missing_explicit_ai_export_approval": ("缺少 AI 明确导出授权", "danger"),
+            "missing_required_unit": ("缺少来源支持的有效单位", "danger"),
+            "missing_bond_identity": ("键相关性质缺少键类型", "danger"),
             "rejected": ("候选已拒绝", "muted"),
         }
         issues: list[dict[str, Any]] = []
@@ -1171,6 +1188,6 @@ class DFTReviewQueueService:
                 f"Locators: {locators}",
                 "",
                 "必须检查：材料/催化剂、吸附物、性质类型、数值、单位、计算条件/方法、证据原文、页码/章节/表格/图号、重复项、漏提线索。",
-                "输出只能是：accept / reject / needs_fix / suspected_duplicate / suspected_missing，并给出理由和证据位置。",
+                "输出只能是：accept / reject / needs_fix / suspected_duplicate / suspected_missing，并给出理由和证据位置。只有明确 accept 且确认满足导出条件时，才同时提交 recommended_action=ready_for_ml_export；其他结论不得给出导出授权。",
             ]
         )

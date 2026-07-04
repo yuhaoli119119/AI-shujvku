@@ -62,6 +62,7 @@ DESCRIPTOR_PROPERTY_ORDER = [
     "band_gap",
     "metal_electronegativity",
     "coordination_number",
+    "li_s_bond_length",
     "bond_length",
     "adsorption_distance",
 ]
@@ -82,6 +83,7 @@ CORRELATION_VARIABLE_ORDER = [
     "work_function",
     "metal_electronegativity",
     "coordination_number",
+    "li_s_bond_length",
     "bond_length",
     "adsorption_distance",
 ]
@@ -103,6 +105,7 @@ CORRELATION_VARIABLE_GROUPS = {
     "work_function": "electronic",
     "metal_electronegativity": "structure",
     "coordination_number": "structure",
+    "li_s_bond_length": "structure",
     "bond_length": "structure",
     "adsorption_distance": "structure",
 }
@@ -172,6 +175,11 @@ def _canonical_property_type(value: Any) -> str:
         "bader": "bader_charge",
         "charge": "bader_charge",
         "efermi_work_function": "work_function",
+        "li_s": "li_s_bond_length",
+        "li_s_bond_length_a": "li_s_bond_length",
+        "li_s_bond_length": "li_s_bond_length",
+        "li_s_distance": "li_s_bond_length",
+        "li_s_bond_distance": "li_s_bond_length",
         "bond_distance": "bond_length",
         "adsorbate_distance": "adsorption_distance",
     }
@@ -1209,17 +1217,16 @@ def _build_exploratory_descriptor_index(
         family = catalyst_payload.get("family") or catalyst_payload.get("label") or catalyst_payload.get("name") or ""
         if requested_family and requested_family not in _norm_key(family):
             continue
-        group_key = (
-            f"catalyst:{result.catalyst_sample_id}"
-            if result.catalyst_sample_id
-            else f"unassigned:{result.id}"
-        )
+        if not result.catalyst_sample_id:
+            continue
+        group_key = f"catalyst:{result.catalyst_sample_id}"
         entry = {
             "value": float(result.value),
             "unit": result.unit,
             "result": result,
             "paper": paper,
             "catalyst": catalyst_payload,
+            "catalyst_sample_id": str(result.catalyst_sample_id),
             "adsorbate": result_adsorbate,
             "category": category,
         }
@@ -1311,10 +1318,11 @@ def _exploratory_variable_points_from_index(
                         "year": paper.year,
                         "journal": paper.journal,
                         "catalyst": (entry.get("catalyst") or {}).get("label"),
+                        "catalyst_sample_id": entry.get("catalyst_sample_id"),
                         "adsorbate": entry.get("adsorbate"),
                         "reaction_category": entry.get("category"),
                         "reaction_step": _clean_pdf_text(result.reaction_step).lower(),
-                        "match_scope": "self_identity",
+                        "match_scope": "same_catalyst_self_identity",
                         "target_result_id": str(result.id),
                         "descriptor_result_id": str(result.id),
                         "target_evidence": _clean_pdf_text(result.evidence_text)[:420],
@@ -1350,10 +1358,11 @@ def _exploratory_variable_points_from_index(
                 "year": paper.year,
                 "journal": paper.journal,
                 "catalyst": (y_entry.get("catalyst") or {}).get("label"),
+                "catalyst_sample_id": y_entry.get("catalyst_sample_id") or x_entry.get("catalyst_sample_id"),
                 "adsorbate": y_entry.get("adsorbate"),
                 "reaction_category": y_entry.get("category"),
                 "reaction_step": _clean_pdf_text(y_result.reaction_step).lower(),
-                "match_scope": "exploratory_same_sample",
+                "match_scope": "same_catalyst",
                 "target_result_id": str(y_result.id),
                 "descriptor_result_id": str(x_result.id),
                 "target_evidence": _clean_pdf_text(y_result.evidence_text)[:420],
@@ -1495,16 +1504,16 @@ def _build_descriptor_correlation_summary_v2(
                 target_property=y_property,
                 descriptor=x_property,
             )
-            pair_payload = strict_pair_payload
-            source = "reviewed_exportable"
-            if allow_exploratory and not pair_payload:
+            if allow_exploratory:
                 pair_payload = _exploratory_variable_points_from_index(
                     exploratory_index,
                     y_property=y_property,
                     x_property=x_property,
                 )
-                if pair_payload:
-                    source = "exploratory_same_sample"
+                source = "same_catalyst"
+            else:
+                pair_payload = strict_pair_payload
+                source = "reviewed_exportable"
             n = len(pair_payload)
             if x_property == y_property and n:
                 stats = {
@@ -1540,14 +1549,14 @@ def _build_descriptor_correlation_summary_v2(
                         (
                             f"已形成 {n} 个最新导出逻辑下的配对样本。"
                             if source == "reviewed_exportable"
-                            else f"已形成 {n} 个已审核同样本配对样本。"
+                            else f"已形成 {n} 个已审核同催化剂配对样本。"
                         )
                         if status in {"ready", "identity"}
                         else (
                             "Correlation is withheld until the current ML dataset logic yields paired descriptor/target "
                             f"values with n >= {min_n} under the selected reaction/adsorbate/material filters."
                             if source == "reviewed_exportable"
-                            else "Strict reviewed/exportable pairing is empty, and the reviewed same-sample fallback "
+                            else "Reviewed same-catalyst pairing "
                             f"still has n < {min_n} under the selected reaction/adsorbate/material filters."
                         )
                     ),
@@ -1572,8 +1581,9 @@ def _build_descriptor_correlation_summary_v2(
             "dataset_schema_version": (dataset.get("metadata") or {}).get("schema_version"),
         },
         "correlation_policy": (
-            "The heatmap is a single DFT variable-by-variable matrix. Strict reviewed/exportable matching is preferred. "
-            "When strict pairing is empty, an explicitly requested fallback may use reviewed/exportable same-sample pairs."
+            "The heatmap is a single DFT variable-by-variable matrix. "
+            "When same-catalyst mode is requested, pairs are grouped by catalyst_sample_id and do not require the same active-site instance. "
+            "Without that mode, strict reviewed/exportable descriptor-field matching is used."
         ),
     }
 
@@ -1710,7 +1720,7 @@ def visualization_overview(
     corr_min_n: int = Query(default=3, ge=3, le=50),
     corr_allow_exploratory: bool = Query(
         default=False,
-        description="When true, correlation may fall back to reviewed/exportable same-sample pairs.",
+        description="When true, correlation uses reviewed/exportable same-catalyst pairs.",
     ),
     sections: str | None = Query(
         default=None,
@@ -1894,7 +1904,7 @@ def descriptor_correlation_pairs(
     min_n: int = Query(default=3, ge=3, le=50),
     allow_exploratory: bool = Query(
         default=False,
-        description="When true, may fall back to reviewed/exportable same-sample pairs.",
+        description="When true, use reviewed/exportable same-catalyst pairs.",
     ),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -1943,9 +1953,7 @@ def descriptor_correlation_pairs(
         target_property=target,
         descriptor=descriptor_key,
     )
-    pairs = strict_pairs
-    source = "reviewed_exportable"
-    if allow_exploratory and not pairs:
+    if allow_exploratory:
         exploratory_index = _build_exploratory_descriptor_index(
             pair_rows,
             {str(item.id): item for item in catalysts},
@@ -1963,8 +1971,10 @@ def descriptor_correlation_pairs(
             y_property=target,
             x_property=descriptor_key,
         )
-        if pairs:
-            source = "exploratory_same_sample"
+        source = "same_catalyst"
+    else:
+        pairs = strict_pairs
+        source = "reviewed_exportable"
     if target == descriptor_key and pairs:
         stats = {
             "pearson_r": 1.0,
@@ -2003,6 +2013,6 @@ def descriptor_correlation_pairs(
         "points": pairs,
         "policy": (
             "Scatter pairs use the current reviewed/exportable DFT ML dataset by default. "
-            "Reviewed/exportable same-sample pairs are returned only when explicitly requested."
+            "When same-catalyst mode is requested, points are paired by catalyst_sample_id and do not require the same active-site instance."
         ),
     }

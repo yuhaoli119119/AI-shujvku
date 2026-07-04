@@ -421,9 +421,11 @@ body.resizing iframe {
     background: var(--color-primary-bg);
 }
 .paper-title {
+    font-family: Arial, "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 14px;
     line-height: 1.35;
-    font-weight: 800;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     color: var(--color-text);
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -432,6 +434,7 @@ body.resizing iframe {
     text-overflow: ellipsis;
 }
 .paper-original-title {
+    font-family: Arial, "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
     margin-top: 4px;
     color: var(--color-text-secondary);
     font-size: 12px;
@@ -510,13 +513,17 @@ body.resizing iframe {
     justify-content: center;
 }
 .workspace-title {
+    font-family: Arial, "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 20px;
     line-height: 1.45;
-    font-weight: 800;
+    font-weight: 700;
+    letter-spacing: -0.01em;
 }
 .localized-summary-card .localized-title {
+    font-family: Arial, "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 700;
+    letter-spacing: -0.01em;
     line-height: 1.4;
     margin-bottom: 8px;
 }

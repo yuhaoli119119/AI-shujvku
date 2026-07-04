@@ -209,8 +209,12 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             query = query.where(pdf_available_clause if filters.has_pdf else ~pdf_available_clause)
 
         query = query.order_by(*self._list_ordering(filters))
-        query = query.offset(filters.offset).limit(filters.limit)
-        papers = self.session.scalars(query).all()
+        if self._list_should_place_supplementary_after_main(filters):
+            ordered_papers = self.session.scalars(query).all()
+            ordered_papers = self._place_supplementary_papers_after_main(ordered_papers)
+            papers = ordered_papers[filters.offset : filters.offset + filters.limit]
+        else:
+            papers = self.session.scalars(query.offset(filters.offset).limit(filters.limit)).all()
         if not papers:
             return []
         if ensure_paper_codes(self.session, papers):
@@ -335,6 +339,67 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                 )
             )
         return items
+
+    @staticmethod
+    def _list_should_place_supplementary_after_main(filters: PaperListFilterParams) -> bool:
+        sort_by = (filters.sort_by or "year_serial").strip().lower()
+        sort_order = (filters.sort_order or "desc").strip().lower()
+        return sort_by == "year_serial" and sort_order == "desc"
+
+    def _place_supplementary_papers_after_main(self, papers: list[Paper]) -> list[Paper]:
+        paper_ids = [paper.id for paper in papers]
+        if not paper_ids:
+            return papers
+        visible_ids = set(paper_ids)
+        incoming_rows = [
+            row
+            for row in self.session.scalars(
+                select(PaperRelationship).where(PaperRelationship.target_paper_id.in_(paper_ids))
+            ).all()
+            if self._is_supplementary_relationship(row.relationship_type)
+            and row.source_paper_id in visible_ids
+        ]
+        if not incoming_rows:
+            return papers
+
+        support_ids_by_main_id: dict[UUID, list[UUID]] = {}
+        support_to_main_id: dict[UUID, UUID] = {}
+        for row in incoming_rows:
+            support_ids_by_main_id.setdefault(row.source_paper_id, []).append(row.target_paper_id)
+            support_to_main_id[row.target_paper_id] = row.source_paper_id
+
+        papers_by_id = {paper.id: paper for paper in papers}
+
+        def support_sort_key(paper_id: UUID) -> tuple[str, str, str]:
+            paper = papers_by_id.get(paper_id)
+            if paper is None:
+                return ("", "", str(paper_id))
+            return (
+                str(paper.paper_code or ""),
+                str(paper.title or ""),
+                str(paper.id),
+            )
+
+        for support_ids in support_ids_by_main_id.values():
+            support_ids.sort(key=support_sort_key)
+
+        placed_ids: set[UUID] = set()
+        ordered: list[Paper] = []
+        for paper in papers:
+            if paper.id in placed_ids:
+                continue
+            main_id = support_to_main_id.get(paper.id)
+            if main_id is not None and main_id in visible_ids:
+                continue
+            ordered.append(paper)
+            placed_ids.add(paper.id)
+            for support_id in support_ids_by_main_id.get(paper.id, []):
+                support_paper = papers_by_id.get(support_id)
+                if support_paper is None or support_id in placed_ids:
+                    continue
+                ordered.append(support_paper)
+                placed_ids.add(support_id)
+        return ordered
 
     @staticmethod
     def _list_ordering(filters: PaperListFilterParams) -> tuple:

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import (
+    AuditLog,
     CatalystSample,
     DFTResult,
     DFTSetting,
@@ -100,6 +101,7 @@ class DFTReviewBundleService:
             "parsed/initial_dft_candidates.json": _json_bytes(materials["initial_dft_candidates"]),
             "parsed/extracted_tables.json": _json_bytes(materials["extracted_tables"]),
             "parsed/extracted_figures.json": _json_bytes(self._public_figures(materials["extracted_figures"])),
+            "parsed/curated_figure_table_evidence_snapshot.json": _json_bytes(materials["curated_evidence_snapshot"]),
             "evidence/text_snippets.jsonl": self._jsonl_bytes(materials["text_snippets"]),
             "return_schema.json": _json_bytes(OfflineDFTReviewResult.model_json_schema()),
         }
@@ -152,6 +154,8 @@ class DFTReviewBundleService:
                 "title": materials["paper_metadata"]["title"],
             },
             "review_scope": "single_paper_main_plus_relevant_supplementary_dft_evidence",
+            "figure_table_evidence_review_status": materials["curated_evidence_snapshot"]["evidence_review_status"],
+            "figure_table_evidence_snapshot_fingerprint": materials["curated_evidence_snapshot"]["snapshot_fingerprint"],
             "writeback_paper_id": materials["paper_metadata"]["paper_id"],
             "evidence_ids": sorted(materials["evidence_map"]),
             "target_dft_result_ids": sorted(materials["target_dft_result_ids"]),
@@ -402,6 +406,12 @@ class DFTReviewBundleService:
         )
         evidence_map = {**text_map, **table_map, **figure_map}
 
+        curated_evidence_snapshot = self._curated_evidence_snapshot(
+            paper=paper,
+            extracted_tables=extracted_tables,
+            extracted_figures=extracted_figures,
+        )
+
         paper_metadata = {
             "paper_id": str(paper.id),
             "paper_code": str(paper.paper_code),
@@ -459,6 +469,7 @@ class DFTReviewBundleService:
                 {key: value for key, value in item.items() if key != "bundle_file" and not key.startswith("_")}
                 for item in extracted_figures
             ],
+            "curated_evidence_snapshot": curated_evidence_snapshot,
         }
         bundle_fingerprint = _sha256(_canonical_json_bytes(fingerprint_payload))
         warnings = []
@@ -466,6 +477,8 @@ class DFTReviewBundleService:
             warnings.append("no_dft_relevant_evidence_found")
         if not initial_dft_candidates["existing_candidates"]:
             warnings.append("no_main_paper_dft_candidates")
+        if curated_evidence_snapshot["evidence_review_status"] != "applied":
+            warnings.append("figure_table_evidence_not_yet_reviewed")
 
         return {
             "paper_metadata": paper_metadata,
@@ -473,6 +486,7 @@ class DFTReviewBundleService:
             "text_snippets": text_snippets,
             "extracted_tables": extracted_tables,
             "extracted_figures": extracted_figures,
+            "curated_evidence_snapshot": curated_evidence_snapshot,
             "evidence_map": evidence_map,
             "target_dft_result_ids": {
                 str(row.id) for row in dft_rows if row.paper_id == paper.id
@@ -794,6 +808,41 @@ class DFTReviewBundleService:
             "utf-8"
         )
 
+
+
+    def _curated_evidence_snapshot(
+        self,
+        *,
+        paper: Paper,
+        extracted_tables: list[dict[str, Any]],
+        extracted_figures: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        latest = self.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.paper_id == paper.id)
+            .where(AuditLog.action == "offline_evidence_review_applied")
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(1)
+        ).first()
+        payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
+        snapshot = {
+            "schema_version": "curated_figure_table_evidence_snapshot_v1",
+            "evidence_review_status": "applied" if latest is not None else "not_recorded",
+            "review_run_id": str(latest.id) if latest is not None else None,
+            "reviewed_at": latest.created_at.isoformat() if latest is not None and latest.created_at else None,
+            "review_source": payload.get("review_source") if isinstance(payload, dict) else None,
+            "stage1_bundle_fingerprint": payload.get("bundle_fingerprint") if isinstance(payload, dict) else None,
+            "applied_count": len(payload.get("applied") or []) if isinstance(payload, dict) else 0,
+            "skipped_count": len(payload.get("skipped") or []) if isinstance(payload, dict) else 0,
+            "dft_evidence_candidates": payload.get("dft_evidence_candidates") if isinstance(payload, dict) else [],
+            "tables": extracted_tables,
+            "figures": self._public_figures(extracted_figures),
+        }
+        fingerprint_payload = dict(snapshot)
+        fingerprint_payload.pop("snapshot_fingerprint", None)
+        snapshot["snapshot_fingerprint"] = _sha256(_canonical_json_bytes(fingerprint_payload))
+        return snapshot
+
     @staticmethod
     def _public_figures(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return [
@@ -879,7 +928,9 @@ class DFTReviewBundleService:
 
 ## 材料顺序
 
-先读 `manifest.json`、`parsed/initial_dft_candidates.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
+先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
+
+如果 `curated_figure_table_evidence_snapshot.json` 的 `evidence_review_status` 不是 `applied`，说明图表证据还没有完成第一阶段回写；此时不得把图表来源的 DFT 值标成确定通过，只能使用 `NEEDS_HUMAN` 或在 `uncertainties` 中说明。
 
 最终只输出符合 `return_schema.json` 的 JSON。
 """

@@ -1221,7 +1221,8 @@
         "d_band_center": "d带中心 (d-Band Center)",
         "bader_charge": "Bader电荷分布 (Bader Charge)",
         "work_function": "功函数 (Work Function)",
-        "bond_length": "键长 (Bond Length)",
+        "li_s_bond_length": "Li-S 键长 (Li-S Bond Length)",
+        "bond_length": "通用键长 (Generic Bond Length)",
         "adsorption_distance": "吸附距离 (Adsorption Distance)"
       };
       return dict[type] || type;
@@ -1230,6 +1231,9 @@
     function formatMatchScope(scope) {
       const dict = {
         "direct": "精确直接匹配 (数据直接标记了此催化剂样本)",
+        "direct_catalyst": "同一催化剂精确匹配",
+        "same_catalyst": "同一催化剂配对",
+        "same_catalyst_self_identity": "同一记录自配对",
         "paper_level_fallback": "文献级推导匹配 (从论文中回填推定在此催化剂下)",
         "missing_catalyst": "未标注 (未归类到具体催化剂样本)"
       };
@@ -1254,7 +1258,8 @@
         work_function: "功函数",
         metal_electronegativity: "金属电负性",
         coordination_number: "配位数",
-        bond_length: "键长",
+        li_s_bond_length: "Li-S 键长",
+        bond_length: "通用键长",
         adsorption_distance: "吸附距离",
       };
       return dict[label] || String(label || "").replace(/_/g, " ");
@@ -1695,7 +1700,7 @@
       box.innerHTML =
         '<div class="scatter-shell">' +
           '<div class="scatter-head">' +
-            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(yProperty)) + ' x ' + esc(formatCorrelationLabel(xProperty)) + '</div><div class="muted">仅使用已审核可导出配对；虚线为线性拟合。</div></div>' +
+            '<div><div class="scatter-title">' + esc(formatCorrelationLabel(yProperty)) + ' x ' + esc(formatCorrelationLabel(xProperty)) + '</div><div class="muted">同一催化剂身份内配对；虚线为线性拟合。</div></div>' +
             '<span class="pill">点击矩阵可切换组合</span>' +
           '</div>' +
           '<div class="scatter-meta">' +

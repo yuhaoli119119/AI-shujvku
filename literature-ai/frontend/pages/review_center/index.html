@@ -98,9 +98,9 @@
     }
     .page-actions {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: 42px minmax(190px, 1.1fr) minmax(150px, 0.9fr) minmax(220px, 1.25fr);
       gap: 8px;
-      flex: 0 0 660px;
+      flex: 0 0 720px;
     }
     .page-actions .btn {
       min-width: 0;
@@ -124,6 +124,11 @@
       text-align: center;
       text-align-last: center;
       cursor: pointer;
+    }
+    .page-actions .icon-btn {
+      padding: 0;
+      font-size: 14px;
+      font-weight: 900;
     }
     .btn-tinted {
       background: var(--color-primary-bg);
@@ -329,8 +334,10 @@
     th:nth-child(5), td:nth-child(5) { width: 24%; }
     th:nth-child(6), td:nth-child(6) { width: 16%; }
     .paper-title {
-      font-weight: 900;
-      line-height: 1.28;
+      font-family: Arial, "Helvetica Neue", Helvetica, "PingFang SC", "Microsoft YaHei", sans-serif;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.3;
       overflow-wrap: anywhere;
       display: -webkit-box;
       -webkit-line-clamp: 2;
@@ -1304,9 +1311,16 @@
     <div class="review-topline">
       <section class="stats" id="stats"></section>
       <div class="page-actions">
-        <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新审核中心">↻ 刷新</button>
-        <button class="btn btn-ghost" id="webAiReturnEntryBtn" type="button" onclick="openWebAiReturnDialog()" disabled>回传网页 AI 结果</button>
-        <button class="btn btn-ghost" id="webAiBundlePromptBtn" type="button" onclick="copyWebAiBundlePrompt()" title="复制上传 DFT 核验包时使用的网页 AI 提示词">复制网页 AI 提示词</button>
+        <button class="btn btn-ghost icon-btn" type="button" onclick="loadReviewCenter()" title="刷新审核中心" aria-label="刷新审核中心">↻</button>
+        <select class="btn btn-ghost" id="webAiWorkflowSelect" title="网页 AI 图表/DFT 离线审核流程" onchange="handleWebAiWorkflowSelect()">
+          <option value="">网页 AI 流程</option>
+          <option value="export_evidence">1 导出图表证据包</option>
+          <option value="copy_evidence_prompt">复制图表提示词</option>
+          <option value="return_evidence">2 回传图表 JSON</option>
+          <option value="export_dft">3 导出 DFT 终审包</option>
+          <option value="copy_dft_prompt">复制 DFT 提示词</option>
+          <option value="return_dft">4 回传 DFT JSON</option>
+        </select>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
           <option value="prepare_filtered">AI 重建</option>
@@ -1431,6 +1445,7 @@
           <button class="btn btn-tinted btn-sm" id="webAiValidateBtn" type="button" onclick="validateWebAiReturnJson()">校验结果</button>
         </div>
         <div class="web-ai-return-footer-group">
+          <button class="btn btn-tinted btn-sm" id="webAiApplyEvidenceBtn" type="button" onclick="applyWebAiEvidenceResult()" disabled style="display:none;">应用图表结果</button>
           <button class="btn btn-tinted btn-sm" id="webAiCopyInstructionBtn" type="button" onclick="copyLocalAiImportInstruction()" disabled>复制本地 AI 处理指令</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="closeWebAiReturnDialog()">关闭</button>
         </div>
@@ -1453,6 +1468,7 @@
     const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
     const selectedPaperIds = new Set();
     const webAiReturnState = {
+      mode: "dft",
       paperId: "",
       paperCode: "",
       validatedRawText: "",
@@ -1778,26 +1794,147 @@
       if (!copied) throw new Error("clipboard copy was rejected");
     }
 
-    async function copyWebAiBundlePrompt() {
-      const prompt = [
-        "请解压并阅读这个 AI 核验包中的审核说明、manifest、返回 schema 和 JSON 模板。",
+    function webAiModeLabel(mode) {
+      return mode === "evidence" ? "图表证据整理" : "DFT 终审";
+    }
+
+    function buildWebAiEvidencePrompt() {
+      return [
+        "请解压并阅读这个图表证据整理包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
         "",
-        "请结合主文与 SI 证据逐条核验其中的 DFT 数据：",
+        "你的任务是把系统当前抽取的图片和表格还原成可信证据：",
+        "- 图片 crop 正确填 KEEP；裁剪不完整或错位填 RECROP，并给出 page 与 bbox_norm；",
+        "- 漏图填 CREATE，并给出 page、bbox_norm、caption、figure_role、content_summary、key_elements；",
+        "- 表格正确填 KEEP；表格缺行、缺列、跨页断裂或单位/脚注缺失填 UPDATE，并返回完整 complete_markdown；",
+        "- 漏表填 CREATE；重复/跨页合并、删除、无法判断时分别用 MERGE / DELETE / NEEDS_HUMAN。",
+        "",
+        "只把图/表里明确写出的 DFT 数值作为 dft_evidence_candidates；不要从曲线、柱状图或颜色图估读数值。",
+        "不要声称已经写库、verified、人工确认或 ML_Ready。系统会校验 JSON 后从原 PDF 重新裁剪/回写。",
+        "",
+        "最终只输出一份严格符合 return_schema.json 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
+      ].join("\n");
+    }
+
+    function buildWebAiDftPrompt() {
+      return [
+        "请解压并阅读这个 DFT 终审包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
+        "",
+        "请先检查 parsed/curated_figure_table_evidence_snapshot.json：",
+        "- 如果 evidence_review_status 不是 applied，图表证据还没有完成第一阶段回写；不得把图表来源的 DFT 值判定为 PASS，只能写 NEEDS_HUMAN 或 uncertainties。",
+        "- 如果已经 applied，请使用已回写图表证据快照，再结合 text_snippets、tables、figures 和系统原有 DFT candidates 做终审。",
+        "",
+        "请逐条核验 DFT 数据：",
         "- 正确填 PASS；",
         "- 需要修正填 REVISE；",
         "- 错误或重复填 REJECT；",
         "- 发现漏提数据填 new_candidate；",
         "- 无法确认填 NEEDS_HUMAN。",
-        "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。",
+        "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。正文、SI、表格或图片对同一计算结果的重复证据应合并，不要重复创建 DFT 结果。",
         "",
-        "最终只输出一份严格符合返回 schema 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
+        "最终只输出一份严格符合 return_schema.json 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
       ].join("\n");
+    }
+
+    async function copyWebAiBundlePrompt(mode) {
+      const normalizedMode = mode === "evidence" ? "evidence" : "dft";
+      const prompt = normalizedMode === "evidence" ? buildWebAiEvidencePrompt() : buildWebAiDftPrompt();
       try {
         await copyTextToClipboard(prompt);
-        showToast("网页 AI 核验提示词已复制");
+        showToast("网页 AI " + webAiModeLabel(normalizedMode) + "提示词已复制");
       } catch (error) {
         console.error(error);
         showToast("复制失败，请检查浏览器剪贴板权限");
+      }
+    }
+
+    async function handleWebAiWorkflowSelect() {
+      const select = document.getElementById("webAiWorkflowSelect");
+      const action = String(select && select.value || "");
+      if (select) select.value = "";
+      if (!action) return;
+      if (action === "export_evidence") {
+        await downloadWebAiBundle("evidence");
+      } else if (action === "copy_evidence_prompt") {
+        await copyWebAiBundlePrompt("evidence");
+      } else if (action === "return_evidence") {
+        openWebAiReturnDialog("evidence");
+      } else if (action === "export_dft") {
+        await downloadWebAiBundle("dft");
+      } else if (action === "copy_dft_prompt") {
+        await copyWebAiBundlePrompt("dft");
+      } else if (action === "return_dft") {
+        openWebAiReturnDialog("dft");
+      }
+    }
+
+    function selectedWebAiSingleMainPaper() {
+      const target = selectedWebAiReturnTarget();
+      if (!target) {
+        showToast("请先只选择一篇主文献。");
+        return null;
+      }
+      return target;
+    }
+
+    function contentDispositionFilename(headerValue, fallback) {
+      const value = String(headerValue || "");
+      const utf8Match = value.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match) {
+        try {
+          return decodeURIComponent(utf8Match[1]);
+        } catch (_) {
+          return utf8Match[1];
+        }
+      }
+      const plainMatch = value.match(/filename="?([^";]+)"?/i);
+      return plainMatch ? plainMatch[1] : fallback;
+    }
+
+    async function downloadWebAiBundle(mode) {
+      const normalizedMode = mode === "evidence" ? "evidence" : "dft";
+      const target = selectedWebAiSingleMainPaper();
+      if (!target) return;
+      const paperId = String(target.paper_id || "");
+      const paperCode = String(target.paper_code || paperId.slice(0, 8) || "paper");
+      const endpoint = normalizedMode === "evidence"
+        ? "/api/papers/" + encodeURIComponent(paperId) + "/evidence-review-bundle?include_pdf_files=true&include_figure_files=true"
+        : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true";
+      const button = document.getElementById("webAiBundlePromptBtn");
+      const previousText = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "导出中...";
+      }
+      try {
+        const response = await fetch(endpoint, { method: "POST" });
+        if (!response.ok) {
+          let message = "HTTP " + response.status;
+          try {
+            const data = await response.json();
+            if (data && data.detail) message = String(data.detail);
+          } catch (_) {}
+          throw new Error(message);
+        }
+        const blob = await response.blob();
+        const fallback = paperCode + (normalizedMode === "evidence" ? "_figure_table_evidence_review_bundle.zip" : "_dft_review_bundle.zip");
+        const filename = contentDispositionFilename(response.headers.get("Content-Disposition"), fallback);
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        showToast(webAiModeLabel(normalizedMode) + "包已开始下载：" + filename);
+      } catch (error) {
+        console.error(error);
+        showToast("导出失败：" + error.message);
+      } finally {
+        if (button) {
+          button.disabled = false;
+          button.textContent = previousText || "复制 DFT 提示词";
+        }
       }
     }
 
@@ -2253,13 +2390,26 @@
       box.innerHTML = html;
     }
 
+    function syncWebAiReturnModeButtons() {
+      const isEvidenceMode = webAiReturnState.mode === "evidence";
+      const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+      const copyButton = document.getElementById("webAiCopyInstructionBtn");
+      if (applyButton) {
+        applyButton.style.display = isEvidenceMode ? "" : "none";
+        applyButton.disabled = true;
+      }
+      if (copyButton) {
+        copyButton.style.display = isEvidenceMode ? "none" : "";
+        copyButton.disabled = true;
+      }
+    }
+
     function clearWebAiReturnTransientState(message) {
       const textarea = document.getElementById("webAiReturnJson");
       if (textarea) textarea.value = "";
       webAiReturnState.validatedRawText = "";
       webAiReturnState.validationResponse = null;
-      const copyButton = document.getElementById("webAiCopyInstructionBtn");
-      if (copyButton) copyButton.disabled = true;
+      syncWebAiReturnModeButtons();
       setWebAiValidationBox(esc(message || "尚未校验。校验成功也不会自动入库。"), "");
     }
 
@@ -2278,8 +2428,8 @@
       if (button) {
         button.disabled = !target;
         button.textContent = target
-          ? "回传网页 AI 结果（" + (nextPaperCode || nextPaperId.slice(0, 8)) + "）"
-          : "回传网页 AI 结果";
+          ? "回传 DFT JSON（" + (nextPaperCode || nextPaperId.slice(0, 8)) + "）"
+          : "回传 DFT JSON";
         button.title = target
           ? "当前论文号：" + (nextPaperCode || "-")
           : "请先只选择一篇主文献";
@@ -2295,20 +2445,36 @@
       }
     }
 
-    function openWebAiReturnDialog() {
+    function openWebAiReturnDialog(mode) {
+      const normalizedMode = mode === "evidence" ? "evidence" : "dft";
       const target = selectedWebAiReturnTarget();
       if (!target) {
-        showToast("请先只选择一篇主文献，再回传网页 AI 结果。");
+        showToast("请先只选择一篇主文献，再回传网页 AI " + webAiModeLabel(normalizedMode) + "结果。");
         return;
       }
       const targetId = String(target.paper_id || "");
-      if (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) {
+      if (
+        (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) ||
+        webAiReturnState.mode !== normalizedMode
+      ) {
         clearWebAiReturnTransientState("已切换文献，先前临时内容已清除。");
       }
+      webAiReturnState.mode = normalizedMode;
       webAiReturnState.paperId = targetId;
       webAiReturnState.paperCode = String(target.paper_code || "");
+      document.getElementById("webAiReturnTitle").textContent =
+        "回传网页 AI " + webAiModeLabel(normalizedMode) + " JSON";
       document.getElementById("webAiReturnSubtitle").textContent =
-        "当前论文号：" + (webAiReturnState.paperCode || "-") + " | paper_id：" + targetId;
+        "当前论文号：" + (webAiReturnState.paperCode || "-") +
+        " | paper_id：" + targetId +
+        " | 模式：" + webAiModeLabel(normalizedMode);
+      syncWebAiReturnModeButtons();
+      setWebAiValidationBox(
+        normalizedMode === "evidence"
+          ? "尚未校验。图表 JSON 校验通过后，可由系统自动应用高置信度图表修复；本地 AI 只负责确认和读回。"
+          : "尚未校验。DFT JSON 校验成功也不会自动入库。",
+        ""
+      );
       const overlay = document.getElementById("webAiReturnOverlay");
       overlay.classList.add("open");
       overlay.setAttribute("aria-hidden", "false");
@@ -2320,7 +2486,14 @@
       webAiReturnState.validationResponse = null;
       const copyButton = document.getElementById("webAiCopyInstructionBtn");
       if (copyButton) copyButton.disabled = true;
-      setWebAiValidationBox("内容已修改，请重新校验。校验成功前不能复制导入指令。", "");
+      const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+      if (applyButton) applyButton.disabled = true;
+      setWebAiValidationBox(
+        webAiReturnState.mode === "evidence"
+          ? "内容已修改，请重新校验。校验成功前不能应用图表结果。"
+          : "内容已修改，请重新校验。校验成功前不能复制导入指令。",
+        ""
+      );
     }
 
     const WEB_AI_RETURN_MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -2403,11 +2576,20 @@
       field_out_of_scope: "包含超出 DFT 核验范围的字段",
       unknown_target_id: "目标 DFT 记录不存在或不属于当前主文献",
       unknown_evidence_id: "引用的 evidence_id 不存在于当前核验包",
+      unknown_figure_id: "目标图片不存在或不属于当前核验包",
+      unknown_table_id: "目标表格不存在或不属于当前核验包",
+      unknown_source_paper_id: "source_paper_id 不属于当前主文/SI 材料包",
+      unknown_dft_candidate_evidence_id: "图表 DFT 候选引用的 evidence_id 不存在",
       evidence_not_checked: "该结论要求 evidence_checked=true",
       incomplete_candidate_coverage: "标记完成时仍有 DFT 候选未逐条审核",
+      incomplete_figure_coverage: "标记完成时仍有图片未逐项审核",
+      incomplete_table_coverage: "标记完成时仍有表格未逐项审核",
+      invalid_markdown_table: "表格 UPDATE/CREATE 必须返回完整 markdown 表格",
+      apply_requires_completed_review: "只有 overall_status=completed 的图表审核结果才允许应用",
       invalid_json: "无法解析为 JSON",
       file_read_error: "无法读取拖入的 JSON 文件",
-      validation_request_failed: "校验请求失败"
+      validation_request_failed: "校验请求失败",
+      apply_request_failed: "应用请求失败"
     };
 
     function webAiValidationIssueText(issue) {
@@ -2432,6 +2614,28 @@
       );
     }
 
+    function renderWebAiExecutionPlan(plan) {
+      const items = Array.isArray(plan) ? plan.slice(0, 24) : [];
+      if (!items.length) {
+        return '<div class="muted" style="margin-top:8px;">没有生成自动执行计划。</div>';
+      }
+      const rows = items.map(function (item) {
+        const blocked = Array.isArray(item.blocked_reasons) && item.blocked_reasons.length
+          ? item.blocked_reasons.join(", ")
+          : "可自动处理";
+        return "<li>" +
+          "<strong>" + esc(String(item.category || "-") + " / " + String(item.action || "-")) + "</strong>" +
+          " → " + esc(String(item.target_id || "-")) +
+          "；auto_apply=" + esc(String(Boolean(item.auto_apply))) +
+          "；" + esc(blocked) +
+          "</li>";
+      }).join("");
+      const extra = plan.length > items.length
+        ? '<div class="muted">仅显示前 ' + esc(String(items.length)) + ' 条，共 ' + esc(String(plan.length)) + ' 条。</div>'
+        : "";
+      return '<div style="margin-top:10px;"><strong>执行计划：</strong><ul>' + rows + "</ul>" + extra + "</div>";
+    }
+
     function renderWebAiValidationSuccess(data) {
       const warnings = Array.isArray(data.warnings) ? data.warnings : [];
       const warningText = warnings.length
@@ -2439,6 +2643,25 @@
             return "[" + String(item && item.code || "warning") + "] " + String(item && item.message || "需要本地 AI 复核");
           }).join("；")
         : "无";
+      if (webAiReturnState.mode === "evidence") {
+        const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+        if (applyButton) applyButton.disabled = false;
+        setWebAiValidationBox(
+          "<strong>图表 JSON 校验通过，尚未应用。</strong>" +
+          '<div class="web-ai-validation-summary">' +
+            '<div class="web-ai-validation-item"><strong>paper_code</strong>' + esc(data.paper_code || "-") + "</div>" +
+            '<div class="web-ai-validation-item"><strong>auto_apply_count</strong>' + esc(String(data.auto_apply_count || 0)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>needs_confirmation</strong>' + esc(String(data.needs_confirmation_count || 0)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>validate_writes_database</strong>' + esc(String(Boolean(data && data.safety && data.safety.validate_writes_database))) + "</div>" +
+          "</div>" +
+          "<div style=\"margin-top:10px;\"><strong>warnings：</strong>" + esc(warningText) + "</div>" +
+          renderWebAiExecutionPlan(data.execution_plan || []),
+          "is-success"
+        );
+        return;
+      }
+      const copyButton = document.getElementById("webAiCopyInstructionBtn");
+      if (copyButton) copyButton.disabled = false;
       const writesDatabase = Boolean(data && data.safety && data.safety.writes_database);
       const hasImportRequest = Boolean(data && data.import_analysis_request);
       setWebAiValidationBox(
@@ -2474,6 +2697,8 @@
         webAiReturnState.validatedRawText = "";
         webAiReturnState.validationResponse = null;
         document.getElementById("webAiCopyInstructionBtn").disabled = true;
+        const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+        if (applyButton) applyButton.disabled = true;
         renderWebAiValidationFailure([{ code: "invalid_json", message: error.message }], []);
         return;
       }
@@ -2481,16 +2706,24 @@
       validateButton.disabled = true;
       validateButton.textContent = "校验中...";
       document.getElementById("webAiCopyInstructionBtn").disabled = true;
+      const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+      if (applyButton) applyButton.disabled = true;
       try {
+        const endpoint = webAiReturnState.mode === "evidence"
+          ? "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/validate"
+          : "/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-result/validate";
         const data = await fetchJSON(
-          "/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-result/validate",
+          endpoint,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(parsed)
           }
         );
-        if (!data || data.valid !== true || !data.import_analysis_request) {
+        const hasExpectedResult = webAiReturnState.mode === "evidence"
+          ? Boolean(data && data.valid === true && Array.isArray(data.execution_plan))
+          : Boolean(data && data.valid === true && data.import_analysis_request);
+        if (!hasExpectedResult) {
           webAiReturnState.validatedRawText = "";
           webAiReturnState.validationResponse = null;
           renderWebAiValidationFailure(data && data.errors || [], data && data.warnings || []);
@@ -2498,7 +2731,6 @@
         }
         webAiReturnState.validatedRawText = rawText;
         webAiReturnState.validationResponse = data;
-        document.getElementById("webAiCopyInstructionBtn").disabled = false;
         renderWebAiValidationSuccess(data);
       } catch (error) {
         webAiReturnState.validatedRawText = "";
@@ -2513,6 +2745,9 @@
     }
 
     function buildLocalAiImportInstruction() {
+      if (webAiReturnState.mode !== "dft") {
+        throw new Error("当前不是 DFT 终审模式。图表结果请使用“应用图表结果”。");
+      }
       const response = webAiReturnState.validationResponse;
       const textarea = document.getElementById("webAiReturnJson");
       const rawText = String(textarea && textarea.value || "").trim();
@@ -2529,9 +2764,10 @@
         "1. 先把下方原始 JSON 重新 POST 到 /api/papers/" + webAiReturnState.paperId + "/dft-review-result/validate，防止核验包或数据库状态已过期。",
         "2. 如果新返回 valid=false，立即停止，不调用 import_analysis，并向用户报告 errors 和 warnings。",
         "3. 如果新返回 valid=true，只使用这次新返回的 import_analysis_request；不得使用旧校验结果。",
-        "4. 优先调用当前会话已认证 MCP 的 import_analysis；禁止直接写 PostgreSQL，禁止调用 service/session/model 绕过公开入口。",
-        "5. 校验成功本身不等于入库，也不等于人工确认、verified 或 ML_Ready。",
-        "6. 导入后回读并报告 run_id、候选数量、冲突项、需要人工处理的项目以及未完成事项。",
+        "4. 确认 DFT bundle 中 parsed/curated_figure_table_evidence_snapshot.json 已是本轮已回写图表证据；若 figure_table_evidence_review_status 不是 applied，应停止并要求先完成图表证据整理。",
+        "5. 优先调用当前会话已认证 MCP 的 import_analysis；禁止直接写 PostgreSQL，禁止调用 service/session/model 绕过公开入口。",
+        "6. 校验成功本身不等于入库，也不等于人工确认、verified 或 ML_Ready。",
+        "7. 导入后回读并报告 run_id、候选数量、冲突项、需要人工处理的项目以及未完成事项。",
         "",
         "网页 AI 返回的原始 JSON：",
         "-----BEGIN WEB AI REVIEW JSON-----",
@@ -2548,6 +2784,76 @@
       } catch (error) {
         document.getElementById("webAiCopyInstructionBtn").disabled = true;
         showToast(error.message);
+      }
+    }
+
+    async function applyWebAiEvidenceResult() {
+      if (webAiReturnState.mode !== "evidence") {
+        showToast("当前不是图表证据整理模式。");
+        return;
+      }
+      const target = selectedWebAiReturnTarget();
+      const textarea = document.getElementById("webAiReturnJson");
+      const rawText = String(textarea && textarea.value || "").trim();
+      if (!target || String(target.paper_id || "") !== webAiReturnState.paperId) {
+        renderWebAiValidationFailure([{ code: "paper_id_mismatch", message: "当前选择与弹窗目标不一致" }], []);
+        return;
+      }
+      if (!webAiReturnState.validationResponse || webAiReturnState.validationResponse.valid !== true || rawText !== webAiReturnState.validatedRawText) {
+        showToast("请先校验当前图表 JSON。");
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(rawText);
+      } catch (error) {
+        renderWebAiValidationFailure([{ code: "invalid_json", message: error.message }], []);
+        return;
+      }
+      const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+      if (!window.confirm("确认应用这份图表审核 JSON？系统只会自动处理高置信度图表修复；MERGE/DELETE/REJECT/NEEDS_HUMAN 会跳过。")) {
+        return;
+      }
+      applyButton.disabled = true;
+      applyButton.textContent = "应用中...";
+      try {
+        const data = await fetchJSON(
+          "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/apply",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(parsed)
+          }
+        );
+        if (data && data.apply_ready === false && Array.isArray(data.apply_blocking_errors) && data.apply_blocking_errors.length) {
+          renderWebAiValidationFailure(data.apply_blocking_errors, data.warnings || []);
+          return;
+        }
+        if (!data || data.valid !== true) {
+          renderWebAiValidationFailure(data && data.errors || [{ code: "apply_request_failed", message: "系统未返回有效应用结果" }], data && data.warnings || []);
+          return;
+        }
+        const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0;
+        const applied = Array.isArray(data.applied) ? data.applied.length : Number(data.applied_count || 0);
+        setWebAiValidationBox(
+          "<strong>图表结果已处理。</strong>" +
+          '<div class="web-ai-validation-summary">' +
+            '<div class="web-ai-validation-item"><strong>applied_count</strong>' + esc(String(applied)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>skipped_count</strong>' + esc(String(skipped)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>writes_database</strong>' + esc(String(Boolean(data && data.safety && data.safety.writes_database))) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>post_apply_fingerprint</strong>' + esc(String(data.post_apply_bundle_fingerprint || "-").slice(0, 16)) + "</div>" +
+          "</div>" +
+          '<div style="margin-top:10px;">下一步：导出 DFT 终审包；包内会包含已经回写的图表证据快照。</div>',
+          "is-success"
+        );
+        webAiReturnState.validationResponse = data;
+        showToast("图表结果已应用；请导出 DFT 终审包继续。");
+        await loadReviewCenter();
+      } catch (error) {
+        renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
+      } finally {
+        applyButton.textContent = "应用图表结果";
+        applyButton.disabled = true;
       }
     }
     // WEB_AI_RETURN_FEATURE_END

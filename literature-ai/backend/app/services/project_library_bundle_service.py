@@ -39,7 +39,13 @@ _LI2S_REACTION_SUBTYPES = {
     "migration_barrier",
 }
 _ELECTRONIC_PROPERTIES = {"d_band_center", "bader_charge", "charge_transfer"}
-_STRUCTURE_PROPERTIES = {"metal_metal_distance", "coordination_environment", "adsorption_site", "adsorption_mode"}
+_STRUCTURE_PROPERTIES = {
+    "metal_metal_distance",
+    "li_s_bond_length",
+    "coordination_environment",
+    "adsorption_site",
+    "adsorption_mode",
+}
 _VALID_EXPLICIT_ENERGY_KINDS = {
     "thermodynamic_energy",
     "activation_barrier",
@@ -172,8 +178,17 @@ def _structure_payload(
     if values["coordination_environment"] in (None, "", []):
         values["coordination_environment"] = catalyst.coordination
         sources["coordination_environment"] = "catalyst_sample.coordination" if catalyst.coordination else None
+    assign("li_s_bond_length_A", "li_s_bond_length_A", "li_s_bond_length", "li_s_bond_length_a", "Li-S", "li-s")
     assign("metal_ligand_distance_A", "metal_ligand_distance_A", "metal_ligand_distance", "metal_ligand_distance_a")
     taxonomy = get_property_taxonomy(row.property_type)
+    if (
+        values["li_s_bond_length_A"] is None
+        and taxonomy.get("canonical_property_type") == "li_s_bond_length"
+    ):
+        normalized = UnitNormalizer().normalize_length(row.value, row.unit)
+        if normalized.normalized_value is not None and normalized.normalized_unit == "A":
+            values["li_s_bond_length_A"] = normalized.normalized_value
+            sources["li_s_bond_length_A"] = "dft_result.value"
     adsorption_site_keys = (
         ("adsorption_site", "active_site")
         if taxonomy.get("property_family") == "electronic_descriptor"
@@ -737,6 +752,7 @@ def _export_record_for_task(
         **descriptor_payload,
         "metal_metal_distance_A": prop.get("metal_metal_distance_A"),
         "coordination_environment": prop.get("coordination_environment"),
+        "li_s_bond_length_A": prop.get("li_s_bond_length_A"),
         "metal_ligand_distance_A": prop.get("metal_ligand_distance_A"),
         "adsorption_site": prop.get("adsorption_site"),
         "adsorption_mode": prop.get("adsorption_mode"),
@@ -798,6 +814,7 @@ def _put_supplemental_wide_values(target: dict[str, Any], prop: dict[str, Any]) 
         "charge_transfer_e": "charge_transfer_e",
         "metal_metal_distance_A": "metal_metal_distance_A",
         "coordination_environment": "coordination_environment",
+        "li_s_bond_length_A": "li_s_bond_length_A",
         "metal_ligand_distance_A": "metal_ligand_distance_A",
         "adsorption_site": "adsorption_site",
         "adsorption_mode": "adsorption_mode",
@@ -856,6 +873,13 @@ def _compact_property(prop: dict[str, Any]) -> dict[str, Any]:
         "state_context": prop.get("state_context"),
         "site_label": prop.get("site_label"),
         "electronic_field_sources": prop.get("electronic_field_sources", {}),
+        "metal_metal_distance_A": prop.get("metal_metal_distance_A"),
+        "coordination_environment": prop.get("coordination_environment"),
+        "li_s_bond_length_A": prop.get("li_s_bond_length_A"),
+        "metal_ligand_distance_A": prop.get("metal_ligand_distance_A"),
+        "adsorption_site": prop.get("adsorption_site"),
+        "adsorption_mode": prop.get("adsorption_mode"),
+        "structure_field_sources": prop.get("structure_field_sources", {}),
         "ml_ready": prop["ml_ready"],
         "blockers": prop["blockers"],
         "manual_verification_required": prop["manual_verification_required"],
@@ -993,6 +1017,7 @@ def _export_sample_record_for_task(
             "charge_transfer_e": electronic_sources.get("charge_transfer_e"),
             "metal_metal_distance_A": structure_sources.get("metal_metal_distance_A"),
             "coordination_environment": structure_sources.get("coordination_environment"),
+            "li_s_bond_length_A": structure_sources.get("li_s_bond_length_A"),
             "metal_ligand_distance_A": structure_sources.get("metal_ligand_distance_A"),
             "adsorption_site": structure_sources.get("adsorption_site"),
             "adsorption_mode": structure_sources.get("adsorption_mode"),
@@ -1075,6 +1100,7 @@ def _export_sample_record_for_task(
         "property_groups": property_groups,
         "metal_metal_distance_A": first_record.get("metal_metal_distance_A"),
         "coordination_environment": first_record.get("coordination_environment"),
+        "li_s_bond_length_A": first_record.get("li_s_bond_length_A"),
         "metal_ligand_distance_A": first_record.get("metal_ligand_distance_A"),
         "adsorption_site": first_record.get("adsorption_site"),
         "adsorption_mode": first_record.get("adsorption_mode"),
@@ -1430,6 +1456,7 @@ class ProjectLibraryBundleService:
             "descriptor_blockers",
             "metal_metal_distance_A",
             "coordination_environment",
+            "li_s_bond_length_A",
             "metal_ligand_distance_A",
             "adsorption_site",
             "adsorption_mode",
@@ -1506,6 +1533,7 @@ class ProjectLibraryBundleService:
             "descriptor_blockers",
             "metal_metal_distance_A",
             "coordination_environment",
+            "li_s_bond_length_A",
             "metal_ligand_distance_A",
             "adsorption_site",
             "adsorption_mode",

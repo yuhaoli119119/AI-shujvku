@@ -10,7 +10,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
-from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
+from app.db.models import (
+    Base,
+    CatalystSample,
+    DFTResult,
+    DFTSetting,
+    EvidenceSpan,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    ExtractionFieldReview,
+    Paper,
+)
 from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
 from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
@@ -69,7 +79,54 @@ def _dft(
     return row
 
 
-def _safe_review(session: Session, paper: Paper, row: DFTResult) -> ExtractionFieldReview:
+def _explicit_ai_export_approval(
+    session: Session,
+    paper: Paper,
+    row: DFTResult,
+    *,
+    source: str = "web_ai",
+    decision: str = "PASS",
+    recommended_action: str | None = "ready_for_ml_export",
+    evidence_checked: bool = True,
+    status: str = "ai_reviewed",
+) -> ExternalAnalysisCandidate:
+    run = ExternalAnalysisRun(
+        paper_id=paper.id,
+        source=source,
+        source_label=f"{source}_review",
+        mapping_status="completed",
+    )
+    session.add(run)
+    session.flush()
+    candidate = ExternalAnalysisCandidate(
+        run_id=run.id,
+        paper_id=paper.id,
+        candidate_type="object_review_audit",
+        normalized_payload={
+            "target_type": "dft_results",
+            "target_id": str(row.id),
+            "field_name": "dft_results",
+            "decision": decision,
+            "recommended_action": recommended_action,
+            "evidence_checked": evidence_checked,
+            "evidence_location": {"page": 1, "quoted_text": row.evidence_text},
+            "blocking_errors": [],
+            "source": source,
+        },
+        status=status,
+    )
+    session.add(candidate)
+    session.flush()
+    return candidate
+
+
+def _safe_review(
+    session: Session,
+    paper: Paper,
+    row: DFTResult,
+    *,
+    add_ai_approval: bool = True,
+) -> ExtractionFieldReview:
     review = ExtractionFieldReview(
         paper_id=paper.id,
         target_type="dft_results",
@@ -81,6 +138,8 @@ def _safe_review(session: Session, paper: Paper, row: DFTResult) -> ExtractionFi
     )
     session.add(review)
     session.flush()
+    if add_ai_approval:
+        _explicit_ai_export_approval(session, paper, row)
     return review
 
 
@@ -190,6 +249,91 @@ def test_dft_fast_mode_allows_verified_text_without_separate_evidence_reference(
         engine.dispose()
 
 
+def test_dft_export_blocks_verified_row_without_explicit_ai_export_approval(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            _safe_review(session, paper, row, add_ai_approval=False)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert "missing_explicit_ai_export_approval" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
+def test_dft_export_requires_ai_to_explicitly_recommend_export(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            _safe_review(session, paper, row)
+            candidate = session.query(ExternalAnalysisCandidate).one()
+            payload = dict(candidate.normalized_payload)
+            payload["recommended_action"] = None
+            candidate.normalized_payload = payload
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert "missing_explicit_ai_export_approval" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
+def test_dft_export_accepts_explicit_local_or_web_ai_approval(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            for source in ("local_ai", "web_ai"):
+                paper = _paper(session)
+                row = _dft(session, paper)
+                _safe_review(session, paper, row, add_ai_approval=False)
+                _explicit_ai_export_approval(session, paper, row, source=source)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert len(rows) == 2
+            assert response.headers["x-d1-blocked-count"] == "0"
+    finally:
+        engine.dispose()
+
+
+def test_negative_icohp_requires_real_unit_and_bond_identity(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            row.property_type = "negative_icohp"
+            row.unit = "not specified in evidence"
+            row.evidence_payload = {"corrected_value": {"bond": "metal-S"}}
+            _safe_review(session, paper, row)
+            session.commit()
+
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert "missing_required_unit" in response.headers["x-d1-blocked-reasons"]
+
+            row.unit = "eV"
+            row.evidence_payload = {}
+            session.commit()
+            response, rows = _export_rows(session)
+
+            assert rows == []
+            assert "missing_bond_identity" in response.headers["x-d1-blocked-reasons"]
+    finally:
+        engine.dispose()
+
+
 def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
@@ -294,6 +438,7 @@ def test_dft_export_accepts_safe_verified_imported_pdf_page_anchor(tmp_path):
                     },
                 )
             )
+            _explicit_ai_export_approval(session, paper, row)
             _evidence_ref(session, paper, row, page=None)
             session.commit()
 
@@ -313,6 +458,7 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
             paper = _paper(session)
             row = _dft(session, paper)
             _evidence_ref(session, paper, row, page=None)
+            _explicit_ai_export_approval(session, paper, row, source="local_ai")
             session.commit()
 
             DFTResultReviewService(session).verify_result(
@@ -1110,7 +1256,10 @@ def test_dft_quality_panel_reports_blocked_rows_and_links(tmp_path):
             assert payload["metadata"]["blocked_reasons"]["missing_review"] == 1
             blocked = [row for row in payload["rows"] if not row["is_exportable"]][0]
             assert blocked["record_id"] == str(blocked_row.id)
-            assert blocked["blocked_reasons"] == ["missing_review"]
+            assert blocked["blocked_reasons"] == [
+                "missing_review",
+                "missing_explicit_ai_export_approval",
+            ]
             assert "paper_id=" + str(paper.id) in blocked["library_detail_url"]
             assert "external_analysis_workbench" in blocked["review_workbench_url"]
     finally:

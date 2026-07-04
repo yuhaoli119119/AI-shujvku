@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import os
+import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -106,6 +107,105 @@ def _mcp_review_identity(
         )
     )
     return effective_reviewer, effective_internal_reviewer, effective_lock_owners
+
+
+def _is_uuid_text(value: str) -> bool:
+    try:
+        UUID(str(value))
+    except Exception:
+        return False
+    return True
+
+
+def _normalize_rel_asset_path(value: str | None) -> str | None:
+    text = str(value or "").strip().replace("\\", "/").lstrip("./")
+    for prefix in ("storage/figures/", "figures/"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    return text or None
+
+
+def _is_generated_paper_figure_asset(rel_path: str | None) -> bool:
+    normalized = _normalize_rel_asset_path(rel_path)
+    if not normalized:
+        return False
+    parts = Path(normalized).parts
+    if len(parts) != 2:
+        return False
+    folder, filename = parts
+    if any(part in {"", ".", ".."} for part in parts):
+        return False
+    return filename.startswith(f"{folder}_fig_") and filename.lower().endswith(".png") and _is_uuid_text(folder)
+
+
+def _is_path_within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _delete_generated_figure_asset_if_unreferenced(
+    *,
+    old_image_path: str | None,
+    paper_id: UUID,
+    source: str,
+) -> dict[str, Any]:
+    normalized_old_path = _normalize_rel_asset_path(old_image_path)
+    if not _is_generated_paper_figure_asset(normalized_old_path):
+        return {"status": "skipped_not_generated_asset", "path": normalized_old_path}
+
+    settings = get_settings()
+    figure_root = settings.storage_paths["figures"]
+    asset_path = figure_root / normalized_old_path
+    if not _is_path_within(asset_path, figure_root):
+        return {"status": "skipped_invalid_path", "path": normalized_old_path}
+
+    with session_scope(settings.database_url) as session:
+        refs = {
+            _normalize_rel_asset_path(path)
+            for path in session.scalars(select(PaperFigure.image_path)).all()
+        }
+    if normalized_old_path in refs:
+        return {"status": "skipped_still_referenced", "path": normalized_old_path}
+
+    try:
+        size_bytes = asset_path.stat().st_size
+    except FileNotFoundError:
+        return {"status": "skipped_missing_file", "path": normalized_old_path}
+
+    try:
+        asset_path.unlink()
+    except OSError as exc:
+        return {"status": "failed", "path": normalized_old_path, "error": str(exc)}
+
+    try:
+        with session_scope(settings.database_url) as session:
+            session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="cleanup_replaced_figure_asset",
+                    source=source,
+                    target_type="storage/figures",
+                    target_id=normalized_old_path,
+                    payload={
+                        "deleted_asset": normalized_old_path,
+                        "deleted_bytes": int(size_bytes),
+                        "trigger": "recrop_figure",
+                    },
+                )
+            )
+            session.flush()
+    except Exception as exc:
+        return {
+            "status": "deleted_audit_failed",
+            "path": normalized_old_path,
+            "deleted_bytes": int(size_bytes),
+            "error": str(exc),
+        }
+
+    return {"status": "deleted", "path": normalized_old_path, "deleted_bytes": int(size_bytes)}
 
 
 mcp_server = FastMCP(
@@ -1954,10 +2054,24 @@ def recrop_figure(
             "paper_id": fig_meta["paper_id"],
             "strategy": strategy,
             "new_image_path": rendered_meta["new_rel_path"],
+            "old_image_path": old_path,
             "bbox_used": rendered_meta["bbox_used"],
             "pixel_size": rendered_meta["pixel_size"],
             "crop_confidence": fig.crop_confidence,
             "status": "success",
+            }
+
+        try:
+            result["replaced_asset_cleanup"] = _delete_generated_figure_asset_if_unreferenced(
+                old_image_path=old_path,
+                paper_id=UUID(fig_meta["paper_id"]),
+                source=auth.source_prefix,
+            )
+        except Exception as exc:
+            result["replaced_asset_cleanup"] = {
+                "status": "failed",
+                "path": _normalize_rel_asset_path(old_path),
+                "error": str(exc),
             }
         return result
     except Exception:
@@ -2101,6 +2215,196 @@ def create_figure_from_bbox(
             "pixel_size": pixel_size,
             "crop_status": figure.crop_status,
         }
+
+
+@mcp_server.tool(
+    name="cleanup_unused_figure_assets",
+    description=(
+        "Delete old generated figure PNG files that are no longer referenced by any current PaperFigure.image_path. "
+        "Only scans generated paper figure assets under UUID-named folders such as {paper_id}/{paper_id}_fig_xxxxxxxx.png; "
+        "it does not touch full-page evidence renders or parser candidate assets stored elsewhere. "
+        "Use dry_run=true first to inspect what would be deleted. "
+        "paper_id is required unless include_all_papers=true; min_age_seconds protects very recent recrops."
+    ),
+)
+def cleanup_unused_figure_assets(
+    paper_id: str | None = None,
+    dry_run: bool = True,
+    min_age_seconds: int = 300,
+    include_all_papers: bool = False,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("request_parse")
+    settings = get_settings()
+    figure_root = settings.storage_paths["figures"]
+
+    if not paper_id and not include_all_papers:
+        raise ValueError("paper_id is required unless include_all_papers=true")
+    if min_age_seconds < 0:
+        raise ValueError("min_age_seconds must be >= 0")
+
+    normalized_paper_id = str(UUID(paper_id)) if paper_id else None
+    referenced_paths: set[str] = set()
+    scan_dir_names: set[str] = set()
+
+    with session_scope(settings.database_url) as session:
+        stmt = select(PaperFigure.paper_id, PaperFigure.image_path)
+        if normalized_paper_id:
+            stmt = stmt.where(PaperFigure.paper_id == UUID(normalized_paper_id))
+        for pid, image_path in session.execute(stmt).all():
+            pid_str = str(pid)
+            scan_dir_names.add(pid_str)
+            normalized_rel = _normalize_rel_asset_path(image_path)
+            if _is_generated_paper_figure_asset(normalized_rel):
+                referenced_paths.add(normalized_rel)
+
+    if not figure_root.exists():
+        return {
+            "paper_id": normalized_paper_id,
+            "dry_run": dry_run,
+            "min_age_seconds": min_age_seconds,
+            "include_all_papers": include_all_papers,
+            "scanned_dir_count": 0,
+            "scanned_dirs": [],
+            "referenced_generated_asset_count": len(referenced_paths),
+            "orphan_asset_count": 0,
+            "orphan_assets": [],
+            "skipped_recent_asset_count": 0,
+            "skipped_recent_assets": [],
+            "deleted_asset_count": 0,
+            "deleted_assets": [],
+            "deleted_bytes": 0,
+            "deletion_error_count": 0,
+            "deletion_errors": [],
+            "removed_empty_dir_count": 0,
+            "removed_empty_dirs": [],
+            "status": "figure_root_missing",
+        }
+
+    if normalized_paper_id:
+        scan_dir_names.add(normalized_paper_id)
+    else:
+        for child in figure_root.iterdir():
+            if child.is_dir() and _is_uuid_text(child.name):
+                scan_dir_names.add(child.name)
+
+    now = time.time()
+    orphan_entries: list[tuple[str, Path, int]] = []
+    skipped_recent_entries: list[dict[str, Any]] = []
+    scanned_dirs: list[str] = []
+    for dir_name in sorted(scan_dir_names):
+        dir_path = figure_root / dir_name
+        if not dir_path.exists() or not dir_path.is_dir():
+            continue
+        scanned_dirs.append(str(dir_path))
+        for asset_path in sorted(dir_path.glob(f"{dir_name}_fig_*.png")):
+            if not _is_path_within(asset_path, figure_root):
+                continue
+            rel_path = f"{dir_name}/{asset_path.name}"
+            if rel_path in referenced_paths:
+                continue
+            try:
+                stat = asset_path.stat()
+            except FileNotFoundError:
+                continue
+            age_seconds = max(0, int(now - stat.st_mtime))
+            if age_seconds < min_age_seconds:
+                skipped_recent_entries.append(
+                    {
+                        "path": rel_path,
+                        "age_seconds": age_seconds,
+                        "size_bytes": int(stat.st_size),
+                    }
+                )
+                continue
+            orphan_entries.append((rel_path, asset_path, int(stat.st_size)))
+
+    deleted_paths: list[str] = []
+    removed_empty_dirs: list[str] = []
+    deletion_errors: list[dict[str, str]] = []
+    deleted_bytes = 0
+    if not dry_run:
+        current_referenced_paths: set[str] = set()
+        with session_scope(settings.database_url) as session:
+            stmt = select(PaperFigure.paper_id, PaperFigure.image_path)
+            if normalized_paper_id:
+                stmt = stmt.where(PaperFigure.paper_id == UUID(normalized_paper_id))
+            for _pid, image_path in session.execute(stmt).all():
+                normalized_rel = _normalize_rel_asset_path(image_path)
+                if _is_generated_paper_figure_asset(normalized_rel):
+                    current_referenced_paths.add(normalized_rel)
+
+        for rel_path, asset_path, size_bytes in orphan_entries:
+            if rel_path in current_referenced_paths or not _is_path_within(asset_path, figure_root):
+                continue
+            try:
+                asset_path.unlink(missing_ok=True)
+            except OSError as exc:
+                deletion_errors.append({"path": rel_path, "error": str(exc)})
+                continue
+            deleted_paths.append(rel_path)
+            deleted_bytes += size_bytes
+        for dir_name in sorted(scan_dir_names):
+            dir_path = figure_root / dir_name
+            if not dir_path.exists() or not dir_path.is_dir():
+                continue
+            if not _is_path_within(dir_path, figure_root):
+                continue
+            try:
+                next(dir_path.iterdir())
+            except StopIteration:
+                try:
+                    dir_path.rmdir()
+                except OSError as exc:
+                    deletion_errors.append({"path": str(dir_path), "error": str(exc)})
+                else:
+                    removed_empty_dirs.append(str(dir_path))
+        with session_scope(settings.database_url) as session:
+            session.add(
+                AuditLog(
+                    paper_id=UUID(normalized_paper_id) if normalized_paper_id else None,
+                    action="cleanup_unused_figure_assets",
+                    source=auth.source_prefix,
+                    target_type="storage/figures",
+                    target_id=normalized_paper_id,
+                    payload={
+                        "paper_id": normalized_paper_id,
+                        "include_all_papers": include_all_papers,
+                        "min_age_seconds": min_age_seconds,
+                        "deleted_asset_count": len(deleted_paths),
+                        "deleted_assets": deleted_paths,
+                        "deleted_bytes": deleted_bytes,
+                        "skipped_recent_asset_count": len(skipped_recent_entries),
+                        "deletion_error_count": len(deletion_errors),
+                        "deletion_errors": deletion_errors,
+                    },
+                )
+            )
+            session.flush()
+
+    return {
+        "paper_id": normalized_paper_id,
+        "dry_run": dry_run,
+        "min_age_seconds": min_age_seconds,
+        "include_all_papers": include_all_papers,
+        "scanned_dir_count": len(scanned_dirs),
+        "scanned_dirs": scanned_dirs,
+        "referenced_generated_asset_count": len(referenced_paths),
+        "orphan_asset_count": len(orphan_entries),
+        "orphan_assets": [
+            {"path": rel_path, "size_bytes": size_bytes}
+            for rel_path, _, size_bytes in orphan_entries
+        ],
+        "skipped_recent_asset_count": len(skipped_recent_entries),
+        "skipped_recent_assets": skipped_recent_entries,
+        "deleted_asset_count": len(deleted_paths),
+        "deleted_assets": deleted_paths,
+        "deleted_bytes": deleted_bytes,
+        "deletion_error_count": len(deletion_errors),
+        "deletion_errors": deletion_errors,
+        "removed_empty_dir_count": len(removed_empty_dirs),
+        "removed_empty_dirs": removed_empty_dirs,
+        "status": "dry_run" if dry_run else ("partial_success" if deletion_errors else "success"),
+    }
 
 
 # ---------------------------------------------------------------------------

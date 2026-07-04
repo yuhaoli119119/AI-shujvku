@@ -223,7 +223,7 @@ function renderPaperList() {
         return (
             '<tr class="paper-row' + active + '" data-id="' + stablePaperId + '" onclick="selectPaperById(\'' + stablePaperId + '\')" ondblclick="openWorkspaceForPaper(\'' + stablePaperId + '\')">' +
                 '<td class="col-divider" style="text-align:center; color:var(--color-text-secondary);">' + esc(displayCode || (idx + 1)) + '</td>' +
-                '<td style="text-align:center; color:var(--color-text-secondary);">' + esc(paper.year || "-") + '</td>' +
+                '<td style="text-align:center; color:var(--color-text-secondary);">' + renderPaperYear(paper) + '</td>' +
                 '<td style="text-align:center; color:var(--color-text-secondary); font-weight:600;">' + paperTypeCellHtml(paper.paper_type) + '</td>' +
                 '<td class="col-divider" style="text-align:center; vertical-align:middle;">' + renderImpactFactor(paper) + '</td>' +
                 '<td class="col-divider" style="text-align:left; padding-left:16px;">' +
@@ -277,7 +277,17 @@ function renderPaperList() {
     '</table>';
 }
 
+function renderPaperYear(paper) {
+    if (paper && isSupplementaryPaperType(paper.paper_type)) {
+        return "-";
+    }
+    return esc(paper && paper.year || "-");
+}
+
 function renderImpactFactor(paper) {
+    if (paper && isSupplementaryPaperType(paper.paper_type)) {
+        return '<span style="color:var(--color-text-tertiary);font-size:12px;">-</span>';
+    }
     const impactFactor = Number(paper && paper.impact_factor);
     if (paper && paper.impact_factor !== null && paper.impact_factor !== undefined && Number.isFinite(impactFactor)) {
         const metadata = [paper.impact_factor_source, paper.impact_factor_year].filter(function(value) {

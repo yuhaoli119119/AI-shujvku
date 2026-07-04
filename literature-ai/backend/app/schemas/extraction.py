@@ -121,7 +121,7 @@ class ProjectLibraryV4ExtractionSchema(BaseModel):
     )
     structure_properties: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="Structure fields such as metal_metal_distance_A, coordination_environment, adsorption_site, adsorption_mode, and metal_ligand_distance_A.",
+        description="Structure fields such as metal_metal_distance_A, li_s_bond_length_A, coordination_environment, adsorption_site, adsorption_mode, and metal_ligand_distance_A.",
     )
     ambiguous_records: list[dict[str, Any]] = Field(
         default_factory=list,

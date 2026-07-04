@@ -146,6 +146,7 @@ _PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
     "lattice_constant": DFTPropertyTaxonomy("lattice_constant", "structural_descriptor", "lattice_constant", "length", "descriptor"),
     "interlayer_distance": DFTPropertyTaxonomy("interlayer_distance", "structural_descriptor", "interlayer_distance", "length", "descriptor"),
     "pore_diameter": DFTPropertyTaxonomy("pore_diameter", "structural_descriptor", "pore_diameter", "length", "descriptor"),
+    "li_s_bond_length": DFTPropertyTaxonomy("li_s_bond_length", "structural_descriptor", "li_s_bond_length", "length", "descriptor"),
     "permeance": DFTPropertyTaxonomy("permeance", "transport_descriptor", "permeance", "permeance", "descriptor"),
     "young_modulus": DFTPropertyTaxonomy("young_modulus", "mechanical_descriptor", "young_modulus", "modulus", "descriptor"),
     "carrier_mobility": DFTPropertyTaxonomy("carrier_mobility", "transport_descriptor", "carrier_mobility", "mobility", "descriptor"),
@@ -365,6 +366,15 @@ class ChemistryNormalizer:
             "li2s deposition barrier": "li2s_deposition_barrier",
             "deposition barrier of li2s": "li2s_deposition_barrier",
             "li2s nucleation barrier": "li2s_nucleation_barrier",
+            "li-s": "li_s_bond_length",
+            "li-s bond length": "li_s_bond_length",
+            "li-s distance": "li_s_bond_length",
+            "li s bond length": "li_s_bond_length",
+            "li s distance": "li_s_bond_length",
+            "dli-s": "li_s_bond_length",
+            "d li-s": "li_s_bond_length",
+            "li_s_bond_length": "li_s_bond_length",
+            "li_s_bond_length_a": "li_s_bond_length",
             "reaction free energy": "gibbs_free_energy_change",
             "自由能变化": "gibbs_free_energy_change",
             "吉布斯自由能变化": "gibbs_free_energy_change",
@@ -411,6 +421,8 @@ class ChemistryNormalizer:
         underscored = lowered.replace(" ", "_")
         if underscored in _PROPERTY_TAXONOMY_MAP:
             return underscored
+        if compact in {"li-s", "lis", "dli-s", "dlis"} or ("li-s" in lowered and ("bond" in lowered or "distance" in lowered or "length" in lowered)):
+            return "li_s_bond_length"
         if "li2s" in lowered and "decom" in lowered:
             return "li2s_decomposition_barrier"
         if "li2s" in lowered and "dissociat" in lowered:

@@ -32,6 +32,13 @@ class SourceLocation:
 
 
 @dataclass
+class _MarkdownTableBlock:
+    markdown_content: str
+    caption: str = "Markdown table"
+    page: int | None = None
+
+
+@dataclass
 class DFTResultItem:
     category: str  # e.g. "adsorption_energy", "reaction_barrier"
     catalyst_name: str | None = None
@@ -126,6 +133,12 @@ UNIT_ALIASES: dict[str, str] = {
     "kcal/mol": "kcal/mol",
     "kj/mol": "kJ/mol",
     "mev": "meV",
+    "a": "A",
+    "å": "A",
+    "angstrom": "A",
+    "angstroms": "A",
+    "nm": "nm",
+    "pm": "pm",
     "μb": "μB",
     "mub": "μB",
     "mu_b": "μB",
@@ -135,10 +148,12 @@ UNIT_ALIASES: dict[str, str] = {
 TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
     (re.compile(r"(adsorption|binding).*(energy|e[_\-\s]*ads|e[_\-\s]*bind)|(^e[_\-\s]*ads(?:\s*\(.*\))?$)|(^e[_\-\s]*bind(?:\s*\(.*\))?$)", re.IGNORECASE), "adsorption_energy", "eV"),
     (re.compile(r"(delta\s*g|gibbs|free energy|^dg$|^Δg$)", re.IGNORECASE), "gibbs_free_energy_change", "eV"),
+    (re.compile(r"li\s*2\s*s.*(?:decompos|decomposition|oxid|breakdown).*(?:barrier|energy)|(?:decompos|decomposition|oxid|breakdown).*(?:barrier|energy).*li\s*2\s*s", re.IGNORECASE), "li2s_decomposition_barrier", "eV"),
     (re.compile(r"(barrier|activation|^ea$|energy barrier)", re.IGNORECASE), "reaction_barrier", "eV"),
     (re.compile(r"(bader).*(charge)|(^bader$)", re.IGNORECASE), "bader_charge", "e"),
     (re.compile(r"(charge transfer|electron transfer)", re.IGNORECASE), "charge_transfer", "e"),
     (re.compile(r"(d-?band|epsilon[_\-\s]*d|ε[_\-\s]*d)", re.IGNORECASE), "d_band_center", "eV"),
+    (re.compile(r"(^\s*(?:d\s*)?li\s*[-–]?\s*s\s*(?:bond\s*)?(?:length|distance)?\s*(?:\((?:a|å|angstroms?)\))?\s*$|li\s*[-–]\s*s.*(?:bond\s*)?(?:length|distance))", re.IGNORECASE), "li_s_bond_length", "A"),
     (re.compile(r"(limiting\s+potential|^u[_\-\s]*l$|u\s*l)", re.IGNORECASE), "limiting_potential", "V"),
     (re.compile(r"(overpotential|η|eta)", re.IGNORECASE), "overpotential", "V"),
 ]
@@ -167,6 +182,7 @@ NUMERIC_CATEGORIES = {
     "lattice_constant",
     "interlayer_distance",
     "pore_diameter",
+    "li_s_bond_length",
     "permeance",
     "adsorption_molecule_fraction",
     "young_modulus",
@@ -222,6 +238,10 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         ],
     "d_band_center": [
         r"(?:d-?band\s+center|\u03b5_d|epsilon_d).{0,40}?([-\+]?\d+[.]?\d*)\s*(eV|meV)",
+        ],
+    "li_s_bond_length": [
+        r"(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        r"([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm).{0,40}(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S)",
         ],
     "limiting_potential": [
         r"(?:limiting\s+potential|U\s*[_\-\s]?\s*L|U\s*L).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
@@ -739,6 +759,28 @@ def _parse_markdown_table(content: str) -> tuple[list[str], list[list[str]]]:
     return headers, rows
 
 
+def _extract_markdown_table_blocks(markdown: str) -> list[_MarkdownTableBlock]:
+    blocks: list[_MarkdownTableBlock] = []
+    current: list[str] = []
+
+    def flush() -> None:
+        nonlocal current
+        if len(current) >= 2:
+            headers, rows = _parse_markdown_table("\n".join(current))
+            if headers and rows:
+                blocks.append(_MarkdownTableBlock(markdown_content="\n".join(current)))
+        current = []
+
+    for line in (markdown or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("|") and stripped.endswith("|"):
+            current.append(stripped)
+            continue
+        flush()
+    flush()
+    return blocks
+
+
 def _infer_table_columns(
     headers: list[str],
 ) -> tuple[dict[int, tuple[str, str | None]], int | None, int | None]:
@@ -818,7 +860,7 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                 if category in NUMERIC_CATEGORIES and not value_match:
                     continue
                 value = _parse_numeric_value(value_match.group(0)) if value_match else None
-                unit_match = re.search(r"(eV|meV|kJ/mol|kcal/mol|e[\u2212-]?|electrons?)", cell, re.IGNORECASE)
+                unit_match = re.search(r"(eV|meV|kJ/mol|kcal/mol|Å|A|angstroms?|nm|pm|e[\u2212-]?|electrons?)", cell, re.IGNORECASE)
                 unit = None
                 if unit_match:
                     raw_unit = unit_match.group(1).strip()
@@ -1039,6 +1081,8 @@ class DFTResultsExtractor:
         tables = getattr(doc, "tables", []) or []
         figures = getattr(doc, "figures", []) or []
         abstract = getattr(doc, "abstract", "") or ""
+        markdown_tables = _extract_markdown_table_blocks(markdown)
+        table_sources = [*tables, *markdown_tables]
 
         logger.info("Running rule-based DFT extraction")
         all_results: list[DFTResultItem] = []
@@ -1069,9 +1113,9 @@ class DFTResultsExtractor:
                 continue
             all_results.extend(self._scan_text(full_text, cat, sec_text_map, sections))
         all_results.extend(_scan_graphene_defect_inline_tables(full_text))
-        all_results.extend(_scan_structured_tables(tables))
+        all_results.extend(_scan_structured_tables(table_sources))
         for cat in self.categories:
-            all_results.extend(_scan_tables_for_category(tables, cat))
+            all_results.extend(_scan_tables_for_category(table_sources, cat))
         all_results.extend(self._scan_figure_captions(figures))
 
         if self.llm and self.llm.is_configured() and (markdown or abstract or sections):
@@ -1081,7 +1125,7 @@ class DFTResultsExtractor:
                 "Extract all explicit DFT and first-principles calculation results for computational materials papers, "
                 "including graphdiyne/graphyne systems, single/dual-atom catalysts (SAC/DAC), and Li-S battery applications.\n"
                 "Categories: adsorption_energy, formation_energy, gibbs_free_energy_change, reaction_barrier, migration_barrier, "
-                "li2s_decomposition_barrier, li2s_nucleation_barrier, bader_charge, charge_transfer, d_band_center, "
+                "li2s_decomposition_barrier, li2s_nucleation_barrier, li_s_bond_length, bader_charge, charge_transfer, d_band_center, "
                 "band_gap, work_function, magnetic_moment, activation_energy, binding_energy, cohesive_energy, fluorination_energy, "
                 "permeation_barrier, lattice_constant, interlayer_distance, pore_diameter, permeance, "
                 "adsorption_molecule_fraction, young_modulus, seebeck_coefficient, zt, electrical_conductance, "

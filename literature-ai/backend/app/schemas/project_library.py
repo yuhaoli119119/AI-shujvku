@@ -241,6 +241,7 @@ class ProjectLibraryUserSubmitRequest(BaseModel):
     state_context: str | None = None
     site_label: str | None = None
     metal_metal_distance_A: float | None = None
+    li_s_bond_length_A: float | None = None
     coordination_environment: str | None = None
     adsorption_site: str | None = None
     adsorption_mode: str | None = None

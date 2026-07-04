@@ -9,7 +9,17 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import Base, CatalystSample, DFTResult, DFTSetting, EvidenceSpan, ExtractionFieldReview, Paper
+from app.db.models import (
+    Base,
+    CatalystSample,
+    DFTResult,
+    DFTSetting,
+    EvidenceSpan,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    ExtractionFieldReview,
+    Paper,
+)
 from app.services.dft_export_service import build_dft_ml_dataset, build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
 
 
@@ -89,6 +99,33 @@ def _row(
     if with_setting:
         related.append(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
     session.add_all(related)
+    run = ExternalAnalysisRun(
+        paper_id=paper.id,
+        source="local_ai",
+        source_label="local_ai_ml_v3_test",
+        mapping_status="completed",
+    )
+    session.add(run)
+    session.flush()
+    session.add(
+        ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": str(row.id),
+                "field_name": "dft_results",
+                "decision": "PASS",
+                "recommended_action": "ready_for_ml_export",
+                "evidence_checked": True,
+                "evidence_location": {"page": 7, "quoted_text": row.evidence_text},
+                "blocking_errors": [],
+                "source": "local_ai",
+            },
+            status="ai_reviewed",
+        )
+    )
     return row, paper
 
 

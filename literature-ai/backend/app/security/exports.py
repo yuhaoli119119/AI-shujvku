@@ -19,6 +19,7 @@ def _is_export_path(path: str) -> bool:
     return (
         path.startswith("/api/papers/export/")
         or (path.startswith("/api/papers/") and path.endswith("/dft-review-bundle"))
+        or (path.startswith("/api/papers/") and path.endswith("/evidence-review-bundle"))
         or path == "/api/dft/ml-dataset-v3"
         or path == "/api/dft/ml-dataset-v3.csv"
         or path == "/api/dft/ml-dataset-v3/manifest"
