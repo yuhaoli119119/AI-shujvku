@@ -133,13 +133,18 @@ class DFTAuditIssueLifecycleService:
         self.session.flush()
         return True
 
-    def apply_human_verify(
+    def apply_verify(
         self,
         *,
         paper_id: UUID,
         result_id: UUID,
         reviewer: str,
+        actor_type: str,
     ) -> list[DFTAuditIssue]:
+        normalized_actor = str(actor_type or "").strip().lower()
+        if normalized_actor not in {"human", "ai"}:
+            raise ValueError("actor_type must be human or ai")
+        resolution_note = "human_verified" if normalized_actor == "human" else "ai_verified"
         closed: list[DFTAuditIssue] = []
         for issue in self.active_issues_for_target(
             paper_id=paper_id,
@@ -149,11 +154,50 @@ class DFTAuditIssueLifecycleService:
             if issue.issue_type == "source_scope_error":
                 continue
             if issue.issue_type == "missing_dft_result" and str(issue.target_id) == str(result_id):
-                if self.close_issue(issue, resolved_by=reviewer, resolution_note="human_verified"):
+                if self.close_issue(issue, resolved_by=reviewer, resolution_note=resolution_note):
                     closed.append(issue)
                 continue
             if issue.issue_type in self.VERIFY_CLOSE_TYPES:
-                if self.close_issue(issue, resolved_by=reviewer, resolution_note="human_verified"):
+                if self.close_issue(issue, resolved_by=reviewer, resolution_note=resolution_note):
+                    closed.append(issue)
+        return closed
+
+    def apply_human_verify(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        reviewer: str,
+    ) -> list[DFTAuditIssue]:
+        return self.apply_verify(
+            paper_id=paper_id,
+            result_id=result_id,
+            reviewer=reviewer,
+            actor_type="human",
+        )
+
+    def apply_reject(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        reviewer: str,
+        actor_type: str,
+    ) -> list[DFTAuditIssue]:
+        normalized_actor = str(actor_type or "").strip().lower()
+        if normalized_actor not in {"human", "ai"}:
+            raise ValueError("actor_type must be human or ai")
+        resolution_note = "target_rejected" if normalized_actor == "human" else "ai_rejected"
+        closed: list[DFTAuditIssue] = []
+        for issue in self.active_issues_for_target(
+            paper_id=paper_id,
+            target_type="dft_results",
+            target_id=result_id,
+        ):
+            if issue.issue_type == "source_scope_error":
+                continue
+            if issue.issue_type in self.REJECT_CLOSE_TYPES:
+                if self.close_issue(issue, resolved_by=reviewer, resolution_note=resolution_note):
                     closed.append(issue)
         return closed
 
@@ -164,18 +208,12 @@ class DFTAuditIssueLifecycleService:
         result_id: UUID,
         reviewer: str,
     ) -> list[DFTAuditIssue]:
-        closed: list[DFTAuditIssue] = []
-        for issue in self.active_issues_for_target(
+        return self.apply_reject(
             paper_id=paper_id,
-            target_type="dft_results",
-            target_id=result_id,
-        ):
-            if issue.issue_type == "source_scope_error":
-                continue
-            if issue.issue_type in self.REJECT_CLOSE_TYPES:
-                if self.close_issue(issue, resolved_by=reviewer, resolution_note="target_rejected"):
-                    closed.append(issue)
-        return closed
+            result_id=result_id,
+            reviewer=reviewer,
+            actor_type="human",
+        )
 
     def live_snapshot_for_issue(self, issue: DFTAuditIssue) -> dict[str, Any] | None:
         if issue.target_type != "dft_results":

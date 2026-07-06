@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from uuid import UUID
@@ -443,12 +444,9 @@ class ExternalAnalysisMaterializationMixin:
         run = self.get_run(run_id)
         candidates = self.list_candidates(run.id)
         tokens: list[str] = [str(item).strip() for item in (write_lock_tokens or []) if str(item or "").strip()]
-        imports_dft = any(
-            str((c.normalized_payload or {}).get("target_type") or "").strip().lower()
-            in {"dft_result", "dft_results"}
-            for c in candidates
-            if isinstance(c.normalized_payload, dict)
-        )
+        imports_dft = any(self._is_dft_import_candidate(candidate) for candidate in candidates)
+        if imports_dft:
+            self._guard_dft_import_prerequisites(run, candidates)
 
         lock_service = ModuleWriteLockService(self.session)
         auto_lock = None
@@ -519,7 +517,7 @@ class ExternalAnalysisMaterializationMixin:
                     except Exception:
                         pass
 
-        return {
+        response = {
             **(dft_summary or {}),
             "non_dft_auto_apply": {
                 "created_notes": non_dft_summary.created_notes,
@@ -529,6 +527,259 @@ class ExternalAnalysisMaterializationMixin:
                 "idempotent_noops": non_dft_summary.idempotent_noops,
                 "skipped_candidates": non_dft_summary.skipped_candidates,
             },
+        }
+        if imports_dft:
+            response["dft_readback"] = self._dft_import_readback(run.paper_id, candidates, dft_summary or {})
+        return response
+
+    @staticmethod
+    def _is_dft_import_candidate(candidate: ExternalAnalysisCandidate) -> bool:
+        payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        target_type = str(payload.get("target_type") or "").strip().lower()
+        field_name = str(payload.get("field_name") or "").strip().lower()
+        target_path = str(payload.get("target_path") or "").strip().lower()
+        candidate_type = str(candidate.candidate_type or "").strip().lower()
+        corrected = payload.get("corrected_value")
+        corrected_keys = (
+            {str(key).strip().lower() for key in corrected}
+            if isinstance(corrected, dict)
+            else set()
+        )
+        looks_like_structured_dft_value = (
+            candidate_type == "object_review_audit"
+            and {"value", "unit"} <= corrected_keys
+            and bool({"property_type", "energy_type", "property"} & corrected_keys)
+            and bool({"material_identity", "material", "catalyst", "structure_name"} & corrected_keys)
+        )
+        return (
+            target_type in {"dft_result", "dft_results"}
+            or field_name in {"dft_result", "dft_results"}
+            or target_path.startswith(("dft_result:", "dft_results:"))
+            or candidate_type in {"dft_result", "dft_results"}
+            or looks_like_structured_dft_value
+        )
+
+    def _guard_dft_import_prerequisites(
+        self,
+        run: ExternalAnalysisRun,
+        candidates: list[ExternalAnalysisCandidate],
+    ) -> None:
+        from app.services.dft_review_bundle_service import DFTReviewBundleService
+
+        dft_candidates = [candidate for candidate in candidates if self._is_dft_import_candidate(candidate)]
+        self._validate_dft_import_json(run, dft_candidates)
+        expected_snapshot = self._dft_import_expected_completed_snapshot(run, dft_candidates)
+        bundle_service = DFTReviewBundleService(self.session, self.settings)
+        state = bundle_service.get_figure_table_review_state(run.paper_id)
+        if not expected_snapshot:
+            raise ValueError("figure_table_review_not_completed:missing_completed_snapshot_fingerprint")
+        bundle_service.ensure_figure_table_review_ready(
+            state,
+            expected_completed_snapshot_fingerprint=expected_snapshot,
+        )
+        missing_local_verification: list[str] = []
+        for candidate in dft_candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            if self._payload_has_local_ai_verification(payload):
+                continue
+            candidate.status = "requires_resolution"
+            candidate.mapping_reason = "local_ai_pdf_verification_required"
+            self.session.add(candidate)
+            missing_local_verification.append(str(candidate.id))
+        if missing_local_verification:
+            self.session.flush()
+            raise ValueError(
+                "local_ai_pdf_verification_required:"
+                "DFT import_analysis requires per-audit local_ai_verification. "
+                "Local AI must call get_codex_item and read_paper_page before final writeback."
+            )
+
+    def _validate_dft_import_json(
+        self,
+        run: ExternalAnalysisRun,
+        candidates: list[ExternalAnalysisCandidate],
+    ) -> None:
+        from app.services.dft_review_bundle_service import DFTReviewBundleService
+
+        raw_payload = run.raw_payload if isinstance(run.raw_payload, dict) else {}
+        metadata = raw_payload.get("review_metadata") if isinstance(raw_payload.get("review_metadata"), dict) else {}
+        review_source = metadata.get("web_ai_review_source") or metadata.get("review_source")
+        audits: list[dict[str, Any]] = []
+        unsupported_candidate_ids: list[str] = []
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = str(payload.get("target_type") or "").strip().lower()
+            if candidate.candidate_type != "object_review_audit" or target_type not in {
+                "dft_result",
+                "dft_results",
+            }:
+                unsupported_candidate_ids.append(str(candidate.id))
+                continue
+            evidence = payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}
+            evidence_ids = payload.get("evidence_ids") or evidence.get("evidence_ids") or []
+            audits.append(
+                {
+                    "target_type": "dft_results",
+                    "target_id": payload.get("target_id"),
+                    "field_name": payload.get("field_name") or "dft_results",
+                    "decision": payload.get("decision"),
+                    "evidence_checked": payload.get("evidence_checked") is True,
+                    "evidence_ids": evidence_ids,
+                    "corrected_value": payload.get("corrected_value"),
+                    "confidence": payload.get("confidence"),
+                    "reason": payload.get("reason"),
+                    "blocking_errors": payload.get("blocking_errors") or [],
+                    "recommended_action": payload.get("recommended_action"),
+                }
+            )
+        if unsupported_candidate_ids:
+            raise ValueError(
+                "dft_json_validation_failed:unsupported_dft_import_candidate:"
+                + ",".join(unsupported_candidate_ids)
+            )
+        candidate_payload = {
+            "schema_version": metadata.get("schema_version"),
+            "bundle_fingerprint": metadata.get("bundle_fingerprint"),
+            "figure_table_completed_snapshot_fingerprint": (
+                metadata.get("figure_table_completed_snapshot_fingerprint")
+            ),
+            "paper_id": str(run.paper_id),
+            "paper_code": metadata.get("paper_code"),
+            "review_source": review_source,
+            "overall_status": metadata.get("overall_status"),
+            "object_review_audits": audits,
+            "uncertainties": raw_payload.get("uncertainties") or [],
+            "notes": raw_payload.get("notes") or [],
+        }
+        validation = DFTReviewBundleService(self.session, self.settings).validate_result(
+            run.paper_id,
+            candidate_payload,
+        )
+        if validation.get("valid") is not True:
+            raise ValueError(
+                "dft_json_validation_failed:"
+                + json.dumps(validation.get("errors") or [], ensure_ascii=False, default=str)
+            )
+
+    @staticmethod
+    def _dft_import_expected_completed_snapshot(
+        run: ExternalAnalysisRun,
+        candidates: list[ExternalAnalysisCandidate],
+    ) -> str | None:
+        fingerprints: set[str] = set()
+        raw_payload = run.raw_payload if isinstance(run.raw_payload, dict) else {}
+        metadata = raw_payload.get("review_metadata") if isinstance(raw_payload.get("review_metadata"), dict) else {}
+        for source in (raw_payload, metadata):
+            value = source.get("figure_table_completed_snapshot_fingerprint") if isinstance(source, dict) else None
+            if value:
+                fingerprints.add(str(value).strip())
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            evidence = payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}
+            for source in (payload, evidence):
+                value = source.get("figure_table_completed_snapshot_fingerprint") if isinstance(source, dict) else None
+                if value:
+                    fingerprints.add(str(value).strip())
+        fingerprints.discard("")
+        if len(fingerprints) > 1:
+            raise ValueError("conflicting_figure_table_completed_snapshot_fingerprint")
+        return next(iter(fingerprints), None)
+
+    @staticmethod
+    def _payload_has_local_ai_verification(payload: dict[str, Any]) -> bool:
+        verification = payload.get("local_ai_verification")
+        if not isinstance(verification, dict):
+            evidence = payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}
+            verification = evidence.get("local_ai_verification") if isinstance(evidence, dict) else None
+        if not isinstance(verification, dict):
+            return False
+        if verification.get("verified_against_pdf") is not True:
+            return False
+        used_tools = {
+            str(item).strip()
+            for item in (
+                verification.get("used_tools")
+                or verification.get("tools_used")
+                or verification.get("tool_calls")
+                or []
+            )
+            if str(item).strip()
+        }
+        return {"get_codex_item", "read_paper_page"} <= used_tools
+
+    def _dft_import_readback(
+        self,
+        paper_id: UUID,
+        candidates: list[ExternalAnalysisCandidate],
+        dft_summary: dict[str, Any],
+    ) -> dict[str, Any]:
+        from app.db.models import DFTResult, ExtractionFieldReview
+        from app.services.review_conflict_service import ReviewConflictAggregationService
+        from app.utils.review_safety import bulk_export_gate_results
+
+        target_ids: set[str] = set()
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_ids.add(str(payload.get("target_id") or "").strip())
+        for item in (dft_summary.get("new_dft_candidates") or {}).get("materialized_items") or []:
+            if item.get("dft_result_id"):
+                target_ids.add(str(item["dft_result_id"]))
+        target_ids.discard("")
+        target_ids.discard("new")
+        valid_target_ids: list[UUID] = []
+        for target_id in sorted(target_ids):
+            try:
+                valid_target_ids.append(UUID(target_id))
+            except (TypeError, ValueError):
+                continue
+        rows = []
+        if valid_target_ids:
+            rows = self.session.scalars(
+                select(DFTResult)
+                .where(DFTResult.paper_id == paper_id)
+                .where(DFTResult.id.in_(valid_target_ids))
+            ).all()
+        gates = bulk_export_gate_results(self.session, rows, target_type="dft_results") if rows else {}
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id.in_([str(row.id) for row in rows] or ["__none__"]),
+            )
+        ).all()
+        versions_by_target: dict[str, dict[str, int]] = {}
+        for review in reviews:
+            versions_by_target.setdefault(str(review.target_id), {})[str(review.field_name)] = int(review.write_version or 1)
+        conflicts = ReviewConflictAggregationService(self.session).list_conflicts(
+            paper_id=paper_id,
+            target_type="dft_results",
+            active_only=True,
+            limit=100,
+        )
+        unfinished = (
+            (dft_summary.get("object_reviews") or {}).get("pending_items")
+            or []
+        ) + (
+            (dft_summary.get("object_reviews") or {}).get("skipped_items")
+            or []
+        )
+        return {
+            "object_versions": versions_by_target,
+            "candidate_status": {
+                str(row.id): row.candidate_status
+                for row in rows
+            },
+            "export_safety": {
+                str(row.id): {
+                    "eligible": gates[str(row.id)].eligible,
+                    "blocked_reasons": list(gates[str(row.id)].reasons),
+                    "review_status": gates[str(row.id)].review_status,
+                }
+                for row in rows
+                if str(row.id) in gates
+            },
+            "conflicts": conflicts.get("rows", []),
+            "unfinished_items": unfinished,
         }
 
     def _required_auto_apply_modules(self, candidates: list[ExternalAnalysisCandidate]) -> list[str]:

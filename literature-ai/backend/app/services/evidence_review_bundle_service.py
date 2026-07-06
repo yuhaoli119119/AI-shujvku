@@ -22,7 +22,9 @@ from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewResult,
     OfflineEvidenceReviewTableAction,
 )
+from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
+from app.services.review_service import ReviewService
 from app.services.table_curation_service import TableCurationService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
@@ -182,11 +184,12 @@ class EvidenceReviewBundleService:
                 "source_paper_ids": sorted(materials["source_paper_ids"]),
             },
             "auto_apply_policy": {
-                "local_ai_role": "confirmation_and_readback_only",
+                "local_ai_role": "evidence_verification_and_atomic_resolution",
                 "figure_auto_confidence_min": FIGURE_AUTO_CONFIDENCE,
                 "table_auto_confidence_min": TABLE_AUTO_CONFIDENCE,
                 "auto_applies": ["figure KEEP metadata", "figure RECROP", "figure CREATE", "table UPDATE", "table CREATE"],
-                "never_auto_applies": ["table MERGE", "table DELETE", "figure REJECT", "NEEDS_HUMAN"],
+                "local_ai_verified_actions": ["table MERGE", "table DELETE", "figure REJECT", "low-confidence actions"],
+                "never_auto_applies": ["NEEDS_HUMAN"],
             },
             "counts": {
                 "source_documents": len(materials["source_documents"]),
@@ -459,23 +462,47 @@ class EvidenceReviewBundleService:
 
     def get_review_task(self, paper_id: UUID) -> dict[str, Any]:
         materials = self._build_materials(paper_id)
+        current_snapshot = compute_figure_table_snapshot(self.session, paper_id)
+        current_snapshot_fingerprint = current_snapshot["fingerprint"]
         latest = self._latest_review_audit(paper_id)
         latest_payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
         latest_response = latest_payload.get("response") if isinstance(latest_payload.get("response"), dict) else None
         stage_status = "not_started"
         unresolved_actions: list[dict[str, Any]] = []
         completed_snapshot_fingerprint = None
-        if latest_response:
-            stage_status = str(latest_response.get("stage_status") or stage_status)
-            unresolved_actions = list(latest_response.get("unresolved_actions") or [])
-            completed_snapshot_fingerprint = latest_response.get("completed_snapshot_fingerprint")
+        state_payload = latest_response or latest_payload
+        if state_payload:
+            stage_status = str(state_payload.get("stage_status") or stage_status)
+            unresolved_actions = list(state_payload.get("unresolved_actions") or [])
+            completed_snapshot_fingerprint = state_payload.get("completed_snapshot_fingerprint")
+        if (
+            latest is None
+            and not current_snapshot["figures"]
+            and not current_snapshot["tables"]
+        ):
+            stage_status = "not_required"
+            completed_snapshot_fingerprint = current_snapshot_fingerprint
+            unresolved_actions = []
+        elif (
+            stage_status == "completed"
+            and completed_snapshot_fingerprint != current_snapshot_fingerprint
+        ):
+            stage_status = "stale"
+            unresolved_actions = [
+                {
+                    "code": "figure_table_snapshot_changed",
+                    "message": "Persisted figure/table content changed after chart review completion.",
+                    "requires_local_ai": True,
+                }
+            ]
         return {
             "schema_version": "chart_review_task_v1",
             "paper_id": materials["paper_metadata"]["paper_id"],
             "paper_code": materials["paper_metadata"]["paper_code"],
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "stage_status": stage_status,
-            "apply_ready": stage_status == "completed",
+            "apply_ready": stage_status in {"completed", "not_required"},
+            "current_snapshot_fingerprint": current_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
             "latest_review_run_id": str(latest.id) if latest is not None else None,
             "unresolved_count": len(unresolved_actions),
@@ -507,6 +534,15 @@ class EvidenceReviewBundleService:
             }
         latest = self._latest_review_audit(paper_id, actions={"offline_evidence_review_applied"})
         materials = self._build_materials(paper_id)
+        current_task = self.get_review_task(paper_id)
+        if current_task["stage_status"] == "not_required":
+            return {
+                **current_task,
+                "valid": True,
+                "chart_review_completed": True,
+                "finalize_ready": True,
+                "unresolved_actions": [],
+            }
         if latest is None:
             return {
                 "valid": True,
@@ -524,12 +560,21 @@ class EvidenceReviewBundleService:
                     }
                 ],
             }
+        if current_task["stage_status"] != "completed":
+            return {
+                **current_task,
+                "valid": True,
+                "chart_review_completed": False,
+                "finalize_ready": False,
+                "finalize_blocking_errors": current_task.get("unresolved_actions") or [],
+            }
         payload = latest.payload if isinstance(latest.payload, dict) else {}
         response = dict(payload.get("response") or {})
         if response:
             response["idempotent"] = True
-            response["stage_status"] = "completed"
+            response["stage_status"] = current_task["stage_status"]
             response["chart_review_completed"] = True
+            response["current_snapshot_fingerprint"] = current_task["current_snapshot_fingerprint"]
             return response
         return {
             "valid": True,
@@ -541,6 +586,7 @@ class EvidenceReviewBundleService:
             "chart_review_completed": True,
             "review_run_id": str(latest.id),
             "completed_snapshot_fingerprint": payload.get("completed_snapshot_fingerprint"),
+            "current_snapshot_fingerprint": current_task["current_snapshot_fingerprint"],
             "unresolved_actions": [],
         }
 
@@ -576,12 +622,15 @@ class EvidenceReviewBundleService:
             blocked.append("needs_human")
             blocked.append("manual_confirmation_required")
         if action.action == "REJECT":
-            blocked.append("reject_requires_local_ai")
-            blocked.append("manual_confirmation_required")
-        if action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE:
+            if not self._has_local_ai_verification(action.local_ai_verification):
+                blocked.append("reject_requires_local_ai")
+                blocked.append("local_ai_pdf_verification_required")
+        if (
+            action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE
+        ) and not self._has_local_ai_verification(action.local_ai_verification):
             blocked.append("confidence_below_auto_apply_threshold")
 
-        auto = not errors and action.action in {"KEEP", "RECROP", "CREATE"} and not blocked
+        auto = not errors and action.action in {"KEEP", "RECROP", "CREATE", "REJECT"} and not blocked
         return {
             "op_id": action_ref.replace("figure_actions[", "figure:").replace("]", f":{action.action}"),
             "action_ref": action_ref,
@@ -630,18 +679,22 @@ class EvidenceReviewBundleService:
         if action.action in {"UPDATE", "CREATE"} and not self._looks_like_markdown_table(action.complete_markdown):
             block("invalid_markdown_table", f"{action.action} requires a complete markdown table with pipes and multiple rows")
         if action.action == "MERGE":
-            blocked.append("merge_requires_local_ai")
-            blocked.append("manual_confirmation_required")
+            if not self._has_local_ai_verification(action.local_ai_verification):
+                blocked.append("merge_requires_local_ai")
+                blocked.append("local_ai_pdf_verification_required")
         if action.action == "DELETE":
-            blocked.append("delete_requires_local_ai")
-            blocked.append("manual_confirmation_required")
+            if not self._has_local_ai_verification(action.local_ai_verification):
+                blocked.append("delete_requires_local_ai")
+                blocked.append("local_ai_pdf_verification_required")
         if action.action == "NEEDS_HUMAN":
             blocked.append("needs_human")
             blocked.append("manual_confirmation_required")
-        if action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE:
+        if (
+            action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE
+        ) and not self._has_local_ai_verification(action.local_ai_verification):
             blocked.append("confidence_below_auto_apply_threshold")
 
-        auto = not errors and action.action in {"KEEP", "UPDATE", "CREATE"} and not blocked
+        auto = not errors and action.action in {"KEEP", "UPDATE", "CREATE", "MERGE", "DELETE"} and not blocked
         return {
             "op_id": action_ref.replace("table_actions[", "table:").replace("]", f":{action.action}"),
             "action_ref": action_ref,
@@ -697,6 +750,39 @@ class EvidenceReviewBundleService:
             self.session.flush()
             target_id = str(figure.id)
             applied_updates = {"created": True, "image_path": rel_path, "bbox": bbox_used}
+        elif action.action == "REJECT":
+            figure = self.session.get(PaperFigure, UUID(str(action.figure_id)))
+            if figure is None:
+                raise ValueError("Figure not found during rejection")
+            target_id = str(figure.id)
+            figure_paper_id = figure.paper_id
+            evidence_payload = {
+                "page": figure.page,
+                "figure_label": figure.figure_label,
+                "quoted_text": figure.caption or figure.content_summary or f"Figure object {figure.id}",
+                "evidence_ids": list(action.evidence_ids),
+                "reason": action.reason,
+                "local_ai_verification": (
+                    action.local_ai_verification.model_dump(mode="json")
+                    if action.local_ai_verification is not None
+                    else None
+                ),
+            }
+            review_service = ReviewService(self.session)
+            correction = review_service.propose_figure_deletion(
+                paper_id=figure_paper_id,
+                figure_id=figure.id,
+                reason=action.reason,
+                reviewer=reviewer,
+                evidence_payload=evidence_payload,
+            )
+            approved = review_service.approve_correction(correction.id, reviewer=reviewer)
+            applied_updates = {
+                "deleted": True,
+                "correction_id": str(approved.id),
+                "actor_type": "ai",
+                "local_ai_verification": evidence_payload["local_ai_verification"],
+            }
         else:
             figure = self.session.get(PaperFigure, UUID(str(action.figure_id)))
             if figure is None:
@@ -725,7 +811,13 @@ class EvidenceReviewBundleService:
                 applied_updates.update({"image_path": rel_path, "bbox": bbox_used, "page": page, "crop_status": "recropped"})
 
         audit = AuditLog(
-            paper_id=UUID(str(action.source_paper_id)) if action.action == "CREATE" else figure.paper_id,
+            paper_id=(
+                UUID(str(action.source_paper_id))
+                if action.action == "CREATE"
+                else figure_paper_id
+                if action.action == "REJECT"
+                else figure.paper_id
+            ),
             action="offline_evidence_review_op",
             source=reviewer,
             target_type="paper_figure",
@@ -735,6 +827,7 @@ class EvidenceReviewBundleService:
                 "bundle_fingerprint": bundle_fingerprint,
                 "action": action.model_dump(mode="json"),
                 "applied_updates": applied_updates,
+                "actor_type": "ai" if action.local_ai_verification is not None else "review_source",
             },
             created_at=utcnow(),
         )
@@ -813,6 +906,39 @@ class EvidenceReviewBundleService:
                 evidence_payload=evidence_payload,
             )
             target_id = str(result.get("table_id") or "")
+        elif action.action == "MERGE":
+            target = self.session.get(PaperTable, UUID(str(action.target_table_id)))
+            if target is None:
+                raise ValueError("Target table not found during merge")
+            target_updates = {
+                key: value
+                for key, value in {
+                    "caption": action.caption,
+                    "markdown_content": action.complete_markdown,
+                    "page": action.page,
+                }.items()
+                if value is not None
+            }
+            result = service.merge_table(
+                paper_id=target.paper_id,
+                source_table_id=UUID(str(action.source_table_id)),
+                target_table_id=target.id,
+                target_updates=target_updates,
+                reason=action.reason,
+                evidence_payload=evidence_payload,
+            )
+            target_id = str(target.id)
+        elif action.action == "DELETE":
+            table = self.session.get(PaperTable, UUID(str(action.table_id)))
+            if table is None:
+                raise ValueError("Table not found during deletion")
+            target_id = str(table.id)
+            result = service.delete_table(
+                paper_id=table.paper_id,
+                table_id=table.id,
+                reason=action.reason,
+                evidence_payload=evidence_payload,
+            )
         else:
             raise ValueError(f"Table action {action.action} is not auto-applied")
 
@@ -827,6 +953,7 @@ class EvidenceReviewBundleService:
                 "bundle_fingerprint": bundle_fingerprint,
                 "action": action.model_dump(mode="json"),
                 "table_result": result,
+                "actor_type": "ai" if action.local_ai_verification is not None else "review_source",
             },
             created_at=utcnow(),
         )
@@ -917,15 +1044,8 @@ class EvidenceReviewBundleService:
         final_errors = self._final_status_errors(result=result, validation=validation, applied=applied, refreshed=refreshed)
         if final_errors:
             raise ValueError("chart_review_finalize_failed: " + json.dumps(final_errors, ensure_ascii=False))
-        snapshot_core = self._completed_snapshot_core(
-            result=result,
-            validation=validation,
-            applied=applied,
-            refreshed=refreshed,
-            payload_hash=payload_hash,
-        )
-        completed_snapshot_fingerprint = _sha256(_canonical_json_bytes(snapshot_core))
-        completed_snapshot = {**snapshot_core, "completed_snapshot_fingerprint": completed_snapshot_fingerprint}
+        completed_snapshot = compute_figure_table_snapshot(self.session, paper_id)
+        completed_snapshot_fingerprint = completed_snapshot["fingerprint"]
         self._mark_figures_review_completed(paper_id, reviewer)
         response = {
             **validation,
@@ -940,6 +1060,7 @@ class EvidenceReviewBundleService:
             "unresolved_actions": [],
             "unresolved_count": 0,
             "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
+            "current_snapshot_fingerprint": completed_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
             "safety": {
                 "writes_database": True,
@@ -983,6 +1104,9 @@ class EvidenceReviewBundleService:
         return response
 
     def _existing_review_response(self, paper_id: UUID, payload_hash: str) -> dict[str, Any] | None:
+        current_materials = self._build_materials(paper_id)
+        current_bundle_fingerprint = current_materials["bundle_fingerprint"]
+        current_snapshot_fingerprint = compute_figure_table_snapshot(self.session, paper_id)["fingerprint"]
         latest_rows = self.session.scalars(
             select(AuditLog)
             .where(AuditLog.paper_id == paper_id)
@@ -997,9 +1121,15 @@ class EvidenceReviewBundleService:
             response = payload.get("response") if isinstance(payload.get("response"), dict) else None
             if response is None:
                 continue
+            if response.get("stage_status") == "completed":
+                if response.get("completed_snapshot_fingerprint") != current_snapshot_fingerprint:
+                    continue
+            elif response.get("post_apply_bundle_fingerprint") != current_bundle_fingerprint:
+                continue
             cloned = dict(response)
             cloned["idempotent"] = True
             cloned["review_run_id"] = str(row.id)
+            cloned["current_snapshot_fingerprint"] = current_snapshot_fingerprint
             return cloned
         return None
 
@@ -1078,7 +1208,7 @@ class EvidenceReviewBundleService:
             if action.table_id and action.action in {"KEEP", "UPDATE"}
         }
         for item in applied:
-            if item.get("action") == "CREATE" and item.get("target_id"):
+            if item.get("target_id"):
                 if item.get("category") == "figure":
                     covered_figures.add(str(item["target_id"]))
                 if item.get("category") == "table":
@@ -1090,33 +1220,6 @@ class EvidenceReviewBundleService:
         if missing_tables:
             errors.append({"code": "finalize_incomplete_table_status", "missing_table_ids": missing_tables})
         return errors
-
-    def _completed_snapshot_core(
-        self,
-        *,
-        result: OfflineEvidenceReviewResult,
-        validation: dict[str, Any],
-        applied: list[dict[str, Any]],
-        refreshed: dict[str, Any],
-        payload_hash: str,
-    ) -> dict[str, Any]:
-        return {
-            "schema_version": "completed_figure_table_evidence_snapshot_v1",
-            "paper_id": refreshed["paper_metadata"]["paper_id"],
-            "paper_code": refreshed["paper_metadata"]["paper_code"],
-            "stage_status": "completed",
-            "source_bundle_fingerprint": result.bundle_fingerprint,
-            "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
-            "input_payload_sha256": payload_hash,
-            "review_source": result.review_source.model_dump(mode="json"),
-            "coverage": validation.get("coverage") or {},
-            "applied_op_ids": [item.get("op_id") for item in applied],
-            "final_figure_ids": sorted(refreshed["figure_id_map"]),
-            "final_table_ids": sorted(refreshed["table_id_map"]),
-            "dft_evidence_candidates": [item.model_dump(mode="json") for item in result.dft_evidence_candidates],
-            "figures": self._public_records(refreshed["extracted_figures"]),
-            "tables": self._public_records(refreshed["extracted_tables"]),
-        }
 
     def _mark_figures_review_completed(self, paper_id: UUID, reviewer: str) -> None:
         paper = self.session.get(Paper, paper_id)
@@ -1515,10 +1618,23 @@ class EvidenceReviewBundleService:
             "table_id": action.table_id or action.target_table_id or action.source_table_id,
             "quoted_text": (action.complete_markdown or action.caption or action.reason)[:2000],
             "evidence_ids": action.evidence_ids,
+            "reason": action.reason,
+            "local_ai_verification": (
+                action.local_ai_verification.model_dump(mode="json")
+                if action.local_ai_verification is not None
+                else None
+            ),
         }
         if action.bbox_norm is not None:
             payload["bbox"] = action.bbox_norm
         return payload
+
+    @staticmethod
+    def _has_local_ai_verification(verification: Any) -> bool:
+        if verification is None or verification.verified_against_pdf is not True:
+            return False
+        used_tools = {str(item).strip() for item in verification.used_tools if str(item).strip()}
+        return {"get_codex_item", "read_paper_page"} <= used_tools
 
     def _already_applied(self, op_id: str, bundle_fingerprint: str, *, target_type: str) -> dict[str, Any] | None:
         rows = self.session.scalars(

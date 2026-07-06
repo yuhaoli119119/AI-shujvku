@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+import json
 import os
 
 import tempfile
@@ -65,7 +67,114 @@ from app.mcp.server import (
     _mcp_review_identity,
 )
 from app.services.paper_query import PaperQueryService
+from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
+
+
+def _validated_local_ai_dft_request(engine, paper_id: str, audits: list[dict]) -> dict:
+    paper_uuid = UUID(str(paper_id))
+    normalized_audits = deepcopy(audits)
+    with Session(engine) as session:
+        paper = session.get(Paper, paper_uuid)
+        assert paper is not None
+        if not paper.paper_code:
+            paper.paper_code = f"MCP-{str(paper.id)[:8]}"
+        if session.query(PaperSection).filter(PaperSection.paper_id == paper.id).count() == 0:
+            session.add(
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title="DFT evidence",
+                    section_type="results",
+                    text="DFT evidence " + json.dumps(normalized_audits, ensure_ascii=False, default=str),
+                    page_start=1,
+                    page_end=10,
+                )
+            )
+        session.add(paper)
+        session.commit()
+
+    with Session(engine) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_uuid)
+        evidence_ids = list(materials["evidence_map"])
+        assert evidence_ids
+        for audit in normalized_audits:
+            audit.setdefault("target_id", "new")
+            audit.setdefault("field_name", "dft_results")
+            audit.setdefault("reason", "Verified against the cited DFT evidence.")
+            if audit.get("decision") in {"PASS", "REVISE", "new_candidate"}:
+                audit.setdefault("recommended_action", "ready_for_ml_export")
+            audit["evidence_checked"] = True
+            audit["evidence_ids"] = [evidence_ids[0]]
+            corrected = audit.get("corrected_value")
+            if audit.get("decision") == "REVISE" and not isinstance(corrected, dict):
+                row = session.get(DFTResult, UUID(str(audit["target_id"])))
+                assert row is not None
+                sample = session.get(CatalystSample, row.catalyst_sample_id) if row.catalyst_sample_id else None
+                audit["corrected_value"] = {
+                    "material_identity": (
+                        audit.get("normalized_material")
+                        or (sample.name if sample is not None else None)
+                        or "DFT material"
+                    ),
+                    "property_type": row.property_type,
+                    "value": corrected,
+                    "unit": row.unit,
+                    "adsorbate": row.adsorbate,
+                    "reaction_step": row.reaction_step,
+                }
+            if audit.get("decision") == "new_candidate" and isinstance(audit.get("corrected_value"), dict):
+                value = audit["corrected_value"]
+                if not value.get("material_identity") and value.get("material"):
+                    value["material_identity"] = value["material"]
+        allowed_audit_fields = {
+            "target_type",
+            "target_id",
+            "field_name",
+            "decision",
+            "evidence_checked",
+            "evidence_ids",
+            "corrected_value",
+            "confidence",
+            "reason",
+            "blocking_errors",
+            "recommended_action",
+        }
+        normalized_audits = [
+            {key: value for key, value in audit.items() if key in allowed_audit_fields}
+            for audit in normalized_audits
+        ]
+        payload = {
+            "schema_version": "offline_dft_review_result_v1",
+            "bundle_fingerprint": materials["bundle_fingerprint"],
+            "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"][
+                "completed_snapshot_fingerprint"
+            ],
+            "paper_id": str(paper_uuid),
+            "paper_code": materials["paper_metadata"]["paper_code"],
+            "review_source": {
+                "review_source_type": "web_ai",
+                "reviewer_label": "MCP test Web AI",
+                "reviewer_model": "test",
+                "tool_capabilities": ["none"],
+            },
+            "overall_status": "uncertain",
+            "object_review_audits": normalized_audits,
+            "uncertainties": [],
+            "notes": [],
+        }
+        validation = service.validate_result(paper_uuid, payload)
+        assert validation["valid"] is True, validation["errors"]
+        request = validation["import_analysis_request"]
+        for audit in request["raw_payload"]["object_review_audits"]:
+            audit["source"] = "local_ai"
+            audit["source_label"] = "local_ai_after_pdf_evidence_check"
+            audit["agent_role"] = "local_ai_pdf_verifier"
+            audit["local_ai_verification"] = {
+                "verified_against_pdf": True,
+                "used_tools": ["get_codex_item", "read_paper_page"],
+            }
+        return request
 
 
 @pytest.fixture
@@ -741,6 +850,7 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
                     }
                 ]
             },
+            auto_apply_review_rules=False,
         )
 
     assert imported["candidate_count"] == 1
@@ -757,7 +867,7 @@ def test_mcp_import_analysis_accepts_object_level_review_payload(mcp_test_env):
         stored_candidate = session.scalar(select(ExternalAnalysisCandidate))
         assert stored_row.candidate_status == "system_candidate"
         assert stored_candidate.candidate_type == "object_review_audit"
-        assert stored_candidate.status == "requires_resolution"
+        assert stored_candidate.status == "candidate"
         assert stored_candidate.normalized_payload["writes_final_truth"] is False
 
 
@@ -1042,36 +1152,23 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
             }
         ]
     }
+    request = _validated_local_ai_dft_request(
+        mcp_test_env["engine"],
+        paper_id,
+        payload["object_review_audits"],
+    )
 
     with mcp_auth_context(_auth()):
         first = import_analysis(
             paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit A",
-            raw_payload=payload,
-        )
-        rerun = import_analysis(
-            paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit A rerun with new timestamp",
-            raw_payload=payload,
-        )
-    with mcp_auth_context(_admin_auth()):
-        second = import_analysis(
-            paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit B",
-            raw_payload=payload,
+            source=request["source"],
+            source_label=request["source_label"],
+            raw_payload=request["raw_payload"],
         )
 
     assert first["candidate_count"] == 1
-    assert rerun["candidate_count"] == 1
-    assert second["candidate_count"] == 1
     assert first["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
     assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 0
-    assert rerun["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
-    assert second["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
-    assert second["auto_apply_summary"]["object_reviews"]["pending_count"] == 0
 
     with Session(mcp_test_env["engine"]) as session:
         stored_row = session.get(DFTResult, UUID(row_id))
@@ -1081,19 +1178,20 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
         audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
-    assert stored_row.candidate_status == "ML_Ready"
-    assert [run.source_identity for run in runs] == ["mcp:claude", "mcp:claude", "mcp:admin"]
+    assert stored_row.candidate_status == "ai_reviewed_needs_evidence"
+    assert [run.source_identity for run in runs] == ["mcp:claude"]
     assert all(run.source_identity_verified for run in runs)
     assert {candidate.status for candidate in candidates} == {"ai_applied"}
     assert reviews
     assert {review.reviewer_status for review in reviews} == {"verified"}
-    assert len(audit_logs) == 3
+    assert len(audit_logs) == 1
+    assert audit_logs[0].payload["actor_type"] == "ai"
 
 
 @pytest.mark.parametrize(
     ("decision", "corrected_value", "expected_value", "expected_status", "expected_review_status", "expected_pending"),
     [
-        ("REVISE", -1.45, -1.45, "ML_Ready", "verified", 0),
+        ("REVISE", -1.45, -1.45, "ai_reviewed_needs_evidence", "verified", 0),
         ("REJECT", None, -1.2, "Rejected", "rejected", 0),
         ("NEEDS_HUMAN", None, -1.2, "system_candidate", None, 1),
     ],
@@ -1153,13 +1251,14 @@ def test_mcp_single_dft_ai_revision_rejection_and_human_hold(
         "reason": f"Single AI decision: {decision}",
         "evidence_location": {"page": 7, "table": "Table 1", "quoted_text": "adsorption energy"},
     }
+    request = _validated_local_ai_dft_request(mcp_test_env["engine"], paper_id, [audit])
     with mcp_auth_context(_auth()):
         lock = acquire_module_write_lock(paper_id=paper_id, module_name="dft_results")
         imported = import_analysis(
             paper_id=paper_id,
-            source="ide_ai",
-            source_label=f"arbitrary_model_{decision.lower()}",
-            raw_payload={"object_review_audits": [audit]},
+            source=request["source"],
+            source_label=request["source_label"],
+            raw_payload=request["raw_payload"],
             auto_apply_review_rules=True,
             write_lock_token=lock["lock_token"],
         )
@@ -1213,6 +1312,11 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
             }
         ]
     }
+    request = _validated_local_ai_dft_request(
+        mcp_test_env["engine"],
+        paper_id,
+        payload["object_review_audits"],
+    )
 
     with mcp_auth_context(_auth()):
         lock = acquire_module_write_lock(
@@ -1221,10 +1325,10 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
         )
         imported = import_analysis(
             paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit custom reviewer",
+            source=request["source"],
+            source_label=request["source_label"],
             reviewer="codex_window_b",
-            raw_payload=payload,
+            raw_payload=request["raw_payload"],
             auto_apply_review_rules=True,
             write_lock_token=lock["lock_token"],
         )
@@ -1235,7 +1339,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
         assert len(rows) == 1
-        assert rows[0].candidate_status == "ML_Ready"
+        assert rows[0].candidate_status == "ai_reviewed_needs_evidence"
         assert rows[0].property_type == "adsorption_energy"
 
 
@@ -1270,6 +1374,11 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_lock_own
             }
         ]
     }
+    request = _validated_local_ai_dft_request(
+        mcp_test_env["engine"],
+        paper_id,
+        payload["object_review_audits"],
+    )
 
     with mcp_auth_context(_auth()):
         lock = acquire_module_write_lock(
@@ -1279,10 +1388,10 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_lock_own
         )
         imported = import_analysis(
             paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit custom lock owner",
+            source=request["source"],
+            source_label=request["source_label"],
             reviewer="codex_window_b",
-            raw_payload=payload,
+            raw_payload=request["raw_payload"],
             auto_apply_review_rules=True,
             write_lock_token=lock["lock_token"],
         )
@@ -2195,13 +2304,18 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
             }
         ]
     }
+    request = _validated_local_ai_dft_request(
+        mcp_test_env["engine"],
+        paper_id,
+        payload["object_review_audits"],
+    )
 
     with mcp_auth_context(_auth()):
         imported = import_analysis(
             paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit deferred",
-            raw_payload=payload,
+            source=request["source"],
+            source_label=request["source_label"],
+            raw_payload=request["raw_payload"],
             auto_apply_review_rules=False,
         )
 
@@ -2242,7 +2356,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ML_Ready"
+        assert dft_rows[0].candidate_status == "ai_reviewed_needs_evidence"
         assert dft_rows[0].value == pytest.approx(-0.95)
         assert dft_rows[0].adsorbate == "H"
 
@@ -2294,14 +2408,19 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             }
         ]
     }
+    request = _validated_local_ai_dft_request(
+        mcp_test_env["engine"],
+        paper_id,
+        payload["object_review_audits"],
+    )
 
     with mcp_auth_context(_auth()):
         # Import without auto-apply so candidates remain pending
         imported = import_analysis(
             paper_id=paper_id,
-            source="assigned_dft_audit",
-            source_label="Assigned AI DFT audit owner semantics",
-            raw_payload=payload,
+            source=request["source"],
+            source_label=request["source_label"],
+            raw_payload=request["raw_payload"],
             auto_apply_review_rules=False,
         )
         run_id = imported["run_id"]
@@ -2334,7 +2453,7 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ML_Ready"
+        assert dft_rows[0].candidate_status == "ai_reviewed_needs_evidence"
         assert dft_rows[0].adsorbate == "Li2S4"
 
         # No active dft_results lock leaked after explicit release

@@ -103,13 +103,15 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html?paper_id=main-paper`);
 
-    await page.locator('#webAiBundlePromptBtn').click();
-    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('请解压并阅读这个 AI 核验包');
+    await page.selectOption('#webAiWorkflowSelect', 'copy_dft_prompt');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('请解压并阅读这个 DFT 终审包');
     const webAiPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(webAiPrompt).toContain('stage_status');
+    expect(webAiPrompt).toContain('completed_snapshot_fingerprint');
     expect(webAiPrompt).toContain('PASS');
     expect(webAiPrompt).toContain('new_candidate');
     expect(webAiPrompt).toContain('evidence_id');
-    expect(webAiPrompt).toContain('最终只输出一份严格符合返回 schema 的完整 JSON');
+    expect(webAiPrompt).toContain('最终只输出一份严格符合 return_schema.json 的完整 JSON');
     await page.evaluate(() => { window.__clipboardText = ''; });
 
     const promptSelect = page.locator('#promptCopySelect');

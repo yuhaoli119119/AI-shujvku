@@ -54,6 +54,9 @@ class DFTImportedOpinionMixin:
                 confirm_reject_candidate=True,
                 reviewer=reviewer_name,
                 reviewer_note=f"Applied imported AI rejection from {source_label}. {reason}".strip(),
+                verification_actor_type="ai",
+                source_label=source_label,
+                evidence_payload=evidence_payload,
                 commit=commit,
             )
             return {
@@ -114,6 +117,8 @@ class DFTImportedOpinionMixin:
             field_names=verify_field_names or None,
             expected_write_versions=expected_write_versions or {},
             evidence_payload=evidence_payload,
+            verification_actor_type="ai",
+            source_label=source_label,
             commit=False,
         )
         audit = AuditLog(
@@ -128,6 +133,8 @@ class DFTImportedOpinionMixin:
                 "applied_correction_fields": [item.get("field_name") for item in applied_corrections],
                 "verified_field_names": verify_field_names,
                 "expected_row_state": expected_row_state or {},
+                "verification_actor_type": "ai",
+                "local_ai_verification": opinion.get("local_ai_verification"),
             },
         )
         self.session.add(audit)

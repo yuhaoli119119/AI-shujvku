@@ -60,6 +60,27 @@ class OfflineEvidenceBBoxMixin(BaseModel):
         return coords
 
 
+class LocalAIVerification(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verified_against_pdf: bool
+    used_tools: list[str] = Field(default_factory=list)
+    verification_note: str = Field(min_length=1)
+
+    @field_validator("used_tools")
+    @classmethod
+    def normalize_used_tools(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    @field_validator("verification_note")
+    @classmethod
+    def strip_verification_note(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("verification_note must not be blank")
+        return stripped
+
+
 class OfflineEvidenceFigureAction(OfflineEvidenceBBoxMixin):
     model_config = ConfigDict(extra="forbid")
 
@@ -78,6 +99,7 @@ class OfflineEvidenceFigureAction(OfflineEvidenceBBoxMixin):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     reason: str = Field(min_length=1)
     blocking_errors: list[str] = Field(default_factory=list)
+    local_ai_verification: LocalAIVerification | None = None
 
     @field_validator("figure_id", "source_paper_id", "figure_label", "figure_role")
     @classmethod
@@ -142,6 +164,7 @@ class OfflineEvidenceTableAction(OfflineEvidenceBBoxMixin):
     confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     reason: str = Field(min_length=1)
     blocking_errors: list[str] = Field(default_factory=list)
+    local_ai_verification: LocalAIVerification | None = None
 
     @field_validator("table_id", "source_table_id", "target_table_id", "source_paper_id")
     @classmethod

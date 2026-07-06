@@ -16,17 +16,18 @@ const FILE_DROP_SCOPE = FEATURE_SCOPE.slice(
 );
 
 test('review center exposes a selected-paper web AI result return entry', () => {
-  expect(REVIEW_CENTER).toContain('id="webAiReturnEntryBtn"');
+  expect(REVIEW_CENTER).toContain('<option value="return_dft">4 回传 DFT JSON</option>');
   expect(REVIEW_CENTER).toContain('回传网页 AI 结果');
-  expect(FEATURE_SCOPE).toContain('回传网页 AI 结果（" + (nextPaperCode');
+  expect(REVIEW_CENTER).toContain('openWebAiReturnDialog("dft")');
+  expect(FEATURE_SCOPE).toContain('回传 DFT JSON（" + (nextPaperCode');
   expect(FEATURE_SCOPE).toContain('rows.length !== 1');
 });
 
 test('validation uses the selected paper id and copy stays disabled until success', () => {
   expect(FEATURE_SCOPE).toContain('encodeURIComponent(target.paper_id) + "/dft-review-result/validate"');
   expect(REVIEW_CENTER).toContain('id="webAiCopyInstructionBtn" type="button" onclick="copyLocalAiImportInstruction()" disabled');
-  expect(FEATURE_SCOPE).toContain('document.getElementById("webAiCopyInstructionBtn").disabled = false;');
-  expect(FEATURE_SCOPE).toContain('if (!data || data.valid !== true || !data.import_analysis_request)');
+  expect(FEATURE_SCOPE).toContain('if (copyButton) copyButton.disabled = false;');
+  expect(FEATURE_SCOPE).toContain('Boolean(data && data.valid === true && data.import_analysis_request)');
 });
 
 test('failed validation never imports and temporary review data is not persisted', () => {
@@ -62,8 +63,13 @@ test('switching papers clears pasted content, validation state, and copy permiss
 test('copied instruction is product-neutral and requires fresh validation plus authenticated MCP', () => {
   expect(FEATURE_SCOPE).toContain('重新 POST 到 /api/papers/');
   expect(FEATURE_SCOPE).toContain('只使用这次新返回的 import_analysis_request');
+  expect(FEATURE_SCOPE).toContain('逐条调用 get_codex_item');
+  expect(FEATURE_SCOPE).toContain('read_paper_page 核对原 PDF');
+  expect(FEATURE_SCOPE).toContain('local_ai_verification={verified_against_pdf:true');
+  expect(FEATURE_SCOPE).toContain('stage_status 为 completed/not_required');
+  expect(FEATURE_SCOPE).toContain('completed_snapshot_fingerprint');
   expect(FEATURE_SCOPE).toContain('优先调用当前会话已认证 MCP 的 import_analysis');
   expect(FEATURE_SCOPE).toContain('禁止直接写 PostgreSQL');
-  expect(FEATURE_SCOPE).toContain('run_id、候选数量、冲突项、需要人工处理的项目');
+  expect(FEATURE_SCOPE).toContain('dft_readback.object_versions');
   expect(FEATURE_SCOPE).not.toMatch(/Codex|DeepSeek|Anti-Gravity|ChatGPT/);
 });

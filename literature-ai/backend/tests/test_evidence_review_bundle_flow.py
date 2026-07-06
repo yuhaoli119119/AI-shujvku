@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import AuditLog, Paper, PaperFigure, PaperTable
+from app.main import app
 from app.mcp.context import mcp_auth_context
 from app.mcp.server import finalize_chart_review, get_chart_review_task, resolve_chart_review_actions
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
@@ -50,6 +52,14 @@ def _review_source(label: str = "web-ai") -> dict:
         "reviewer_label": label,
         "reviewer_model": "unit-test",
         "tool_capabilities": ["pdf_reading", "image_understanding", "table_reconstruction"],
+    }
+
+
+def _local_ai_verification(note: str = "Checked the target object and its cited PDF page.") -> dict:
+    return {
+        "verified_against_pdf": True,
+        "used_tools": ["get_codex_item", "read_paper_page"],
+        "verification_note": note,
     }
 
 
@@ -233,3 +243,109 @@ def test_repeated_submit_is_idempotent(setup_test_db):
     assert second["idempotent"] is True
     assert second["completed_snapshot_fingerprint"] == first["completed_snapshot_fingerprint"]
     assert applied_count == 1
+
+
+def test_completed_chart_review_immediately_allows_dft_bundle_export(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper, figure, table = _paper_with_chart_objects(session, "BCH08")
+        payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
+        completed = _service(session).apply_result(paper.id, payload)
+        paper_id = paper.id
+
+    response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
+
+    assert completed["stage_status"] == "completed"
+    assert response.status_code == 200
+
+
+def test_local_ai_resolves_merge_delete_reject_and_low_confidence_atomically(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper, figure, first_table = _paper_with_chart_objects(session, "BCH09")
+        second_table = PaperTable(
+            paper_id=paper.id,
+            caption="Table 1 continued.",
+            markdown_content="| Metric | Value |\n|---|---|\n| B | 2 |",
+            page=3,
+            extraction_source="docling",
+        )
+        invalid_table = PaperTable(
+            paper_id=paper.id,
+            caption="Navigation noise.",
+            markdown_content="| Noise | Value |\n|---|---|\n| x | y |",
+            page=4,
+            extraction_source="docling",
+        )
+        session.add_all([second_table, invalid_table])
+        session.flush()
+        verification = _local_ai_verification()
+        payload = _result_payload(
+            session,
+            paper,
+            [
+                _figure_action(
+                    figure,
+                    "REJECT",
+                    confidence=0.2,
+                    local_ai_verification=verification,
+                )
+            ],
+            [
+                {
+                    "action": "MERGE",
+                    "source_table_id": str(second_table.id),
+                    "target_table_id": str(first_table.id),
+                    "evidence_ids": ["main:table:001", "main:table:002"],
+                    "evidence_checked": True,
+                    "confidence": 0.2,
+                    "reason": "The PDF shows this is one continued table.",
+                    "local_ai_verification": verification,
+                },
+                _table_action(
+                    invalid_table,
+                    "DELETE",
+                    evidence_ids=["main:table:003"],
+                    confidence=0.2,
+                    local_ai_verification=verification,
+                ),
+            ],
+        )
+
+        result = _service(session).resolve_review_actions(paper.id, payload)
+        remaining_figures = session.query(PaperFigure).filter(PaperFigure.paper_id == paper.id).count()
+        remaining_table_ids = [
+            row.id for row in session.query(PaperTable).filter(PaperTable.paper_id == paper.id).all()
+        ]
+        first_table_id = first_table.id
+        operation_logs = session.scalars(
+            select(AuditLog).where(AuditLog.action == "offline_evidence_review_op")
+        ).all()
+
+    assert result["stage_status"] == "completed"
+    assert result["unresolved_actions"] == []
+    assert remaining_figures == 0
+    assert remaining_table_ids == [first_table_id]
+    assert {row.payload["action"]["action"] for row in operation_logs} == {"REJECT", "MERGE", "DELETE"}
+    assert all(row.payload["actor_type"] == "ai" for row in operation_logs)
+
+
+def test_chart_mutation_invalidates_completion_and_old_payload_is_not_idempotent(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper, figure, table = _paper_with_chart_objects(session, "BCH10")
+        payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
+        completed = _service(session).apply_result(paper.id, payload)
+        old_fingerprint = completed["completed_snapshot_fingerprint"]
+        table.markdown_content = "| Metric | Value |\n|---|---|\n| changed | 99 |"
+        session.add(table)
+        session.commit()
+        task = _service(session).get_review_task(paper.id)
+        repeated = _service(session).apply_result(paper.id, payload)
+        paper_id = paper.id
+
+    dft_response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
+
+    assert task["stage_status"] == "stale"
+    assert task["current_snapshot_fingerprint"] != old_fingerprint
+    assert repeated["valid"] is False
+    assert repeated.get("idempotent") is not True
+    assert dft_response.status_code == 409
+    assert dft_response.json()["detail"]["figure_table_review"]["stage_status"] == "stale"

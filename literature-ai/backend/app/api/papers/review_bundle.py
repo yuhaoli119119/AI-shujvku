@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
-from app.services.dft_review_bundle_service import DFTReviewBundleService
+from app.services.dft_review_bundle_service import DFTReviewBundleService, FigureTableReviewNotCompletedError
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 
 
@@ -33,6 +33,8 @@ def export_dft_review_bundle(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FigureTableReviewNotCompletedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     content = bundle["content"]
@@ -66,6 +68,8 @@ def export_evidence_review_bundle(
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FigureTableReviewNotCompletedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     content = bundle["content"]
@@ -182,5 +186,7 @@ def validate_dft_review_result(
         return DFTReviewBundleService(session, settings).validate_result(paper_id, payload)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FigureTableReviewNotCompletedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

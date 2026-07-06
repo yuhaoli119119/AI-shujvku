@@ -83,6 +83,9 @@ class ExternalObjectReviewAuditModel(BaseModel):
     source_label: str | None = None
     agent_role: str | None = None
     model_name: str | None = None
+    requires_local_ai_verification: bool = False
+    local_ai_verification: dict[str, Any] | None = None
+    figure_table_completed_snapshot_fingerprint: str | None = None
     reason: str | None = None
     raw_payload: dict[str, Any] | list[Any] | str | None = None
     status: str = "candidate"

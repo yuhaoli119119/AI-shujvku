@@ -18,6 +18,8 @@ test('review center exposes local AI chart review copy instruction and status fi
   expect(reviewCenter).toContain('unresolved_actions');
   expect(reviewCenter).toContain('stage_status');
   expect(reviewCenter).toContain('completed_snapshot_fingerprint');
+  expect(reviewCenter).toContain("used_tools:['get_codex_item','read_paper_page']");
+  expect(reviewCenter).toContain('verification_note');
   expect(reviewCenter).toContain('duplicate_or_conflicting_figure_action');
   expect(reviewCenter).toContain('missing_evidence_ids_for_modification');
 });

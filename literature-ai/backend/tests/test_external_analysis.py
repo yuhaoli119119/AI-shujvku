@@ -757,7 +757,7 @@ def test_import_analysis_rejects_figure_recrop_submission(monkeypatch):
             engine.dispose()
 
 
-def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
+def test_unvalidated_si_new_dft_candidate_cannot_bypass_import_contract():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -816,40 +816,17 @@ def test_import_analysis_preserves_si_new_dft_candidate_source_and_signature():
                 },
             )
 
-            assert response.status_code == 200
+            assert response.status_code == 400
+            assert "dft_json_validation_failed" in response.json()["detail"]
             with Session(engine) as session:
-                candidate = session.scalars(select(ExternalAnalysisCandidate)).one()
-                payload = candidate.normalized_payload
-                assert candidate.paper_id == paper_id
-                assert candidate.candidate_type == "object_review_audit"
-                assert payload["target_id"] == "new"
-                assert payload["decision"] == "new_candidate"
-                assert payload["evidence_location"]["source_document_type"] == "supplementary_information"
-                assert payload["dedupe_signature"].startswith("dft:")
-                assert candidate.evidence_payload["source_document_type"] == "supplementary_information"
-                assert candidate.status == "ai_applied"
-                assert candidate.materialized_target_type == "dft_results"
-                assert candidate.materialized_target_id is not None
-                stored_row = session.get(DFTResult, UUID(candidate.materialized_target_id))
-                assert stored_row is not None
-                assert stored_row.candidate_status == "ML_Ready"
-                assert stored_row.property_type == "adsorption_energy"
-                assert stored_row.value == -1.23
-                assert stored_row.unit == "eV"
-                assert stored_row.evidence_payload["material_identity"] == "Co-GDY"
-                locator = session.scalar(select(EvidenceLocator).where(EvidenceLocator.target_id == str(stored_row.id)))
-                assert locator is not None
-                assert locator.target_type == "dft_results"
-                assert locator.page == 14
-                gate = is_export_eligible_extraction(session, stored_row, target_type="dft_results")
-                assert gate.eligible
-                assert gate.reasons == ()
+                assert session.query(ExternalAnalysisCandidate).count() == 0
+                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 0
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
 
 
-def test_si_new_candidate_writeback_persists_source_row_lifecycle():
+def test_unvalidated_si_writeback_does_not_change_source_row_lifecycle():
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -935,18 +912,14 @@ def test_si_new_candidate_writeback_persists_source_row_lifecycle():
                 },
             )
 
-            assert response.status_code == 200, response.text
-            materialized = response.json()["warnings"]
-            assert isinstance(materialized, list)
+            assert response.status_code == 400, response.text
+            assert "dft_json_validation_failed" in response.json()["detail"]
             with Session(engine) as session:
                 stored_source = session.get(DFTResult, source_row_id)
-                assert stored_source.support_lifecycle_status == "written_back"
-                assert stored_source.support_writeback_paper_id == main_id
-                assert stored_source.support_writeback_dft_result_id is not None
-                canonical = session.get(DFTResult, stored_source.support_writeback_dft_result_id)
-                assert canonical is not None
-                assert canonical.paper_id == main_id
-                assert canonical.value == -4.2
+                assert stored_source.support_lifecycle_status != "written_back"
+                assert stored_source.support_writeback_paper_id is None
+                assert stored_source.support_writeback_dft_result_id is None
+                assert session.query(DFTResult).filter(DFTResult.paper_id == main_id).count() == 0
         finally:
             app.dependency_overrides.clear()
             get_settings.cache_clear()
@@ -1329,6 +1302,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
                     "paper_id": str(paper_id),
                     "source": "glm_dft_audit",
                     "source_label": "GLM DFT audit",
+                    "auto_apply_review_rules": False,
                     "raw_payload": {"object_review_audits": [raw_item]},
                 },
             )
@@ -1338,7 +1312,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
             assert len(payload["candidates"]) == 1
             candidate = payload["candidates"][0]
             assert candidate["candidate_type"] == "object_review_audit"
-            assert candidate["status"] == "requires_resolution"
+            assert candidate["status"] == "candidate"
             assert candidate["normalized_payload"]["target_type"] == "dft_results"
             assert candidate["normalized_payload"]["target_id"] == str(row_id)
             assert candidate["normalized_payload"]["field_name"] == "value"
@@ -1683,7 +1657,7 @@ def test_external_analysis_import_rejects_empty_payload():
             engine.dispose()
 
 
-def test_external_analysis_dft_missing_material_identity_stays_pending(monkeypatch):
+def test_unvalidated_dft_missing_material_identity_is_rejected_before_write(monkeypatch):
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -1747,7 +1721,8 @@ def test_external_analysis_dft_missing_material_identity_stays_pending(monkeypat
                 json={**payload, "source_label": "ide-ai-1"},
                 headers=first_headers,
             )
-            assert first.status_code == 200
+            assert first.status_code == 400
+            assert "dft_json_validation_failed" in first.json()["detail"]
             with Session(engine) as session:
                 stored_row = session.get(DFTResult, row_id)
                 candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
@@ -1755,7 +1730,7 @@ def test_external_analysis_dft_missing_material_identity_stays_pending(monkeypat
 
             assert stored_row is not None
             assert stored_row.candidate_status == "system_candidate"
-            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert candidates == []
             assert reviews == []
         finally:
             app.dependency_overrides.clear()
@@ -2467,7 +2442,7 @@ def test_import_analysis_rejects_legacy_codex_item_table_correction():
             engine.dispose()
 
 
-def test_external_analysis_single_ai_review_can_bind_dft_to_catalyst_sample(monkeypatch):
+def test_unvalidated_single_ai_review_cannot_bind_dft_to_catalyst_sample(monkeypatch):
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2542,7 +2517,8 @@ def test_external_analysis_single_ai_review_can_bind_dft_to_catalyst_sample(monk
                 json={**base_payload, "source_label": "ide-ai-1"},
                 headers=first_headers,
             )
-            assert first.status_code == 200
+            assert first.status_code == 400
+            assert "dft_json_validation_failed" in first.json()["detail"]
 
             with Session(engine) as session:
                 stored_row = session.get(DFTResult, row_id)
@@ -2552,13 +2528,11 @@ def test_external_analysis_single_ai_review_can_bind_dft_to_catalyst_sample(monk
                 issues = session.query(DFTAuditIssue).all()
 
             assert stored_row is not None
-            assert stored_row.catalyst_sample_id == catalyst_id
-            assert corrections
-            assert {correction.status for correction in corrections} == {"approved"}
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
-            assert "missing_material_identity" not in gate.reasons
-            assert gate.eligible
-            assert gate.reasons == ()
+            assert stored_row.catalyst_sample_id is None
+            assert corrections == []
+            assert candidates == []
+            assert "missing_material_identity" in gate.reasons
+            assert not gate.eligible
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2610,6 +2584,7 @@ def test_object_level_audit_payloads_participate_in_conflict_aggregation():
                         "paper_id": str(paper_id),
                         "source": source,
                         "source_label": source,
+                        "auto_apply_review_rules": False,
                         "raw_payload": {
                             "object_review_audits": [
                                 {
@@ -2888,11 +2863,7 @@ def test_internal_ai_parse_uses_persisted_writer_settings(monkeypatch):
             get_settings.cache_clear()
 
 
-def test_http_import_dft_new_candidate_defaults_to_apply_and_auto_acquires_lock():
-    """Regression: HTTP /import with an omitted auto_apply_review_rules flag
-    must auto-acquire a dft_results lock, materialize the candidate, and release the lock.
-    This was the original bug report's core failure (module_write_lock_required:dft_results).
-    """
+def test_http_import_dft_new_candidate_without_contract_is_blocked_before_lock():
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2970,25 +2941,14 @@ def test_http_import_dft_new_candidate_defaults_to_apply_and_auto_acquires_lock(
                 },
             )
 
-            assert response.status_code == 200, response.text
-            body = response.json()
-            assert body["candidates"][0]["status"] == "ai_applied"
-            assert body["candidates"][0]["normalized_payload"]["target_type"] == "dft_results"
-            assert body["candidates"][1]["status"] == "requires_resolution"
-            assert body["candidates"][1]["materialized_target_id"] is None
-            warning_codes = {item["code"] for item in body["warnings"]}
-            assert "new_dft_candidate_materialization_skipped" in warning_codes
-            assert "ml_predicted_values_not_dft_results" in warning_codes
+            assert response.status_code == 400, response.text
+            assert "dft_json_validation_failed" in response.json()["detail"]
 
             with Session(engine) as session:
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
-                assert len(dft_rows) == 1
-                assert dft_rows[0].candidate_status == "ML_Ready"
-                assert dft_rows[0].value == -1.23
-                ml_issues = [issue for issue in issues if issue.issue_type == "source_scope_error"]
-                assert len(ml_issues) == 1
-                assert ml_issues[0].status == "needs_user_decision"
+                assert dft_rows == []
+                assert issues == []
                 from app.db.models import ModuleWriteLock
                 active_locks = session.scalars(
                     select(ModuleWriteLock).where(
@@ -3003,10 +2963,7 @@ def test_http_import_dft_new_candidate_defaults_to_apply_and_auto_acquires_lock(
             engine.dispose()
 
 
-def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates():
-    """Regression: a run imported with auto_apply_review_rules=False must be
-    materializable later via POST /runs/{run_id}/apply-review-rules.
-    """
+def test_http_apply_review_rules_rejects_deferred_dft_without_contract():
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -3081,17 +3038,12 @@ def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates()
                 f"/api/external-analysis/runs/{run_id}/apply-review-rules",
                 json={"reviewer": "deferred_dft"},
             )
-            assert apply_response.status_code == 200, apply_response.text
-            apply_body = apply_response.json()
-            assert apply_body["candidate_count"] == 1
-            assert apply_body["candidates"][0]["status"] == "ai_applied"
-            assert apply_body["candidates"][0]["materialized_target_type"] == "dft_results"
+            assert apply_response.status_code == 400, apply_response.text
+            assert "dft_json_validation_failed" in apply_response.json()["detail"]
 
             with Session(engine) as session:
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
-                assert len(dft_rows) == 1
-                assert dft_rows[0].candidate_status == "ML_Ready"
-                assert dft_rows[0].value == -0.95
+                assert dft_rows == []
                 from app.db.models import ModuleWriteLock
                 active_locks = session.scalars(
                     select(ModuleWriteLock).where(
@@ -3106,7 +3058,7 @@ def test_http_apply_review_rules_endpoint_materializes_deferred_dft_candidates()
             engine.dispose()
 
 
-def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_run():
+def test_apply_review_rules_rejects_manually_constructed_runs_without_contract():
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -3187,28 +3139,26 @@ def test_apply_review_rules_only_materializes_new_dft_candidates_from_requested_
                 f"/api/external-analysis/runs/{new_run_id}/apply-review-rules",
                 json={"reviewer": "new-run"},
             )
-            assert applied.status_code == 200, applied.text
-            assert applied.json()["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
+            assert applied.status_code == 400, applied.text
+            assert "dft_json_validation_failed" in applied.json()["detail"]
 
             with Session(engine) as session:
                 assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "candidate"
-                assert session.get(ExternalAnalysisCandidate, current_candidate_id).status == "ai_applied"
+                assert session.get(ExternalAnalysisCandidate, current_candidate_id).status == "candidate"
                 rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
-                assert len(rows) == 1
-                assert rows[0].value == -0.9
+                assert rows == []
                 issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
-                assert len(issues) == 1
-                assert str(current_candidate_id) in issues[0].source_candidate_ids
+                assert issues == []
 
             applied_old = client.post(
                 f"/api/external-analysis/runs/{old_run_id}/apply-review-rules",
                 json={"reviewer": "old-run"},
             )
-            assert applied_old.status_code == 200, applied_old.text
+            assert applied_old.status_code == 400, applied_old.text
             with Session(engine) as session:
-                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "ai_applied"
-                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 2
-                assert session.query(DFTAuditIssue).filter(DFTAuditIssue.paper_id == paper_id).count() == 2
+                assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "candidate"
+                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 0
+                assert session.query(DFTAuditIssue).filter(DFTAuditIssue.paper_id == paper_id).count() == 0
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -3305,10 +3255,11 @@ def test_materialize_endpoint_defers_object_review_audit_without_consuming_it():
                 f"/api/external-analysis/runs/{run_id}/apply-review-rules",
                 json={"reviewer": "test"},
             )
-            assert apply_response.status_code == 200, apply_response.text
+            assert apply_response.status_code == 400, apply_response.text
+            assert "dft_json_validation_failed" in apply_response.json()["detail"]
             with Session(engine) as session:
-                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "ai_applied"
-                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 1
+                assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "pending"
+                assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 0
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -3424,6 +3375,11 @@ def test_apply_review_rules_logs_auto_lock_release_failure_when_apply_rolls_back
                 fail_apply_import_rules,
             )
             monkeypatch.setattr(ModuleWriteLockService, "release", fail_release)
+            monkeypatch.setattr(
+                ExternalAnalysisService,
+                "_guard_dft_import_prerequisites",
+                lambda self, run, candidates: None,
+            )
             caplog.set_level(logging.ERROR, logger="app.services.external_analysis_service")
 
             with Session(engine) as session:

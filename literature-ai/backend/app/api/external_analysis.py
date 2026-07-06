@@ -66,7 +66,9 @@ def _serialize_run(
     *,
     auto_apply_summary: dict | None = None,
 ) -> ExternalAnalysisRunResponse:
-    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(exclude={"candidates", "warnings"})
+    base = ExternalAnalysisRunResponse.model_validate(run).model_dump(
+        exclude={"candidates", "warnings", "auto_apply_summary"}
+    )
     candidates = service.list_candidates(run.id)
     warnings = service.diagnose_import_warnings(
         run,
@@ -84,6 +86,7 @@ def _serialize_run(
             for item in candidates
         ],
         warnings=warnings,
+        auto_apply_summary=auto_apply_summary,
     )
 
 
@@ -139,7 +142,13 @@ async def import_external_analysis(
         return _serialize_run(service, run, auto_apply_summary=auto_apply_summary)
     except ValueError as exc:
         session.rollback()
-        status_code = 409 if str(exc).startswith(("module_write_lock_required", "module_write_lock_conflict")) else 400
+        status_code = 409 if str(exc).startswith((
+            "module_write_lock_required",
+            "module_write_lock_conflict",
+            "figure_table_review_not_completed",
+            "local_ai_pdf_verification_required",
+            "conflicting_figure_table_completed_snapshot_fingerprint",
+        )) else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
@@ -292,7 +301,13 @@ async def apply_review_rules_for_run(
         }
     except ValueError as exc:
         session.rollback()
-        status_code = 409 if str(exc).startswith(("module_write_lock_required", "module_write_lock_conflict")) else 400
+        status_code = 409 if str(exc).startswith((
+            "module_write_lock_required",
+            "module_write_lock_conflict",
+            "figure_table_review_not_completed",
+            "local_ai_pdf_verification_required",
+            "conflicting_figure_table_completed_snapshot_fingerprint",
+        )) else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 

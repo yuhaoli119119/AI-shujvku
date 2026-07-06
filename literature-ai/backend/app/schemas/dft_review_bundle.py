@@ -109,6 +109,14 @@ class OfflineDFTReviewResult(BaseModel):
 
     schema_version: Literal["offline_dft_review_result_v1"] = "offline_dft_review_result_v1"
     bundle_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    figure_table_completed_snapshot_fingerprint: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+        description=(
+            "The completed/not_required figure-table review snapshot bound to this DFT review result. "
+            "If the figure/table snapshot changes, this result must be regenerated."
+        ),
+    )
     paper_id: str = Field(min_length=1, max_length=64)
     paper_code: str = Field(min_length=1, max_length=64)
     review_source: OfflineReviewSource
