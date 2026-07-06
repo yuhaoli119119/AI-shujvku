@@ -109,7 +109,7 @@ class OfflineEvidenceFigureAction(OfflineEvidenceBBoxMixin):
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "OfflineEvidenceFigureAction":
-        if self.action in {"KEEP", "RECROP", "REJECT"} and not self.figure_id:
+        if self.action in {"KEEP", "RECROP", "REJECT", "NEEDS_HUMAN"} and not self.figure_id:
             raise ValueError(f"{self.action} requires figure_id")
         if self.action == "CREATE" and self.figure_id:
             raise ValueError("CREATE must not reuse an existing figure_id")
@@ -168,7 +168,7 @@ class OfflineEvidenceTableAction(OfflineEvidenceBBoxMixin):
 
     @model_validator(mode="after")
     def validate_action_shape(self) -> "OfflineEvidenceTableAction":
-        if self.action in {"KEEP", "UPDATE", "DELETE"} and not self.table_id:
+        if self.action in {"KEEP", "UPDATE", "DELETE", "NEEDS_HUMAN"} and not self.table_id:
             raise ValueError(f"{self.action} requires table_id")
         if self.action == "CREATE":
             if self.table_id:

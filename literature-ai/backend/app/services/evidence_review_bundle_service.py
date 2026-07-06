@@ -73,6 +73,14 @@ def _short_source(value: str | None) -> str:
     return text[:64]
 
 
+def _payload_sha256(payload: Any) -> str:
+    return _sha256(_canonical_json_bytes(payload))
+
+
+def _utc_iso() -> str:
+    return datetime.now(UTC).isoformat()
+
+
 class EvidenceReviewBundleService:
     """Build, validate, and auto-apply offline figure/table evidence review packages."""
 
@@ -211,6 +219,8 @@ class EvidenceReviewBundleService:
         except ValidationError as exc:
             return {
                 "valid": False,
+                "stage_status": "invalid",
+                "apply_ready": False,
                 "errors": [
                     {
                         "code": "schema_validation_error",
@@ -223,6 +233,8 @@ class EvidenceReviewBundleService:
                 "execution_plan": [],
                 "auto_apply_count": 0,
                 "needs_confirmation_count": 0,
+                "unresolved_count": 0,
+                "unresolved_actions": [],
             }
 
         materials = self._build_materials(paper_id)
@@ -249,7 +261,13 @@ class EvidenceReviewBundleService:
 
         figure_ids_seen: set[str] = set()
         table_ids_seen: set[str] = set()
+        figure_refs: dict[str, list[str]] = {}
+        table_refs: dict[str, list[str]] = {}
         evidence_ids = set(materials["evidence_map"])
+
+        def note_ref(mapping: dict[str, list[str]], object_id: str | None, action_ref: str) -> None:
+            if object_id:
+                mapping.setdefault(object_id, []).append(action_ref)
 
         for index, action in enumerate(result.figure_actions):
             action_ref = f"figure_actions[{index}]"
@@ -259,6 +277,7 @@ class EvidenceReviewBundleService:
                 add_error(error["code"], error["message"], action_ref=action_ref)
             if action.figure_id:
                 figure_ids_seen.add(action.figure_id)
+                note_ref(figure_refs, action.figure_id, action_ref)
 
         for index, action in enumerate(result.table_actions):
             action_ref = f"table_actions[{index}]"
@@ -269,6 +288,35 @@ class EvidenceReviewBundleService:
             for table_id in (action.table_id, action.source_table_id, action.target_table_id):
                 if table_id:
                     table_ids_seen.add(table_id)
+                    note_ref(table_refs, table_id, action_ref)
+
+        for object_id, refs in sorted(figure_refs.items()):
+            if len(refs) > 1:
+                add_error(
+                    "duplicate_or_conflicting_figure_action",
+                    f"figure_id '{object_id}' appears in multiple actions: " + ", ".join(refs),
+                    action_ref=refs[0],
+                )
+        for object_id, refs in sorted(table_refs.items()):
+            if len(refs) > 1:
+                add_error(
+                    "duplicate_or_conflicting_table_action",
+                    f"table_id '{object_id}' appears in multiple actions: " + ", ".join(refs),
+                    action_ref=refs[0],
+                )
+
+        missing_figures = sorted(materials["figure_id_map"] - figure_ids_seen)
+        missing_tables = sorted(materials["table_id_map"] - table_ids_seen)
+        if missing_figures:
+            add_error(
+                "incomplete_figure_coverage",
+                "Figure review requires one action for every current figure; missing: " + ", ".join(missing_figures),
+            )
+        if missing_tables:
+            add_error(
+                "incomplete_table_coverage",
+                "Table review requires one action for every current table; missing: " + ", ".join(missing_tables),
+            )
 
         for index, candidate in enumerate(result.dft_evidence_candidates):
             if candidate.evidence_id and candidate.evidence_id not in evidence_ids:
@@ -276,22 +324,6 @@ class EvidenceReviewBundleService:
                     "unknown_dft_candidate_evidence_id",
                     f"dft_evidence_candidates[{index}].evidence_id is not present in the package",
                     action_ref=f"dft_evidence_candidates[{index}]",
-                )
-
-        if result.overall_status == "completed":
-            missing_figures = sorted(materials["figure_id_map"] - figure_ids_seen)
-            missing_tables = sorted(materials["table_id_map"] - table_ids_seen)
-            if missing_figures:
-                add_error(
-                    "incomplete_figure_coverage",
-                    "overall_status=completed requires a figure action for every current figure; missing: "
-                    + ", ".join(missing_figures),
-                )
-            if missing_tables:
-                add_error(
-                    "incomplete_table_coverage",
-                    "overall_status=completed requires a table action for every current table; missing: "
-                    + ", ".join(missing_tables),
                 )
 
         if not result.figure_actions and materials["figure_id_map"]:
@@ -305,6 +337,13 @@ class EvidenceReviewBundleService:
                     "message": "Figure/table DFT candidates are stored for the later DFT review package; they are not verified DFT rows.",
                 }
             )
+        if result.overall_status != "completed":
+            warnings.append(
+                {
+                    "code": "server_will_decide_completion",
+                    "message": "The server finalizes the chart stage from coverage, validation, safe operations, and unresolved_actions rather than trusting overall_status alone.",
+                }
+            )
 
         if errors:
             for plan in execution_plan:
@@ -314,54 +353,58 @@ class EvidenceReviewBundleService:
                     blocked.append("result_has_validation_errors")
                 plan["blocked_reasons"] = blocked
 
+        unresolved_actions = self._unresolved_actions(execution_plan)
+        valid = not errors
+        apply_ready = valid and not unresolved_actions
         return {
-            "valid": not errors,
+            "valid": valid,
+            "stage_status": "ready_to_finalize" if apply_ready else ("needs_local_ai" if valid else "invalid"),
+            "apply_ready": apply_ready,
             "paper_id": metadata["paper_id"],
             "paper_code": metadata["paper_code"],
             "bundle_fingerprint": materials["bundle_fingerprint"],
+            "coverage": {
+                "expected_figure_ids": sorted(materials["figure_id_map"]),
+                "expected_table_ids": sorted(materials["table_id_map"]),
+                "covered_figure_ids": sorted(figure_ids_seen),
+                "covered_table_ids": sorted(table_ids_seen),
+                "missing_figure_ids": missing_figures,
+                "missing_table_ids": missing_tables,
+            },
             "errors": errors,
             "warnings": warnings,
             "execution_plan": execution_plan,
             "auto_apply_count": sum(1 for item in execution_plan if item.get("auto_apply")),
-            "needs_confirmation_count": sum(1 for item in execution_plan if not item.get("auto_apply")),
+            "needs_confirmation_count": len(unresolved_actions),
+            "unresolved_count": len(unresolved_actions),
+            "unresolved_actions": unresolved_actions,
             "safety": {
                 "validate_writes_database": False,
                 "apply_endpoint_writes_database": True,
-                "local_ai_role": "confirm payload validity, call apply, then read back changed figures/tables",
+                "local_ai_role": "use authenticated MCP chart-review tools to read unresolved_actions, check PDF evidence, batch resolve, and finalize",
                 "web_ai_writes_database": False,
             },
         }
 
     def apply_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
+        payload_hash = _payload_sha256(raw_payload)
+        if not dry_run:
+            existing = self._existing_review_response(paper_id, payload_hash)
+            if existing is not None:
+                return existing
+
         validation = self.validate_result(paper_id, raw_payload)
         result = OfflineEvidenceReviewResult.model_validate(raw_payload) if validation["valid"] else None
-        apply_blocking_errors: list[dict[str, str]] = []
-        if result is not None and result.overall_status != "completed":
-            apply_blocking_errors.append(
-                {
-                    "code": "apply_requires_completed_review",
-                    "message": "The apply endpoint only records a curated evidence snapshot when overall_status='completed'.",
-                }
-            )
         if not validation["valid"] or dry_run:
             return {
                 **validation,
                 "dry_run": dry_run,
-                "apply_ready": validation["valid"] and not apply_blocking_errors,
-                "apply_blocking_errors": apply_blocking_errors,
+                "input_payload_sha256": payload_hash,
                 "applied_count": 0,
                 "applied": [],
-                "skipped": validation.get("execution_plan", []),
-            }
-        if apply_blocking_errors:
-            return {
-                **validation,
-                "dry_run": False,
-                "apply_ready": False,
-                "apply_blocking_errors": apply_blocking_errors,
-                "applied_count": 0,
-                "applied": [],
-                "skipped": validation.get("execution_plan", []),
+                "skipped": validation.get("unresolved_actions", validation.get("execution_plan", [])),
+                "chart_review_completed": False,
+                "completed_snapshot_fingerprint": None,
             }
 
         assert result is not None
@@ -372,68 +415,133 @@ class EvidenceReviewBundleService:
             if item.get("auto_apply")
         }
         applied: list[dict[str, Any]] = []
-        skipped: list[dict[str, Any]] = []
         reviewer = _short_source(result.review_source.reviewer_label)
+        unresolved_actions = list(validation.get("unresolved_actions") or [])
 
         try:
             for index, action in enumerate(result.figure_actions):
                 op_id = f"figure:{index}:{action.action}"
                 if op_id not in auto_op_ids:
-                    skipped.append({"op_id": op_id, "category": "figure", "action": action.action})
                     continue
                 applied.append(self._apply_figure_action(action, materials, op_id, result.bundle_fingerprint, reviewer))
 
             for index, action in enumerate(result.table_actions):
                 op_id = f"table:{index}:{action.action}"
                 if op_id not in auto_op_ids:
-                    skipped.append({"op_id": op_id, "category": "table", "action": action.action})
                     continue
                 applied.append(self._apply_table_action(action, materials, op_id, result.bundle_fingerprint, reviewer))
 
-            self.session.add(
-                AuditLog(
+            if unresolved_actions:
+                response = self._record_partial_review(
                     paper_id=paper_id,
-                    action="offline_evidence_review_applied",
-                    source=reviewer,
-                    target_type="offline_evidence_review",
-                    target_id=result.bundle_fingerprint[:32],
-                    payload={
-                        "schema_version": result.schema_version,
-                        "bundle_fingerprint": result.bundle_fingerprint,
-                        "paper_code": result.paper_code,
-                        "overall_status": result.overall_status,
-                        "review_source": result.review_source.model_dump(mode="json"),
-                        "applied": applied,
-                        "skipped": skipped,
-                        "execution_plan": validation.get("execution_plan", []),
-                        "dft_evidence_candidates": [
-                            item.model_dump(mode="json") for item in result.dft_evidence_candidates
-                        ],
-                        "uncertainties": result.uncertainties,
-                        "notes": result.notes,
-                        "local_ai_confirmation_required_before_call": True,
-                    },
-                    created_at=utcnow(),
+                    result=result,
+                    validation=validation,
+                    applied=applied,
+                    unresolved_actions=unresolved_actions,
+                    reviewer=reviewer,
+                    payload_hash=payload_hash,
                 )
-            )
+            else:
+                response = self._record_completed_review(
+                    paper_id=paper_id,
+                    result=result,
+                    validation=validation,
+                    applied=applied,
+                    reviewer=reviewer,
+                    payload_hash=payload_hash,
+                )
             self.session.commit()
         except Exception:
             self.session.rollback()
             raise
 
-        refreshed = self._build_materials(paper_id)
+        return response
+
+    def get_review_task(self, paper_id: UUID) -> dict[str, Any]:
+        materials = self._build_materials(paper_id)
+        latest = self._latest_review_audit(paper_id)
+        latest_payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
+        latest_response = latest_payload.get("response") if isinstance(latest_payload.get("response"), dict) else None
+        stage_status = "not_started"
+        unresolved_actions: list[dict[str, Any]] = []
+        completed_snapshot_fingerprint = None
+        if latest_response:
+            stage_status = str(latest_response.get("stage_status") or stage_status)
+            unresolved_actions = list(latest_response.get("unresolved_actions") or [])
+            completed_snapshot_fingerprint = latest_response.get("completed_snapshot_fingerprint")
         return {
-            **validation,
-            "dry_run": False,
-            "applied_count": len(applied),
-            "applied": applied,
-            "skipped": skipped,
-            "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
-            "safety": {
-                "writes_database": True,
-                "writes_final_dft_truth": False,
-                "local_ai_next_step": "Read back changed figures/tables, then export the DFT review bundle.",
+            "schema_version": "chart_review_task_v1",
+            "paper_id": materials["paper_metadata"]["paper_id"],
+            "paper_code": materials["paper_metadata"]["paper_code"],
+            "bundle_fingerprint": materials["bundle_fingerprint"],
+            "stage_status": stage_status,
+            "apply_ready": stage_status == "completed",
+            "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
+            "latest_review_run_id": str(latest.id) if latest is not None else None,
+            "unresolved_count": len(unresolved_actions),
+            "unresolved_actions": unresolved_actions,
+            "counts": {
+                "source_documents": len(materials["source_documents"]),
+                "figures": len(materials["extracted_figures"]),
+                "tables": len(materials["extracted_tables"]),
             },
+            "paper_metadata": materials["paper_metadata"],
+            "source_documents": self._public_source_documents(materials["source_documents"]),
+            "page_geometry": materials["page_geometry"],
+            "figures": self._public_records(materials["extracted_figures"]),
+            "tables": self._public_records(materials["extracted_tables"]),
+        }
+
+    def resolve_review_actions(self, paper_id: UUID, raw_payload: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
+        return self.apply_result(paper_id, raw_payload, dry_run=dry_run)
+
+    def finalize_review(self, paper_id: UUID, raw_payload: dict[str, Any] | None = None, *, dry_run: bool = False) -> dict[str, Any]:
+        if raw_payload is not None:
+            response = self.apply_result(paper_id, raw_payload, dry_run=dry_run)
+            if dry_run or response.get("chart_review_completed"):
+                return response
+            return {
+                **response,
+                "finalize_ready": False,
+                "finalize_blocking_errors": response.get("unresolved_actions") or response.get("errors") or [],
+            }
+        latest = self._latest_review_audit(paper_id, actions={"offline_evidence_review_applied"})
+        materials = self._build_materials(paper_id)
+        if latest is None:
+            return {
+                "valid": True,
+                "paper_id": materials["paper_metadata"]["paper_id"],
+                "paper_code": materials["paper_metadata"]["paper_code"],
+                "bundle_fingerprint": materials["bundle_fingerprint"],
+                "stage_status": "not_ready",
+                "apply_ready": False,
+                "chart_review_completed": False,
+                "completed_snapshot_fingerprint": None,
+                "unresolved_actions": [
+                    {
+                        "code": "no_completed_chart_review",
+                        "message": "No completed chart review snapshot is recorded for this paper.",
+                    }
+                ],
+            }
+        payload = latest.payload if isinstance(latest.payload, dict) else {}
+        response = dict(payload.get("response") or {})
+        if response:
+            response["idempotent"] = True
+            response["stage_status"] = "completed"
+            response["chart_review_completed"] = True
+            return response
+        return {
+            "valid": True,
+            "paper_id": materials["paper_metadata"]["paper_id"],
+            "paper_code": materials["paper_metadata"]["paper_code"],
+            "bundle_fingerprint": materials["bundle_fingerprint"],
+            "stage_status": "completed",
+            "apply_ready": True,
+            "chart_review_completed": True,
+            "review_run_id": str(latest.id),
+            "completed_snapshot_fingerprint": payload.get("completed_snapshot_fingerprint"),
+            "unresolved_actions": [],
         }
 
     def _validate_figure_action(
@@ -458,11 +566,17 @@ class EvidenceReviewBundleService:
         missing_evidence = [item for item in action.evidence_ids if item not in evidence_ids]
         if missing_evidence:
             block("unknown_evidence_id", "Evidence ids are not present in the package: " + ", ".join(missing_evidence))
+        if self._figure_action_modifies_state(action) and not action.evidence_ids:
+            block("missing_evidence_ids_for_modification", f"{action.action} modifies figure evidence and requires at least one valid evidence_id")
         if action.action != "NEEDS_HUMAN" and not action.evidence_checked:
             block("evidence_not_checked", f"{action.action} requires evidence_checked=true")
         if action.action in {"RECROP", "CREATE"} and not self._has_page_geometry(action.source_paper_id, action.figure_id, action.page, materials):
             blocked.append("page_geometry_unavailable")
-        if action.action in {"REJECT", "NEEDS_HUMAN"}:
+        if action.action == "NEEDS_HUMAN":
+            blocked.append("needs_human")
+            blocked.append("manual_confirmation_required")
+        if action.action == "REJECT":
+            blocked.append("reject_requires_local_ai")
             blocked.append("manual_confirmation_required")
         if action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE:
             blocked.append("confidence_below_auto_apply_threshold")
@@ -470,13 +584,14 @@ class EvidenceReviewBundleService:
         auto = not errors and action.action in {"KEEP", "RECROP", "CREATE"} and not blocked
         return {
             "op_id": action_ref.replace("figure_actions[", "figure:").replace("]", f":{action.action}"),
+            "action_ref": action_ref,
             "category": "figure",
             "action": action.action,
             "target_id": target_id,
             "source_paper_id": action.source_paper_id,
             "auto_apply": auto,
-            "blocked_reasons": blocked,
-            "tool_hint": "system_deterministic_pdf_crop" if action.action in {"RECROP", "CREATE"} else "system_metadata_update",
+            "blocked_reasons": list(dict.fromkeys(blocked)),
+            "tool_hint": "system_deterministic_pdf_crop" if action.action in {"RECROP", "CREATE"} else "system_metadata_update_or_final_status",
             "payload": action.model_dump(mode="json"),
             "_errors": errors,
         }
@@ -508,25 +623,35 @@ class EvidenceReviewBundleService:
         missing_evidence = [item for item in action.evidence_ids if item not in evidence_ids]
         if missing_evidence:
             block("unknown_evidence_id", "Evidence ids are not present in the package: " + ", ".join(missing_evidence))
+        if action.action in {"UPDATE", "CREATE", "MERGE", "DELETE"} and not action.evidence_ids:
+            block("missing_evidence_ids_for_modification", f"{action.action} modifies table evidence and requires at least one valid evidence_id")
         if action.action != "NEEDS_HUMAN" and not action.evidence_checked:
             block("evidence_not_checked", f"{action.action} requires evidence_checked=true")
         if action.action in {"UPDATE", "CREATE"} and not self._looks_like_markdown_table(action.complete_markdown):
             block("invalid_markdown_table", f"{action.action} requires a complete markdown table with pipes and multiple rows")
-        if action.action in {"MERGE", "DELETE", "NEEDS_HUMAN"}:
+        if action.action == "MERGE":
+            blocked.append("merge_requires_local_ai")
+            blocked.append("manual_confirmation_required")
+        if action.action == "DELETE":
+            blocked.append("delete_requires_local_ai")
+            blocked.append("manual_confirmation_required")
+        if action.action == "NEEDS_HUMAN":
+            blocked.append("needs_human")
             blocked.append("manual_confirmation_required")
         if action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE:
             blocked.append("confidence_below_auto_apply_threshold")
 
-        auto = not errors and action.action in {"UPDATE", "CREATE"} and not blocked
+        auto = not errors and action.action in {"KEEP", "UPDATE", "CREATE"} and not blocked
         return {
             "op_id": action_ref.replace("table_actions[", "table:").replace("]", f":{action.action}"),
+            "action_ref": action_ref,
             "category": "table",
             "action": action.action,
             "target_id": target_id,
             "source_paper_id": action.source_paper_id,
             "auto_apply": auto,
-            "blocked_reasons": blocked,
-            "tool_hint": "table_curation_service",
+            "blocked_reasons": list(dict.fromkeys(blocked)),
+            "tool_hint": "no_db_write_final_status" if action.action == "KEEP" else "table_curation_service",
             "payload": action.model_dump(mode="json"),
             "_errors": errors,
         }
@@ -639,7 +764,19 @@ class EvidenceReviewBundleService:
 
         evidence_payload = self._table_evidence_payload(action, bundle_fingerprint)
         service = TableCurationService(self.session, reviewer=reviewer)
-        if action.action == "UPDATE":
+        if action.action == "KEEP":
+            table = self.session.get(PaperTable, UUID(str(action.table_id)))
+            if table is None:
+                raise ValueError("Table not found during keep/final-status recording")
+            target_id = str(table.id)
+            result = {
+                "paper_id": str(table.paper_id),
+                "table_id": target_id,
+                "action": "KEEP",
+                "updated": False,
+                "evidence_payload": evidence_payload,
+            }
+        elif action.action == "UPDATE":
             table = self.session.get(PaperTable, UUID(str(action.table_id)))
             if table is None:
                 raise ValueError("Table not found during update")
@@ -704,6 +841,313 @@ class EvidenceReviewBundleService:
             "table_result": result,
             "idempotent": False,
         }
+
+    def _record_partial_review(
+        self,
+        *,
+        paper_id: UUID,
+        result: OfflineEvidenceReviewResult,
+        validation: dict[str, Any],
+        applied: list[dict[str, Any]],
+        unresolved_actions: list[dict[str, Any]],
+        reviewer: str,
+        payload_hash: str,
+    ) -> dict[str, Any]:
+        refreshed = self._build_materials(paper_id)
+        response = {
+            **validation,
+            "dry_run": False,
+            "input_payload_sha256": payload_hash,
+            "stage_status": "needs_local_ai",
+            "apply_ready": False,
+            "chart_review_completed": False,
+            "applied_count": len(applied),
+            "applied": applied,
+            "skipped": unresolved_actions,
+            "unresolved_actions": unresolved_actions,
+            "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
+            "completed_snapshot_fingerprint": None,
+            "safety": {
+                "writes_database": bool(applied),
+                "writes_final_dft_truth": False,
+                "local_ai_next_step": "Call get_chart_review_task, resolve all unresolved_actions with authenticated MCP, then finalize_chart_review.",
+            },
+        }
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="offline_evidence_review_partial",
+            source=reviewer,
+            target_type="offline_evidence_review",
+            target_id=result.bundle_fingerprint[:32],
+            payload={
+                "schema_version": result.schema_version,
+                "stage_status": "needs_local_ai",
+                "bundle_fingerprint": result.bundle_fingerprint,
+                "input_payload_sha256": payload_hash,
+                "paper_code": result.paper_code,
+                "review_source": result.review_source.model_dump(mode="json"),
+                "applied": applied,
+                "unresolved_actions": unresolved_actions,
+                "execution_plan": validation.get("execution_plan", []),
+                "dft_evidence_candidates": [item.model_dump(mode="json") for item in result.dft_evidence_candidates],
+                "uncertainties": result.uncertainties,
+                "notes": result.notes,
+                "response": response,
+            },
+            created_at=utcnow(),
+        )
+        self.session.add(audit)
+        self.session.flush()
+        response["review_run_id"] = str(audit.id)
+        audit.payload = {**audit.payload, "response": response}
+        self.session.add(audit)
+        return response
+
+    def _record_completed_review(
+        self,
+        *,
+        paper_id: UUID,
+        result: OfflineEvidenceReviewResult,
+        validation: dict[str, Any],
+        applied: list[dict[str, Any]],
+        reviewer: str,
+        payload_hash: str,
+    ) -> dict[str, Any]:
+        refreshed = self._build_materials(paper_id)
+        final_errors = self._final_status_errors(result=result, validation=validation, applied=applied, refreshed=refreshed)
+        if final_errors:
+            raise ValueError("chart_review_finalize_failed: " + json.dumps(final_errors, ensure_ascii=False))
+        snapshot_core = self._completed_snapshot_core(
+            result=result,
+            validation=validation,
+            applied=applied,
+            refreshed=refreshed,
+            payload_hash=payload_hash,
+        )
+        completed_snapshot_fingerprint = _sha256(_canonical_json_bytes(snapshot_core))
+        completed_snapshot = {**snapshot_core, "completed_snapshot_fingerprint": completed_snapshot_fingerprint}
+        self._mark_figures_review_completed(paper_id, reviewer)
+        response = {
+            **validation,
+            "dry_run": False,
+            "input_payload_sha256": payload_hash,
+            "stage_status": "completed",
+            "apply_ready": True,
+            "chart_review_completed": True,
+            "applied_count": len(applied),
+            "applied": applied,
+            "skipped": [],
+            "unresolved_actions": [],
+            "unresolved_count": 0,
+            "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
+            "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
+            "safety": {
+                "writes_database": True,
+                "writes_final_dft_truth": False,
+                "local_ai_next_step": "Chart review is completed; DFT review bundles may consume the completed figure/table snapshot.",
+            },
+        }
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="offline_evidence_review_applied",
+            source=reviewer,
+            target_type="offline_evidence_review",
+            target_id=completed_snapshot_fingerprint[:32],
+            payload={
+                "schema_version": result.schema_version,
+                "stage_status": "completed",
+                "bundle_fingerprint": result.bundle_fingerprint,
+                "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
+                "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
+                "completed_snapshot": completed_snapshot,
+                "input_payload_sha256": payload_hash,
+                "paper_code": result.paper_code,
+                "overall_status": result.overall_status,
+                "review_source": result.review_source.model_dump(mode="json"),
+                "applied": applied,
+                "skipped": [],
+                "unresolved_actions": [],
+                "execution_plan": validation.get("execution_plan", []),
+                "dft_evidence_candidates": [item.model_dump(mode="json") for item in result.dft_evidence_candidates],
+                "uncertainties": result.uncertainties,
+                "notes": result.notes,
+                "response": response,
+            },
+            created_at=utcnow(),
+        )
+        self.session.add(audit)
+        self.session.flush()
+        response["review_run_id"] = str(audit.id)
+        audit.payload = {**audit.payload, "response": response}
+        self.session.add(audit)
+        return response
+
+    def _existing_review_response(self, paper_id: UUID, payload_hash: str) -> dict[str, Any] | None:
+        latest_rows = self.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.paper_id == paper_id)
+            .where(AuditLog.action.in_(["offline_evidence_review_applied", "offline_evidence_review_partial"]))
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(100)
+        ).all()
+        for row in latest_rows:
+            payload = row.payload if isinstance(row.payload, dict) else {}
+            if payload.get("input_payload_sha256") != payload_hash:
+                continue
+            response = payload.get("response") if isinstance(payload.get("response"), dict) else None
+            if response is None:
+                continue
+            cloned = dict(response)
+            cloned["idempotent"] = True
+            cloned["review_run_id"] = str(row.id)
+            return cloned
+        return None
+
+    def _latest_review_audit(self, paper_id: UUID, *, actions: set[str] | None = None) -> AuditLog | None:
+        action_names = sorted(actions or {"offline_evidence_review_applied", "offline_evidence_review_partial"})
+        return self.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.paper_id == paper_id)
+            .where(AuditLog.action.in_(action_names))
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(1)
+        ).first()
+
+    @staticmethod
+    def _unresolved_actions(execution_plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        unresolved: list[dict[str, Any]] = []
+        for plan in execution_plan:
+            blocked = list(plan.get("blocked_reasons") or [])
+            if plan.get("auto_apply") and not blocked:
+                continue
+            payload = plan.get("payload") if isinstance(plan.get("payload"), dict) else {}
+            unresolved.append(
+                {
+                    "action_ref": plan.get("action_ref"),
+                    "op_id": plan.get("op_id"),
+                    "category": plan.get("category"),
+                    "action": plan.get("action"),
+                    "target_id": plan.get("target_id"),
+                    "source_paper_id": plan.get("source_paper_id"),
+                    "blocked_reasons": blocked or ["not_auto_applyable"],
+                    "confidence": payload.get("confidence"),
+                    "evidence_ids": payload.get("evidence_ids") or [],
+                    "reason": payload.get("reason"),
+                    "requires_local_ai": True,
+                }
+            )
+        return unresolved
+
+    @staticmethod
+    def _figure_action_modifies_state(action: OfflineEvidenceReviewFigureAction) -> bool:
+        if action.action in {"RECROP", "CREATE", "REJECT"}:
+            return True
+        if action.action != "KEEP":
+            return False
+        return any(
+            value is not None
+            for value in (
+                action.caption,
+                action.figure_label,
+                action.figure_role,
+                action.content_summary,
+                action.key_elements,
+            )
+        )
+
+    @staticmethod
+    def _final_status_errors(
+        *,
+        result: OfflineEvidenceReviewResult,
+        validation: dict[str, Any],
+        applied: list[dict[str, Any]],
+        refreshed: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        errors: list[dict[str, Any]] = []
+        unresolved = list(validation.get("unresolved_actions") or [])
+        if unresolved:
+            errors.append({"code": "unresolved_actions_present", "unresolved_actions": unresolved})
+        covered_figures = {
+            str(action.figure_id)
+            for action in result.figure_actions
+            if action.figure_id and action.action in {"KEEP", "RECROP"}
+        }
+        covered_tables = {
+            str(action.table_id)
+            for action in result.table_actions
+            if action.table_id and action.action in {"KEEP", "UPDATE"}
+        }
+        for item in applied:
+            if item.get("action") == "CREATE" and item.get("target_id"):
+                if item.get("category") == "figure":
+                    covered_figures.add(str(item["target_id"]))
+                if item.get("category") == "table":
+                    covered_tables.add(str(item["target_id"]))
+        missing_figures = sorted(refreshed["figure_id_map"] - covered_figures)
+        missing_tables = sorted(refreshed["table_id_map"] - covered_tables)
+        if missing_figures:
+            errors.append({"code": "finalize_incomplete_figure_status", "missing_figure_ids": missing_figures})
+        if missing_tables:
+            errors.append({"code": "finalize_incomplete_table_status", "missing_table_ids": missing_tables})
+        return errors
+
+    def _completed_snapshot_core(
+        self,
+        *,
+        result: OfflineEvidenceReviewResult,
+        validation: dict[str, Any],
+        applied: list[dict[str, Any]],
+        refreshed: dict[str, Any],
+        payload_hash: str,
+    ) -> dict[str, Any]:
+        return {
+            "schema_version": "completed_figure_table_evidence_snapshot_v1",
+            "paper_id": refreshed["paper_metadata"]["paper_id"],
+            "paper_code": refreshed["paper_metadata"]["paper_code"],
+            "stage_status": "completed",
+            "source_bundle_fingerprint": result.bundle_fingerprint,
+            "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
+            "input_payload_sha256": payload_hash,
+            "review_source": result.review_source.model_dump(mode="json"),
+            "coverage": validation.get("coverage") or {},
+            "applied_op_ids": [item.get("op_id") for item in applied],
+            "final_figure_ids": sorted(refreshed["figure_id_map"]),
+            "final_table_ids": sorted(refreshed["table_id_map"]),
+            "dft_evidence_candidates": [item.model_dump(mode="json") for item in result.dft_evidence_candidates],
+            "figures": self._public_records(refreshed["extracted_figures"]),
+            "tables": self._public_records(refreshed["extracted_tables"]),
+        }
+
+    def _mark_figures_review_completed(self, paper_id: UUID, reviewer: str) -> None:
+        paper = self.session.get(Paper, paper_id)
+        if paper is None:
+            return
+        analysis = dict(paper.comprehensive_analysis or {})
+        raw_progress = analysis.get("manual_review_progress") if isinstance(analysis.get("manual_review_progress"), dict) else {}
+
+        def normalize_entry(module: str) -> dict[str, Any]:
+            raw = raw_progress.get(module)
+            if isinstance(raw, dict):
+                return {
+                    "completed": bool(raw.get("completed")),
+                    "updated_at": raw.get("updated_at"),
+                    "updated_by": raw.get("updated_by"),
+                }
+            return {"completed": bool(raw), "updated_at": None, "updated_by": None}
+
+        progress = {
+            "content": normalize_entry("content"),
+            "figures": normalize_entry("figures"),
+            "dft": normalize_entry("dft"),
+        }
+        progress["figures"] = {
+            "completed": True,
+            "updated_at": _utc_iso(),
+            "updated_by": reviewer,
+        }
+        analysis["manual_review_progress"] = progress
+        paper.comprehensive_analysis = analysis
+        self.session.add(paper)
 
     def _build_materials(self, paper_id: UUID) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)

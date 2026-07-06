@@ -687,7 +687,8 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "- query_papers, get_paper, get_codex_context, get_codex_item, get_paper_knowledge, retrieve_evidence, read_paper_page\n"
         "- import_analysis, append_note, propose_correction, propose_dft_result_correction\n"
         "- get_dft_review_queue, verify_dft_result, reject_dft_result, approve_correction, reject_correction\n"
-        "- recrop_figure, create_figure_from_bbox, review_figure, get_review_coverage, compare_papers, insert_word_citation\n"
+        "- recrop_figure, create_figure_from_bbox, review_figure, get_review_coverage, get_chart_review_task, resolve_chart_review_actions, finalize_chart_review\n"
+        "- compare_papers, insert_word_citation\n"
     )
 
     return {

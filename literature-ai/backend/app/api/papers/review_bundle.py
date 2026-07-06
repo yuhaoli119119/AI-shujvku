@@ -116,6 +116,59 @@ def apply_evidence_review_result(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+
+@router.get("/{paper_id}/chart-review-task")
+def get_chart_review_task(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    # Return the current figure/table review task, including unresolved actions from the latest run.
+
+    try:
+        return EvidenceReviewBundleService(session, settings).get_review_task(paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/chart-review-result/resolve")
+def resolve_chart_review_actions(
+    paper_id: UUID,
+    payload: dict[str, Any],
+    dry_run: bool = Query(default=False),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    # Batch-resolve figure/table review actions through the same guarded apply path.
+
+    try:
+        return EvidenceReviewBundleService(session, settings).resolve_review_actions(paper_id, payload, dry_run=dry_run)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/chart-review-result/finalize")
+def finalize_chart_review(
+    paper_id: UUID,
+    payload: dict[str, Any] | None = None,
+    dry_run: bool = Query(default=False),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    # Finalize chart review only after re-reading current figures/tables and finding no unresolved actions.
+
+    try:
+        return EvidenceReviewBundleService(session, settings).finalize_review(paper_id, payload, dry_run=dry_run)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/{paper_id}/dft-review-result/validate")
 def validate_dft_review_result(
     paper_id: UUID,

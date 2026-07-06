@@ -828,12 +828,16 @@ class DFTReviewBundleService:
         snapshot = {
             "schema_version": "curated_figure_table_evidence_snapshot_v1",
             "evidence_review_status": "applied" if latest is not None else "not_recorded",
+            "stage_status": payload.get("stage_status") if latest is not None and isinstance(payload, dict) else "not_recorded",
             "review_run_id": str(latest.id) if latest is not None else None,
             "reviewed_at": latest.created_at.isoformat() if latest is not None and latest.created_at else None,
             "review_source": payload.get("review_source") if isinstance(payload, dict) else None,
             "stage1_bundle_fingerprint": payload.get("bundle_fingerprint") if isinstance(payload, dict) else None,
+            "post_apply_bundle_fingerprint": payload.get("post_apply_bundle_fingerprint") if isinstance(payload, dict) else None,
+            "completed_snapshot_fingerprint": payload.get("completed_snapshot_fingerprint") if isinstance(payload, dict) else None,
             "applied_count": len(payload.get("applied") or []) if isinstance(payload, dict) else 0,
             "skipped_count": len(payload.get("skipped") or []) if isinstance(payload, dict) else 0,
+            "unresolved_count": len(payload.get("unresolved_actions") or []) if isinstance(payload, dict) else 0,
             "dft_evidence_candidates": payload.get("dft_evidence_candidates") if isinstance(payload, dict) else [],
             "tables": extracted_tables,
             "figures": self._public_figures(extracted_figures),
@@ -930,7 +934,7 @@ class DFTReviewBundleService:
 
 先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
 
-如果 `curated_figure_table_evidence_snapshot.json` 的 `evidence_review_status` 不是 `applied`，说明图表证据还没有完成第一阶段回写；此时不得把图表来源的 DFT 值标成确定通过，只能使用 `NEEDS_HUMAN` 或在 `uncertainties` 中说明。
+如果 `curated_figure_table_evidence_snapshot.json` 的 `evidence_review_status` 不是 `applied`，或 `stage_status` 不是 `completed`，说明图表证据还没有完成第一阶段闭环；此时不得把图表来源的 DFT 值标成确定通过，只能使用 `NEEDS_HUMAN` 或在 `uncertainties` 中说明。
 
 最终只输出符合 `return_schema.json` 的 JSON。
 """

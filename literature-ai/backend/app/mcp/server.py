@@ -29,6 +29,7 @@ from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
+from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.local_pdf_service import LocalPdfService
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -1160,6 +1161,48 @@ def merge_table(
             target_updates=resolved_target_updates,
             reason=reason,
             evidence_payload=evidence_payload,
+        )
+
+
+
+@mcp_server.tool(
+    name="get_chart_review_task",
+    description="Read the current figure/table chart-review task, including unresolved_actions from the latest web-AI return.",
+)
+def get_chart_review_task(paper_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return EvidenceReviewBundleService(session, settings).get_review_task(UUID(paper_id))
+
+
+@mcp_server.tool(
+    name="resolve_chart_review_actions",
+    description="Batch-resolve chart review actions using the guarded evidence-review result schema. Returns unresolved_actions if anything remains.",
+)
+def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+    require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return EvidenceReviewBundleService(session, settings).resolve_review_actions(
+            UUID(paper_id),
+            review_result,
+            dry_run=dry_run,
+        )
+
+
+@mcp_server.tool(
+    name="finalize_chart_review",
+    description="Finalize chart review after re-reading current figures/tables. The stage completes only when no unresolved actions remain.",
+)
+def finalize_chart_review(paper_id: str, review_result: dict[str, Any] | None = None, dry_run: bool = False) -> dict[str, Any]:
+    require_mcp_capability("review_corrections")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return EvidenceReviewBundleService(session, settings).finalize_review(
+            UUID(paper_id),
+            review_result,
+            dry_run=dry_run,
         )
 
 

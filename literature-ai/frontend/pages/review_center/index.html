@@ -1317,6 +1317,7 @@
           <option value="export_evidence">1 导出图表证据包</option>
           <option value="copy_evidence_prompt">复制图表提示词</option>
           <option value="return_evidence">2 回传图表 JSON</option>
+          <option value="copy_evidence_local_ai">复制本地 AI 图表复核指令</option>
           <option value="export_dft">3 导出 DFT 终审包</option>
           <option value="copy_dft_prompt">复制 DFT 提示词</option>
           <option value="return_dft">4 回传 DFT JSON</option>
@@ -1858,6 +1859,8 @@
         await copyWebAiBundlePrompt("evidence");
       } else if (action === "return_evidence") {
         openWebAiReturnDialog("evidence");
+      } else if (action === "copy_evidence_local_ai") {
+        await copyLocalAiChartReviewInstructionFromMenu();
       } else if (action === "export_dft") {
         await downloadWebAiBundle("dft");
       } else if (action === "copy_dft_prompt") {
@@ -2399,7 +2402,8 @@
         applyButton.disabled = true;
       }
       if (copyButton) {
-        copyButton.style.display = isEvidenceMode ? "none" : "";
+        copyButton.style.display = "";
+        copyButton.textContent = isEvidenceMode ? "复制本地 AI 图表复核指令" : "复制本地 AI 处理指令";
         copyButton.disabled = true;
       }
     }
@@ -2471,7 +2475,7 @@
       syncWebAiReturnModeButtons();
       setWebAiValidationBox(
         normalizedMode === "evidence"
-          ? "尚未校验。图表 JSON 校验通过后，可由系统自动应用高置信度图表修复；本地 AI 只负责确认和读回。"
+          ? "尚未校验。图表 JSON 校验通过后，可应用安全操作；若仍有 unresolved_actions，可复制本地 AI 图表复核指令一次批量闭环。"
           : "尚未校验。DFT JSON 校验成功也不会自动入库。",
         ""
       );
@@ -2586,6 +2590,10 @@
       incomplete_table_coverage: "标记完成时仍有表格未逐项审核",
       invalid_markdown_table: "表格 UPDATE/CREATE 必须返回完整 markdown 表格",
       apply_requires_completed_review: "只有 overall_status=completed 的图表审核结果才允许应用",
+      duplicate_or_conflicting_figure_action: "同一图片出现重复或冲突操作",
+      duplicate_or_conflicting_table_action: "同一表格出现重复或冲突操作",
+      missing_evidence_ids_for_modification: "修改类操作必须带有效 evidence_ids",
+      unresolved_actions_present: "仍有未解决图表操作",
       invalid_json: "无法解析为 JSON",
       file_read_error: "无法读取拖入的 JSON 文件",
       validation_request_failed: "校验请求失败",
@@ -2636,6 +2644,28 @@
       return '<div style="margin-top:10px;"><strong>执行计划：</strong><ul>' + rows + "</ul>" + extra + "</div>";
     }
 
+
+    function renderWebAiUnresolvedActions(actions) {
+      const items = Array.isArray(actions) ? actions.slice(0, 16) : [];
+      if (!items.length) {
+        return '<div style="margin-top:10px;"><strong>unresolved_actions：</strong>无</div>';
+      }
+      const rows = items.map(function (item) {
+        const blocked = Array.isArray(item.blocked_reasons) && item.blocked_reasons.length
+          ? item.blocked_reasons.join(", ")
+          : "requires_local_ai";
+        return "<li>" +
+          "<strong>" + esc(String(item.category || "-") + " / " + String(item.action || "-")) + "</strong>" +
+          " → " + esc(String(item.target_id || "-")) +
+          "；" + esc(blocked) +
+          "</li>";
+      }).join("");
+      const extra = actions.length > items.length
+        ? '<div class="muted">仅显示前 ' + esc(String(items.length)) + ' 条，共 ' + esc(String(actions.length)) + ' 条。</div>'
+        : "";
+      return '<div style="margin-top:10px;"><strong>unresolved_actions：</strong><ul>' + rows + "</ul>" + extra + "</div>";
+    }
+
     function renderWebAiValidationSuccess(data) {
       const warnings = Array.isArray(data.warnings) ? data.warnings : [];
       const warningText = warnings.length
@@ -2645,16 +2675,21 @@
         : "无";
       if (webAiReturnState.mode === "evidence") {
         const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+        const copyButton = document.getElementById("webAiCopyInstructionBtn");
         if (applyButton) applyButton.disabled = false;
+        if (copyButton) copyButton.disabled = false;
         setWebAiValidationBox(
           "<strong>图表 JSON 校验通过，尚未应用。</strong>" +
           '<div class="web-ai-validation-summary">' +
             '<div class="web-ai-validation-item"><strong>paper_code</strong>' + esc(data.paper_code || "-") + "</div>" +
+            '<div class="web-ai-validation-item"><strong>stage_status</strong>' + esc(String(data.stage_status || "-")) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>apply_ready</strong>' + esc(String(Boolean(data.apply_ready))) + "</div>" +
             '<div class="web-ai-validation-item"><strong>auto_apply_count</strong>' + esc(String(data.auto_apply_count || 0)) + "</div>" +
-            '<div class="web-ai-validation-item"><strong>needs_confirmation</strong>' + esc(String(data.needs_confirmation_count || 0)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>unresolved_count</strong>' + esc(String(data.unresolved_count || 0)) + "</div>" +
             '<div class="web-ai-validation-item"><strong>validate_writes_database</strong>' + esc(String(Boolean(data && data.safety && data.safety.validate_writes_database))) + "</div>" +
           "</div>" +
           "<div style=\"margin-top:10px;\"><strong>warnings：</strong>" + esc(warningText) + "</div>" +
+          renderWebAiUnresolvedActions(data.unresolved_actions || []) +
           renderWebAiExecutionPlan(data.execution_plan || []),
           "is-success"
         );
@@ -2745,12 +2780,38 @@
     }
 
     function buildLocalAiImportInstruction() {
-      if (webAiReturnState.mode !== "dft") {
-        throw new Error("当前不是 DFT 终审模式。图表结果请使用“应用图表结果”。");
-      }
       const response = webAiReturnState.validationResponse;
       const textarea = document.getElementById("webAiReturnJson");
       const rawText = String(textarea && textarea.value || "").trim();
+      if (webAiReturnState.mode === "evidence") {
+        if (!response || response.valid !== true || rawText !== webAiReturnState.validatedRawText) {
+          throw new Error("请先回传并校验图表 JSON，再复制本地 AI 图表复核指令。");
+        }
+        return [
+          "你是本地 AI 图表复核与闭环执行者。网页 AI 只提供审核建议，不能直接写数据库。",
+          "",
+          "当前论文号：" + (webAiReturnState.paperCode || "-"),
+          "paper_id：" + webAiReturnState.paperId,
+          "",
+          "执行要求：",
+          "1. 只使用当前会话已认证的 Literature AI MCP；不要改 MCP 配置，不要发不带认证头的裸请求。",
+          "2. 先调用 get_chart_review_task(paper_id) 一次读取整批 figures/tables、bundle_fingerprint、unresolved_actions 和 PDF/页面信息。",
+          "3. 对 unresolved_actions 批量核对 PDF，可结合 read_paper_page、get_codex_context、get_codex_item 读取页面、图注、表格和原文证据。",
+          "4. 生成修正后的完整 review_result，并调用 resolve_chart_review_actions(paper_id, review_result)。不要要求用户逐项点击。",
+          "5. 如果返回仍有 unresolved_actions，继续批量处理；如果无法处理，报告具体 blocked reason，不要标记完成。",
+          "6. 当 unresolved_actions 为空后调用 finalize_chart_review(paper_id, review_result)。finalize 必须返回 stage_status=completed 且 completed_snapshot_fingerprint 非空。",
+          "7. 禁止直接写 PostgreSQL，禁止绕过公开 API/MCP 调 service/session/model。",
+          "8. 校验、resolve 或 finalize 成功都不等于人工 verified 或 ML_Ready；只报告图表阶段闭环状态。",
+          "",
+          "网页 AI 返回的原始 JSON：",
+          "-----BEGIN WEB AI CHART REVIEW JSON-----",
+          rawText,
+          "-----END WEB AI CHART REVIEW JSON-----"
+        ].join("\n");
+      }
+      if (webAiReturnState.mode !== "dft") {
+        throw new Error("当前不是 DFT 终审模式。");
+      }
       if (!response || response.valid !== true || !response.import_analysis_request || rawText !== webAiReturnState.validatedRawText) {
         throw new Error("当前结果尚未通过校验，或粘贴内容已发生变化。");
       }
@@ -2764,7 +2825,7 @@
         "1. 先把下方原始 JSON 重新 POST 到 /api/papers/" + webAiReturnState.paperId + "/dft-review-result/validate，防止核验包或数据库状态已过期。",
         "2. 如果新返回 valid=false，立即停止，不调用 import_analysis，并向用户报告 errors 和 warnings。",
         "3. 如果新返回 valid=true，只使用这次新返回的 import_analysis_request；不得使用旧校验结果。",
-        "4. 确认 DFT bundle 中 parsed/curated_figure_table_evidence_snapshot.json 已是本轮已回写图表证据；若 figure_table_evidence_review_status 不是 applied，应停止并要求先完成图表证据整理。",
+        "4. 确认 DFT bundle 中 parsed/curated_figure_table_evidence_snapshot.json 已是本轮已回写图表证据；若 evidence_review_status 不是 applied 或 stage_status 不是 completed，应停止并要求先完成图表证据整理。",
         "5. 优先调用当前会话已认证 MCP 的 import_analysis；禁止直接写 PostgreSQL，禁止调用 service/session/model 绕过公开入口。",
         "6. 校验成功本身不等于入库，也不等于人工确认、verified 或 ML_Ready。",
         "7. 导入后回读并报告 run_id、候选数量、冲突项、需要人工处理的项目以及未完成事项。",
@@ -2780,11 +2841,22 @@
       try {
         const instruction = buildLocalAiImportInstruction();
         await copyTextToClipboard(instruction);
-        showToast("已复制本地 AI 处理指令；仍需由本地 AI 重新校验后受控导入。");
+        showToast(webAiReturnState.mode === "evidence"
+          ? "已复制本地 AI 图表复核指令；请通过已认证 MCP 批量 resolve 并 finalize。"
+          : "已复制本地 AI 处理指令；仍需由本地 AI 重新校验后受控导入。");
       } catch (error) {
         document.getElementById("webAiCopyInstructionBtn").disabled = true;
         showToast(error.message);
       }
+    }
+
+    async function copyLocalAiChartReviewInstructionFromMenu() {
+      if (webAiReturnState.mode !== "evidence" || !webAiReturnState.validationResponse) {
+        openWebAiReturnDialog("evidence");
+        showToast("请先粘贴并校验图表 JSON，再复制本地 AI 图表复核指令。");
+        return;
+      }
+      await copyLocalAiImportInstruction();
     }
 
     async function applyWebAiEvidenceResult() {
@@ -2835,19 +2907,24 @@
         }
         const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0;
         const applied = Array.isArray(data.applied) ? data.applied.length : Number(data.applied_count || 0);
+        const completed = Boolean(data && data.chart_review_completed);
+        const copyButton = document.getElementById("webAiCopyInstructionBtn");
+        if (copyButton) copyButton.disabled = false;
         setWebAiValidationBox(
-          "<strong>图表结果已处理。</strong>" +
+          "<strong>" + (completed ? "图表阶段已完成。" : "图表安全操作已处理，仍有未解决项。") + "</strong>" +
           '<div class="web-ai-validation-summary">' +
+            '<div class="web-ai-validation-item"><strong>stage_status</strong>' + esc(String(data.stage_status || "-")) + "</div>" +
             '<div class="web-ai-validation-item"><strong>applied_count</strong>' + esc(String(applied)) + "</div>" +
             '<div class="web-ai-validation-item"><strong>skipped_count</strong>' + esc(String(skipped)) + "</div>" +
-            '<div class="web-ai-validation-item"><strong>writes_database</strong>' + esc(String(Boolean(data && data.safety && data.safety.writes_database))) + "</div>" +
-            '<div class="web-ai-validation-item"><strong>post_apply_fingerprint</strong>' + esc(String(data.post_apply_bundle_fingerprint || "-").slice(0, 16)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>unresolved_count</strong>' + esc(String(data.unresolved_count || 0)) + "</div>" +
+            '<div class="web-ai-validation-item"><strong>completed_snapshot</strong>' + esc(String(data.completed_snapshot_fingerprint || "-").slice(0, 16)) + "</div>" +
           "</div>" +
-          '<div style="margin-top:10px;">下一步：导出 DFT 终审包；包内会包含已经回写的图表证据快照。</div>',
-          "is-success"
+          renderWebAiUnresolvedActions(data.unresolved_actions || []) +
+          '<div style="margin-top:10px;">' + (completed ? '下一步：导出 DFT 终审包；包内会包含 completed 图表证据快照。' : '下一步：复制本地 AI 图表复核指令，批量 resolve 后 finalize。') + '</div>',
+          completed ? "is-success" : ""
         );
         webAiReturnState.validationResponse = data;
-        showToast("图表结果已应用；请导出 DFT 终审包继续。");
+        showToast(completed ? "图表阶段已完成；请导出 DFT 终审包继续。" : "图表安全项已处理；仍需本地 AI 批量闭环。");
         await loadReviewCenter();
       } catch (error) {
         renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
