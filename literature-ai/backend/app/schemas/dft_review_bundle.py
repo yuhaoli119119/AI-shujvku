@@ -45,6 +45,7 @@ class OfflineObjectReviewAudit(BaseModel):
 
     target_type: Literal["dft_results"] = "dft_results"
     target_id: str = Field(min_length=1, max_length=64)
+    temporary_id: str | None = Field(default=None, max_length=96)
     field_name: str = Field(default="dft_results", min_length=1, max_length=128)
     decision: ReviewDecision
     evidence_checked: bool
@@ -70,6 +71,14 @@ class OfflineObjectReviewAudit(BaseModel):
             return None
         return value.strip() or None
 
+    @field_validator("temporary_id")
+    @classmethod
+    def strip_temporary_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
     @field_validator("evidence_ids")
     @classmethod
     def normalize_evidence_ids(cls, value: list[str]) -> list[str]:
@@ -88,6 +97,8 @@ class OfflineObjectReviewAudit(BaseModel):
         if self.decision == "new_candidate":
             if self.target_id.lower() != "new" or self.field_name != "dft_results":
                 raise ValueError("new_candidate requires target_id='new' and field_name='dft_results'")
+            if not self.temporary_id:
+                raise ValueError("new_candidate requires a unique temporary_id")
             if not isinstance(self.corrected_value, dict):
                 raise ValueError("new_candidate requires corrected_value to be an object")
             missing = [

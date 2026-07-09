@@ -371,6 +371,7 @@ def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(s
                     {
                         "target_type": "dft_results",
                         "target_id": "new",
+                        "temporary_id": "new-dft-001",
                         "field_name": "dft_results",
                         "decision": "new_candidate",
                         "evidence_checked": True,
@@ -412,6 +413,80 @@ def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(s
         text_evidence["evidence_id"],
         figure_evidence["evidence_id"],
     ]
+
+
+def test_offline_review_validation_allows_multiple_new_dft_candidates_with_temporary_ids(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_id)
+        template = service._return_template(materials)
+        text_evidence = next(
+            item for item in materials["evidence_map"].values()
+            if item.get("evidence_kind") == "text"
+        )
+        template.update(
+            {
+                "overall_status": "uncertain",
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": str(row_id),
+                        "field_name": "dft_results",
+                        "decision": "PASS",
+                        "evidence_checked": True,
+                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "confidence": 0.9,
+                        "reason": "Existing candidate covered.",
+                        "recommended_action": "ready_for_ml_export",
+                    },
+                    {
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "temporary_id": "new-dft-001",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "evidence_checked": True,
+                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "corrected_value": {
+                            "material_identity": "Fe-N-C",
+                            "property_type": "work_function",
+                            "value": 4.8,
+                            "unit": "eV",
+                        },
+                        "confidence": 0.85,
+                        "reason": "First missing DFT descriptor.",
+                        "recommended_action": "ready_for_ml_export",
+                    },
+                    {
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "temporary_id": "new-dft-002",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "evidence_checked": True,
+                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "corrected_value": {
+                            "material_identity": "Fe-N-C",
+                            "property_type": "magnetic_moment",
+                            "value": 1.2,
+                            "unit": "μB",
+                        },
+                        "confidence": 0.82,
+                        "reason": "Second missing DFT descriptor.",
+                        "recommended_action": "ready_for_ml_export",
+                    },
+                ],
+            }
+        )
+
+        result = service.validate_result(paper_id, template)
+
+    assert result["valid"] is True
+    audits = result["import_analysis_request"]["raw_payload"]["object_review_audits"]
+    new_audits = [audit for audit in audits if audit["target_id"] == "new"]
+    assert {audit["temporary_id"] for audit in new_audits} == {"new-dft-001", "new-dft-002"}
 
 
 def test_offline_review_existing_dft_uses_locator_pdf_anchor_when_payload_has_no_page(setup_test_db):

@@ -20,6 +20,7 @@ from app.domain.element_descriptors import (
     build_metal_descriptor_payload,
 )
 from app.domain.project_library_context import get_project_library_context
+from app.domain.tabular_task_profiles import UNKNOWN_TASK, get_tabular_task_profile, normalize_tabular_task
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
 from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity
@@ -42,9 +43,19 @@ _ELECTRONIC_PROPERTIES = {"d_band_center", "bader_charge", "charge_transfer"}
 _STRUCTURE_PROPERTIES = {
     "metal_metal_distance",
     "li_s_bond_length",
+    "bond_length_Li-S",
+    "bond_length_S-S",
+    "bond_length_M-N",
+    "bond_length_M-S",
+    "bond_length_M-M",
     "coordination_environment",
     "adsorption_site",
     "adsorption_mode",
+}
+_TABULAR_V4_TASK_ALIASES = {
+    "SRR_LiS:active_site_stability",
+    "SRR_LiS:structure_bond_lengths",
+    "SRR_LiS:adsorption_energy_matrix",
 }
 _VALID_EXPLICIT_ENERGY_KINDS = {
     "thermodynamic_energy",
@@ -70,6 +81,12 @@ _TASK_ALIASES = {
     "rds_srr_multi_task": "rds_srr_multitask",
     "srr_multitask": "rds_srr_multitask",
     "srr_lis_multitask": "rds_srr_multitask",
+    "active_site_stability": "SRR_LiS:active_site_stability",
+    "srr_lis_active_site_stability": "SRR_LiS:active_site_stability",
+    "structure_bond_lengths": "SRR_LiS:structure_bond_lengths",
+    "srr_lis_structure_bond_lengths": "SRR_LiS:structure_bond_lengths",
+    "adsorption_energy_matrix": "SRR_LiS:adsorption_energy_matrix",
+    "srr_lis_adsorption_energy_matrix": "SRR_LiS:adsorption_energy_matrix",
 }
 
 
@@ -83,7 +100,22 @@ def _token(value: Any) -> str:
 
 def _canonical_task(value: Any) -> str:
     token = _token(value)
-    return _TASK_ALIASES.get(token, token or "adsorption_energy")
+    if token in _TASK_ALIASES:
+        return _TASK_ALIASES[token]
+    tabular_task = normalize_tabular_task(value)
+    if tabular_task != UNKNOWN_TASK:
+        return tabular_task
+    return token or "adsorption_energy"
+
+
+def _tabular_task_profile(task: str) -> Any | None:
+    canonical_task = _canonical_task(task)
+    if canonical_task not in _TABULAR_V4_TASK_ALIASES:
+        return None
+    try:
+        return get_tabular_task_profile(canonical_task)
+    except KeyError:
+        return None
 
 
 def _iter_dicts(value: Any) -> list[dict[str, Any]]:
@@ -393,6 +425,8 @@ def energy_kind_for_property(property_type: Any) -> str:
         return "thermodynamic_energy"
     if canonical == "reaction_barrier" or subtype in _LI2S_REACTION_SUBTYPES:
         return "activation_barrier"
+    if taxonomy["physical_dimension"] == "energy" and taxonomy["ml_role"] == "target":
+        return "thermodynamic_energy"
     return "unknown"
 
 
@@ -485,6 +519,10 @@ def _property_bundle(
         "unit_normalization_blockers": list(normalized_energy.blockers) if normalized_energy else non_energy_blockers,
         "unit_normalization_valid": normalized_energy.is_valid if normalized_energy else non_energy_valid,
         "source_text": source_text,
+        "evidence_payload": row.evidence_payload,
+        "source_table_id": _payload_value(row.evidence_payload, "source_table_id"),
+        "source_row_index": _payload_value(row.evidence_payload, "source_row_index"),
+        "source_column_index": _payload_value(row.evidence_payload, "source_column_index"),
         "source_location": _source_location(row, pages_by_record),
         "confidence_level": row.confidence,
         "candidate_status": row.candidate_status,
@@ -623,6 +661,15 @@ def _record_blockers(prop: dict[str, Any], *, instance_source: str, instance_blo
 
 def _task_contract(task: str) -> dict[str, Any]:
     canonical_task = _canonical_task(task)
+    profile = _tabular_task_profile(canonical_task)
+    if profile is not None:
+        suffix = canonical_task.split(":", 1)[-1]
+        return {
+            "task": profile.key,
+            "label_name": f"{suffix}_value",
+            "feature_scope": "tabular_property",
+            "tabular_profile": profile,
+        }
     if canonical_task == "adsorption_energy":
         return {
             "task": canonical_task,
@@ -663,6 +710,11 @@ def _task_match_reasons(prop: dict[str, Any], task: str) -> tuple[bool, list[str
     energy_kind = prop["energy_kind"]
     missing_reaction_step = _is_missing_reaction_step(prop.get("reaction_step"))
     reasons: list[str] = []
+    profile = _tabular_task_profile(canonical_task)
+    if profile is not None:
+        if canonical in profile.allowed_target_properties:
+            return True, reasons
+        return False, reasons
     if canonical_task == "adsorption_energy":
         return canonical == "adsorption_energy", reasons
     if canonical_task == "li2s_reaction_energy":
@@ -735,12 +787,12 @@ def _export_record_for_task(
         "paper_id": bundle["paper_id"],
         "title": bundle["paper_title"],
         "task": contract["task"],
-        "label_name": contract["label_name"],
+        "label_name": _wide_property_key(prop) if contract.get("tabular_profile") is not None else contract["label_name"],
         "label_value": prop["normalized_value"],
         "label_unit": prop["normalized_unit"],
         "label_energy_kind": prop["energy_kind"],
         "label_property_subtype": prop["property_subtype"],
-        "feature_scope": contract["feature_scope"],
+        "feature_scope": _feature_scope_for_property(prop) if contract.get("tabular_profile") is not None else contract["feature_scope"],
         "catalyst_sample_id": catalyst["catalyst_sample_id"],
         "catalyst_name": catalyst["name"],
         "catalyst_type": catalyst["catalyst_type"],
@@ -780,6 +832,10 @@ def _export_record_for_task(
         "raw_value": prop["value"],
         "raw_unit": prop["unit"],
         "source_text": prop["source_text"],
+        "evidence_payload": prop.get("evidence_payload"),
+        "source_table_id": prop.get("source_table_id"),
+        "source_row_index": prop.get("source_row_index"),
+        "source_column_index": prop.get("source_column_index"),
         "source_location": prop["source_location"],
         "confidence_level": prop["confidence_level"],
         "ml_ready": ml_ready,
@@ -864,6 +920,10 @@ def _compact_property(prop: dict[str, Any]) -> dict[str, Any]:
         "raw_value": prop["value"],
         "raw_unit": prop["unit"],
         "source_text": prop["source_text"],
+        "evidence_payload": prop.get("evidence_payload"),
+        "source_table_id": prop.get("source_table_id"),
+        "source_row_index": prop.get("source_row_index"),
+        "source_column_index": prop.get("source_column_index"),
         "source_location": prop["source_location"],
         "confidence_level": prop["confidence_level"],
         "bader_charge_M1": prop.get("bader_charge_M1"),
@@ -908,7 +968,13 @@ def _task_records_for_instance(
     task: str,
 ) -> list[dict[str, Any]]:
     candidates_by_semantic_key: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
-    for group_name in ("adsorbate_properties", "reaction_step_properties"):
+    for group_name in (
+        "adsorbate_properties",
+        "reaction_step_properties",
+        "electronic_properties",
+        "structure_properties",
+        "other_properties",
+    ):
         for prop in instance["properties"][group_name]:
             matches_task, _ = _task_match_reasons(prop, task)
             if not matches_task:
@@ -928,6 +994,9 @@ def _task_records_for_instance(
                 if record["canonical_property_type"] == "adsorption_energy"
                 else _token(normalize_dft_reaction_step_for_identity(record["reaction_step"])),
                 record["label_energy_kind"],
+                record["source_table_id"],
+                record["source_row_index"],
+                record["source_column_index"],
             )
             candidates_by_semantic_key[semantic_key].append(record)
 
@@ -1394,7 +1463,13 @@ class ProjectLibraryBundleService:
                 1
                 for bundle in bundle_payload["bundles"]
                 for instance in bundle["active_site_instances"]
-                for group in ("adsorbate_properties", "reaction_step_properties")
+                for group in (
+                    "adsorbate_properties",
+                    "reaction_step_properties",
+                    "electronic_properties",
+                    "structure_properties",
+                    "other_properties",
+                )
                 for prop in instance["properties"][group]
                 if _task_match_reasons(prop, canonical_task)[0]
             ),

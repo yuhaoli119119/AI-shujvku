@@ -97,3 +97,18 @@ def test_chemistry_normalizer_canonicalizes_common_electrocatalysis_adsorbates()
     normalized = normalizer.normalize({"adsorbate": "OH*"})
     assert normalized["adsorbate"] == "*OH"
     assert canonicalize_adsorbate("*COOH") == "*COOH"
+
+
+def test_lis_sulfur_and_dac_property_taxonomy_aliases():
+    assert canonicalize_adsorbate("Sulfur") == "S_atom"
+    assert canonicalize_adsorbate("S8 molecule") == "S8"
+    assert canonicalize_adsorbate("Figure S8") is None
+
+    assert get_property_taxonomy("Lowdin charge")["canonical_property_type"] == "Lowdin_charge"
+    assert get_property_taxonomy("ICOHP")["canonical_property_type"] == "ICOHP"
+    assert get_property_taxonomy("DOS at Fermi")["canonical_property_type"] == "DOS_at_Fermi"
+    assert get_property_taxonomy("M-S bond length")["canonical_property_type"] == "bond_length_M-S"
+    assert get_property_taxonomy("metal support binding energy Eb")["canonical_property_type"] == "metal_support_binding_energy_Eb"
+    binding = get_property_taxonomy("binding energy")
+    assert binding["canonical_property_type"] == "binding_energy"
+    assert binding["property_subtype"] == "generic_binding"

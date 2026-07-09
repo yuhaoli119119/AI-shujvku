@@ -820,6 +820,160 @@ def test_project_library_v4_export_task_taxonomy_and_blockers(setup_test_db):
     assert "missing_reaction_step" in rds_missing_step_record["blockers"]
 
 
+def test_project_library_v4_export_reuses_tabular_lis_task_aliases(setup_test_db):
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        paper = _seed_paper(session, title="Li-S v4 tabular aliases", library_name="锂硫双原子", parsed=True)
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-Co-N-C",
+            catalyst_type="dual_atom",
+            metal_centers=["Fe", "Co"],
+            coordination="FeCo-N6",
+            support="carbon",
+        )
+        session.add(catalyst)
+        session.flush()
+        session.add(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
+
+        rows = [
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="metal_support_binding_energy_Eb",
+                adsorbate=None,
+                reaction_step="Fe-Co support binding",
+                value=-3.21,
+                evidence_payload={
+                    "active_site_instance_key": "alias:stability",
+                    "source_text": "Eb is -3.21 eV.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 1,
+                    "source_column_index": 2,
+                },
+                with_setting=False,
+            ),
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="stability_parameter_Es",
+                adsorbate=None,
+                reaction_step="Fe-Co stability",
+                value=-1.08,
+                evidence_payload={
+                    "active_site_instance_key": "alias:stability",
+                    "source_text": "Es is -1.08 eV.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 2,
+                    "source_column_index": 2,
+                },
+                with_setting=False,
+            ),
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="bond_length_M-N",
+                adsorbate=None,
+                reaction_step="optimized M-N bond",
+                value=1.91,
+                unit="A",
+                evidence_payload={
+                    "active_site_instance_key": "alias:structure",
+                    "source_text": "M-N is 1.91 A.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 3,
+                    "source_column_index": 4,
+                },
+                with_setting=False,
+            ),
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="bond_length_M-S",
+                adsorbate=None,
+                reaction_step="optimized M-S bond",
+                value=2.18,
+                unit="A",
+                evidence_payload={
+                    "active_site_instance_key": "alias:structure",
+                    "source_text": "M-S is 2.18 A.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 4,
+                    "source_column_index": 4,
+                },
+                with_setting=False,
+            ),
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="adsorption_energy",
+                adsorbate="Li2S",
+                reaction_step="Li2S adsorption",
+                value=-1.44,
+                evidence_payload={
+                    "active_site_instance_key": "alias:adsorption",
+                    "source_text": "Li2S adsorption is -1.44 eV.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 5,
+                    "source_column_index": 6,
+                },
+                with_setting=False,
+            ),
+            _seed_dft(
+                session,
+                paper=paper,
+                catalyst=catalyst,
+                property_type="adsorption_energy",
+                adsorbate="S_atom",
+                reaction_step="S adsorption",
+                value=-0.74,
+                evidence_payload={
+                    "active_site_instance_key": "alias:adsorption",
+                    "source_text": "S adsorption is -0.74 eV.",
+                    "source_table_id": "si:table:002",
+                    "source_row_index": 6,
+                    "source_column_index": 6,
+                },
+                with_setting=False,
+            ),
+        ]
+        session.commit()
+        row_ids_by_property = {row.property_type: str(row.id) for row in rows}
+
+    client = TestClient(app)
+    probes = [
+        ("active_site_stability", "SRR_LiS:active_site_stability", 2),
+        ("SRR_LiS:structure_bond_lengths", "SRR_LiS:structure_bond_lengths", 2),
+        ("adsorption_energy_matrix", "SRR_LiS:adsorption_energy_matrix", 2),
+    ]
+    for alias, expected_task, expected_count in probes:
+        response = client.get("/api/dft/project-library-ml-export-v4", params={"task": alias})
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["manifest"]["task"] == expected_task
+        assert payload["manifest"]["candidate_count"] == expected_count
+        assert payload["manifest"]["returned_count"] == expected_count
+        assert {record["task"] for record in payload["records"]} == {expected_task}
+        assert {record["source_table_id"] for record in payload["records"]} == {"si:table:002"}
+        assert all(record["source_row_index"] is not None for record in payload["records"])
+        assert all(record["source_column_index"] is not None for record in payload["records"])
+        assert all(record["active_site_instance_key"].startswith("alias:") for record in payload["records"])
+        assert all(record["evidence_payload"]["source_table_id"] == "si:table:002" for record in payload["records"])
+
+    active_payload = client.get(
+        "/api/dft/project-library-ml-export-v4",
+        params={"task": "SRR_LiS:active_site_stability"},
+    ).json()
+    assert row_ids_by_property["metal_support_binding_energy_Eb"] in {
+        record["record_id"] for record in active_payload["records"]
+    }
+
+
 def test_project_library_v4_user_submit_blocks_task_contract_mismatch(setup_test_db):
     SessionLocal = sessionmaker(bind=setup_test_db, future=True)
     with SessionLocal() as session:

@@ -41,7 +41,8 @@ CATALYST_TYPE_MAP: dict[str, str] = {
 }
 
 ADSORBATE_MAP: dict[str, str] = {
-    "s8": "S8", "sulfur": "S8", "sulphur": "S8",
+    "s8": "S8", "cyclo-s8": "S8", "sulfur": "S_atom", "sulphur": "S_atom",
+    "s atom": "S_atom", "single sulfur atom": "S_atom", "atomic sulfur": "S_atom",
     "li2s8": "Li2S8", "li2s 8": "Li2S8",
     "li2s6": "Li2S6", "li2s 6": "Li2S6",
     "li2s4": "Li2S4", "li2s 4": "Li2S4",
@@ -121,13 +122,15 @@ class DFTPropertyTaxonomy:
 
 _PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
     "adsorption_energy": DFTPropertyTaxonomy("adsorption_energy", "energetics", "adsorption", "energy", "target"),
-    "binding_energy": DFTPropertyTaxonomy("adsorption_energy", "energetics", "binding", "energy", "target"),
+    "binding_energy": DFTPropertyTaxonomy("binding_energy", "energetics", "generic_binding", "energy", "target"),
     "gibbs_free_energy_change": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
     "free_energy": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
     "free_energy_change": DFTPropertyTaxonomy("gibbs_free_energy_change", "thermodynamics", "gibbs_free_energy_change", "energy", "target"),
     "reaction_energy": DFTPropertyTaxonomy("reaction_energy", "thermodynamics", "reaction_energy", "energy", "target"),
     "formation_energy": DFTPropertyTaxonomy("formation_energy", "energetics", "formation", "energy", "target"),
     "cohesive_energy": DFTPropertyTaxonomy("cohesive_energy", "energetics", "cohesive", "energy", "target"),
+    "metal_support_binding_energy_Eb": DFTPropertyTaxonomy("metal_support_binding_energy_Eb", "energetics", "metal_support_binding_energy_Eb", "energy", "target"),
+    "stability_parameter_Es": DFTPropertyTaxonomy("stability_parameter_Es", "energetics", "stability_parameter_Es", "energy", "target"),
     "fluorination_energy": DFTPropertyTaxonomy("fluorination_energy", "energetics", "fluorination", "energy", "target"),
     "activation_energy": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "activation_energy", "energy", "target"),
     "reaction_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "reaction_barrier", "energy", "target"),
@@ -139,7 +142,12 @@ _PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
     "li2s_nucleation_barrier": DFTPropertyTaxonomy("reaction_barrier", "kinetics", "li2s_nucleation_barrier", "energy", "target"),
     "d_band_center": DFTPropertyTaxonomy("d_band_center", "electronic_descriptor", "d_band_center", "energy", "descriptor"),
     "bader_charge": DFTPropertyTaxonomy("bader_charge", "electronic_descriptor", "bader_charge", "charge", "descriptor"),
+    "Lowdin_charge": DFTPropertyTaxonomy("Lowdin_charge", "electronic_descriptor", "Lowdin_charge", "charge", "descriptor"),
     "charge_transfer": DFTPropertyTaxonomy("charge_transfer", "electronic_descriptor", "charge_transfer", "charge", "descriptor"),
+    "ICOHP": DFTPropertyTaxonomy("ICOHP", "electronic_descriptor", "ICOHP", "energy", "descriptor"),
+    "COHP": DFTPropertyTaxonomy("COHP", "electronic_descriptor", "COHP", "energy", "descriptor"),
+    "d_orbital_occupancy": DFTPropertyTaxonomy("d_orbital_occupancy", "electronic_descriptor", "d_orbital_occupancy", "dimensionless", "descriptor"),
+    "DOS_at_Fermi": DFTPropertyTaxonomy("DOS_at_Fermi", "electronic_descriptor", "DOS_at_Fermi", "dos", "descriptor"),
     "band_gap": DFTPropertyTaxonomy("band_gap", "electronic_descriptor", "band_gap", "energy", "descriptor"),
     "work_function": DFTPropertyTaxonomy("work_function", "electronic_descriptor", "work_function", "energy", "descriptor"),
     "magnetic_moment": DFTPropertyTaxonomy("magnetic_moment", "electronic_descriptor", "magnetic_moment", "magnetic_moment", "descriptor"),
@@ -147,6 +155,11 @@ _PROPERTY_TAXONOMY_MAP: dict[str, DFTPropertyTaxonomy] = {
     "interlayer_distance": DFTPropertyTaxonomy("interlayer_distance", "structural_descriptor", "interlayer_distance", "length", "descriptor"),
     "pore_diameter": DFTPropertyTaxonomy("pore_diameter", "structural_descriptor", "pore_diameter", "length", "descriptor"),
     "li_s_bond_length": DFTPropertyTaxonomy("li_s_bond_length", "structural_descriptor", "li_s_bond_length", "length", "descriptor"),
+    "bond_length_Li-S": DFTPropertyTaxonomy("bond_length_Li-S", "structural_descriptor", "bond_length_Li-S", "length", "descriptor"),
+    "bond_length_S-S": DFTPropertyTaxonomy("bond_length_S-S", "structural_descriptor", "bond_length_S-S", "length", "descriptor"),
+    "bond_length_M-N": DFTPropertyTaxonomy("bond_length_M-N", "structural_descriptor", "bond_length_M-N", "length", "descriptor"),
+    "bond_length_M-S": DFTPropertyTaxonomy("bond_length_M-S", "structural_descriptor", "bond_length_M-S", "length", "descriptor"),
+    "bond_length_M-M": DFTPropertyTaxonomy("bond_length_M-M", "structural_descriptor", "bond_length_M-M", "length", "descriptor"),
     "permeance": DFTPropertyTaxonomy("permeance", "transport_descriptor", "permeance", "permeance", "descriptor"),
     "young_modulus": DFTPropertyTaxonomy("young_modulus", "mechanical_descriptor", "young_modulus", "modulus", "descriptor"),
     "carrier_mobility": DFTPropertyTaxonomy("carrier_mobility", "transport_descriptor", "carrier_mobility", "mobility", "descriptor"),
@@ -181,6 +194,15 @@ def canonicalize_adsorbate(text: str | None) -> str | None:
         return None
     cleaned = text.strip()
     if not cleaned:
+        return None
+    lowered = re.sub(r"\s+", " ", cleaned.lower())
+    if re.search(r"\b(?:figure|fig\.?|table|scheme)\s+s\s*8\b", lowered):
+        return None
+    if re.search(r"\b(?:cyclo[-\s]?s\s*8|s\s*8\s+(?:molecule|ring|cluster)|(?:molecular\s+)?s\s*8)\b", lowered):
+        return "S8"
+    if re.search(r"\b(?:single\s+sulfur\s+atom|atomic\s+sulfur|sulfur\s+atom|s\s+atom)\b", lowered):
+        return "S_atom"
+    if re.search(r"\b(?:sulfur|sulphur)\s+(?:reduction|host|cathode|chemistry|loading|content)\b", lowered):
         return None
     canonical = _canonicalize(cleaned, ADSORBATE_MAP)
     if canonical:
@@ -366,15 +388,26 @@ class ChemistryNormalizer:
             "li2s deposition barrier": "li2s_deposition_barrier",
             "deposition barrier of li2s": "li2s_deposition_barrier",
             "li2s nucleation barrier": "li2s_nucleation_barrier",
-            "li-s": "li_s_bond_length",
-            "li-s bond length": "li_s_bond_length",
-            "li-s distance": "li_s_bond_length",
-            "li s bond length": "li_s_bond_length",
-            "li s distance": "li_s_bond_length",
-            "dli-s": "li_s_bond_length",
-            "d li-s": "li_s_bond_length",
+            "li-s": "bond_length_Li-S",
+            "li-s bond length": "bond_length_Li-S",
+            "li-s distance": "bond_length_Li-S",
+            "li s bond length": "bond_length_Li-S",
+            "li s distance": "bond_length_Li-S",
+            "dli-s": "bond_length_Li-S",
+            "d li-s": "bond_length_Li-S",
             "li_s_bond_length": "li_s_bond_length",
             "li_s_bond_length_a": "li_s_bond_length",
+            "bond_length_li_s": "bond_length_Li-S",
+            "bond length li-s": "bond_length_Li-S",
+            "bond_length_s_s": "bond_length_S-S",
+            "s-s bond length": "bond_length_S-S",
+            "bond length s-s": "bond_length_S-S",
+            "bond_length_m_n": "bond_length_M-N",
+            "m-n bond length": "bond_length_M-N",
+            "bond_length_m_s": "bond_length_M-S",
+            "m-s bond length": "bond_length_M-S",
+            "bond_length_m_m": "bond_length_M-M",
+            "m-m bond length": "bond_length_M-M",
             "reaction free energy": "gibbs_free_energy_change",
             "自由能变化": "gibbs_free_energy_change",
             "吉布斯自由能变化": "gibbs_free_energy_change",
@@ -390,10 +423,22 @@ class ChemistryNormalizer:
             "d-band center": "d_band_center",
             "d_band_center": "d_band_center",
             "bader charge": "bader_charge",
+            "lowdin charge": "Lowdin_charge",
+            "löwdin charge": "Lowdin_charge",
             "charge transfer": "charge_transfer",
+            "icohp": "ICOHP",
+            "cohp": "COHP",
+            "d orbital occupancy": "d_orbital_occupancy",
+            "d-orbital occupancy": "d_orbital_occupancy",
+            "dos at fermi": "DOS_at_Fermi",
+            "dos_at_fermi": "DOS_at_Fermi",
             "band gap": "band_gap",
             "work function": "work_function",
             "magnetic moment": "magnetic_moment",
+            "metal support binding energy eb": "metal_support_binding_energy_Eb",
+            "metal_support_binding_energy_eb": "metal_support_binding_energy_Eb",
+            "stability parameter es": "stability_parameter_Es",
+            "stability_parameter_es": "stability_parameter_Es",
             "dos": "dos_claim",
             "density of states": "dos_claim",
             "charge density difference": "charge_density_difference_claim",
@@ -422,7 +467,29 @@ class ChemistryNormalizer:
         if underscored in _PROPERTY_TAXONOMY_MAP:
             return underscored
         if compact in {"li-s", "lis", "dli-s", "dlis"} or ("li-s" in lowered and ("bond" in lowered or "distance" in lowered or "length" in lowered)):
-            return "li_s_bond_length"
+            return "bond_length_Li-S"
+        for atom_pair, property_name in {
+            "s-s": "bond_length_S-S",
+            "m-n": "bond_length_M-N",
+            "m-s": "bond_length_M-S",
+            "m-m": "bond_length_M-M",
+        }.items():
+            if atom_pair in lowered and ("bond" in lowered or "distance" in lowered or "length" in lowered):
+                return property_name
+        if "lowdin" in lowered or "löwdin" in lowered:
+            return "Lowdin_charge"
+        if "icohp" in lowered or "integrated cohp" in lowered:
+            return "ICOHP"
+        if re.search(r"\bcohp\b", lowered):
+            return "COHP"
+        if "d" in lowered and "occupanc" in lowered:
+            return "d_orbital_occupancy"
+        if ("dos" in lowered or "density of states" in lowered) and ("fermi" in lowered or "e_f" in lowered):
+            return "DOS_at_Fermi"
+        if "metal" in lowered and "support" in lowered and ("binding" in lowered or "eb" in compact):
+            return "metal_support_binding_energy_Eb"
+        if "stability" in lowered and ("parameter" in lowered or "energy" in lowered or "es" in compact):
+            return "stability_parameter_Es"
         if "li2s" in lowered and "decom" in lowered:
             return "li2s_decomposition_barrier"
         if "li2s" in lowered and "dissociat" in lowered:

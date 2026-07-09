@@ -200,9 +200,17 @@ def test_registered_profiles_are_candidates_with_fixed_split_groups() -> None:
     profiles = list_tabular_task_profiles()
 
     assert [profile.key for profile in profiles] == [
+        "SRR_LiS:active_site_stability",
         "SRR_LiS:adsorption_energy",
+        "SRR_LiS:adsorption_energy_matrix",
+        "SRR_LiS:calculation_settings",
+        "SRR_LiS:electronic_descriptors",
+        "SRR_LiS:ml_descriptor_table",
         "SRR_LiS:rds_gibbs_free_energy",
         "SRR_LiS:reaction_barrier",
+        "SRR_LiS:reaction_barrier_matrix",
+        "SRR_LiS:reaction_free_energy_matrix",
+        "SRR_LiS:structure_bond_lengths",
     ]
     for profile in profiles:
         assert profile.status == "candidate"
@@ -245,3 +253,21 @@ def test_adsorption_energy_still_requires_canonical_adsorbate() -> None:
     assert result["label_ready"] is True
     assert result["tabular_ml_ready"] is False
     assert result["feature_blockers"] == ["missing_canonical_adsorbate"]
+
+
+def test_lis_extended_tasks_are_registered_and_do_not_force_adsorbate() -> None:
+    record = _ready_adsorption_record()
+    record.update(
+        canonical_property_type="bond_length_M-S",
+        normalized_value=2.18,
+        normalized_unit="A",
+        canonical_adsorbate=None,
+        reaction_step="optimized Fe-S bond",
+    )
+
+    result = evaluate_tabular_readiness("SRR_LiS:structure_bond_lengths", record)
+
+    assert result["task_profile"] == "SRR_LiS:structure_bond_lengths"
+    assert result["label_ready"] is True
+    assert "missing_canonical_adsorbate" not in result["feature_blockers"]
+    assert normalize_tabular_task("electronic_descriptors") == "SRR_LiS:electronic_descriptors"

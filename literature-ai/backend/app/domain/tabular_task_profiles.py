@@ -49,19 +49,26 @@ _COMMON_OPTIONAL_FEATURES = (
 )
 
 
-def _profile(key: str, target_property: str) -> TabularTaskProfile:
+def _profile(
+    key: str,
+    target_property: str | tuple[str, ...],
+    *,
+    require_adsorbate: bool | None = None,
+    allowed_units: tuple[str, ...] = ("eV",),
+) -> TabularTaskProfile:
     required_features = _COMMON_REQUIRED_FEATURES
-    if key == "SRR_LiS:rds_gibbs_free_energy":
+    if require_adsorbate is False or key == "SRR_LiS:rds_gibbs_free_energy":
         required_features = tuple(
             feature for feature in _COMMON_REQUIRED_FEATURES if feature != "canonical_adsorbate"
         )
+    properties = (target_property,) if isinstance(target_property, str) else target_property
     return TabularTaskProfile(
         key=key,
         version=TASK_PROFILE_VERSION,
         reaction_type="SRR_LiS",
         status="candidate",
-        allowed_target_properties=frozenset({target_property}),
-        allowed_units=frozenset({"eV"}),
+        allowed_target_properties=frozenset(properties),
+        allowed_units=frozenset(allowed_units),
         required_features=required_features,
         optional_features=_COMMON_OPTIONAL_FEATURES,
         split_group_keys=("paper_id", "catalyst_family"),
@@ -78,6 +85,48 @@ _PROFILES = MappingProxyType(
         ),
         "SRR_LiS:rds_gibbs_free_energy": _profile(
             "SRR_LiS:rds_gibbs_free_energy", "gibbs_free_energy_change"
+        ),
+        "SRR_LiS:active_site_stability": _profile(
+            "SRR_LiS:active_site_stability",
+            ("metal_support_binding_energy_Eb", "stability_parameter_Es", "formation_energy", "cohesive_energy"),
+            require_adsorbate=False,
+        ),
+        "SRR_LiS:structure_bond_lengths": _profile(
+            "SRR_LiS:structure_bond_lengths",
+            ("bond_length_Li-S", "bond_length_S-S", "bond_length_M-N", "bond_length_M-S", "bond_length_M-M", "li_s_bond_length"),
+            require_adsorbate=False,
+            allowed_units=("A", "Å", "nm", "pm"),
+        ),
+        "SRR_LiS:adsorption_energy_matrix": _profile(
+            "SRR_LiS:adsorption_energy_matrix", "adsorption_energy"
+        ),
+        "SRR_LiS:reaction_free_energy_matrix": _profile(
+            "SRR_LiS:reaction_free_energy_matrix",
+            ("gibbs_free_energy_change", "reaction_energy"),
+            require_adsorbate=False,
+        ),
+        "SRR_LiS:reaction_barrier_matrix": _profile(
+            "SRR_LiS:reaction_barrier_matrix",
+            ("reaction_barrier", "activation_energy", "li2s_decomposition_barrier", "li2s_nucleation_barrier"),
+            require_adsorbate=False,
+        ),
+        "SRR_LiS:electronic_descriptors": _profile(
+            "SRR_LiS:electronic_descriptors",
+            ("bader_charge", "Lowdin_charge", "charge_transfer", "ICOHP", "COHP", "d_orbital_occupancy", "DOS_at_Fermi", "d_band_center", "work_function", "magnetic_moment"),
+            require_adsorbate=False,
+            allowed_units=("eV", "e", "electrons", "μB", "states/eV", "eV^-1", "dimensionless"),
+        ),
+        "SRR_LiS:ml_descriptor_table": _profile(
+            "SRR_LiS:ml_descriptor_table",
+            ("bader_charge", "Lowdin_charge", "charge_transfer", "ICOHP", "COHP", "d_orbital_occupancy", "DOS_at_Fermi", "d_band_center", "work_function", "magnetic_moment", "bond_length_Li-S", "bond_length_S-S", "bond_length_M-N", "bond_length_M-S", "bond_length_M-M"),
+            require_adsorbate=False,
+            allowed_units=("eV", "e", "electrons", "μB", "states/eV", "eV^-1", "dimensionless", "A", "Å", "nm", "pm"),
+        ),
+        "SRR_LiS:calculation_settings": _profile(
+            "SRR_LiS:calculation_settings",
+            ("cutoff_energy", "k_points", "vacuum_thickness", "calculation_setting"),
+            require_adsorbate=False,
+            allowed_units=("eV", "A", "Å", "dimensionless"),
         ),
     }
 )
@@ -97,6 +146,22 @@ _TASK_ALIASES = {
     _task_token("SRR_LiS:rds_gibbs_free_energy"): "SRR_LiS:rds_gibbs_free_energy",
     _task_token("srr_lis_rds_gibbs_free_energy"): "SRR_LiS:rds_gibbs_free_energy",
     _task_token("rds_gibbs_free_energy"): "SRR_LiS:rds_gibbs_free_energy",
+    _task_token("SRR_LiS:active_site_stability"): "SRR_LiS:active_site_stability",
+    _task_token("active_site_stability"): "SRR_LiS:active_site_stability",
+    _task_token("SRR_LiS:structure_bond_lengths"): "SRR_LiS:structure_bond_lengths",
+    _task_token("structure_bond_lengths"): "SRR_LiS:structure_bond_lengths",
+    _task_token("SRR_LiS:adsorption_energy_matrix"): "SRR_LiS:adsorption_energy_matrix",
+    _task_token("adsorption_energy_matrix"): "SRR_LiS:adsorption_energy_matrix",
+    _task_token("SRR_LiS:reaction_free_energy_matrix"): "SRR_LiS:reaction_free_energy_matrix",
+    _task_token("reaction_free_energy_matrix"): "SRR_LiS:reaction_free_energy_matrix",
+    _task_token("SRR_LiS:reaction_barrier_matrix"): "SRR_LiS:reaction_barrier_matrix",
+    _task_token("reaction_barrier_matrix"): "SRR_LiS:reaction_barrier_matrix",
+    _task_token("SRR_LiS:electronic_descriptors"): "SRR_LiS:electronic_descriptors",
+    _task_token("electronic_descriptors"): "SRR_LiS:electronic_descriptors",
+    _task_token("SRR_LiS:ml_descriptor_table"): "SRR_LiS:ml_descriptor_table",
+    _task_token("ml_descriptor_table"): "SRR_LiS:ml_descriptor_table",
+    _task_token("SRR_LiS:calculation_settings"): "SRR_LiS:calculation_settings",
+    _task_token("calculation_settings"): "SRR_LiS:calculation_settings",
 }
 
 

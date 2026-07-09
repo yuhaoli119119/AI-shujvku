@@ -124,6 +124,31 @@ def test_dft_duplicate_candidates_merge_across_source_locations():
     assert len(merged[0]["evidence_sources"]) == 2
 
 
+def test_dft_duplicate_key_keeps_distinct_lis_atom_pair_and_site_label():
+    service = object.__new__(ExtractionPipelineService)
+    service.chemistry_normalizer = ChemistryNormalizer()
+
+    base = {
+        "category": "bond_length_M-S",
+        "adsorbate": None,
+        "value": 2.18,
+        "unit": "A",
+        "reaction_step": "optimized structure",
+        "catalyst_name": "FeCo-N6",
+        "evidence_text": "Table reports M-S bond length.",
+        "source_location": {"table": "Table 2", "page": 9},
+        "confidence": 0.8,
+    }
+
+    atom_pair_changed = {**base, "category": "bond_length_M-N", "atom_pair": "M-N"}
+    site_changed_a = {**base, "atom_pair": "M-S", "site_label": "bridge"}
+    site_changed_b = {**base, "atom_pair": "M-S", "site_label": "top"}
+
+    assert service._normalized_dft_candidate_key(base) != service._normalized_dft_candidate_key(atom_pair_changed)
+    assert service._normalized_dft_candidate_key(site_changed_a) != service._normalized_dft_candidate_key(site_changed_b)
+    assert len(service._merge_duplicate_dft_items([site_changed_a, site_changed_b])) == 2
+
+
 def test_dft_persist_merges_existing_duplicate_candidate_without_new_row():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)

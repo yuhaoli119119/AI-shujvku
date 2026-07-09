@@ -706,3 +706,534 @@ def test_dft_results_skips_graphene_reference_table_artifacts():
     results = extractor.extract(document)
 
     assert not any(item["category"] in {"formation_energy", "migration_barrier"} for item in results)
+
+
+def test_lis_sulfur_eads_is_adsorption_energy_not_limiting_potential():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text="The Eads of Sulfur on Fe-N4/C is -1.34 eV.",
+                section_title="DFT results",
+                page_start=6,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(
+        item["category"] == "adsorption_energy" and item["adsorbate"] == "S_atom" and item["value"] == -1.34
+        for item in results
+    )
+    assert not any(item["category"] == "limiting_potential" for item in results)
+
+
+def test_lis_adsorbate_sulfur_forms_are_normalized_without_figure_s8_pollution():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text=(
+                    "Eads of Li2S is -2.10 eV. "
+                    "E_ads of S8 molecule is -0.80 eV. "
+                    "Figure S8 shows the optimized structure but gives no numeric adsorption value."
+                ),
+                section_title="DFT results",
+                page_start=7,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(item["category"] == "adsorption_energy" and item["adsorbate"] == "Li2S" for item in results)
+    assert any(item["category"] == "adsorption_energy" and item["adsorbate"] == "S8" for item in results)
+
+    figure_only = extractor.extract(
+        {
+            "abstract": "",
+            "sections": [
+                SimpleNamespace(
+                    text="Figure S8 shows the optimized adsorption configuration with an energy of -0.20 eV.",
+                    section_title="Supporting figures",
+                    page_start=12,
+                )
+            ],
+            "tables": [],
+            "figures": [],
+        }
+    )
+    assert not any(item["adsorbate"] == "S8" for item in figure_only)
+
+
+def test_lis_eb_es_allow_null_adsorbate_and_binding_energy_stays_generic_when_unclear():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text=(
+                    "The Eb of the Fe atom on the N-doped carbon support is -5.20 eV. "
+                    "The stability parameter Es is -3.10 eV. "
+                    "The binding energy is -0.60 eV in the optimized model."
+                ),
+                section_title="Stability",
+                page_start=8,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(
+        item["category"] == "metal_support_binding_energy_Eb" and item["adsorbate"] is None
+        for item in results
+    )
+    assert any(
+        item["category"] == "stability_parameter_Es" and item["adsorbate"] is None
+        for item in results
+    )
+    assert any(item["category"] == "binding_energy" and item["adsorbate"] is None for item in results)
+    assert not any(
+        item["category"] == "adsorption_energy" and item["adsorbate"] in {None, "H2"}
+        for item in results
+    )
+
+
+def test_lis_binding_energy_of_li2s_is_adsorption_energy():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text="The binding energy of Li2S on the catalyst is -1.95 eV.",
+                section_title="DFT results",
+                page_start=8,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(
+        item["category"] == "adsorption_energy" and item["adsorbate"] == "Li2S" and item["value"] == -1.95
+        for item in results
+    )
+    assert not any(item["category"] == "binding_energy" for item in results)
+
+
+def test_lis_binding_energy_mixed_paragraph_does_not_cross_sentence_adsorbate():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text=(
+                    "The binding energy of Li2S on the catalyst is -1.95 eV. "
+                    "The Eb of the Fe atom on the N-doped carbon support is -5.20 eV. "
+                    "The binding energy is -0.60 eV in the optimized model."
+                ),
+                section_title="DFT results",
+                page_start=8,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert any(
+        item["category"] == "adsorption_energy" and item["adsorbate"] == "Li2S" and item["value"] == -1.95
+        for item in results
+    )
+    assert any(
+        item["category"] == "binding_energy" and item["adsorbate"] is None and item["value"] == -0.60
+        for item in results
+    )
+    assert any(
+        item["category"] == "metal_support_binding_energy_Eb" and item["adsorbate"] is None and item["value"] == -5.20
+        for item in results
+    )
+    assert not any(
+        item["category"] == "adsorption_energy" and item["adsorbate"] == "Li2S" and item["value"] == -0.60
+        for item in results
+    )
+
+
+def test_lis_bond_lengths_and_electronic_descriptors_extract_from_table_cells():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 2 Li-S DAC DFT descriptors",
+                markdown_content=(
+                    "| Site | Li-S bond length (A) | S-S bond length (A) | M-N bond length (A) | M-S bond length (A) | M-M bond length (A) | Lowdin charge (e) | ICOHP (eV) | d orbital occupancy | DOS at Fermi |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| FeCo-N6 | 2.31 | 2.05 | 1.92 | 2.18 | 2.43 | 0.36 | -1.42 | 6.2 | 1.8 |\n"
+                ),
+                page=9,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+    categories = {item["category"] for item in results}
+
+    assert {"bond_length_Li-S", "bond_length_S-S", "bond_length_M-N", "bond_length_M-S", "bond_length_M-M"} <= categories
+    assert {"Lowdin_charge", "ICOHP", "d_orbital_occupancy", "DOS_at_Fermi"} <= categories
+    assert any(item["atom_pair"] == "Li-S" and item["source_row_index"] == 0 for item in results)
+    checked_categories = {
+        "bond_length_Li-S",
+        "bond_length_S-S",
+        "bond_length_M-N",
+        "bond_length_M-S",
+        "bond_length_M-M",
+        "Lowdin_charge",
+        "ICOHP",
+        "DOS_at_Fermi",
+    }
+    assert all(item["adsorbate"] is None for item in results if item["category"] in checked_categories)
+
+
+def test_lis_eads_matrix_headers_extract_adsorbates_from_columns():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 1 Adsorption matrix",
+                markdown_content=(
+                    "| System | Eads of Sulfur | Eads of Li2S | Eads of S8 |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| FeCo-N6 | -1.10 | -2.20 | -0.70 |\n"
+                ),
+                page=4,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [
+        item for item in extractor.extract(document)
+        if item["category"] == "adsorption_energy"
+    ]
+
+    assert len(results) == 3
+    assert {(item["adsorbate"], item["value"]) for item in results} == {
+        ("S_atom", -1.10),
+        ("Li2S", -2.20),
+        ("S8", -0.70),
+    }
+
+
+def test_lis_descriptor_table_ignores_see_fig_s8_reference_numbers():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                caption="Table 3 Electronic descriptors",
+                markdown_content=(
+                    "| Site | ICOHP (eV) | DOS at Fermi (states/eV) |\n"
+                    "| --- | --- | --- |\n"
+                    "| FeCo-N6 | see Fig. S8 | 1.70; see Fig. S8 |\n"
+                ),
+                page=10,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert not any(
+        item["category"] in {"ICOHP", "DOS_at_Fermi"} and item["value"] == 8
+        for item in results
+    )
+    assert any(item["category"] == "DOS_at_Fermi" and item["value"] == 1.70 for item in results)
+    assert all(
+        item["adsorbate"] is None
+        for item in results
+        if item["category"] in {"ICOHP", "DOS_at_Fermi"}
+    )
+
+
+def test_lis_s0101_table_s1_matrix_extracts_scalar_dft_candidates():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-table-s1",
+                caption=(
+                    "Table S1. Calculated 𝐸𝑏, 𝐸𝑠, average bond length of M-N (𝑑𝑀-𝑁), "
+                    "bond length of M-S (𝑑𝑀-𝑆) and adsorption energy (Eads) of Li2S "
+                    "and sulfur on the different M-N1-4/G systems."
+                ),
+                markdown_content=(
+                    "| Structures | 𝑬 𝒃 (eV) | 𝑬 𝒔 (eV) | Average 𝒅 𝑴-𝑵 (Å) | 𝒅 𝑴-𝑺 (Å) | 𝐄 𝐚𝐝𝐬 of 𝐋𝐢 𝟐 𝐒 (eV) | 𝐄 𝐚𝐝𝐬 of Sulfur (eV) |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| 𝑺𝒄-𝑵 𝟑 /𝑮 | -7.360 | -2.854 | 2.031 | 2.447 | -5.949 | -4.886 |\n"
+                    "| 𝑺𝒄-𝑵 𝟒 /𝑮 | -7.419 | -2.913 | 1.990 | 2.411 | -5.186 | -5.249 |\n"
+                ),
+                page=8,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    expected = {
+        ("metal_support_binding_energy_Eb", None, -7.360, None),
+        ("stability_parameter_Es", None, -2.854, None),
+        ("bond_length_M-N", None, 2.031, "M-N"),
+        ("bond_length_M-S", None, 2.447, "M-S"),
+        ("adsorption_energy", "Li2S", -5.949, None),
+        ("adsorption_energy", "S_atom", -4.886, None),
+    }
+    for category, adsorbate, value, atom_pair in expected:
+        assert any(
+            item["category"] == category
+            and item["adsorbate"] == adsorbate
+            and item["value"] == value
+            and (atom_pair is None or item["atom_pair"] == atom_pair)
+            for item in results
+        )
+
+    table_results = [item for item in results if item["source_table_id"] == "s0101-table-s1"]
+    assert len(table_results) == 12
+    for item in table_results:
+        assert item["fact_family"]
+        assert item["site_label"]
+        assert item["state_context"]
+        assert item["active_site_instance_key"]
+        assert item["source_table_caption"].startswith("Table S1.")
+        assert item["source_row_index"] is not None
+        assert item["source_column_index"] is not None
+        assert item["raw_row_text"]
+        assert item["raw_column_header"]
+
+
+def test_lis_s0101_table_s5_reaction_free_energy_extracts_scalar_candidates():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-table-s5",
+                caption="Table S5. Free energy difference (ΔG) of Li2S2 to Li2S conversion for selected SMSCs.",
+                markdown_content=(
+                    "| SMSC | Reaction step | ΔG (eV) | RDS |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| FeN/G | Li2S2 -> Li2S | 4.76 | yes |\n"
+                    "| CoN/G | Li2S2 -> Li2S | 4.98 | yes |\n"
+                ),
+                page=12,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [item for item in extractor.extract(document) if item["source_table_id"] == "s0101-table-s5"]
+
+    assert [(item["category"], item["value"]) for item in results] == [
+        ("gibbs_free_energy_change", 4.76),
+        ("gibbs_free_energy_change", 4.98),
+    ]
+    assert all(item["fact_family"] == "reaction_free_energy_table" for item in results)
+    assert all(item["reaction_step"] == "Li2S2 -> Li2S" for item in results)
+    assert all(item["source_row_index"] is not None and item["source_column_index"] == 2 for item in results)
+
+
+def test_lis_s0101_reaction_barrier_table_extracts_deposition_and_diffusion_barriers():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-barrier-table",
+                caption="Supplementary reaction barrier table for Li2S decomposition/deposition and Li diffusion.",
+                markdown_content=(
+                    "| SMSC | Li2S decomposition barrier (eV) | Li2S deposition barrier (eV) | Li diffusion barrier (eV) |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| FeN/G | 0.64 | 0.42 | 0.21 |\n"
+                ),
+                page=13,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [item for item in extractor.extract(document) if item["source_table_id"] == "s0101-barrier-table"]
+
+    assert {(item["category"], item["value"]) for item in results} == {
+        ("li2s_decomposition_barrier", 0.64),
+        ("li2s_deposition_barrier", 0.42),
+        ("migration_barrier", 0.21),
+    }
+    assert all(item["fact_family"] == "reaction_barrier_table" for item in results)
+    assert all(item["adsorbate"] is None for item in results)
+
+
+def test_lis_s0101_s2_s3_electronic_descriptor_table_extracts_scalar_candidates():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-table-s2-s3",
+                caption="Table S2/S3. Lowdin charge, d-band center, DOS/PDOS, ICOHP/COHP and magnetic moment descriptors.",
+                markdown_content=(
+                    "| SMSC | Lowdin charge of TM (e) | Bader charge (e) | charge transfer (e) | d-band center (eV) | DOS@EF | ICOHP (eV) | COHP (eV) | magnetic moment (μB) |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| FeN/G | 0.31 | 0.42 | 0.18 | -1.22 | 1.70 | -1.43 | -0.62 | 2.10 |\n"
+                ),
+                page=10,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [item for item in extractor.extract(document) if item["source_table_id"] == "s0101-table-s2-s3"]
+
+    assert {
+        "Lowdin_charge",
+        "bader_charge",
+        "charge_transfer",
+        "d_band_center",
+        "DOS_at_Fermi",
+        "ICOHP",
+        "COHP",
+        "magnetic_moment",
+    } <= {item["category"] for item in results}
+    assert all(item["fact_family"] == "electronic_descriptor_table" for item in results)
+    assert all(item["adsorbate"] is None for item in results)
+    assert all(item["active_site_instance_key"] == "FeN/G" for item in results)
+
+
+def test_lis_s0101_s6_ml_descriptor_table_marks_ml_descriptor_family():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-table-s6",
+                caption="Table S6. Machine learning input features and descriptors for selected SMSCs.",
+                markdown_content=(
+                    "| SMSC | Es (eV) | L_TM-N/C (A) | En_sum | εd (eV) | Lowdin charge of TM (Δρ) | DOS@EF | Pun | ρ(dxz + dyz) | ρ(dz2) |\n"
+                    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
+                    "| FeN/G | -1.02 | 1.91 | 4.98 | -1.22 | 0.31 | 1.70 | 0.24 | 1.82 | 0.77 |\n"
+                ),
+                page=14,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [item for item in extractor.extract(document) if item["source_table_id"] == "s0101-table-s6"]
+
+    assert {
+        "stability_parameter_Es",
+        "electronegativity_sum",
+        "d_band_center",
+        "Lowdin_charge",
+        "DOS_at_Fermi",
+        "unoccupied_d_state_fraction",
+        "orbital_occupancy_dxz_dyz",
+        "orbital_occupancy_dz2",
+    } <= {item["category"] for item in results}
+    assert all(item["fact_family"] == "ml_descriptor" for item in results)
+    assert not any(item["category"] == "adsorption_energy" for item in results)
+
+
+def test_lis_s0101_calculation_settings_table_keeps_settings_as_structured_payload():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [],
+        "tables": [
+            SimpleNamespace(
+                id="s0101-calculation-settings",
+                caption="Calculation settings used for the DFT simulations.",
+                markdown_content=(
+                    "| Setting | Value |\n"
+                    "| --- | --- |\n"
+                    "| functional | PBE |\n"
+                    "| cutoff energy | 500 eV |\n"
+                    "| k-point mesh | 5 x 5 x 1 |\n"
+                    "| supercell | 5 x 5 x 1 graphene |\n"
+                    "| vacuum space | 15 A |\n"
+                    "| force convergence | 0.001 eV/A |\n"
+                ),
+                page=3,
+            )
+        ],
+        "figures": [],
+    }
+
+    results = [item for item in extractor.extract(document) if item["source_table_id"] == "s0101-calculation-settings"]
+
+    assert {
+        "functional",
+        "cutoff_energy",
+        "k_points",
+        "supercell",
+        "vacuum_thickness",
+        "convergence_force",
+    } <= {item["category"] for item in results}
+    assert all(item["fact_family"] == "calculation_settings" for item in results)
+    assert all(item["adsorbate"] is None for item in results)
+    assert any(item["category"] == "functional" and item["value"] is None for item in results)
+    assert any(item["category"] == "cutoff_energy" and item["value"] == 500 and item["unit"] == "eV" for item in results)
+    assert not any(item["category"] in {"adsorption_energy", "metal_support_binding_energy_Eb"} for item in results)
+
+
+def test_lis_delithiation_energy_e1_does_not_pollute_adsorption_or_eb():
+    extractor = DFTResultsExtractor()
+    document = {
+        "abstract": "",
+        "sections": [
+            SimpleNamespace(
+                text=(
+                    "When the binding energy of a single sulfur atom on an SMSC exceeds "
+                    "the delithiation energy, E1 (4.53 eV), the charging process is "
+                    "insufficient to remove the sulfur atom."
+                ),
+                section_title="Reduced sulfur poisoning on SMSCs",
+                page_start=6,
+            )
+        ],
+        "tables": [],
+        "figures": [],
+    }
+
+    results = extractor.extract(document)
+
+    assert not any(
+        item["category"] in {"adsorption_energy", "metal_support_binding_energy_Eb"}
+        and item["value"] == 4.53
+        for item in results
+    )

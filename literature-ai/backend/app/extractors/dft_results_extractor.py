@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -51,6 +52,21 @@ class DFTResultItem:
     evidence_text: str = ""
     source_location: SourceLocation = field(default_factory=SourceLocation)
     confidence: float = 0.5  # 0.0 ~ 1.0
+    fact_family: str | None = None
+    atom_pair: str | None = None
+    site_label: str | None = None
+    state_context: str | None = None
+    active_site_instance_key: str | None = None
+    metal_center_1: str | None = None
+    metal_center_2: str | None = None
+    support: str | None = None
+    source_table_id: str | None = None
+    source_table_caption: str | None = None
+    source_row_index: int | None = None
+    source_column_index: int | None = None
+    raw_row_text: str | None = None
+    raw_column_header: str | None = None
+    parser_version: str = "lis_dac_dft_rules_v1"
 
 
 class SourceLocationModel(BaseModel):
@@ -102,7 +118,11 @@ ADSORBATE_MAP: dict[str, str] = {
     "li2s4": "Li2S4",
     "li2s2": "Li2S2",
     "li2s": "Li2S",
-    "sulfur": "S8",
+    "sulfur": "S_atom",
+    "sulphur": "S_atom",
+    "s atom": "S_atom",
+    "single sulfur atom": "S_atom",
+    "atomic sulfur": "S_atom",
     "polysulfide": "LiPS",
     "lips": "LiPS",
     "oxygen": "O",
@@ -143,7 +163,27 @@ UNIT_ALIASES: dict[str, str] = {
     "mub": "μB",
     "mu_b": "μB",
     "bohr magneton": "μB",
+    "ev/a": "eV/A",
+    "ev/å": "eV/A",
+    "states/ev": "states/eV",
+    "ev-1": "eV^-1",
+    "ev^-1": "eV^-1",
 }
+
+
+def _normalize_chem_label(text: str | None) -> str:
+    """Normalize mathematical Unicode labels from parsed PDFs for rule matching."""
+    if not text:
+        return ""
+    normalized = unicodedata.normalize("NFKC", str(text))
+    normalized = normalized.replace("–", "-").replace("—", "-")
+    normalized = re.sub(r"\s+", " ", normalized)
+    normalized = re.sub(r"(?i)\bLi\s*2\s*S\b", "Li2S", normalized)
+    normalized = re.sub(r"(?i)\bLi\s*2\s*S\s*([2468])\b", r"Li2S\1", normalized)
+    normalized = re.sub(r"(?i)\bE\s+ads\b", "Eads", normalized)
+    normalized = re.sub(r"(?i)\bE\s+([bs])\b", r"E\1", normalized)
+    normalized = re.sub(r"\b([A-Za-z])\s*-\s*([A-Za-z])\b", r"\1-\2", normalized)
+    return normalized.strip()
 
 TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
     (re.compile(r"(adsorption|binding).*(energy|e[_\-\s]*ads|e[_\-\s]*bind)|(^e[_\-\s]*ads(?:\s*\(.*\))?$)|(^e[_\-\s]*bind(?:\s*\(.*\))?$)", re.IGNORECASE), "adsorption_energy", "eV"),
@@ -153,8 +193,8 @@ TABLE_HEADER_CATEGORY_RULES: list[tuple[re.Pattern[str], str, str | None]] = [
     (re.compile(r"(bader).*(charge)|(^bader$)", re.IGNORECASE), "bader_charge", "e"),
     (re.compile(r"(charge transfer|electron transfer)", re.IGNORECASE), "charge_transfer", "e"),
     (re.compile(r"(d-?band|epsilon[_\-\s]*d|ε[_\-\s]*d)", re.IGNORECASE), "d_band_center", "eV"),
-    (re.compile(r"(^\s*(?:d\s*)?li\s*[-–]?\s*s\s*(?:bond\s*)?(?:length|distance)?\s*(?:\((?:a|å|angstroms?)\))?\s*$|li\s*[-–]\s*s.*(?:bond\s*)?(?:length|distance))", re.IGNORECASE), "li_s_bond_length", "A"),
-    (re.compile(r"(limiting\s+potential|^u[_\-\s]*l$|u\s*l)", re.IGNORECASE), "limiting_potential", "V"),
+    (re.compile(r"(^\s*(?:d\s*)?li\s*[-–]?\s*s\s*(?:bond\s*)?(?:length|distance)?\s*(?:\((?:a|å|angstroms?)\))?\s*$|li\s*[-–]\s*s.*(?:bond\s*)?(?:length|distance))", re.IGNORECASE), "bond_length_Li-S", "A"),
+    (re.compile(r"(?:^|\b)(?:limiting\s+potential|U\s*[_\-]\s*L|U\s+L|UL)(?:\b|$)", re.IGNORECASE), "limiting_potential", "V"),
     (re.compile(r"(overpotential|η|eta)", re.IGNORECASE), "overpotential", "V"),
 ]
 
@@ -163,17 +203,27 @@ NUMERIC_CATEGORIES = {
     "activation_energy",
     "binding_energy",
     "cohesive_energy",
+    "metal_support_binding_energy_Eb",
+    "stability_parameter_Es",
     "formation_energy",
     "fluorination_energy",
     "gibbs_free_energy_change",
+    "reaction_energy",
     "reaction_barrier",
     "migration_barrier",
     "permeation_barrier",
     "li2s_decomposition_barrier",
+    "li2s_deposition_barrier",
+    "li2s_dissociation_energy",
     "li2s_nucleation_barrier",
     "bader_charge",
     "charge_transfer",
+    "Lowdin_charge",
+    "ICOHP",
+    "COHP",
     "d_band_center",
+    "d_orbital_occupancy",
+    "DOS_at_Fermi",
     "band_gap",
     "work_function",
     "magnetic_moment",
@@ -183,6 +233,11 @@ NUMERIC_CATEGORIES = {
     "interlayer_distance",
     "pore_diameter",
     "li_s_bond_length",
+    "bond_length_Li-S",
+    "bond_length_S-S",
+    "bond_length_M-N",
+    "bond_length_M-S",
+    "bond_length_M-M",
     "permeance",
     "adsorption_molecule_fraction",
     "young_modulus",
@@ -193,13 +248,28 @@ NUMERIC_CATEGORIES = {
     "thermal_conductivity",
     "carrier_mobility",
     "optical_absorption_peak",
+    "electronegativity_sum",
+    "unoccupied_d_state_fraction",
+    "orbital_occupancy_dxy",
+    "orbital_occupancy_dx2_y2",
+    "orbital_occupancy_dz2",
+    "orbital_occupancy_dxz",
+    "orbital_occupancy_dyz",
+    "orbital_occupancy_dxz_dyz",
+    "cutoff_energy",
+    "vacuum_thickness",
+    "u_value",
+    "convergence_force",
+    "convergence_energy",
 }
 TABLE_ONLY_NUMERIC_CATEGORIES = {"limiting_potential", "overpotential"}
 NON_NUMERIC_DFT_CLAIM_CATEGORIES = {"dos_claim", "charge_density_difference_claim"}
+TEXT_SCALAR_CATEGORIES = {"functional", "k_points", "supercell", "solvation_model", "calculation_setting"}
 
 # 类别 → 正则模式列表 (每个模式: (pattern, value_group, unit_group))
 CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "adsorption_energy": [
+        r"(?:E\s*[_\-\s]?\s*ads|Eads)\s*(?:\(\s*[^)]{1,40}\s*\)|\s+(?:of|for)\s+[A-Za-z0-9*+\-_/().\s]{1,60}?|[-–]\s*[A-Za-z0-9*+\-_/().\s]{1,40}?)?\s*(?:is|was|=|:|≈|~)\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         # "adsorption energy of X on Y is -1.23 eV"
         (
             r"(?:adsorption|binding)\s+(?:energy|strength).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
@@ -214,9 +284,9 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         r"(?:\u0394G|delta\s*G)\s*[=\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|kJ/mol|kcal/mol)",
         ],
     "reaction_barrier": [
-        r"(?:reaction\s+)?(?:barrier|activation\s+energy|E_a).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
-        r"E_a\s*[=\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
-        r"E\s*[_\-\s]?\s*a\s*[=＝\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:reaction\s+)?(?:barrier|activation\s+energy|\bE_a\b).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"\bE_a\b\s*[=\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"\bE\s*[_\-\s]?\s*a\b\s*[=＝\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"(?:活化能|活化能垒|能垒|反应能垒).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"energy\s+barrier.{0,30}([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         ],
@@ -227,6 +297,8 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "li2s_nucleation_barrier": [
         r"(?:nucleat(?:ion)?.{0,20}(?:barrier|energy)|Li2S.{0,20}nucleat).{0,60}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         ],
+    "li2s_deposition_barrier": [],
+    "li2s_dissociation_energy": [],
     "bader_charge": [
         r"(?:Bader\s+?(?:charge|analysis)).{0,80}?([\-\+]?\d+[.]?\d*)\s*(e[\u2212-]|e)",
         r"Bader.{0,40}?charge\s*(?:of|transfer|gain|loss).{0,20}?([\-\+]?\d+[.]?\d*)",
@@ -236,17 +308,57 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         r"(?:transfers?|gains?|loss?).{0,20}?([\-\+]?\d+[.]?\d+)\s*(?:e[\u2212-]?|electrons?)",
         r"Mulliken.{0,30}?([\-\+]?\d+[.]?\d*)\s*e[\u2212-]",
         ],
+    "Lowdin_charge": [
+        r"(?:Lowdin|Löwdin)\s+(?:charge|population).{0,80}?([\-\+]?\d+[.]?\d*)\s*(e[\u2212-]?|e|electrons?)?",
+    ],
+    "ICOHP": [
+        r"(?:I?COHP|integrated\s+COHP).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV)?",
+    ],
+    "COHP": [
+        r"\bCOHP\b.{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV)?",
+    ],
     "d_band_center": [
         r"(?:d-?band\s+center|\u03b5_d|epsilon_d).{0,40}?([-\+]?\d+[.]?\d*)\s*(eV|meV)",
         ],
-    "li_s_bond_length": [
+    "d_orbital_occupancy": [
+        r"(?:d[-\s]?orbital\s+occupanc(?:y|ies)|d\s+electron\s+occupanc(?:y|ies)|d\s+occupancy).{0,80}?([\-\+]?\d+[.]?\d*)\s*(electrons?|e)?",
+    ],
+    "DOS_at_Fermi": [
+        r"(?:(?:DOS|density\s+of\s+states).{0,40}(?:Fermi|E[_\-\s]?F)|(?:Fermi|E[_\-\s]?F).{0,40}(?:DOS|density\s+of\s+states)).{0,80}?([\-\+]?\d+[.]?\d*)\s*(states?/eV|eV-1|eV\^-1)?",
+    ],
+    "bond_length_Li-S": [
         r"(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
         r"([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm).{0,40}(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S)",
         ],
-    "limiting_potential": [
-        r"(?:limiting\s+potential|U\s*[_\-\s]?\s*L|U\s*L).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
-        r"([\-\+]?\d+[.]?\d*)\s*(V|eV).{0,60}(?:limiting\s+potential|U\s*[_\-\s]?\s*L)",
+    "bond_length_S-S": [
+        r"(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        r"([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm).{0,40}(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S)",
         ],
+    "bond_length_M-N": [
+        r"(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        ],
+    "bond_length_M-S": [
+        r"(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        ],
+    "bond_length_M-M": [
+        r"(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        ],
+    "limiting_potential": [
+        r"(?:limiting\s+potential|\bU\s*[_\-]\s*L\b|\bU\s+L\b|\bUL\b).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
+        r"([\-\+]?\d+[.]?\d*)\s*(V|eV).{0,60}(?:limiting\s+potential|\bU\s*[_\-]\s*L\b|\bU\s+L\b|\bUL\b)",
+        ],
+    "metal_support_binding_energy_Eb": [
+        r"\bE\s*[_\-\s]?\s*b\b[^.;\n]{0,120}?\b(?:metal|atom|single[-\s]?atom|support|substrate|anchoring|M\s*[-–]\s*N|M\s*[-–]\s*C|N[-\s]?doped\s+carbon)\b[^.;\n]{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"\b(?:metal|atom|single[-\s]?atom|support|substrate|anchoring|M\s*[-–]\s*N|M\s*[-–]\s*C|N[-\s]?doped\s+carbon)\b[^.;\n]{0,120}?\bE\s*[_\-\s]?\s*b\b[^.;\n]{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:\bE\s*[_\-\s]?\s*b\b|\bEb\b|binding\s+energy).{0,80}?(?:metal|atom|single[-\s]?atom|support|substrate|anchoring|M\s*[-–]\s*N|M\s*[-–]\s*C).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:metal|atom|single[-\s]?atom|support|substrate|anchoring|M\s*[-–]\s*N|M\s*[-–]\s*C).{0,80}?(?:\bE\s*[_\-\s]?\s*b\b|\bEb\b|binding\s+energy).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+    ],
+    "stability_parameter_Es": [
+        r"(?:\bE\s*[_\-\s]?\s*s\b|\bEs\b|stability\s+(?:parameter|energy)).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+    ],
+    "binding_energy": [
+        r"(?:binding\s+energy|\bE\s*[_\-\s]?\s*b\b|\bEb\b).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+    ],
     "overpotential": [
         r"(?:overpotential|\u03b7|eta).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
         r"([\-\+]?\d+[.]?\d*)\s*(V|eV).{0,60}(?:overpotential|\u03b7|eta)",
@@ -262,8 +374,8 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     # Rule patterns are intentionally empty; these are populated by LLM output
     # and persisted through the same DFTResult candidate/review chain.
     "activation_energy": [],
-    "binding_energy": [],
     "cohesive_energy": [],
+    "formation_energy": [],
     "fluorination_energy": [],
     "permeation_barrier": [],
     "lattice_constant": [],
@@ -279,6 +391,25 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
     "thermal_conductivity": [],
     "carrier_mobility": [],
     "optical_absorption_peak": [],
+    "reaction_energy": [],
+    "electronegativity_sum": [],
+    "unoccupied_d_state_fraction": [],
+    "orbital_occupancy_dxy": [],
+    "orbital_occupancy_dx2_y2": [],
+    "orbital_occupancy_dz2": [],
+    "orbital_occupancy_dxz": [],
+    "orbital_occupancy_dyz": [],
+    "orbital_occupancy_dxz_dyz": [],
+    "cutoff_energy": [],
+    "k_points": [],
+    "supercell": [],
+    "vacuum_thickness": [],
+    "u_value": [],
+    "functional": [],
+    "solvation_model": [],
+    "calculation_setting": [],
+    "convergence_force": [],
+    "convergence_energy": [],
 }
 
 GRAPHITE_DEFECT_CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
@@ -334,24 +465,299 @@ for _category, _rules in GRAPHITE_DEFECT_CATEGORY_RULES.items():
 
 TABLE_HEADER_CATEGORY_RULES.extend(
     [
+        (re.compile(r"(?:^|[^A-Za-z])(?:S\s*[-–]\s*S|S-S)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:S\s*[-–]\s*S|S-S)", re.IGNORECASE), "bond_length_S-S", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)", re.IGNORECASE), "bond_length_M-N", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)", re.IGNORECASE), "bond_length_M-S", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)", re.IGNORECASE), "bond_length_M-M", "A"),
+        (re.compile(r"(?:li\s*2\s*s.*deposition|deposition.*li\s*2\s*s).*(?:barrier|energy)", re.IGNORECASE), "li2s_deposition_barrier", "eV"),
+        (re.compile(r"(?:li\s*2\s*s.*dissociation|dissociation.*li\s*2\s*s).*(?:energy|barrier)", re.IGNORECASE), "li2s_dissociation_energy", "eV"),
+        (re.compile(r"(?:li\s*(?:ion)?\s*)?(?:diffusion|migration).*(?:barrier|energy)", re.IGNORECASE), "migration_barrier", "eV"),
+        (re.compile(r"(?:reaction\s+energy|conversion\s+energy|^e[_\-\s]*rxn)", re.IGNORECASE), "reaction_energy", "eV"),
+        (re.compile(r"(?:lowdin|löwdin).*(?:charge|population)", re.IGNORECASE), "Lowdin_charge", "e"),
+        (re.compile(r"\bbader\b.*(?:charge|population)|(?:charge|population).*\bbader\b", re.IGNORECASE), "bader_charge", "e"),
+        (re.compile(r"charge\s+transfer|electron\s+transfer", re.IGNORECASE), "charge_transfer", "e"),
+        (re.compile(r"\bICOHP\b|integrated\s+COHP", re.IGNORECASE), "ICOHP", "eV"),
+        (re.compile(r"\bCOHP\b", re.IGNORECASE), "COHP", "eV"),
+        (re.compile(r"d[-\s]?orbital\s+occupanc|d\s+occupanc|d\s+electron\s+occupanc", re.IGNORECASE), "d_orbital_occupancy", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*xy|d\s*xy\s+occupanc", re.IGNORECASE), "orbital_occupancy_dxy", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*x\s*2\s*[-−]?\s*y\s*2|dx\s*2\s*[-−]?\s*y\s*2\s+occupanc", re.IGNORECASE), "orbital_occupancy_dx2_y2", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*(?:z\s*2|2\s*z)|d\s*(?:z\s*2|2\s*z)\s+occupanc", re.IGNORECASE), "orbital_occupancy_dz2", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*xz\b|dxz\s+occupanc", re.IGNORECASE), "orbital_occupancy_dxz", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*yz\b|dyz\s+occupanc", re.IGNORECASE), "orbital_occupancy_dyz", None),
+        (re.compile(r"(?:rho|ρ)\s*\(?\s*d\s*xz\s*\+\s*d\s*yz|dxz\s*\+\s*dyz\s+occupanc", re.IGNORECASE), "orbital_occupancy_dxz_dyz", None),
+        (re.compile(r"(?:DOS|density\s+of\s+states).*(?:Fermi|E[_\-\s]?F)|(?:Fermi|E[_\-\s]?F).*(?:DOS|density\s+of\s+states)", re.IGNORECASE), "DOS_at_Fermi", None),
+        (re.compile(r"(?:d[-\s]?band\s+center|ε\s*d|epsilon\s*d)", re.IGNORECASE), "d_band_center", "eV"),
+        (re.compile(r"(?:en[_\-\s]*sum|electronegativity\s+sum|sum\s+of\s+electronegativities)", re.IGNORECASE), "electronegativity_sum", None),
+        (re.compile(r"(?:p[_\-\s]*un|unoccupied\s+d[-\s]*states?|proportion\s+of\s+unoccupied)", re.IGNORECASE), "unoccupied_d_state_fraction", None),
+        (re.compile(r"(?:\bE\s*[_\-\s]?\s*b\b|\bEb\b).*(?:metal|support|site|anchoring)|(?:metal|support|site|anchoring).*(?:\bE\s*[_\-\s]?\s*b\b|\bEb\b|binding\s+energy)", re.IGNORECASE), "metal_support_binding_energy_Eb", "eV"),
+        (re.compile(r"(?:\bE\s*[_\-\s]?\s*s\b|\bEs\b|stability\s+(?:parameter|energy))", re.IGNORECASE), "stability_parameter_Es", "eV"),
         (re.compile(r"(defect\s*)?formation\s+energ|(^e[_\-\s]*f$)|(^e[_\-\s]*form)", re.IGNORECASE), "formation_energy", "eV"),
+        (re.compile(r"cohesive\s+energ|(^e[_\-\s]*coh)", re.IGNORECASE), "cohesive_energy", "eV/atom"),
         (re.compile(r"(migration|diffusion).*(barrier|energy)|(^e[_\-\s]*m$)", re.IGNORECASE), "migration_barrier", "eV"),
         (re.compile(r"(band\s*gap|e[_\-\s]*g)", re.IGNORECASE), "band_gap", "eV"),
         (re.compile(r"(work\s*function|^wf$)", re.IGNORECASE), "work_function", "eV"),
         (re.compile(r"(magnetic\s*moment|magnetization|spin\s*moment)", re.IGNORECASE), "magnetic_moment", "μB"),
+        (re.compile(r"(?:functional|exchange[-\s]*correlation)", re.IGNORECASE), "functional", None),
+        (re.compile(r"(?:cutoff|plane[-\s]*wave|kinetic\s+energy).*(?:energy)?", re.IGNORECASE), "cutoff_energy", "eV"),
+        (re.compile(r"(?:k[-\s]*points?|monkhorst)", re.IGNORECASE), "k_points", None),
+        (re.compile(r"(?:supercell|cell\s+size)", re.IGNORECASE), "supercell", None),
+        (re.compile(r"(?:vacuum|vacuum\s+space|vacuum\s+thickness)", re.IGNORECASE), "vacuum_thickness", "A"),
+        (re.compile(r"(?:hubbard\s+u|\bu\s+value\b|\bU\b)", re.IGNORECASE), "u_value", "eV"),
+        (re.compile(r"(?:solvation|solvent|implicit\s+solvent)", re.IGNORECASE), "solvation_model", None),
+        (re.compile(r"(?:force\s+convergence|convergence\s+force)", re.IGNORECASE), "convergence_force", "eV/A"),
+        (re.compile(r"(?:energy\s+convergence|convergence\s+energy)", re.IGNORECASE), "convergence_energy", "eV"),
     ]
 )
 
 
 def _resolve_adsorbate(text: str) -> str | None:
     """从文本中推断吸附质."""
-    normalized = re.sub(r"\s+", " ", (text or "").lower())
+    normalized = re.sub(r"\s+", " ", _normalize_chem_label(text).lower())
+    if not normalized:
+        return None
+    if re.search(r"\b(?:sulfur|sulphur)\s+(?:reduction|host|cathode|species|chemistry|loading|content)\b", normalized):
+        return None
+    if re.search(r"\b(?:figure|fig\.?|table|scheme)\s+s\s*8\b", normalized):
+        s8_context = re.sub(r"\b(?:figure|fig\.?|table|scheme)\s+s\s*8\b", " ", normalized)
+    else:
+        s8_context = normalized
+    if re.search(r"\b(?:cyclo[-\s]?s\s*8|s\s*8\s+(?:molecule|ring|cluster)|(?:molecular\s+)?s\s*8)\b", s8_context):
+        return "S8"
+    if re.search(r"\b(?:single\s+sulfur\s+atom|atomic\s+sulfur|sulfur\s+atom|s\s+atom)\b", normalized):
+        return "S_atom"
     for key in sorted(ADSORBATE_MAP, key=len, reverse=True):
         name = ADSORBATE_MAP[key]
         escaped = re.escape(key.lower()).replace(r"\ ", r"[\s\-]+")
-        if re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", normalized):
+        haystack = s8_context if key == "s8" else normalized
+        if re.search(rf"(?<![a-z0-9]){escaped}(?![a-z0-9])", haystack):
             return name
     return None
+
+
+def _evidence_payload_fields(item: DFTResultItem) -> dict[str, Any]:
+    return {
+        "fact_family": item.fact_family,
+        "atom_pair": item.atom_pair,
+        "site_label": item.site_label,
+        "state_context": item.state_context,
+        "active_site_instance_key": item.active_site_instance_key,
+        "metal_center_1": item.metal_center_1,
+        "metal_center_2": item.metal_center_2,
+        "support": item.support,
+        "source_table_id": item.source_table_id,
+        "source_table_caption": item.source_table_caption,
+        "source_row_index": item.source_row_index,
+        "source_column_index": item.source_column_index,
+        "raw_row_text": item.raw_row_text,
+        "raw_column_header": item.raw_column_header,
+        "parser_version": item.parser_version,
+        "confidence": item.confidence,
+    }
+
+
+def _infer_atom_pair(text: str) -> str | None:
+    normalized = _normalize_chem_label(text)
+    patterns = [
+        (r"\bLi\s*-\s*S\b|\bLi\s+S\b", "Li-S"),
+        (r"\bS\s*-\s*S\b|\bS\s+S\b", "S-S"),
+        (r"\bM\s*-\s*N\b|\bmetal\s*-\s*N\b|[A-Z][a-z]?\s*-\s*N\b", "M-N"),
+        (r"\bM\s*-\s*S\b|\bmetal\s*-\s*S\b|[A-Z][a-z]?\s*-\s*S\b", "M-S"),
+        (r"\bM\s*-\s*M\b|\bmetal\s*-\s*metal\b|[A-Z][a-z]?\s*-\s*[A-Z][a-z]?\b", "M-M"),
+    ]
+    for pattern, atom_pair in patterns:
+        if re.search(pattern, normalized, re.IGNORECASE):
+            return atom_pair
+    return None
+
+
+def _category_atom_pair(category: str, evidence: str) -> str | None:
+    if category.startswith("bond_length_"):
+        return category.removeprefix("bond_length_")
+    return _infer_atom_pair(evidence)
+
+
+def _fact_family_for_category(category: str) -> str:
+    if category.startswith("bond_length_") or category == "li_s_bond_length":
+        return "bond_length_table"
+    if category in {
+        "Lowdin_charge",
+        "bader_charge",
+        "charge_transfer",
+        "ICOHP",
+        "COHP",
+        "d_orbital_occupancy",
+        "DOS_at_Fermi",
+        "d_band_center",
+        "work_function",
+        "magnetic_moment",
+        "electronegativity_sum",
+        "unoccupied_d_state_fraction",
+        "orbital_occupancy_dxy",
+        "orbital_occupancy_dx2_y2",
+        "orbital_occupancy_dz2",
+        "orbital_occupancy_dxz",
+        "orbital_occupancy_dyz",
+        "orbital_occupancy_dxz_dyz",
+    }:
+        return "electronic_descriptor_table"
+    if category in {"metal_support_binding_energy_Eb", "stability_parameter_Es", "formation_energy", "cohesive_energy"}:
+        return "active_site_stability_table"
+    if category in {"gibbs_free_energy_change", "reaction_energy"}:
+        return "reaction_free_energy_table"
+    if category in {
+        "reaction_barrier",
+        "activation_energy",
+        "migration_barrier",
+        "li2s_decomposition_barrier",
+        "li2s_deposition_barrier",
+        "li2s_dissociation_energy",
+        "li2s_nucleation_barrier",
+    }:
+        return "reaction_barrier_table"
+    if category in {
+        "cutoff_energy",
+        "k_points",
+        "supercell",
+        "vacuum_thickness",
+        "u_value",
+        "functional",
+        "solvation_model",
+        "calculation_setting",
+        "convergence_force",
+        "convergence_energy",
+    }:
+        return "calculation_settings"
+    if category == "adsorption_energy":
+        return "adsorption_energy_matrix"
+    return "scalar_dft_result"
+
+
+def _is_ml_descriptor_context(*parts: str | None) -> bool:
+    text = " ".join(part or "" for part in parts)
+    return bool(
+        re.search(
+            r"\b(?:machine\s+learning|ML\s+dataset|ML\s+descriptor|input\s+features?|descriptor\s+table|Tables?\s+S[678])\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _fact_family_for_table_cell(category: str, caption: str, header: str, row_text: str) -> str:
+    family = _fact_family_for_category(category)
+    if family in {"electronic_descriptor_table", "bond_length_table", "active_site_stability_table"} and _is_ml_descriptor_context(
+        caption,
+        header,
+        row_text,
+    ):
+        return "ml_descriptor"
+    return family
+
+
+def _adsorbate_from_adsorption_header(header: str) -> str | None:
+    text = re.sub(r"\s+", " ", _normalize_chem_label(header)).strip()
+    if not text:
+        return None
+    patterns = [
+        r"(?:E\s*[_\-\s]?\s*ads|Eads)\s*\(\s*([^)]+?)\s*\)",
+        r"(?:E\s*[_\-\s]?\s*ads|Eads)\s+(?:of|for)\s+(.+?)(?:\s*\(|$)",
+        r"(?:E\s*[_\-\s]?\s*ads|Eads)\s*[-–]\s*(.+?)(?:\s*\(|$)",
+        r"adsorption\s+energy\s+(?:of|for)\s+(.+?)(?:\s*\(|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = re.sub(r"\b(?:ev|mev|kj/mol|kcal/mol|a|angstroms?|nm|pm)\b", " ", match.group(1), flags=re.IGNORECASE)
+        candidate = re.sub(r"[^A-Za-z0-9*+\-_\s().]", " ", candidate).strip(" -_()")
+        resolved = _resolve_adsorbate(candidate)
+        if resolved:
+            return resolved
+    return None
+
+
+def _is_explicit_adsorbate_header(header: str | None) -> bool:
+    return bool(
+        re.search(
+            r"\b(adsorbate|intermediate|species|molecule|slurry|lips|li2sx)\b",
+            header or "",
+            re.IGNORECASE,
+        )
+    )
+
+
+def _category_should_default_null_adsorbate(category: str) -> bool:
+    return _fact_family_for_category(category) in {
+        "bond_length_table",
+        "electronic_descriptor_table",
+        "active_site_stability_table",
+        "calculation_setting_table",
+        "calculation_settings",
+        "reaction_free_energy_table",
+        "reaction_barrier_table",
+    }
+
+
+def _row_reaction_step(row: list[str], headers: list[str], category: str, header: str) -> str:
+    family = _fact_family_for_category(category)
+    if family in {"reaction_free_energy_table", "reaction_barrier_table"} and row:
+        for idx, cell in enumerate(row):
+            column = headers[idx] if idx < len(headers) else ""
+            context = f"{column} {cell}"
+            if re.search(
+                r"\b(?:step|reaction|process|conversion|pathway|intermediate)\b|Li\s*2\s*S\s*\d?\s*(?:->|→|to|-)\s*Li\s*2\s*S\s*\d?",
+                context,
+                re.IGNORECASE,
+            ) and (
+                _looks_like_safe_table_label(cell)
+                or re.search(r"Li\s*2\s*S\s*\d?\s*(?:->|→|to|-)\s*Li\s*2\s*S\s*\d?", cell, re.IGNORECASE)
+            ):
+                return cell.strip()
+    return header
+
+
+def _category_unit_from_label(label: str, caption: str = "") -> tuple[str, str | None] | None:
+    text = re.sub(r"\s+", " ", _normalize_chem_label(label)).strip()
+    lowered = text.lower()
+    if not text:
+        return None
+    setting_labels = [
+        (r"(?:functional|exchange[-\s]*correlation)", "functional", None),
+        (r"(?:cutoff|plane[-\s]*wave|kinetic\s+energy)", "cutoff_energy", "eV"),
+        (r"(?:k[-\s]*points?|monkhorst)", "k_points", None),
+        (r"(?:supercell|cell\s+size)", "supercell", None),
+        (r"(?:vacuum|vacuum\s+space|vacuum\s+thickness)", "vacuum_thickness", "A"),
+        (r"(?:hubbard\s+u|\bu\s+value\b|\bU\b)", "u_value", "eV"),
+        (r"(?:solvation|solvent|implicit\s+solvent)", "solvation_model", None),
+        (r"(?:force\s+convergence|convergence\s+force)", "convergence_force", "eV/A"),
+        (r"(?:energy\s+convergence|convergence\s+energy)", "convergence_energy", "eV"),
+    ]
+    for pattern, category, unit in setting_labels:
+        if re.search(pattern, text, re.IGNORECASE):
+            return category, unit
+    if re.search(r"(?:Δ\s*G|delta\s*G|free\s+energy|gibbs)", text, re.IGNORECASE):
+        return "gibbs_free_energy_change", "eV"
+    if re.search(r"(?:li\s*2\s*s.*deposition|deposition.*li\s*2\s*s).*(?:barrier|energy)", lowered):
+        return "li2s_deposition_barrier", "eV"
+    if re.search(r"(?:li\s*2\s*s.*decomposition|decomposition.*li\s*2\s*s).*(?:barrier|energy)", lowered):
+        return "li2s_decomposition_barrier", "eV"
+    if re.search(r"(?:li\s*(?:ion)?\s*)?(?:diffusion|migration).*(?:barrier|energy)", lowered):
+        return "migration_barrier", "eV"
+    for pattern, category, unit in TABLE_HEADER_CATEGORY_RULES:
+        if pattern.search(text) or pattern.search(f"{text} {caption}"):
+            return category, unit
+    return None
+
+
+def _is_supplement_label_number(cell: str, match: re.Match[str]) -> bool:
+    token = match.group(0)
+    if token != "8":
+        return False
+    prefix = cell[: match.start()]
+    suffix = cell[match.end() :]
+    if not re.search(r"(?:figure|fig\.?|table|scheme)\s+s\s*$", prefix, re.IGNORECASE):
+        return False
+    return bool(re.match(r"\b", suffix))
 
 
 def _has_graphite_defect_context(text: str) -> bool:
@@ -576,7 +982,7 @@ def _looks_like_reference_token(value: str | None) -> bool:
 
 
 def _looks_like_safe_table_label(value: str | None) -> bool:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    text = re.sub(r"\s+", " ", _normalize_chem_label(value)).strip()
     if not text:
         return False
     if len(text) > 48:
@@ -618,6 +1024,19 @@ def _category_semantic_conflict(category: str, evidence: str, value: float | Non
             return True
         if category == "band_gap" and value is not None and value > 10:
             return True
+    if category == "limiting_potential" and re.search(r"\bsulfur\b", lowered):
+        return True
+    if category == "adsorption_energy" and re.search(r"\b(?:\d+\s+electrons?|figure\s+s\s*8|fig\.?\s+s\s*8)\b", lowered):
+        return True
+    if category in {"adsorption_energy", "metal_support_binding_energy_Eb"} and re.search(
+        r"\bdelithiation\s+energy\b|\bE\s*1\b",
+        evidence or "",
+        re.IGNORECASE,
+    ):
+        return True
+    if category in {"ICOHP", "COHP", "DOS_at_Fermi", "d_orbital_occupancy", "Lowdin_charge", "bader_charge"}:
+        if value == 8 and re.search(r"\b(?:see\s+)?(?:figure|fig\.?|table|scheme)\s+s\s*8\b", lowered):
+            return True
     return False
 
 
@@ -632,6 +1051,12 @@ def _should_keep_result(category: str, adsorbate: str | None, value: float | Non
         return False
     if category in {"limiting_potential", "overpotential"}:
         lowered = evidence.lower()
+        if category == "limiting_potential" and not re.search(
+            r"(?:limiting\s+potential|\bU\s*[_\-]\s*L\b|\bU\s+L\b|\bUL\b)",
+            evidence,
+            re.IGNORECASE,
+        ):
+            return False
         if re.search(r"\[\s*\d+\s*\]", evidence):
             return False
         if value is not None and abs(value) > 20:
@@ -639,6 +1064,38 @@ def _should_keep_result(category: str, adsorbate: str | None, value: float | Non
         if re.search(r"\b\d{4}\b", lowered) and not re.search(r"\b(?:0|1|2|3|4|5)\.\d+\s*(?:v|ev)\b", lowered):
             return False
     if category == "adsorption_energy" and not adsorbate:
+        return False
+    if category == "adsorption_energy":
+        lowered = evidence.lower()
+        if re.search(r"\bdelithiation\s+energy\b|\bE\s*1\b", evidence, re.IGNORECASE):
+            return False
+        if re.search(r"\b(?:sulfur|sulphur)\s+(?:reduction|host|cathode|chemistry|loading|content)\b", lowered):
+            return False
+        if re.search(r"\b(?:figure|fig\.?|table|scheme)\s+s\s*8\b", lowered) and adsorbate == "S8":
+            return False
+    if category == "metal_support_binding_energy_Eb" and not re.search(
+        r"\b(?:metal|atom|single[-\s]?atom|support|substrate|anchoring|stability|M\s*[-–]\s*N|M\s*[-–]\s*C)\b",
+        evidence,
+        re.IGNORECASE,
+    ):
+        return False
+    if category == "metal_support_binding_energy_Eb" and re.search(
+        r"\bdelithiation\s+energy\b|\bE\s*1\b",
+        evidence,
+        re.IGNORECASE,
+    ):
+        return False
+    if category == "binding_energy":
+        lowered = evidence.lower()
+        if re.search(r"\b(?:li2s8|li2s6|li2s4|li2s2|li2s|lips|polysulfide)\b", lowered):
+            return False
+        if re.search(r"\b(?:metal|single[-\s]?atom|support|substrate|anchoring|m\s*[-–]\s*n|m\s*[-–]\s*c)\b", lowered):
+            return False
+    if category == "stability_parameter_Es" and not re.search(
+        r"\b(?:stability|stable|E\s*[_\-\s]?\s*s|Es)\b",
+        evidence,
+        re.IGNORECASE,
+    ):
         return False
     if category == "formation_energy":
         lowered = evidence.lower()
@@ -653,7 +1110,7 @@ def _should_keep_result(category: str, adsorbate: str | None, value: float | Non
         ):
             return False
         if re.search(
-            r"\b(underestimat|overestimat|disagreement|difference|deviation|margin|"
+            r"\b(underestimat\w*|overestimat\w*|disagreement|difference|deviation|margin|"
             r"order\s+of|error\s+bars?|standard\s+deviations?|finite[-\s]concentration|"
             r"energy\s+scale|energy\s+drops?|cutoff\s+energy|force\s+tolerance|atomization\s+energ|activation\s+energy)\b",
             lowered,
@@ -704,7 +1161,7 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
         content = getattr(tbl, "markdown_content", "") or ""
         if _is_reference_like_evidence(f"{caption}\n{content}"):
             continue
-        if category in {"limiting_potential", "overpotential"} and _parse_markdown_table(content)[1]:
+        if _parse_markdown_table(content)[1]:
             continue
         combined = _normalize_numeric_text(f"{caption}\n{content}")
         for pat_tuple in patterns:
@@ -715,7 +1172,8 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
             for m in re.finditer(pattern, combined, re.IGNORECASE):
                 try:
                     val = _parse_match_float(m, vg) if vg else None
-                    raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
+                    raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
+                    raw_unit = raw_unit_value.strip() if isinstance(raw_unit_value, str) else None
                     unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                 except (ValueError, IndexError):
                     val, unit = None, None
@@ -739,6 +1197,10 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                     evidence_text=evidence,
                     source_location=loc,
                     confidence=0.75 if val is not None else 0.45,
+                    fact_family=_fact_family_for_category(category),
+                    atom_pair=_category_atom_pair(category, evidence),
+                    source_table_id=str(getattr(tbl, "id", "") or getattr(tbl, "table_id", "") or caption or "table"),
+                    source_table_caption=caption or None,
                 ))
     return results
 
@@ -783,35 +1245,213 @@ def _extract_markdown_table_blocks(markdown: str) -> list[_MarkdownTableBlock]:
 
 def _infer_table_columns(
     headers: list[str],
+    caption: str = "",
 ) -> tuple[dict[int, tuple[str, str | None]], int | None, int | None]:
     category_columns: dict[int, tuple[str, str | None]] = {}
     adsorbate_col: int | None = None
     catalyst_col: int | None = None
+    caption_text = _normalize_chem_label(caption)
     for idx, header in enumerate(headers):
-        header_text = re.sub(r"\s+", " ", header or "").strip()
+        header_text = re.sub(r"\s+", " ", _normalize_chem_label(header)).strip()
         lowered = header_text.lower()
+        compact = re.sub(r"[^a-z0-9]+", "", lowered)
+        header_context = f"{header_text} {caption_text}".strip()
         if catalyst_col is None and re.search(
-            r"\b(catalyst|material|system|model|substrate)\b",
+            r"\b(catalyst|material|system|systems|model|substrate|structure|structures)\b",
             lowered,
         ):
             catalyst_col = idx
         if adsorbate_col is None and re.search(
-            r"(adsorbate|intermediate|species|molecule|state|slurry|lips|li2sx)",
+            r"\b(adsorbate|intermediate|species|molecule|slurry|lips|li2sx)\b",
             lowered,
         ):
             adsorbate_col = idx
+        if re.search(
+            r"(?:E\s*[_\-\s]?\s*ads|Eads)\s*(?:\(|\s+(?:of|for)\s+|[-–])|adsorption\s+energy\s+(?:of|for)\s+",
+            header_text,
+            re.IGNORECASE,
+        ):
+            category_columns[idx] = ("adsorption_energy", "eV")
+            continue
+        if re.search(r"(?:Δ\s*G|delta\s*G|free\s+energy|gibbs)", header_text, re.IGNORECASE):
+            category_columns[idx] = ("gibbs_free_energy_change", "eV")
+            continue
+        if compact in {"eb", "ebeV", "ebe"} or re.fullmatch(r"eb(?:ev)?", compact):
+            category_columns[idx] = ("metal_support_binding_energy_Eb", "eV")
+            continue
+        if compact in {"es", "eseV", "ese"} or re.fullmatch(r"es(?:ev)?", compact):
+            category_columns[idx] = ("stability_parameter_Es", "eV")
+            continue
+        if re.search(r"\bd\s*M\s*-\s*S\b|\bM\s*-\s*S\b", header_text, re.IGNORECASE):
+            category_columns[idx] = ("bond_length_M-S", "A")
+            continue
+        if re.search(r"\bd\s*M\s*-\s*N\b|\bM\s*-\s*N\b", header_text, re.IGNORECASE):
+            category_columns[idx] = ("bond_length_M-N", "A")
+            continue
         if re.search(r"(migration|diffusion).*(barrier|energy)", lowered):
             category_columns[idx] = ("migration_barrier", "eV")
+            continue
+        if re.search(r"(?:li\s*2\s*s.*deposition|deposition.*li\s*2\s*s).*(?:barrier|energy)", lowered):
+            category_columns[idx] = ("li2s_deposition_barrier", "eV")
+            continue
+        if re.search(r"(?:li\s*2\s*s.*dissociation|dissociation.*li\s*2\s*s).*(?:energy|barrier)", lowered):
+            category_columns[idx] = ("li2s_dissociation_energy", "eV")
+            continue
+        if re.search(r"(?:reaction\s+energy|conversion\s+energy|^e[_\-\s]*rxn)", lowered):
+            category_columns[idx] = ("reaction_energy", "eV")
+            continue
+        if re.search(r"(?:en[_\-\s]*sum|electronegativity\s+sum|sum\s+of\s+electronegativities)", lowered):
+            category_columns[idx] = ("electronegativity_sum", None)
+            continue
+        if re.search(r"(?:p[_\-\s]*un|unoccupied\s+d[-\s]*states?|proportion\s+of\s+unoccupied)", lowered):
+            category_columns[idx] = ("unoccupied_d_state_fraction", None)
+            continue
+        orbital_columns = {
+            "orbital_occupancy_dxz_dyz": r"(?:rho|ρ)\s*\(?\s*d\s*xz\s*\+\s*d\s*yz|dxz\s*\+\s*dyz\s+occupanc",
+            "orbital_occupancy_dx2_y2": r"(?:rho|ρ)\s*\(?\s*d\s*x\s*2\s*[-−]?\s*y\s*2|dx\s*2\s*[-−]?\s*y\s*2\s+occupanc",
+            "orbital_occupancy_dz2": r"(?:rho|ρ)\s*\(?\s*d\s*(?:z\s*2|2\s*z)|d\s*(?:z\s*2|2\s*z)\s+occupanc",
+            "orbital_occupancy_dxy": r"(?:rho|ρ)\s*\(?\s*d\s*xy|d\s*xy\s+occupanc",
+            "orbital_occupancy_dxz": r"(?:rho|ρ)\s*\(?\s*d\s*xz\b|dxz\s+occupanc",
+            "orbital_occupancy_dyz": r"(?:rho|ρ)\s*\(?\s*d\s*yz\b|dyz\s+occupanc",
+        }
+        matched_orbital = False
+        for orbital_category, orbital_pattern in orbital_columns.items():
+            if re.search(orbital_pattern, header_text, re.IGNORECASE):
+                category_columns[idx] = (orbital_category, None)
+                matched_orbital = True
+                break
+        if matched_orbital:
+            continue
+        calculation_columns = [
+            (r"(?:functional|exchange[-\s]*correlation)", "functional", None),
+            (r"(?:cutoff|plane[-\s]*wave|kinetic\s+energy)", "cutoff_energy", "eV"),
+            (r"(?:k[-\s]*points?|monkhorst)", "k_points", None),
+            (r"(?:supercell|cell\s+size)", "supercell", None),
+            (r"(?:vacuum|vacuum\s+space|vacuum\s+thickness)", "vacuum_thickness", "A"),
+            (r"(?:hubbard\s+u|\bu\s+value\b|\bU\b)", "u_value", "eV"),
+            (r"(?:solvation|solvent|implicit\s+solvent)", "solvation_model", None),
+            (r"(?:force\s+convergence|convergence\s+force)", "convergence_force", "eV/A"),
+            (r"(?:energy\s+convergence|convergence\s+energy)", "convergence_energy", "eV"),
+        ]
+        matched_setting = False
+        for setting_pattern, setting_category, setting_unit in calculation_columns:
+            if re.search(setting_pattern, header_text, re.IGNORECASE):
+                category_columns[idx] = (setting_category, setting_unit)
+                matched_setting = True
+                break
+        if matched_setting:
+            continue
+        if re.search(r"(?:\be\s*[_\-\s]?\s*b\b|\beb\b|binding\s+energy)", lowered) and re.search(
+            r"(?:metal|support|site|anchoring|stability|m\s*[-–]\s*n|m\s*[-–]\s*c)",
+            header_context,
+            re.IGNORECASE,
+        ):
+            category_columns[idx] = ("metal_support_binding_energy_Eb", "eV")
+            continue
+        if re.search(r"(?:\be\s*[_\-\s]?\s*s\b|\bes\b|stability\s+(?:parameter|energy))", lowered):
+            category_columns[idx] = ("stability_parameter_Es", "eV")
             continue
         for pattern, category, unit in TABLE_HEADER_CATEGORY_RULES:
             if pattern.search(header_text):
                 category_columns[idx] = (category, unit)
                 break
     if adsorbate_col is None and catalyst_col is None and headers:
-        first_header = headers[0].lower()
-        if not any(pattern.search(first_header) for pattern, _, _ in TABLE_HEADER_CATEGORY_RULES):
+        first_header = _normalize_chem_label(headers[0]).lower()
+        if (
+            not any(pattern.search(first_header) for pattern, _, _ in TABLE_HEADER_CATEGORY_RULES)
+            and not re.search(r"\b(site|system|material|catalyst|model|state)\b", first_header, re.IGNORECASE)
+        ):
             adsorbate_col = 0
     return category_columns, adsorbate_col, catalyst_col
+
+
+def _first_numeric_match(cell: str) -> re.Match[str] | None:
+    return re.search(
+        r"(?:"
+        r"[-+]?\d+(?:\.\d+)?\s*[×x·]\s*10\^[-+]?\d+"
+        r"|[-+]?\d+(?:\.\d+)?[eE][-+]?\d+"
+        r"|[-+]?\d*\.?\d+"
+        r")",
+        cell,
+    )
+
+
+def _unit_from_cell(cell: str, default_unit: str | None, category: str) -> str | None:
+    if category in TEXT_SCALAR_CATEGORIES:
+        return None
+    unit_match = re.search(
+        r"(eV/A|eV/Å|states/eV|eV\^-1|eV-1|eV|meV|kJ/mol|kcal/mol|Å|A|angstroms?|nm|pm|V|μB|mu_B|e[\u2212-]?|electrons?)",
+        cell,
+        re.IGNORECASE,
+    )
+    if unit_match:
+        raw_unit = unit_match.group(1).strip()
+        return UNIT_ALIASES.get(raw_unit.lower(), raw_unit)
+    return default_unit
+
+
+def _scan_key_value_rows(
+    headers: list[str],
+    rows: list[list[str]],
+    *,
+    caption: str,
+    page: int | None,
+    source_table_id: str,
+) -> list[DFTResultItem]:
+    if len(headers) < 2:
+        return []
+    first_header = _normalize_chem_label(headers[0]).lower()
+    second_header = _normalize_chem_label(headers[1]).lower()
+    if not re.search(r"\b(setting|parameter|property|descriptor|feature|quantity|metric)\b", first_header):
+        return []
+    if not re.search(r"\b(value|result|number|data)\b", second_header):
+        return []
+    results: list[DFTResultItem] = []
+    for row_index, row in enumerate(rows):
+        if len(row) < 2:
+            continue
+        label = row[0].strip()
+        cell = _normalize_numeric_text(row[1].strip())
+        category_unit = _category_unit_from_label(label, caption)
+        if not category_unit or not cell:
+            continue
+        category, default_unit = category_unit
+        value_match = _first_numeric_match(cell)
+        if value_match and _is_supplement_label_number(cell, value_match):
+            value_match = None
+        if category in NUMERIC_CATEGORIES and not value_match:
+            continue
+        value = None if category in TEXT_SCALAR_CATEGORIES else (_parse_numeric_value(value_match.group(0)) if value_match else None)
+        unit = _unit_from_cell(cell, default_unit, category)
+        row_text = " | ".join(row)
+        evidence = f"{label}: {cell}; row: {row_text}"
+        adsorbate = None if _category_should_default_null_adsorbate(category) else _resolve_adsorbate(evidence)
+        if not _should_keep_result(category, adsorbate, value, evidence):
+            continue
+        results.append(
+            DFTResultItem(
+                category=category,
+                adsorbate=adsorbate,
+                value=value,
+                unit=unit,
+                reaction_step=label,
+                evidence_text=evidence[:450],
+                source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
+                confidence=0.84 if value is not None else 0.68,
+                fact_family=_fact_family_for_table_cell(category, caption, label, row_text),
+                atom_pair=_category_atom_pair(category, f"{label} {row_text}"),
+                site_label=None,
+                state_context=label,
+                active_site_instance_key=None,
+                source_table_id=source_table_id,
+                source_table_caption=caption or None,
+                source_row_index=row_index,
+                source_column_index=1,
+                raw_row_text=row_text,
+                raw_column_header=headers[1],
+            )
+        )
+    return results
 
 
 def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
@@ -824,18 +1464,33 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
         headers, rows = _parse_markdown_table(content)
         if not headers or not rows:
             continue
-        category_columns, adsorbate_col, catalyst_col = _infer_table_columns(headers)
+        source_table_id = str(getattr(tbl, "id", "") or getattr(tbl, "table_id", "") or caption or "table")
+        results.extend(
+            _scan_key_value_rows(
+                headers,
+                rows,
+                caption=caption,
+                page=getattr(tbl, "page", None),
+                source_table_id=source_table_id,
+            )
+        )
+        category_columns, adsorbate_col, catalyst_col = _infer_table_columns(headers, caption)
+        explicit_adsorbate_col = (
+            adsorbate_col is not None
+            and adsorbate_col < len(headers)
+            and _is_explicit_adsorbate_header(headers[adsorbate_col])
+        )
         results.extend(_scan_metric_rows(headers, rows, caption, getattr(tbl, "page", None)))
         if not category_columns:
             continue
-        for row in rows:
+        for row_index, row in enumerate(rows):
             row_text = " | ".join(row)
             adsorbate = None
             catalyst_name = None
             if adsorbate_col is not None and adsorbate_col < len(row):
                 raw_adsorbate = row[adsorbate_col].strip()
                 adsorbate = _resolve_adsorbate(raw_adsorbate)
-                if adsorbate is None and _looks_like_safe_table_label(raw_adsorbate):
+                if explicit_adsorbate_col and adsorbate is None and _looks_like_safe_table_label(raw_adsorbate):
                     adsorbate = raw_adsorbate or None
             if catalyst_col is not None and catalyst_col < len(row):
                 raw_catalyst = row[catalyst_col].strip()
@@ -849,31 +1504,34 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                     continue
                 # M4 修复：支持科学计数法（1.5 × 10^3, 2.3e-4, 1.5×10³ 等）
                 cell = _normalize_numeric_text(cell)
-                value_match = re.search(
-                    r"(?:"
-                    r"[-+]?\d+(?:\.\d+)?\s*[×x·]\s*10\^[-+]?\d+"  # 1.5 × 10^3
-                    r"|[-+]?\d+(?:\.\d+)?[eE][-+]?\d+"              # 1.5e3
-                    r"|[-+]?\d*\.?\d+"                               # 普通小数
-                    r")",
-                    cell,
-                )
+                value_match = _first_numeric_match(cell)
+                if value_match and _is_supplement_label_number(cell, value_match):
+                    value_match = None
                 if category in NUMERIC_CATEGORIES and not value_match:
                     continue
-                value = _parse_numeric_value(value_match.group(0)) if value_match else None
-                unit_match = re.search(r"(eV|meV|kJ/mol|kcal/mol|Å|A|angstroms?|nm|pm|e[\u2212-]?|electrons?)", cell, re.IGNORECASE)
-                unit = None
-                if unit_match:
-                    raw_unit = unit_match.group(1).strip()
-                    unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit)
-                elif default_unit:
-                    unit = default_unit
+                value = None if category in TEXT_SCALAR_CATEGORIES else (_parse_numeric_value(value_match.group(0)) if value_match else None)
+                unit = _unit_from_cell(cell, default_unit, category)
                 header = headers[col_idx]
+                reaction_step = _row_reaction_step(row, headers, category, header)
+                quality_evidence = _normalize_chem_label(f"{caption}; {header}: {cell}; row: {row_text}")
                 evidence = f"{header}: {cell}; row: {row_text}"
-                adsorbate_value = _resolve_adsorbate(row_text) or adsorbate or _resolve_adsorbate(evidence)
-                if _category_semantic_conflict(category, evidence, value, unit):
+                header_adsorbate = _adsorbate_from_adsorption_header(header)
+                if category == "adsorption_energy":
+                    adsorbate_value = header_adsorbate or adsorbate or _resolve_adsorbate(evidence)
+                elif _has_graphite_defect_context(f"{caption} {row_text}"):
+                    adsorbate_value = adsorbate or _resolve_adsorbate(evidence)
+                elif _category_should_default_null_adsorbate(category):
+                    adsorbate_value = header_adsorbate or (
+                        adsorbate if (explicit_adsorbate_col or category == "formation_energy") else None
+                    )
+                else:
+                    adsorbate_value = header_adsorbate or (adsorbate if explicit_adsorbate_col else None) or _resolve_adsorbate(evidence)
+                if _category_semantic_conflict(category, quality_evidence, value, unit):
                     continue
-                if not _should_keep_result(category, adsorbate_value, value, evidence):
+                if not _should_keep_result(category, adsorbate_value, value, quality_evidence):
                     continue
+                atom_pair = _category_atom_pair(category, f"{header} {row_text}")
+                site_label = row[0].strip() if row and _looks_like_safe_table_label(row[0]) else None
                 results.append(
                     DFTResultItem(
                         category=category,
@@ -881,13 +1539,24 @@ def _scan_structured_tables(tables: list[Any]) -> list[DFTResultItem]:
                         adsorbate=adsorbate_value,
                         value=value,
                         unit=unit,
-                        reaction_step=header,
+                        reaction_step=reaction_step,
                         evidence_text=evidence[:450],
                         source_location=SourceLocation(
                             table=caption[:80] if caption else "Table",
                             page=getattr(tbl, "page", None),
                         ),
                         confidence=0.82 if value is not None else 0.6,
+                        fact_family=_fact_family_for_table_cell(category, caption, header, row_text),
+                        atom_pair=atom_pair,
+                        site_label=site_label,
+                        state_context=reaction_step,
+                        active_site_instance_key="|".join(part for part in [catalyst_name, site_label] if part) or None,
+                        source_table_id=source_table_id,
+                        source_table_caption=caption or None,
+                        source_row_index=row_index,
+                        source_column_index=col_idx,
+                        raw_row_text=row_text,
+                        raw_column_header=header,
                     )
                 )
     return results
@@ -922,7 +1591,7 @@ def _looks_like_table_section_label(row: list[str]) -> str | None:
 def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, page: int | None) -> list[DFTResultItem]:
     results: list[DFTResultItem] = []
     current_group: str | None = None
-    for row in rows:
+    for row_index, row in enumerate(rows):
         row = [cell.strip() for cell in row]
         section_label = _looks_like_table_section_label(row)
         if section_label:
@@ -952,6 +1621,8 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                 r")",
                 cell,
             )
+            if value_match and _is_supplement_label_number(cell, value_match):
+                continue
             if not value_match:
                 continue
             unit_match = re.search(r"(V|eV|meV)", cell, re.IGNORECASE)
@@ -967,6 +1638,17 @@ def _scan_metric_rows(headers: list[str], rows: list[list[str]], caption: str, p
                     evidence_text=evidence[:450],
                     source_location=SourceLocation(table=caption[:80] if caption else "Table", page=page),
                     confidence=0.86,
+                    fact_family=_fact_family_for_category(category),
+                    atom_pair=_category_atom_pair(category, f"{header} {row_text}"),
+                    site_label=current_group,
+                    state_context=header,
+                    active_site_instance_key=current_group,
+                    source_table_id=caption or "metric_table",
+                    source_table_caption=caption or None,
+                    source_row_index=row_index,
+                    source_column_index=col_idx,
+                    raw_row_text=row_text,
+                    raw_column_header=header,
                 )
             )
     return results
@@ -1280,7 +1962,8 @@ class DFTResultsExtractor:
                     continue
                 try:
                     val = _parse_match_float(m, vg) if vg else None
-                    raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
+                    raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
+                    raw_unit = raw_unit_value.strip() if isinstance(raw_unit_value, str) else None
                     unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                 except (ValueError, IndexError):
                     val, unit = None, None
@@ -1297,8 +1980,14 @@ class DFTResultsExtractor:
 
                 evidence = _extract_context_around_match(text, m.start(), m.end())
                 local_evidence = _extract_sentence_around_match(text, m.start(), m.end())
-                adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(local_evidence) or _resolve_adsorbate(evidence)
-                if not _should_keep_result(category, adsorbate, val, evidence):
+                adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(local_evidence)
+                if (
+                    not adsorbate
+                    and category not in {"adsorption_energy", "binding_energy"}
+                    and not _category_should_default_null_adsorbate(category)
+                ):
+                    adsorbate = _resolve_adsorbate(evidence)
+                if not _should_keep_result(category, adsorbate, val, local_evidence or evidence):
                     continue
                 results.append(DFTResultItem(
                     category=category,
@@ -1308,6 +1997,8 @@ class DFTResultsExtractor:
                     evidence_text=evidence,
                     source_location=loc,
                     confidence=self._calc_confidence(val, unit, evidence, category),
+                    fact_family=_fact_family_for_category(category),
+                    atom_pair=_category_atom_pair(category, evidence),
                 ))
         return results
 
@@ -1318,6 +2009,7 @@ class DFTResultsExtractor:
             cap = _normalize_numeric_text(getattr(fig, "caption", "") or "")
             if not cap:
                 continue
+            figure_had_result = False
             for cat, patterns in CATEGORY_RULES.items():
                 if cat in TABLE_ONLY_NUMERIC_CATEGORIES:
                     continue
@@ -1329,7 +2021,8 @@ class DFTResultsExtractor:
                     for m in re.finditer(pattern, cap, re.IGNORECASE):
                         try:
                             val = _parse_match_float(m, vg) if vg else None
-                            raw_unit = m.group(ug).strip() if ug and ug < len(m.groups()) + 1 else None
+                            raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
+                            raw_unit = raw_unit_value.strip() if isinstance(raw_unit_value, str) else None
                             unit = UNIT_ALIASES.get(raw_unit.lower(), raw_unit) if raw_unit else None
                         except (ValueError, IndexError):
                             val, unit = None, None
@@ -1341,6 +2034,7 @@ class DFTResultsExtractor:
                         adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(evidence)
                         if not _should_keep_result(cat, adsorbate, val, evidence):
                             continue
+                        figure_had_result = True
                         results.append(DFTResultItem(
                             category=cat,
                             adsorbate=adsorbate,
@@ -1349,7 +2043,23 @@ class DFTResultsExtractor:
                             evidence_text=evidence,
                             source_location=loc,
                             confidence=0.7,
+                            fact_family=_fact_family_for_category(cat),
+                            atom_pair=_category_atom_pair(cat, evidence),
                         ))
+            if not figure_had_result and re.search(
+                r"(?:DFT|adsorption\s+energy|free\s+energy|reaction\s+barrier|DOS|Bader|COHP|bond\s+length)",
+                cap,
+                re.IGNORECASE,
+            ):
+                results.append(
+                    DFTResultItem(
+                        category="ambiguous_record",
+                        evidence_text=cap[:450],
+                        source_location=SourceLocation(figure=cap[:100], page=getattr(fig, "page", None)),
+                        confidence=0.25,
+                        fact_family="ambiguous_record",
+                    )
+                )
         return results
 
     @staticmethod
@@ -1384,6 +2094,11 @@ class DFTResultsExtractor:
 
     @staticmethod
     def _item_to_dict(item: DFTResultItem) -> dict:
+        payload_fields = {
+            key: value
+            for key, value in _evidence_payload_fields(item).items()
+            if value not in (None, "", [], {})
+        }
         return {
             "category": item.category,
             "catalyst_name": item.catalyst_name,
@@ -1401,4 +2116,6 @@ class DFTResultsExtractor:
             },
             "reaction_step": item.reaction_step,
             "confidence": round(item.confidence, 2),
+            **payload_fields,
+            "evidence_payload": payload_fields or None,
         }

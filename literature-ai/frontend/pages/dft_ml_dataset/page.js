@@ -74,12 +74,18 @@
         adsorption_energy: "吸附能任务",
         reaction_barrier: "反应能垒任务",
         rds_gibbs_free_energy: "RDS 自由能 / 决速步骤自由能任务",
+        active_site_stability: "活性位稳定性任务",
+        structure_bond_lengths: "结构键长任务",
+        adsorption_energy_matrix: "吸附能矩阵任务",
     };
     const V4_TASK_LABELS = {
         adsorption_energy: "吸附能任务",
         li2s_reaction_energy: "Li2S 反应能任务",
         li2s_barrier: "Li2S 能垒任务",
         rds_srr_multitask: "RDS / SRR 多任务",
+        active_site_stability: "活性位稳定性任务",
+        structure_bond_lengths: "结构键长任务",
+        adsorption_energy_matrix: "吸附能矩阵任务",
     };
 
     const SETTING_STATUS_LABELS = {

@@ -260,6 +260,17 @@ class VerificationSessionDFTCandidateMixin:
             merged_evidence_payload["source_dft_result_id"] = source_dft_result_id
         if source_paper_id:
             merged_evidence_payload["source_paper_id"] = source_paper_id
+        identity_fields = {
+            "property_subtype": self._first_text(corrected.get("property_subtype"), evidence_payload.get("property_subtype")),
+            "active_site_instance_key": self._first_text(corrected.get("active_site_instance_key"), evidence_payload.get("active_site_instance_key")),
+            "atom_pair": self._first_text(corrected.get("atom_pair"), evidence_payload.get("atom_pair")),
+            "site_label": self._first_text(corrected.get("site_label"), corrected.get("adsorption_site"), evidence_payload.get("site_label")),
+            "state_context": self._first_text(corrected.get("state_context"), evidence_payload.get("state_context")),
+            "source_table_id": self._first_text(corrected.get("source_table_id"), evidence_payload.get("source_table_id")),
+            "source_row_index": self._first_text(corrected.get("source_row_index"), evidence_payload.get("source_row_index")),
+            "source_column_index": self._first_text(corrected.get("source_column_index"), evidence_payload.get("source_column_index")),
+        }
+        merged_evidence_payload.update({key: value for key, value in identity_fields.items() if value not in (None, "")})
         signature = self._new_dft_signature(
             material_identity=material_identity,
             property_type=property_type,
@@ -269,6 +280,7 @@ class VerificationSessionDFTCandidateMixin:
             reaction_step=reaction_step,
             source_figure=source_figure,
             page=evidence_payload.get("page"),
+            **identity_fields,
         )
         return (
             {
@@ -288,6 +300,7 @@ class VerificationSessionDFTCandidateMixin:
                 "signature": signature,
                 "source_dft_result_id": source_dft_result_id,
                 "source_paper_id": source_paper_id,
+                **identity_fields,
             },
             "",
         )
@@ -426,6 +439,14 @@ class VerificationSessionDFTCandidateMixin:
                 reaction_step=row.reaction_step,
                 source_figure=row.source_figure,
                 page=evidence_payload.get("page"),
+                property_subtype=evidence_payload.get("property_subtype"),
+                active_site_instance_key=evidence_payload.get("active_site_instance_key"),
+                atom_pair=evidence_payload.get("atom_pair"),
+                site_label=evidence_payload.get("site_label"),
+                state_context=evidence_payload.get("state_context"),
+                source_table_id=evidence_payload.get("source_table_id"),
+                source_row_index=evidence_payload.get("source_row_index"),
+                source_column_index=evidence_payload.get("source_column_index"),
             )
             signatures.setdefault(signature, row)
         return signatures
@@ -448,6 +469,11 @@ class VerificationSessionDFTCandidateMixin:
                     "unit": row.unit,
                     "adsorbate": row.adsorbate,
                     "reaction_step": row.reaction_step,
+                    "property_subtype": evidence_payload.get("property_subtype"),
+                    "active_site_instance_key": evidence_payload.get("active_site_instance_key"),
+                    "atom_pair": evidence_payload.get("atom_pair"),
+                    "site_label": evidence_payload.get("site_label"),
+                    "state_context": evidence_payload.get("state_context"),
                 }
             )
             signatures[signature].append(row)
@@ -471,6 +497,10 @@ class VerificationSessionDFTCandidateMixin:
                     "unit": row.unit,
                     "adsorbate": row.adsorbate,
                     "reaction_step": row.reaction_step,
+                    "active_site_instance_key": evidence_payload.get("active_site_instance_key"),
+                    "atom_pair": evidence_payload.get("atom_pair"),
+                    "site_label": evidence_payload.get("site_label"),
+                    "state_context": evidence_payload.get("state_context"),
                 }
             )
             if signature is not None:
@@ -481,21 +511,31 @@ class VerificationSessionDFTCandidateMixin:
     def _new_dft_semantic_signature(candidate_item: dict[str, Any]) -> tuple[str, ...]:
         value = candidate_item.get("value")
         value_part = "" if value is None else f"{float(value):.8g}"
+        base = [
+            candidate_item.get("material_identity"),
+            candidate_item.get("property_type"),
+            value_part,
+            candidate_item.get("unit"),
+            candidate_item.get("adsorbate"),
+            normalize_dft_reaction_step_for_identity(
+                candidate_item.get("reaction_step"),
+                property_type=candidate_item.get("property_type"),
+                adsorbate=candidate_item.get("adsorbate"),
+                material=candidate_item.get("material_identity"),
+            ),
+        ]
+        extension = [
+            candidate_item.get("property_subtype"),
+            candidate_item.get("active_site_instance_key"),
+            candidate_item.get("atom_pair"),
+            candidate_item.get("site_label"),
+            candidate_item.get("state_context"),
+        ]
+        if any(str(part or "").strip() for part in extension):
+            base.extend(extension)
         return tuple(
             str(part or "").strip().lower()
-            for part in (
-                candidate_item.get("material_identity"),
-                candidate_item.get("property_type"),
-                value_part,
-                candidate_item.get("unit"),
-                candidate_item.get("adsorbate"),
-                normalize_dft_reaction_step_for_identity(
-                    candidate_item.get("reaction_step"),
-                    property_type=candidate_item.get("property_type"),
-                    adsorbate=candidate_item.get("adsorbate"),
-                    material=candidate_item.get("material_identity"),
-                ),
-            )
+            for part in base
         )
 
     @staticmethod
@@ -505,17 +545,23 @@ class VerificationSessionDFTCandidateMixin:
             return None
         value = candidate_item.get("value")
         value_part = "" if value is None else f"{float(value):.8g}"
-        return tuple(
-            str(part or "").strip().lower()
-            for part in (
-                "method_step_compatible",
-                candidate_item.get("material_identity"),
-                candidate_item.get("property_type"),
-                value_part,
-                candidate_item.get("unit"),
-                candidate_item.get("adsorbate"),
-            )
-        )
+        base = [
+            "method_step_compatible",
+            candidate_item.get("material_identity"),
+            candidate_item.get("property_type"),
+            value_part,
+            candidate_item.get("unit"),
+            candidate_item.get("adsorbate"),
+        ]
+        extension = [
+            candidate_item.get("active_site_instance_key"),
+            candidate_item.get("atom_pair"),
+            candidate_item.get("site_label"),
+            candidate_item.get("state_context"),
+        ]
+        if any(str(part or "").strip() for part in extension):
+            base.extend(extension)
+        return tuple(str(part or "").strip().lower() for part in base)
 
     @staticmethod
     def _method_step_compatible_existing(candidate_item: dict[str, Any], rows: list[DFTResult]) -> DFTResult | None:
@@ -554,13 +600,23 @@ class VerificationSessionDFTCandidateMixin:
         reaction_step: Any,
         source_figure: Any,
         page: Any,
+        property_subtype: Any = None,
+        active_site_instance_key: Any = None,
+        atom_pair: Any = None,
+        site_label: Any = None,
+        state_context: Any = None,
+        source_table_id: Any = None,
+        source_row_index: Any = None,
+        source_column_index: Any = None,
     ) -> tuple[str, ...]:
         value_part = "" if value is None else f"{float(value):.8g}"
         return tuple(
             str(part or "").strip().lower()
             for part in (
                 material_identity,
+                active_site_instance_key,
                 property_type,
+                property_subtype,
                 value_part,
                 unit,
                 adsorbate,
@@ -570,8 +626,14 @@ class VerificationSessionDFTCandidateMixin:
                     adsorbate=adsorbate,
                     material=material_identity,
                 ),
+                atom_pair,
+                site_label,
+                state_context,
                 source_figure,
                 page,
+                source_table_id,
+                source_row_index,
+                source_column_index,
             )
         )
 
@@ -601,6 +663,22 @@ class VerificationSessionDFTCandidateMixin:
             "adsorption_energy": "adsorption_energy",
             "reaction_barrier": "reaction_barrier",
             "permeation_barrier": "permeation_barrier",
+            "binding_energy": "binding_energy",
+            "metal_support_binding_energy_eb": "metal_support_binding_energy_Eb",
+            "stability_parameter_es": "stability_parameter_Es",
+            "formation_energy": "formation_energy",
+            "cohesive_energy": "cohesive_energy",
+            "lowdin_charge": "Lowdin_charge",
+            "löwdin_charge": "Lowdin_charge",
+            "icohp": "ICOHP",
+            "cohp": "COHP",
+            "d_orbital_occupancy": "d_orbital_occupancy",
+            "dos_at_fermi": "DOS_at_Fermi",
+            "bond_length_li_s": "bond_length_Li-S",
+            "bond_length_s_s": "bond_length_S-S",
+            "bond_length_m_n": "bond_length_M-N",
+            "bond_length_m_s": "bond_length_M-S",
+            "bond_length_m_m": "bond_length_M-M",
         }
         return aliases.get(text, text or None)
 

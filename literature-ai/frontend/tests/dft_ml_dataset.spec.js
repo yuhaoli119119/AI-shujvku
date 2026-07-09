@@ -636,7 +636,7 @@ function makeV3Manifest(task) {
   return {
     schema: 'dft_results_ml_v3',
     version: 'dft-ml-dataset-v0.3',
-    task: 'adsorption_energy',
+    task: task || 'adsorption_energy',
     profile: 'SRR_LiS',
     source_candidate_count: 8,
     candidate_count: 3,
@@ -1051,6 +1051,11 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v3ExcludedCounts')).toContainText('missing_rds_semantics');
     await expect(page.locator('#v3TaskValue')).not.toContainText('反应能垒');
     await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=rds_gibbs_free_energy');
+
+    await page.selectOption('#v3TaskSelect', 'active_site_stability');
+    await expect(page.locator('#v3TaskValue')).toContainText('活性位稳定性任务');
+    await expect(page.locator('#v3TaskValue')).toContainText('active_site_stability');
+    await expect.poll(() => mockState.getLastV3ManifestUrl()).toContain('task=active_site_stability');
   });
 
   test('renders v4 project-library manifest and blocked diagnostics scope', async ({ page }) => {
@@ -1088,6 +1093,11 @@ test.describe('DFT ML-ready dataset page', () => {
     await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('Fe-NC');
     await expect(page.locator('#v4SampleRecordsTableBody')).toContainText('blocked');
     await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('ready_only=false');
+
+    await page.selectOption('#v4TaskSelect', 'active_site_stability');
+    await expect(page.locator('#v4TaskValue')).toContainText('活性位稳定性任务');
+    await expect(page.locator('#v4TaskValue')).toContainText('active_site_stability');
+    await expect.poll(() => mockState.getLastV4JsonUrl()).toContain('task=active_site_stability');
   });
 
   test('supports blocker filtering and server-side year/library refresh params', async ({ page }) => {

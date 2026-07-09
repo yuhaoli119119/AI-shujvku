@@ -325,9 +325,13 @@ class DFTReviewBundleService:
         normalized_audits: list[dict[str, Any]] = []
         reviewed_target_ids: set[str] = set()
         new_candidate_count = 0
-        seen_target_fields: dict[tuple[str, str], str] = {}
+        seen_target_fields: dict[tuple[str, str, str | None], str] = {}
         for index, audit in enumerate(result.object_review_audits):
-            target_field_key = (audit.target_id, audit.field_name)
+            target_field_key = (
+                audit.target_id,
+                audit.field_name,
+                audit.temporary_id if audit.target_id.lower() == "new" else None,
+            )
             previous_decision = seen_target_fields.get(target_field_key)
             if previous_decision is not None:
                 error_code = (
@@ -337,7 +341,7 @@ class DFTReviewBundleService:
                 )
                 add_error(
                     error_code,
-                    "Each target_id + field_name may appear only once in a DFT review result",
+                    "Each target_id + field_name + temporary_id may appear only once in a DFT review result",
                     audit_index=index,
                 )
             else:
@@ -408,6 +412,7 @@ class DFTReviewBundleService:
                     "paper_id": result.paper_id,
                     "target_type": audit.target_type,
                     "target_id": audit.target_id,
+                    "temporary_id": audit.temporary_id,
                     "field_name": audit.field_name,
                     "decision": audit.decision,
                     "evidence_checked": audit.evidence_checked,
@@ -1246,7 +1251,7 @@ class DFTReviewBundleService:
 
         warnings: list[dict[str, Any]] = []
         normalized_audits: list[Any] = []
-        seen: dict[tuple[str, str, str], int] = {}
+        seen: dict[tuple[str, str, str, str], int] = {}
         converted_numeric_values = 0
         deduped_audits = 0
         for audit in audits:
@@ -1259,6 +1264,9 @@ class DFTReviewBundleService:
                 str(audit.get("target_type") or "dft_results").strip(),
                 str(audit.get("target_id") or "").strip(),
                 str(audit.get("field_name") or "dft_results").strip(),
+                str(audit.get("temporary_id") or "").strip()
+                if str(audit.get("target_id") or "").strip().lower() == "new"
+                else "",
             )
             if not key[1]:
                 normalized_audits.append(audit)
@@ -1705,10 +1713,12 @@ class DFTReviewBundleService:
             "new_candidate_rule": {
                 "target_type": "dft_results",
                 "target_id": "new",
+                "temporary_id": "new-dft-001",
                 "field_name": "dft_results",
                 "decision": "new_candidate",
                 "when_to_use": "Only when the package evidence contains a DFT result missing from existing candidates.",
                 "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
+                "multiple_new_candidates": "Use target_id='new' for each new candidate and give each one a unique temporary_id.",
             },
         }
 
@@ -1778,6 +1788,7 @@ class DFTReviewBundleService:
                         {
                             **base,
                             "target_id": "new",
+                            "temporary_id": "new-dft-001",
                             "decision": "new_candidate",
                             "corrected_value": {
                                 "material_identity": "Co-N4/G",
@@ -1809,7 +1820,7 @@ class DFTReviewBundleService:
 3. 每条 `object_review_audits` 都必须引用一个或多个真实 `evidence_ids`。证据编号来自 `manifest.json` 和 `evidence/`，且必须和该 DFT 目标直接相关。
 4. 已有主文献 DFT candidate 使用 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`。
 5. 必须为 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交 1 条审核结果；同一个 `target_id + field_name` 不要复制多条，多个证据合并到同一条的 `evidence_ids`。证据不足也要提交 `NEEDS_HUMAN`，不能漏掉该 target_id。只有全部覆盖时才能使用 `overall_status="completed"`；未覆盖全部已有候选时服务器不会生成导入请求。
-6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`；`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`；`value` 必须是 JSON number，不要写成 `"−1.20 eV"`，单位只写入 `unit`。
+6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`（例如 `new-dft-001`、`new-dft-002`）；`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`；`value` 必须是 JSON number，不要写成 `"−1.20 eV"`，单位只写入 `unit`。
 7. SI 是主文献的证据来源，不是独立审核任务。SI 中发现的漏项仍写回当前主文献，使用 `new_candidate`。
 8. 不得声称已写数据库、已入库、已确认、已 verified 或已成为 ML_Ready。
 9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要修改 schema，不要用自由散文替代 JSON，也不要包 Markdown 代码块。

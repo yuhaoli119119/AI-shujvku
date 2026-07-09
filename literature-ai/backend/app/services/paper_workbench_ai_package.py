@@ -485,7 +485,9 @@ class PaperWorkbenchAiPackageMixin:
     @staticmethod
     def dft_evidence_payload(item: dict[str, Any]) -> dict[str, Any]:
         location = item.get("source_location") or {}
+        incoming_payload = item.get("evidence_payload") if isinstance(item.get("evidence_payload"), dict) else {}
         payload = {
+            **incoming_payload,
             "schema_version": WORKBENCH_SCHEMA_VERSION,
             "protocol": protocol_snapshot("dft_ai_protocol", fallback_version=EXTRACTION_PROTOCOL_VERSION),
             "system_extractor_protocol": protocol_snapshot("dft_results", fallback_version=EXTRACTION_PROTOCOL_VERSION),
@@ -501,6 +503,21 @@ class PaperWorkbenchAiPackageMixin:
             "active_site_context": item.get("active_site_context"),
             "structure_context": item.get("structure_context"),
             "dft_setting_id": item.get("dft_setting_id"),
+            "fact_family": item.get("fact_family") or incoming_payload.get("fact_family"),
+            "atom_pair": item.get("atom_pair") or incoming_payload.get("atom_pair"),
+            "site_label": item.get("site_label") or incoming_payload.get("site_label"),
+            "state_context": item.get("state_context") or incoming_payload.get("state_context"),
+            "active_site_instance_key": item.get("active_site_instance_key") or incoming_payload.get("active_site_instance_key"),
+            "metal_center_1": item.get("metal_center_1") or incoming_payload.get("metal_center_1"),
+            "metal_center_2": item.get("metal_center_2") or incoming_payload.get("metal_center_2"),
+            "support": item.get("support") or incoming_payload.get("support"),
+            "source_table_id": item.get("source_table_id") or incoming_payload.get("source_table_id"),
+            "source_table_caption": item.get("source_table_caption") or incoming_payload.get("source_table_caption"),
+            "source_row_index": item.get("source_row_index") if item.get("source_row_index") is not None else incoming_payload.get("source_row_index"),
+            "source_column_index": item.get("source_column_index") if item.get("source_column_index") is not None else incoming_payload.get("source_column_index"),
+            "raw_row_text": item.get("raw_row_text") or incoming_payload.get("raw_row_text"),
+            "raw_column_header": item.get("raw_column_header") or incoming_payload.get("raw_column_header"),
+            "parser_version": item.get("parser_version") or incoming_payload.get("parser_version"),
             "supporting_evidence": item.get("supporting_evidence") or [],
             "field_sources": [
                 {

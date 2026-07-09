@@ -239,20 +239,29 @@ def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
     )
     adsorbate = _first_payload(payload, corrected, keys=("normalized_adsorbate", "adsorbate"))
     property_type = _first_payload(payload, corrected, keys=("normalized_property_type", "property_type", "energy_type"))
+    property_subtype = _first_payload(payload, corrected, evidence, location, keys=("property_subtype", "normalized_property_subtype"))
     parts = {
         "paper_id": _text(payload.get("paper_id")),
         "source_bucket": _owned_source_bucket(source_type),
         "material": _text(material),
+        "active_site_instance_key": _text(_first_payload(payload, corrected, evidence, location, keys=("active_site_instance_key",))),
         "adsorbate": _text(adsorbate),
         "property_type": _text(property_type),
+        "property_subtype": _text(property_subtype),
         "reaction_step": normalize_dft_reaction_step_for_identity(
             _first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step")),
             property_type=property_type,
             adsorbate=adsorbate,
             material=material,
         ),
+        "atom_pair": _text(_first_payload(payload, corrected, evidence, location, keys=("atom_pair",))),
+        "site_label": _text(_first_payload(payload, corrected, evidence, location, keys=("site_label", "adsorption_site", "site"))),
+        "state_context": _text(_first_payload(payload, corrected, evidence, location, keys=("state_context",))),
         "value": normalize_numeric_value(_first_payload(payload, corrected, keys=("normalized_value", "value"))),
         "unit": normalize_unit(_first_payload(payload, corrected, keys=("normalized_unit", "unit"))),
+        "source_table_id": _text(_first_payload(payload, corrected, evidence, location, keys=("source_table_id",))),
+        "source_row_index": _text(_first_payload(payload, corrected, evidence, location, keys=("source_row_index",))),
+        "source_column_index": _text(_first_payload(payload, corrected, evidence, location, keys=("source_column_index",))),
     }
     canonical = json.dumps(parts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
