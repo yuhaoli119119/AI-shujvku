@@ -193,9 +193,9 @@ function formatEvidenceStatus(status) {
 
 function formatWarningText(warning) {
     const map = {
-        suggestion_only_needs_human_verification: "仅为建议，需先完成人工核验。",
+        suggestion_only_needs_human_verification: "仅为建议，需先完成确认核验。",
         impact_factor_needs_metadata: "影响因子缺失，需要补充元数据。",
-        needs_manual_verification_before_use: "使用前必须完成人工核验。"
+        needs_manual_verification_before_use: "使用前必须完成确认核验。"
     };
     return map[warning] || String(warning || "-");
 }
@@ -638,7 +638,7 @@ function renderResults(data) {
                 badgeClass = "badge-confirmed";
                 borderClass = "border-confirmed";
             } else if (cand.requires_human_verification === true && cand.evidence_status !== "metadata_only") {
-                badgeText = "需要人工核验";
+                badgeText = "需要确认核验";
                 badgeClass = "badge-needs-verification";
                 borderClass = "border-needs-verification";
             } else {
@@ -802,7 +802,7 @@ function copyCardInfo(cand) {
     if (cand.can_be_used_as_confirmed_citation === true) {
         safetyLabel = "高置信度候选";
     } else if (cand.requires_human_verification === true) {
-        safetyLabel = "需要人工核验";
+        safetyLabel = "需要确认核验";
     }
 
     const infoString = [
@@ -948,9 +948,9 @@ function renderDraftProposal(paperId, data) {
 
     let safetyBanner = "";
     if (data.can_insert_as_confirmed_citation === true) {
-        safetyBanner = '<div class="proposal-banner banner-confirmed">该草稿基于高置信度证据生成，但作为严谨学术引用，使用前仍建议进行人工核对。</div>';
+        safetyBanner = '<div class="proposal-banner banner-confirmed">该草稿基于高置信度证据生成，但作为严谨学术引用，使用前仍建议进行确认核对。</div>';
     } else if (data.requires_human_verification === true) {
-        safetyBanner = '<div class="proposal-banner banner-warning">该草稿仅供参考，引用前必须完成人工核验。</div>';
+        safetyBanner = '<div class="proposal-banner banner-warning">该草稿仅供参考，引用前必须完成确认核验。</div>';
     } else if (data.evidence_status === "metadata_only") {
         safetyBanner = '<div class="proposal-banner banner-metadata">该草稿仅基于元数据建议生成，暂不能作为证据使用。</div>';
     }
@@ -971,7 +971,7 @@ function renderDraftProposal(paperId, data) {
     if (data.human_review_checklist && data.human_review_checklist.length > 0) {
         checklistHtml = `
             <div class="proposal-checklist">
-                <strong>人工复核清单：</strong>
+                <strong>确认复核清单：</strong>
                 <ul>
                     ${data.human_review_checklist.map(item => `<li><input type="checkbox" disabled> ${escapeHtml(formatChecklistItem(item))}</li>`).join("")}
                 </ul>
@@ -1149,7 +1149,7 @@ function copyDraftProposal(paperId) {
     const parts = [
         `草稿状态：${data.proposal_status}`,
         `证据状态：${data.evidence_status}`,
-        `需要人工核验：${data.requires_human_verification}`
+        `需要确认核验：${data.requires_human_verification}`
     ];
 
     if (data.warnings && data.warnings.length > 0) {

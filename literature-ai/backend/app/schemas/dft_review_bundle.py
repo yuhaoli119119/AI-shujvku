@@ -104,6 +104,19 @@ class OfflineObjectReviewAudit(BaseModel):
         return self
 
 
+class OfflineDFTReviewCoverageAck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_target_ids: list[str] = Field(default_factory=list)
+    reviewed_target_ids: list[str] = Field(default_factory=list)
+    coverage_complete: bool = False
+
+    @field_validator("expected_target_ids", "reviewed_target_ids")
+    @classmethod
+    def normalize_target_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+
 class OfflineDFTReviewResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -123,8 +136,15 @@ class OfflineDFTReviewResult(BaseModel):
     overall_status: OverallReviewStatus = Field(
         description=(
             "Use completed only after reviewing every current main-paper DFT candidate; "
-            "use uncertain or needs_human when candidate coverage is incomplete."
+            "coverage must still include NEEDS_HUMAN entries for targets that cannot be decided."
         )
+    )
+    coverage_acknowledgement: OfflineDFTReviewCoverageAck | None = Field(
+        default=None,
+        description=(
+            "Optional explicit coverage checklist copied from return_template.json. "
+            "The server still derives final coverage from object_review_audits."
+        ),
     )
     object_review_audits: list[OfflineObjectReviewAudit] = Field(default_factory=list)
     uncertainties: list[str] = Field(default_factory=list)

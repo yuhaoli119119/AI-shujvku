@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>人工确认工作台 - Literature AI</title>
+  <title>确认工作台 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -47,8 +47,8 @@
   <main class="shell">
     <header class="page-head">
       <div>
-        <h1>人工确认工作台</h1>
-        <p>把 AI/自动抽取结果纳入正式数据前，先在这里核对字段、证据和 PDF 定位；保存草稿不会自动通过，人工确认后才进入可靠数据。</p>
+        <h1>确认工作台</h1>
+        <p>把 AI/自动抽取结果纳入正式数据前，先在这里核对字段、证据和 PDF 定位；保存草稿不会自动通过，确认后才进入可靠数据。</p>
       </div>
       <a class="btn ghost" href="../dft_database/index.html">打开 DFT 数据库</a>
     </header>
@@ -57,11 +57,11 @@
       <div><label for="paperSelect">文献</label><select id="paperSelect" onchange="loadSelectedPaper()"><option value="">正在加载...</option></select></div>
       <div><label for="schemaSelect">数据类型</label><select id="schemaSelect" onchange="renderSchemaForm()"><option value="CatalystSample">CatalystSample</option><option value="DFTSetting">DFTSetting</option><option value="DFTResult" selected>DFTResult</option><option value="MechanismClaim">MechanismClaim</option><option value="ElectrochemicalPerformance">ElectrochemicalPerformance</option></select></div>
       <div>
-        <label for="filterSelect">人工确认过滤</label>
+        <label for="filterSelect">确认过滤</label>
         <select id="filterSelect" onchange="renderSchemaForm()" style="height: 38px; min-width: 160px;">
           <option value="">全部字段</option>
           <option value="warnings">仅有警告 (only warnings)</option>
-          <option value="unverified">仅未人工确认 (only unverified)</option>
+          <option value="unverified">仅未确认 (only unverified)</option>
           <option value="low_confidence">仅低置信度 (&lt; 0.7)</option>
           <option value="active_remapped">仅有效/已重映射 (only active/remapped)</option>
           <option value="stale_ambiguous_unresolved">仅失效/有歧义/未解析 (only stale/ambiguous/unresolved)</option>
@@ -95,7 +95,7 @@
     <section class="footer-actions">
       <div id="actionScopeSummary" class="action-scope">作用域：请选择文献。</div>
       <button class="btn ghost" onclick="saveDraft()">保存修改</button>
-      <button class="btn primary" onclick="markVerified()">人工确认校验</button>
+      <button class="btn primary" onclick="markVerified()">确认校验</button>
       <button class="btn ghost" onclick="startExtractionJob()">重新解析</button>
     </section>
   </main>
@@ -326,7 +326,7 @@
 
       const pendingHtml = hasPending ? `
         <div style="margin-top:10px;font-size:12px;color:var(--color-warning);font-weight:800;">
-          已有 ${pendingRows.length} 条待确认记录。请在下方逐项核对证据后保存或人工确认。
+          已有 ${pendingRows.length} 条待确认记录。请在下方逐项核对证据后保存或确认。
         </div>
       ` : "";
 
@@ -335,7 +335,7 @@
           <div style="max-width:760px;">
             <h3 style="margin:0 0 6px;">生成待确认清单</h3>
             <p style="margin:0;color:var(--color-text-secondary);font-size:13px;line-height:1.5;">
-              把 AI/自动抽取字段放进人工确认队列。它不会自动通过、不会导出、不会解锁写作，也不会重新解析论文。
+              把 AI/自动抽取字段放进确认队列。它不会自动通过、不会导出、不会解锁写作，也不会重新解析论文。
             </p>
             ${pendingHtml}
           </div>
@@ -441,19 +441,19 @@
       if (stale + ambiguous + unresolved + unknown > 0) {
         warningBanner = `
           <div style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); color: var(--color-danger); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
-            ⚠️ 部分人工校验记录已无法安全匹配到当前抽取结果，请重新确认后再用于导出或写作。
+            ⚠️ 部分确认记录已无法安全匹配到当前抽取结果，请重新确认后再用于导出或写作。
           </div>
         `;
       } else if (total > 0) {
         warningBanner = `
           <div style="border: 1px dashed var(--color-success); background: var(--color-success-bg); color: var(--color-success); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
-            ✓ 人工校验记录与当前抽取结果匹配正常。
+            ✓ 确认记录与当前抽取结果匹配正常。
           </div>
         `;
       } else {
         warningBanner = `
           <div style="border: 1px dashed var(--color-border); background: var(--color-surface-alt); color: var(--color-text-secondary); padding: 12px 16px; border-radius: var(--radius); margin-bottom: 12px; font-size: 13px; font-weight: 800;">
-            暂无人工校验记录。
+            暂无确认记录。
           </div>
         `;
       }
@@ -461,7 +461,7 @@
       box.innerHTML = `
         ${warningBanner}
         <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
-          <strong style="font-size: 13px; margin-right: 8px;">人工校验稳定性摘要：</strong>
+          <strong style="font-size: 13px; margin-right: 8px;">确认稳定性摘要：</strong>
           <span style="font-size: 12px; background: var(--color-surface-alt); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);">全部: <strong>${total}</strong></span>
           <span style="font-size: 12px; background: var(--color-success-bg); color: var(--color-success); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-success)40;">有效: <strong>${active}</strong></span>
           <span style="font-size: 12px; background: var(--color-primary-bg); color: var(--color-primary); padding: 4px 8px; border-radius: var(--radius-sm); border: 1px solid var(--color-primary)40;">已重映射: <strong>${remapped}</strong></span>
@@ -545,9 +545,9 @@
       if (code === "evidence_locator_text_only") return `“${field}”目前只有文本证据，还缺少准确 PDF 页码定位。`;
       if (code === "evidence_locator_missing_page") return `“${field}”缺少 PDF 页码，无法直接跳转核对原文。`;
       if (code === "evidence_locator_missing_locator") return `“${field}”还没有可用的 PDF 定位结果。`;
-      if (code === "evidence_locator_unsafe_locator") return `“${field}”的 PDF 定位不够可靠，需要人工核对。`;
+      if (code === "evidence_locator_unsafe_locator") return `“${field}”的 PDF 定位不够可靠，需要复核。`;
       if (code.startsWith("review_target_")) return `这条记录对应的抽取目标发生变化，需要重新确认“${field}”。`;
-      return (w && w.message) || "该字段需要人工核对。";
+      return (w && w.message) || "该字段需要复核。";
     }
 
     function getFieldStatus(field) {
@@ -567,16 +567,16 @@
       }
       let bg = "var(--color-surface-alt)", color = "var(--color-text-secondary)", label = "已生成待确认记录";
       if (status === "verified") {
-        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "人工确认通过";
+        bg = "var(--color-success-bg)"; color = "var(--color-success)"; label = "确认通过";
       } else if (status === "corrected") {
-        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "人工修正";
+        bg = "var(--color-primary-bg)"; color = "var(--color-primary)"; label = "确认修正";
       } else if (status === "needs_check") {
         bg = "var(--color-danger-bg)"; color = "var(--color-danger)"; label = "需核对";
       } else if (status === "pending") {
         bg = "var(--color-warning-bg)"; color = "var(--color-warning)"; label = "已生成待确认记录";
       }
       if (status === "pending") {
-        label = "待人工确认";
+        label = "待确认";
       }
       return `<span class="status-chip" style="background:${bg}; color:${color}; border:1px solid ${color}40; padding:2px 8px; font-size:11px; font-weight:700; border-radius:var(--radius-pill);">${label}</span>`;
     }
@@ -794,7 +794,7 @@
 
     function locatorDegradedText(locator) {
       var s = normalizeLocatorStatus(locator);
-      if (s === "approximate") return "可能相关页码，需要人工确认";
+      if (s === "approximate") return "可能相关页码，需要确认";
       if (s === "unresolved") return "证据定位待解析/待确认";
       if (s === "missing_locator") return "暂无可用 PDF 定位";
       return "仅有证据文本，暂无 PDF 页码定位";
@@ -889,7 +889,7 @@
         var bboxDataAttr = hasBbox === "true" ? ('data-bbox="' + escAttr(JSON.stringify(locator.bbox)) + '"') : "";
         return `<span id="${uid}" data-paper-id="${esc(paperId)}" data-page="${page || 0}" data-has-bbox="${hasBbox}" data-locator-status="exact_page" data-evidence-text="${escAttr(ellipsis(evidenceText, 60))}" ${bboxDataAttr} style="display:none;"></span><button class="btn primary small" style="height:24px;padding:0 8px;font-size:11px;" onclick="triggerWorkbenchLocatorAction('${uid}')">查看 PDF 第 ${page || "?"} 页</button>`;
       } else {
-        return `<span class="locator-unrepaired-msg" style="font-size:11px;color:var(--color-text-secondary);font-weight:700;">缺少准确 PDF 定位。${locatorDegradedText(locator)} 需要补全定位并人工确认后，才能导出或用于写作。</span>`;
+        return `<span class="locator-unrepaired-msg" style="font-size:11px;color:var(--color-text-secondary);font-weight:700;">缺少准确 PDF 定位。${locatorDegradedText(locator)} 需要补全定位并确认后，才能导出或用于写作。</span>`;
       }
     }
 
@@ -1047,7 +1047,7 @@
                 ${isStaleWarning ? `
                   <div style="margin-top: 4px; font-size: 11px; cursor: pointer; text-decoration: underline;" onclick="const targetEl = this.nextElementSibling; targetEl.style.display = targetEl.style.display === 'none' ? 'block' : 'none';">展开说明 ▾</div>
                   <div style="display: none; margin-top: 4px; font-weight: normal; font-size: 11px; color: var(--color-text);">
-                    后端阻止了旧人工校验静默应用到当前字段，请重新核对 evidence。
+                    后端阻止了旧确认记录静默应用到当前字段，请重新核对 evidence。
                   </div>
                 ` : ""}
               </div>
@@ -1058,7 +1058,7 @@
           if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
             resStatusWarningHtml = `
               <div class="warning-row" style="margin-bottom:8px; font-size:12px; padding:6px 10px; border-left:3px solid var(--color-danger); background:var(--color-danger-bg); color:var(--color-danger);">
-                ⚠️ <strong>该字段曾被人工校验，但重抽取后无法安全匹配到当前字段。</strong>
+                ⚠️ <strong>该字段曾被确认，但重抽取后无法安全匹配到当前字段。</strong>
               </div>
             `;
           }
@@ -1094,7 +1094,7 @@
                 </div>
                 <div style="display: flex; gap: 4px; align-items: flex-end; height: 100%;">
                   <button class="btn primary small" style="height: 32px; font-size: 12px; padding: 0 8px;" onclick="saveSingleField('${record.target_type}', '${record.target_id}', '${name}')">保存</button>
-                  <button class="btn ghost small" style="height: 32px; font-size: 12px; padding: 0 8px; color: var(--color-success); border-color: var(--color-success);" onclick="verifySingleField('${record.target_type}', '${record.target_id}', '${name}')">人工确认</button>
+                  <button class="btn ghost small" style="height: 32px; font-size: 12px; padding: 0 8px; color: var(--color-success); border-color: var(--color-success);" onclick="verifySingleField('${record.target_type}', '${record.target_id}', '${name}')">确认</button>
                 </div>
               </div>
               
@@ -1113,7 +1113,7 @@
             <div class="section-card" style="margin-bottom: 20px; background: var(--color-surface-alt); border: 1px solid var(--color-border-strong);">
               <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--color-border-strong); padding-bottom: 8px; margin-bottom: 12px;">
                 <strong style="font-size: 14px;">记录 #${recordIdx + 1} (${record.target_id.slice(0, 8)})</strong>
-                <button class="btn ghost small" style="color: var(--color-success); border-color: var(--color-success);" onclick="verifyRecord('${record.target_type}', '${record.target_id}')">本条人工确认</button>
+                <button class="btn ghost small" style="color: var(--color-success); border-color: var(--color-success);" onclick="verifyRecord('${record.target_type}', '${record.target_id}')">本条确认</button>
               </div>
               ${fieldsHtml}
             </div>
@@ -1203,14 +1203,14 @@
                   <span class="muted">字段名称:</span> <strong>${esc(item.field_name)}</strong>
                   <span class="muted">目标 Label:</span> <span>${esc(item.target_label || "-")}</span>
                   <span class="muted">字段路径:</span> <span>${esc(item.field_path || "-")}</span>
-                  <span class="muted">旧人工校验值:</span> <strong style="color: var(--color-primary);">${esc(item.reviewed_value !== undefined ? item.reviewed_value : item.original_value)} ${esc(item.unit || "")}</strong>
+                  <span class="muted">旧确认值:</span> <strong style="color: var(--color-primary);">${esc(item.reviewed_value !== undefined ? item.reviewed_value : item.original_value)} ${esc(item.unit || "")}</strong>
                   <span class="muted">原文证据:</span> <span style="font-family: var(--font-mono); white-space: pre-wrap; font-size: 11px; background: var(--color-surface-alt); padding: 4px 6px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);">${esc(item.evidence_text || "无")}</span>
                   ${item.remapped_from_target_id ? `<span class="muted">来源旧 ID:</span> <span>${esc(item.remapped_from_target_id)}</span>` : ""}
                 </div>
               </div>
               
               <div style="font-size: 11px; color: var(--color-danger); font-weight: 800; border-top: 1px solid var(--color-border); padding-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-                <span>这是一条旧目标人工校验记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的人工确认。</span>
+                <span>这是一条旧目标确认记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的确认。</span>
                 ${jumpButtonHtml}
               </div>
             </div>
@@ -1220,10 +1220,10 @@
         orphanHtml = `
           <div class="section-card" style="margin-top: 24px; border: 1px dashed var(--color-warning); background: var(--color-warning-bg)10; border-radius: var(--radius-lg); padding: 16px;">
             <h3 style="margin-top: 0; color: var(--color-warning); font-size: 15px; display: flex; align-items: center; gap: 8px;">
-              ⚠️ 需要重新确认的旧人工校验记录
+              ⚠️ 需要重新确认的旧确认记录
             </h3>
             <p style="font-size: 12px; color: var(--color-text-secondary); margin-bottom: 12px; margin-top: -6px;">
-              由于文档重新解析或实体边界变化，以下人工校验数据已失效或无法匹配。请核对原文证据后，在上方当前字段中重新确认保存。
+              由于文档重新解析或实体边界变化，以下确认数据已失效或无法匹配。请核对原文证据后，在上方当前字段中重新确认保存。
             </p>
             ${cardsHtml}
           </div>
@@ -1252,7 +1252,7 @@
         const field = record[fieldName];
         const resStatus = field?.review ? normalizeReviewResolutionStatus(field.review.target_resolution_status, "active") : undefined;
         if (resStatus && ["stale", "ambiguous", "unresolved", "unknown"].includes(resStatus)) {
-          return confirm("该字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
+          return confirm("该字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新确认。是否继续？");
         }
       } else {
         let hasStale = false;
@@ -1264,7 +1264,7 @@
           }
         });
         if (hasStale) {
-          return confirm("该记录中部分字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新人工确认。是否继续？");
+          return confirm("该记录中部分字段当前 review target 状态不是 active/remapped。保存后将作为对当前字段的新确认。是否继续？");
         }
       }
       return true;
@@ -1284,7 +1284,7 @@
         });
       });
       if (hasStale) {
-        return confirm("批量操作的记录中包含当前 review target 状态不是 active/remapped 的校验。保存后将作为新人工确认。是否继续？");
+        return confirm("批量操作的记录中包含当前 review target 状态不是 active/remapped 的校验。保存后将作为新确认。是否继续？");
       }
       return true;
     }
@@ -1415,10 +1415,10 @@
           body: JSON.stringify(payload)
         });
         rememberReviewVersions(saved);
-        showToast(`字段 ${fieldName} 人工确认通过！`);
+        showToast(`字段 ${fieldName} 确认通过！`);
         await refreshAllData();
       } catch (error) {
-        await handleReviewWriteError(error, "人工确认失败: ");
+        await handleReviewWriteError(error, "确认失败: ");
       }
     }
 
@@ -1448,10 +1448,10 @@
           body: JSON.stringify(payload)
         });
         rememberReviewVersions(saved);
-        showToast("整条记录人工确认通过！");
+        showToast("整条记录确认通过！");
         await refreshAllData();
       } catch (error) {
-        await handleReviewWriteError(error, "人工确认失败: ");
+        await handleReviewWriteError(error, "确认失败: ");
       }
     }
 
@@ -1507,7 +1507,7 @@
       if (!checkBulkStaleTargetConfirmation(scope.visibleRecords)) return;
       
       if (scope.visibleFieldCount === 0) {
-        showToast("当前过滤范围没有待人工确认的字段。");
+        showToast("当前过滤范围没有待确认的字段。");
         return;
       }
       
@@ -1528,10 +1528,10 @@
           });
           rememberReviewVersions(saved);
         }
-        showToast("批量人工确认通过成功！");
+        showToast("批量确认通过成功！");
         await refreshAllData();
       } catch (error) {
-        await handleReviewWriteError(error, "批量人工确认失败: ");
+        await handleReviewWriteError(error, "批量确认失败: ");
       }
     }
     async function validateCurrent() {

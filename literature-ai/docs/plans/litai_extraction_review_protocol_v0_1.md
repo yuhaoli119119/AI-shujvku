@@ -48,7 +48,7 @@ Interpretation:
 - `Gemini_*` means "external/second AI review state", not necessarily reviewed by Gemini.
 - `Human_Confirmed`, `ML_Ready`, and `Citation_Ready` are promotion states guarded by review and evidence rules.
 
-New docs and UI copy should prefer generic labels such as "AI candidate", "external AI reviewed", "needs human confirmation", and "safe verified".
+New docs and UI copy should prefer generic labels such as "AI candidate", "external AI reviewed", "needs confirmation", and "safe verified".
 
 ## Artifact Gate
 

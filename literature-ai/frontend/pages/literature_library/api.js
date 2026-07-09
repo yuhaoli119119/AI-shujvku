@@ -158,7 +158,7 @@ const UI_LABELS = {
     candidate_status: {
         candidate: "待按审核规则处理",
         pending: "待确认",
-        requires_resolution: "需人工处理",
+        requires_resolution: "需确认处理",
         materialized: "已记录",
         ai_reviewed: "AI 已审核",
         ai_applied: "AI 已修改入库",

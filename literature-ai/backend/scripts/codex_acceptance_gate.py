@@ -321,7 +321,7 @@ def mcp_review_coverage_payload(paper_ids: list[str]) -> dict[str, Any]:
                 "all_external_audits_unverified": all(
                     str(item.get("verification_status") or "unverified").lower() not in {"verified", "safe_verified"}
                     and item.get("writes_final_truth") is False
-                    and item.get("requires_human_confirmation") is True
+                    and item.get("requires_confirmation") is True
                     for item in latest
                 ),
             }

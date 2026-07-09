@@ -25,7 +25,7 @@ from app.services.dft_rescan_policy import (
     normalize_source_document_type,
 )
 from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
-from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.evidence_anchors import first_pdf_evidence_anchor
 
 
 class VerificationSessionDFTCandidateMixin:
@@ -193,8 +193,11 @@ class VerificationSessionDFTCandidateMixin:
             )
         )
         value = self._float_or_none(corrected.get("value"))
+        value_upper = self._float_or_none(corrected.get("value_upper"))
+        value_kind = self._new_dft_value_kind(corrected, value_upper=value_upper)
         unit = self._first_text(corrected.get("unit"))
         evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        pdf_anchor = first_pdf_evidence_anchor(evidence)
         if not material_identity:
             return None, "missing_material_identity"
         if not property_type:
@@ -203,16 +206,24 @@ class VerificationSessionDFTCandidateMixin:
             return None, "missing_value"
         if not unit:
             return None, "missing_unit"
-        if not has_evidence_anchor(evidence):
-            return None, "missing_evidence_anchor"
+        if pdf_anchor is None:
+            return None, "missing_pdf_evidence_anchor"
         evidence_payload = evidence if isinstance(evidence, dict) else {"evidence": evidence}
+        evidence_payload = {
+            **evidence_payload,
+            **{
+                key: anchor_value
+                for key, anchor_value in pdf_anchor.items()
+                if anchor_value not in (None, "") and evidence_payload.get(key) in (None, "")
+            },
+        }
         source_table = self._first_text(corrected.get("source_table"), evidence_payload.get("table"))
         source_section = self._first_text(
             evidence_payload.get("section"),
             evidence_payload.get("section_title"),
             f"Page {evidence_payload.get('page')}" if evidence_payload.get("page") not in (None, "") else None,
         )
-        source_figure = self._first_text(corrected.get("source_figure"), source_table, evidence_payload.get("figure"))
+        source_figure = self._first_text(corrected.get("source_figure"), evidence_payload.get("figure"), source_table)
         method = self._first_text(corrected.get("method"), corrected.get("calculation_method"))
         temperature = self._first_text(corrected.get("temperature"), corrected.get("temperature_label"))
         reaction_step = self._first_text(
@@ -265,6 +276,8 @@ class VerificationSessionDFTCandidateMixin:
                 "property_type": property_type,
                 "adsorbate": adsorbate,
                 "value": value,
+                "value_upper": value_upper,
+                "value_kind": value_kind,
                 "unit": unit,
                 "reaction_step": reaction_step,
                 "source_section": source_section,
@@ -333,6 +346,8 @@ class VerificationSessionDFTCandidateMixin:
             adsorbate=candidate_item["adsorbate"],
             property_type=candidate_item["property_type"],
             value=candidate_item["value"],
+            value_upper=candidate_item["value_upper"],
+            value_kind=candidate_item["value_kind"],
             unit=candidate_item["unit"],
             reaction_step=candidate_item["reaction_step"],
             source_section=candidate_item["source_section"],
@@ -365,6 +380,17 @@ class VerificationSessionDFTCandidateMixin:
     def _new_dft_identity(signature: tuple[str, ...]) -> str:
         canonical = json.dumps(list(signature), ensure_ascii=False, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _new_dft_value_kind(self, corrected: dict[str, Any], *, value_upper: float | None) -> str:
+        explicit = self._first_text(corrected.get("value_kind"), corrected.get("value_type"))
+        if explicit:
+            return explicit
+        if value_upper is not None:
+            property_text = str(corrected.get("property_type") or corrected.get("property") or "").lower()
+            if "window" in property_text:
+                return "energy_window"
+            return "range"
+        return "point"
 
     def _upsert_new_dft_locator(self, row: DFTResult, evidence_payload: dict[str, Any], *, source_label: str) -> None:
         page = self._int_or_none(evidence_payload.get("page"))

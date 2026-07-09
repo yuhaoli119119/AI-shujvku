@@ -186,7 +186,7 @@ function locatorCanJump(locator) {
 
 function locatorDegradedText(locator) {
     const s = normalizeLocatorStatus(locator);
-    if (s === "approximate") return "可能相关页码，需要人工确认";
+    if (s === "approximate") return "可能相关页码，需要确认";
     if (s === "unresolved") return "证据定位待解析/待确认";
     if (s === "missing_locator") return "暂无可用 PDF 定位";
     return "仅有证据文本，暂无 PDF 页码定位";

@@ -220,6 +220,24 @@ class DFTImportedOpinionMixin:
                 if self._numeric_key(numeric_value) != self._numeric_key(row.value):
                     updates["value"] = numeric_value
 
+            value_upper_present = "value_upper" in corrected_value
+            value_upper = corrected_value.get("value_upper") if value_upper_present else None
+            if value_upper_present:
+                numeric_value_upper, _ = self._normalize_imported_dft_value(
+                    value=value_upper,
+                    unit=unit if unit_present else row.unit,
+                    property_type=property_value or row.property_type,
+                )
+                if self._numeric_key(numeric_value_upper) != self._numeric_key(row.value_upper):
+                    updates["value_upper"] = numeric_value_upper
+
+            value_kind_present = "value_kind" in corrected_value or "value_type" in corrected_value
+            value_kind = self._first_text(corrected_value.get("value_kind"), corrected_value.get("value_type"))
+            if value_kind_present and self._normalized_text(value_kind) != self._normalized_text(row.value_kind):
+                updates["value_kind"] = value_kind
+            elif value_upper_present and value_upper is not None and not row.value_kind:
+                updates["value_kind"] = "energy_window" if "window" in str(property_value or row.property_type or "").lower() else "range"
+
             if unit_present and self._normalized_text(normalized_unit) != self._normalized_text(row.unit):
                 updates["unit"] = normalized_unit
 
@@ -240,15 +258,15 @@ class DFTImportedOpinionMixin:
         )
         if field_name in ReviewService.ALLOWED_DFT_RESULT_FIELDS and corrected_value not in (None, ""):
             current_value = getattr(row, field_name, None)
-            if field_name == "value":
+            if field_name in {"value", "value_upper"}:
                 numeric_value, normalized_unit = self._normalize_imported_dft_value(
                     value=corrected_value,
                     unit=row.unit,
                     property_type=row.property_type,
                 )
                 if numeric_value is not None and self._numeric_key(numeric_value) != self._numeric_key(current_value):
-                    updates["value"] = numeric_value
-                if normalized_unit and self._normalized_text(normalized_unit) != self._normalized_text(row.unit):
+                    updates[field_name] = numeric_value
+                if field_name == "value" and normalized_unit and self._normalized_text(normalized_unit) != self._normalized_text(row.unit):
                     updates["unit"] = normalized_unit
             elif self._normalized_text(corrected_value) != self._normalized_text(current_value):
                 updates[field_name] = corrected_value
@@ -274,7 +292,7 @@ class DFTImportedOpinionMixin:
         if row.catalyst_sample_id:
             preferred.append("catalyst")
         if isinstance(corrected_value, dict):
-            if any(key in corrected_value for key in ("value", "unit")):
+            if any(key in corrected_value for key in ("value", "value_upper", "value_kind", "value_type", "unit")):
                 preferred.append("value")
             if "adsorbate" in corrected_value:
                 preferred.append("adsorbate")

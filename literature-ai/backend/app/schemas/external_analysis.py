@@ -72,7 +72,7 @@ class ExternalObjectReviewAuditPayload(BaseModel):
     model_name: str | None = None
     reason: str | None = None
     writes_final_truth: bool = False
-    human_confirmation_required: bool = True
+    confirmation_required: bool = True
 
 
 class ExternalAnalysisMaterializeRequest(BaseModel):

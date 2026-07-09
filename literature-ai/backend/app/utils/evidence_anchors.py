@@ -5,6 +5,8 @@ from typing import Any, Iterator
 
 ANCHOR_KEYS = (
     "page",
+    "page_start",
+    "page_end",
     "section",
     "section_title",
     "figure",
@@ -68,6 +70,29 @@ def first_evidence_anchor(payload: Any) -> dict[str, Any] | None:
         if summary:
             return summary
     return None
+
+
+def first_pdf_evidence_anchor(payload: Any) -> dict[str, Any] | None:
+    for candidate in iter_anchor_payloads(payload):
+        page = candidate.get("page")
+        if page in (None, ""):
+            page = candidate.get("page_start") or candidate.get("page_end")
+        if page in (None, "") or not str(page).strip():
+            continue
+        summary = {
+            key: candidate.get(key)
+            for key in ANCHOR_KEYS
+            if candidate.get(key) is not None and str(candidate.get(key)).strip()
+        }
+        summary["page"] = page
+        summary.pop("page_start", None)
+        summary.pop("page_end", None)
+        return summary
+    return None
+
+
+def has_pdf_evidence_anchor(payload: Any) -> bool:
+    return first_pdf_evidence_anchor(payload) is not None
 
 
 def first_material_correction_anchor(payload: Any) -> dict[str, Any] | None:

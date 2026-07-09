@@ -67,7 +67,7 @@ This UI work did not add write interfaces. It does not automatically mark target
 - DFT export remains blocked unless the existing evidence and review gates pass.
 - Ordinary IDE AI keys should not receive `review_corrections`; that capability remains reserved for trusted admin or human-review use.
 - `get_review_conflicts` is read-only and does not approve, merge, verify, or update review state.
-- Object-level `object_review_audit` candidates are forced to `verification_status=unverified`, `writes_final_truth=false`, and `human_confirmation_required=true`.
+- Object-level `object_review_audit` candidates are forced to `verification_status=unverified`, `writes_final_truth=false`, and `confirmation_required=true`.
 - DFT queue and Review center object audit displays are read-only summaries; they do not automatically verify rows, approve corrections, or merge values.
 
 ## Verification Summary

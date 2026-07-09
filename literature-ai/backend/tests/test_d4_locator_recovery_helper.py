@@ -227,14 +227,14 @@ def test_helper_does_not_fabricate_bbox_when_source_lacks_bbox():
     assert "bbox_unavailable" in proposal.warnings
 
 
-def test_proposal_defaults_to_no_write_and_requires_human_confirmation():
+def test_proposal_defaults_to_no_write_and_requires_confirmation():
     proposal = _proposal()
     payload = proposal.to_dict()
 
     assert proposal.should_write_locator is False
-    assert proposal.requires_human_confirmation is True
+    assert proposal.requires_confirmation is True
     assert payload["should_write_locator"] is False
-    assert payload["requires_human_confirmation"] is True
+    assert payload["requires_confirmation"] is True
 
 
 def test_proposal_generation_does_not_write_review_row_or_locator(tmp_path):

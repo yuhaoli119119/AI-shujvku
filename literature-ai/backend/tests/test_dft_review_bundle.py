@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -14,6 +15,7 @@ from app.db.models import (
     AuditLog,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
     ExternalAnalysisRun,
     ExtractionFieldReview,
     Paper,
@@ -128,7 +130,9 @@ def _seed_review_materials(engine):
                     paper_id=main.id,
                     figure_label="Figure 4",
                     caption="Figure 4. DFT adsorption-energy profile.",
+                    figure_role="dft_calculation",
                     content_summary="Adsorption energy profile for Li2S conversion.",
+                    key_elements=["Li2S adsorption", "energy profile"],
                     image_path="dft-profile.png",
                     page=6,
                 ),
@@ -172,6 +176,50 @@ def test_offline_dft_review_bundle_requires_completed_figure_table_review(setup_
     assert response.json()["detail"]["code"] == "figure_table_review_not_completed"
 
 
+def test_offline_dft_review_bundle_blocks_completed_chart_audit_when_figures_not_rag_ready(setup_test_db):
+    paper_id, _ = _seed_review_materials(setup_test_db)
+    settings = get_settings()
+    with Session(setup_test_db) as session:
+        figure = session.scalars(select(PaperFigure).where(PaperFigure.paper_id == paper_id)).first()
+        figure.figure_role = "unknown"
+        figure.content_summary = None
+        figure.key_elements = None
+        session.add(figure)
+        session.commit()
+
+    with Session(setup_test_db) as session:
+        state = DFTReviewBundleService(session, settings).get_figure_table_review_state(paper_id)
+        session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="offline_evidence_review_applied",
+                source="test_chart_review",
+                target_type="offline_evidence_review",
+                target_id=state["current_snapshot_fingerprint"][:32],
+                payload={
+                    "stage_status": "completed",
+                    "completed_snapshot_fingerprint": state["current_snapshot_fingerprint"],
+                    "review_source": {"review_source_type": "local_ai", "reviewer_label": "test"},
+                    "applied": [],
+                    "skipped": [],
+                    "dft_evidence_candidates": [],
+                },
+            )
+        )
+        session.commit()
+
+    with Session(setup_test_db) as session:
+        state = DFTReviewBundleService(session, settings).get_figure_table_review_state(paper_id)
+
+    response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
+
+    assert state["stage_status"] == "needs_local_ai"
+    assert state["rag_quality_status"] == "blocked"
+    assert state["rag_quality"]["figures"]["blocked"] == 1
+    assert response.status_code == 409
+    assert response.json()["detail"]["figure_table_review"]["rag_quality_status"] == "blocked"
+
+
 def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     paper_id, _ = _seed_review_materials(setup_test_db)
     completed_snapshot = _mark_figure_table_review_completed(setup_test_db, paper_id)
@@ -186,9 +234,11 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
         names = set(archive.namelist())
         assert {
             "manifest.json",
+            "format_examples.json",
             "instructions_for_web_ai.md",
             "return_schema.json",
             "return_template.json",
+            "parsed/dft_review_checklist.json",
             "parsed/paper_metadata.json",
             "parsed/initial_dft_candidates.json",
             "parsed/extracted_tables.json",
@@ -203,6 +253,9 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
         candidates = json.loads(archive.read("parsed/initial_dft_candidates.json"))
         metadata = json.loads(archive.read("parsed/paper_metadata.json"))
         return_schema = json.loads(archive.read("return_schema.json"))
+        return_template = json.loads(archive.read("return_template.json"))
+        checklist = json.loads(archive.read("parsed/dft_review_checklist.json"))
+        examples = json.loads(archive.read("format_examples.json"))
         instructions = archive.read("instructions_for_web_ai.md").decode("utf-8")
 
     assert manifest["paper"]["paper_code"] == "B0078"
@@ -213,7 +266,20 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     assert candidates["supporting_si_candidates"][0]["source_document_type"] == "supplementary_information"
     assert {doc["role"] for doc in metadata["source_documents"]} == {"main", "si"}
     assert "every current main-paper DFT candidate" in return_schema["properties"]["overall_status"]["description"]
+    assert return_template["coverage_acknowledgement"]["expected_target_ids"] == manifest["target_dft_result_ids"]
+    assert checklist["target_ids"] == manifest["target_dft_result_ids"]
+    assert checklist["targets"][0]["required_once"] is True
+    assert checklist["targets"][0]["field_name"] == "dft_results"
+    assert "PASS" in checklist["targets"][0]["allowed_decisions"]
+    revise_example = examples["examples"]["revise_existing_candidate"]["object_review_audits"][0]
+    assert revise_example["corrected_value"]["value"] == -1.2
+    assert revise_example["corrected_value"]["unit"] == "eV"
+    assert "format only" in examples["usage"][0]
+    assert manifest["expected_dft_review_coverage"]["target_ids"] == manifest["target_dft_result_ids"]
     assert '`overall_status="completed"`' in instructions
+    assert "format_examples.json" in instructions
+    assert "dft_review_checklist.json" in instructions
+    assert "不要照抄示例 ID" in instructions
     assert "未覆盖全部已有候选" in instructions
     assert "不得声称已写数据库" in instructions
 
@@ -281,6 +347,152 @@ def test_offline_review_validation_returns_import_request_without_writing(setup_
     assert invalid.status_code == 200
     assert invalid.json()["valid"] is False
     assert invalid.json()["errors"][0]["code"] == "unknown_evidence_id"
+
+
+def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_id)
+        template = service._return_template(materials)
+        text_evidence = next(
+            item for item in materials["evidence_map"].values()
+            if item.get("evidence_kind") == "text"
+        )
+        figure_evidence = next(
+            item for item in materials["evidence_map"].values()
+            if item.get("evidence_kind") == "figure" and item.get("page") is not None
+        )
+        template.update(
+            {
+                "overall_status": "uncertain",
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": "new",
+                        "field_name": "dft_results",
+                        "decision": "new_candidate",
+                        "evidence_checked": True,
+                        "evidence_ids": [text_evidence["evidence_id"], figure_evidence["evidence_id"]],
+                        "corrected_value": {
+                            "material_identity": "Fe-N-C",
+                            "property_type": "pdos_overlap_energy_window",
+                            "value": -2.5,
+                            "value_upper": -0.5,
+                            "unit": "eV",
+                            "adsorbate": "Li2S4",
+                        },
+                        "confidence": 0.9,
+                        "reason": "Text and Figure 4 jointly support the DFT energy window.",
+                        "recommended_action": "ready_for_ml_export",
+                    },
+                    {
+                        "target_type": "dft_results",
+                        "target_id": str(row_id),
+                        "field_name": "dft_results",
+                        "decision": "PASS",
+                        "evidence_checked": True,
+                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "confidence": 0.9,
+                        "reason": "The existing DFT candidate is also covered by this review result.",
+                        "recommended_action": "ready_for_ml_export",
+                    }
+                ],
+            }
+        )
+
+        result = service.validate_result(paper_id, template)
+
+    audit = result["import_analysis_request"]["raw_payload"]["object_review_audits"][0]
+    assert result["valid"] is True
+    assert audit["evidence_location"]["page"] == figure_evidence["page"]
+    assert audit["evidence_location"]["figure"] == figure_evidence["figure_label"]
+    assert audit["evidence_location"]["evidence_ids"] == [
+        text_evidence["evidence_id"],
+        figure_evidence["evidence_id"],
+    ]
+
+
+def test_offline_review_existing_dft_uses_locator_pdf_anchor_when_payload_has_no_page(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = Paper(
+            title="Locator-only DFT paper",
+            paper_code="BLOC1",
+            paper_type="article",
+            pdf_path="locator-only.pdf",
+            authors=[],
+        )
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Fe-N4")
+        session.add(sample)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=sample.id,
+            adsorbate="Li2S4",
+            property_type="adsorption_energy",
+            value=-1.2,
+            unit="eV",
+            evidence_text="Table 2 reports Li2S4 adsorption energy of -1.20 eV on Fe-N4.",
+            evidence_payload=None,
+        )
+        session.add(row)
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name="value",
+                page=9,
+                evidence_text="Table 2 reports Li2S4 adsorption energy of -1.20 eV on Fe-N4.",
+                locator_status="exact_page",
+                locator_confidence=0.96,
+                parser_source="test",
+            )
+        )
+        session.commit()
+        paper_id = paper.id
+        row_id = row.id
+
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_id)
+        row_evidence = next(
+            item
+            for item in materials["evidence_map"].values()
+            if item.get("source_record_id") == str(row_id)
+        )
+        template = service._return_template(materials)
+        template.update(
+            {
+                "overall_status": "completed",
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": str(row_id),
+                        "field_name": "value",
+                        "decision": "PASS",
+                        "evidence_checked": True,
+                        "evidence_ids": [row_evidence["evidence_id"]],
+                        "corrected_value": -1.2,
+                        "confidence": 0.9,
+                        "reason": "Locator-backed row evidence confirms the value.",
+                        "recommended_action": "ready_for_ml_export",
+                    }
+                ],
+            }
+        )
+
+        result = service.validate_result(paper_id, template)
+
+    audit = result["import_analysis_request"]["raw_payload"]["object_review_audits"][0]
+    assert result["valid"] is True
+    assert row_evidence["page"] == 9
+    assert audit["evidence_location"]["page"] == 9
+    assert audit["evidence_location"]["locator_status"] == "exact_page"
 
 
 def test_offline_review_validation_rejects_wrong_paper_code(setup_test_db):
@@ -381,6 +593,107 @@ def test_offline_review_validation_rejects_conflicting_duplicate_target_field(se
     assert response.status_code == 200
     assert response.json()["valid"] is False
     assert any(error["code"] == "conflicting_target_field_review" for error in response.json()["errors"])
+
+
+def test_offline_review_validation_normalizes_common_web_ai_json_noise(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    client = TestClient(app)
+    bundle_response = client.post(f"/api/papers/{paper_id}/dft-review-bundle")
+    with ZipFile(BytesIO(bundle_response.content)) as archive:
+        template = json.loads(archive.read("return_template.json"))
+        evidence_id = json.loads(archive.read("evidence/text_snippets.jsonl").decode("utf-8").splitlines()[0])[
+            "evidence_id"
+        ]
+    audit = {
+        "target_type": "dft_results",
+        "target_id": str(row_id),
+        "field_name": "dft_results",
+        "decision": "REVISE",
+        "evidence_checked": True,
+        "evidence_ids": [evidence_id],
+        "corrected_value": {
+            "material_identity": "Fe-N-C",
+            "property_type": "adsorption_energy",
+            "value": "−1.20 eV",
+            "unit": "eV",
+            "adsorbate": "Li2S",
+        },
+        "confidence": 0.95,
+        "reason": "Evidence checked against the quoted sentence.",
+        "recommended_action": "ready_for_ml_export",
+    }
+    template.update(
+        {
+            "overall_status": "completed",
+            "object_review_audits": [dict(audit), dict(audit)],
+        }
+    )
+
+    response = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=template)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is True
+    assert body["validated_audit_count"] == 1
+    assert any(warning["code"] == "normalized_duplicate_object_review_audit" for warning in body["warnings"])
+    normalized_audit = body["import_analysis_request"]["raw_payload"]["object_review_audits"][0]
+    assert normalized_audit["corrected_value"]["value"] == -1.2
+
+
+def test_offline_review_validation_blocks_partial_dft_coverage_even_when_uncertain(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    with Session(setup_test_db) as session:
+        sample = session.query(CatalystSample).filter(CatalystSample.paper_id == paper_id).first()
+        session.add(
+            DFTResult(
+                paper_id=paper_id,
+                catalyst_sample_id=sample.id,
+                adsorbate="Li2S2",
+                property_type="adsorption_energy",
+                value=-0.8,
+                unit="eV",
+                evidence_text="A second DFT row requires a separate audit decision.",
+                evidence_payload={"page": 7, "quoted_text": "-0.8 eV"},
+            )
+        )
+        session.commit()
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    client = TestClient(app)
+    bundle_response = client.post(f"/api/papers/{paper_id}/dft-review-bundle")
+    with ZipFile(BytesIO(bundle_response.content)) as archive:
+        template = json.loads(archive.read("return_template.json"))
+        evidence_id = json.loads(archive.read("evidence/text_snippets.jsonl").decode("utf-8").splitlines()[0])[
+            "evidence_id"
+        ]
+    template.update(
+        {
+            "overall_status": "uncertain",
+            "object_review_audits": [
+                {
+                    "target_type": "dft_results",
+                    "target_id": str(row_id),
+                    "field_name": "dft_results",
+                    "decision": "PASS",
+                    "evidence_checked": True,
+                    "evidence_ids": [evidence_id],
+                    "reason": "Only one of two DFT candidates was reviewed.",
+                    "recommended_action": "ready_for_ml_export",
+                }
+            ],
+        }
+    )
+
+    response = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=template)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["valid"] is False
+    assert body["import_analysis_request"] is None
+    assert body["coverage"]["coverage_complete"] is False
+    assert body["coverage"]["reviewed_existing_count"] == 1
+    assert body["coverage"]["missing_target_ids"]
+    assert any(error["code"] == "incomplete_candidate_coverage" for error in body["errors"])
 
 
 def test_offline_review_validation_rejects_unrelated_or_missing_evidence_ids(setup_test_db):

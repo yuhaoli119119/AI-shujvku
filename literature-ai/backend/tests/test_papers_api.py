@@ -22,7 +22,7 @@ from app.services.paper_codes import next_supplementary_paper_code, supplementar
 import app.api.papers as papers_api
 
 
-def _add_explicit_ai_export_approval(session, row: DFTResult, *, source: str = "local_ai"):
+def _add_object_review_audit(session, row: DFTResult, *, source: str = "local_ai"):
     run = ExternalAnalysisRun(
         paper_id=row.paper_id,
         source=source,
@@ -1294,7 +1294,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
                 parser_source="test",
             )
         )
-        _add_explicit_ai_export_approval(session, dft_result)
+        _add_object_review_audit(session, dft_result)
         session.commit()
         paper_id = paper.id
         dft_result_id = dft_result.id
@@ -1340,10 +1340,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
     assert readiness["total_candidates"] == 2
     assert readiness["eligible_count"] == 1
     assert readiness["blocked_count"] == 1
-    assert readiness["blocked_reasons"] == {
-        "missing_review": 1,
-        "missing_explicit_ai_export_approval": 1,
-    }
+    assert readiness["blocked_reasons"] == {"missing_review": 1}
 
     dataset_response = client.get("/api/papers/export/dft-dataset")
     assert dataset_response.status_code == 200
@@ -1437,7 +1434,6 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
     assert queue_row["blocked_reasons"] == [
         "missing_material_identity",
         "missing_review",
-        "missing_explicit_ai_export_approval",
     ]
     assert queue_row["can_mark_verified"] is False
     assert queue_row["recommended_action"] == "inspect_suspicious_candidate"
@@ -2060,7 +2056,7 @@ def test_rejected_dft_rows_do_not_count_as_pending_review_blocks(setup_test_db):
                     last_resolved_target_id=str(row.id),
                 )
             )
-        _add_explicit_ai_export_approval(session, verified)
+        _add_object_review_audit(session, verified)
         session.commit()
         paper_id = str(paper.id)
 
@@ -2655,7 +2651,7 @@ def test_dft_dataset_export_honors_catalyst_type_and_min_confidence_filters(setu
                     locator_confidence=0.95,
                 )
             )
-            _add_explicit_ai_export_approval(session, row)
+            _add_object_review_audit(session, row)
         session.commit()
 
     response = client.get(
@@ -2851,7 +2847,7 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
                         parser_source="test",
                     )
                 )
-                _add_explicit_ai_export_approval(session, row)
+                _add_object_review_audit(session, row)
                 rows_to_verify.append((paper.id, row.id))
         session.commit()
 
@@ -3134,7 +3130,7 @@ def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
                         locator_confidence=0.98,
                     )
                 )
-                _add_explicit_ai_export_approval(session, result_row)
+                _add_object_review_audit(session, result_row)
         session.commit()
 
     client = TestClient(app)
@@ -3621,7 +3617,7 @@ def test_visuals_correlation_summary_prefetches_reviewed_dft_once(setup_test_db)
                         locator_confidence=0.98,
                     )
                 )
-                _add_explicit_ai_export_approval(session, result_row)
+                _add_object_review_audit(session, result_row)
         session.commit()
 
     statements = []

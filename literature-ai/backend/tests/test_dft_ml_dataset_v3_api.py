@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import csv
 import io
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 import pytest
@@ -50,6 +51,9 @@ def _seed(
         reaction_type="SRR_LiS",
         reaction_profile_version="reaction_profiles_v1",
         reaction_validation_status="valid",
+        candidate_status="ai_verified_ml_ready",
+        ml_ready_at=datetime.utcnow(),
+        ml_ready_source="test_local_ai",
     )
     session.add(row)
     session.flush()

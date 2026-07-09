@@ -16,18 +16,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import AuditLog, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
+from app.db.models import AuditLog, ExternalAnalysisCandidate, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
 from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewFigureAction,
     OfflineEvidenceReviewResult,
     OfflineEvidenceReviewTableAction,
 )
 from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
+from app.services.figure_rag_quality import build_figure_rag_quality_summary
+from app.services.figure_review_scope import (
+    include_figure_in_chart_review_scope,
+    is_dft_related_support_figure,
+)
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.review_service import ReviewService
 from app.services.table_curation_service import TableCurationService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
-from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
+from app.utils.figure_summary import (
+    figure_summary_echoes_caption,
+    flatten_figure_key_elements,
+    normalize_figure_content_summary,
+    normalize_figure_key_elements,
+)
 
 
 OFFLINE_EVIDENCE_REVIEW_BUNDLE_SCHEMA_VERSION = "offline_figure_table_evidence_bundle_v1"
@@ -37,7 +47,6 @@ MAX_SOURCE_PDF_COUNT = 8
 MAX_TOTAL_SOURCE_PDF_BYTES = 160 * 1024 * 1024
 FIGURE_AUTO_CONFIDENCE = 0.70
 TABLE_AUTO_CONFIDENCE = 0.75
-
 
 def _json_bytes(payload: Any) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
@@ -77,6 +86,56 @@ def _short_source(value: str | None) -> str:
 
 def _payload_sha256(payload: Any) -> str:
     return _sha256(_canonical_json_bytes(payload))
+
+
+def pending_needs_human_actions_from_review_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    response = payload.get("response") if isinstance(payload.get("response"), dict) else payload
+    applied = response.get("applied") if isinstance(response, dict) else None
+    pending: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in applied or []:
+        if not isinstance(item, dict) or item.get("action") != "NEEDS_HUMAN":
+            continue
+        category = str(item.get("category") or "unknown")
+        target_id = str(item.get("target_id") or "")
+        key = (category, target_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        result = item.get("table_result") if isinstance(item.get("table_result"), dict) else {}
+        evidence = result.get("evidence_payload") if isinstance(result.get("evidence_payload"), dict) else {}
+        pending.append(
+            {
+                "code": "needs_human_pending",
+                "category": category,
+                "action": "NEEDS_HUMAN",
+                "target_id": target_id or None,
+                "blocked_reasons": ["needs_human", "local_ai_review_required", "confirmation_required"],
+                "reason": evidence.get("reason") or "NEEDS_HUMAN is pending and cannot complete the chart review stage.",
+                "requires_local_ai": True,
+            }
+        )
+    return pending
+
+
+FIGURE_REVIEWED_ACTIONS = {
+    "KEEP",
+    "RECROP",
+    "CREATE",
+    "RECROP_FIGURE",
+    "CREATE_FIGURE_FROM_BBOX",
+}
+TABLE_REVIEWED_ACTIONS = {
+    "KEEP",
+    "UPDATE",
+    "CREATE",
+    "MERGE",
+    "CREATE_TABLE",
+    "UPDATE_TABLE",
+    "MERGE_TABLE",
+}
+POSITIVE_REVIEW_DECISIONS = {"PASS", "APPROVE", "APPROVED", "ACCEPT", "ACCEPTED", "VERIFIED", "OK"}
+FINALIZED_REVIEW_STATUSES = {"ai_reviewed", "ai_applied", "materialized"}
 
 
 def _utc_iso() -> str:
@@ -189,7 +248,9 @@ class EvidenceReviewBundleService:
                 "table_auto_confidence_min": TABLE_AUTO_CONFIDENCE,
                 "auto_applies": ["figure KEEP metadata", "figure RECROP", "figure CREATE", "table UPDATE", "table CREATE"],
                 "local_ai_verified_actions": ["table MERGE", "table DELETE", "figure REJECT", "low-confidence actions"],
-                "never_auto_applies": ["NEEDS_HUMAN"],
+                "pending_actions": [
+                    "NEEDS_HUMAN always remains unresolved until local AI or the user resolves it to KEEP/UPDATE/MERGE/DELETE/REJECT"
+                ],
             },
             "counts": {
                 "source_documents": len(materials["source_documents"]),
@@ -288,7 +349,7 @@ class EvidenceReviewBundleService:
             execution_plan.append(plan)
             for error in plan.pop("_errors", []):
                 add_error(error["code"], error["message"], action_ref=action_ref)
-            for table_id in (action.table_id, action.source_table_id, action.target_table_id):
+            for table_id in {action.table_id, action.source_table_id, action.target_table_id}:
                 if table_id:
                     table_ids_seen.add(table_id)
                     note_ref(table_refs, table_id, action_ref)
@@ -301,11 +362,12 @@ class EvidenceReviewBundleService:
                     action_ref=refs[0],
                 )
         for object_id, refs in sorted(table_refs.items()):
-            if len(refs) > 1:
+            unique_refs = list(dict.fromkeys(refs))
+            if len(unique_refs) > 1:
                 add_error(
                     "duplicate_or_conflicting_table_action",
-                    f"table_id '{object_id}' appears in multiple actions: " + ", ".join(refs),
-                    action_ref=refs[0],
+                    f"table_id '{object_id}' appears in multiple actions: " + ", ".join(unique_refs),
+                    action_ref=unique_refs[0],
                 )
 
         missing_figures = sorted(materials["figure_id_map"] - figure_ids_seen)
@@ -374,6 +436,10 @@ class EvidenceReviewBundleService:
                 "missing_figure_ids": missing_figures,
                 "missing_table_ids": missing_tables,
             },
+            "rag_quality": {
+                "figures": materials["figure_rag_quality"],
+            },
+            "rag_quality_status": materials["figure_rag_quality"]["status"],
             "errors": errors,
             "warnings": warnings,
             "execution_plan": execution_plan,
@@ -495,18 +561,64 @@ class EvidenceReviewBundleService:
                     "requires_local_ai": True,
                 }
             ]
+        needs_human_pending = pending_needs_human_actions_from_review_payload(latest_payload)
+        if stage_status == "completed" and needs_human_pending:
+            stage_status = "needs_local_ai"
+            unresolved_actions = [*unresolved_actions, *needs_human_pending]
+        figure_rag_quality = materials["figure_rag_quality"]
+        rag_quality_status = str(figure_rag_quality.get("status") or "ready")
+        quality_blockers: list[dict[str, Any]] = []
+        if stage_status == "completed" and rag_quality_status != "ready":
+            stage_status = "needs_local_ai"
+            quality_blockers = self._rag_quality_unresolved_actions(figure_rag_quality)
+            unresolved_actions = [*unresolved_actions, *quality_blockers]
+        stale_changed_ids = (
+            self._changed_snapshot_object_ids(
+                latest_payload.get("completed_snapshot") or state_payload.get("completed_snapshot"),
+                current_snapshot,
+            )
+            if stage_status == "stale" and isinstance(state_payload, dict)
+            else {"figures": set(), "tables": set()}
+        )
+        scope_completion = self._current_scope_completion(
+            materials,
+            reviewed_after=latest.created_at if latest is not None and stage_status == "stale" else None,
+            changed_ids=stale_changed_ids,
+        )
+        if (
+            stage_status in {"stale", "not_started", "needs_local_ai"}
+            and rag_quality_status == "ready"
+            and scope_completion["complete"]
+        ):
+            stage_status = "completed"
+            completed_snapshot_fingerprint = current_snapshot_fingerprint
+            unresolved_actions = []
         return {
             "schema_version": "chart_review_task_v1",
             "paper_id": materials["paper_metadata"]["paper_id"],
             "paper_code": materials["paper_metadata"]["paper_code"],
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "stage_status": stage_status,
-            "apply_ready": stage_status in {"completed", "not_required"},
+            "apply_ready": stage_status in {"completed", "not_required"} and rag_quality_status == "ready",
+            "rag_quality_status": rag_quality_status,
+            "rag_quality": {
+                "figures": figure_rag_quality,
+            },
+            "blocking_errors": [
+                {
+                    "code": "figure_rag_quality_incomplete",
+                    "message": "Figure/table review has a completed action snapshot, but current figures are not RAG-ready.",
+                    "blocked_count": figure_rag_quality.get("blocked"),
+                }
+            ]
+            if quality_blockers
+            else [],
             "current_snapshot_fingerprint": current_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
             "latest_review_run_id": str(latest.id) if latest is not None else None,
             "unresolved_count": len(unresolved_actions),
             "unresolved_actions": unresolved_actions,
+            "scope_completion": scope_completion,
             "counts": {
                 "source_documents": len(materials["source_documents"]),
                 "figures": len(materials["extracted_figures"]),
@@ -619,16 +731,28 @@ class EvidenceReviewBundleService:
         if action.action in {"RECROP", "CREATE"} and not self._has_page_geometry(action.source_paper_id, action.figure_id, action.page, materials):
             blocked.append("page_geometry_unavailable")
         if action.action == "NEEDS_HUMAN":
+            if not action.evidence_checked:
+                blocked.append("evidence_not_checked")
+            if not action.evidence_ids:
+                blocked.append("missing_evidence_ids_for_pending_action")
             blocked.append("needs_human")
-            blocked.append("manual_confirmation_required")
+            blocked.append("local_ai_review_required")
+            blocked.append("confirmation_required")
         if action.action == "REJECT":
             if not self._has_local_ai_verification(action.local_ai_verification):
                 blocked.append("reject_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
         if (
-            action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE
+            action.action != "NEEDS_HUMAN"
+            and (action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE)
         ) and not self._has_local_ai_verification(action.local_ai_verification):
             blocked.append("confidence_below_auto_apply_threshold")
+        quality_reasons = self._projected_figure_action_quality_reasons(action, materials)
+        if quality_reasons:
+            block(
+                "figure_rag_quality_incomplete",
+                "Figure remains not RAG-ready after this action: " + ", ".join(quality_reasons),
+            )
 
         auto = not errors and action.action in {"KEEP", "RECROP", "CREATE", "REJECT"} and not blocked
         return {
@@ -643,6 +767,61 @@ class EvidenceReviewBundleService:
             "tool_hint": "system_deterministic_pdf_crop" if action.action in {"RECROP", "CREATE"} else "system_metadata_update_or_final_status",
             "payload": action.model_dump(mode="json"),
             "_errors": errors,
+        }
+
+    @staticmethod
+    def _projected_figure_action_quality_reasons(
+        action: OfflineEvidenceReviewFigureAction,
+        materials: dict[str, Any],
+    ) -> list[str]:
+        if action.action == "REJECT":
+            return []
+        existing = materials.get("figure_record_by_id", {}).get(str(action.figure_id or ""))
+        if action.action in {"KEEP", "RECROP", "NEEDS_HUMAN"} and not isinstance(existing, dict):
+            return []
+        projected = dict(existing or {})
+        if action.action in {"CREATE", "RECROP"}:
+            projected["image_available"] = True
+            projected["crop_status"] = "recropped" if action.action == "RECROP" else "ai_created_crop"
+        for field in ("page", "caption", "figure_label", "figure_role", "content_summary", "key_elements"):
+            value = getattr(action, field)
+            if value is not None:
+                projected[field] = value
+        reasons: list[str] = []
+        if not projected.get("image_available"):
+            reasons.append("missing_image")
+        if projected.get("page") is None:
+            reasons.append("missing_page")
+        if not str(projected.get("caption") or "").strip():
+            reasons.append("missing_caption")
+        role = str(projected.get("figure_role") or "").strip().lower()
+        if role in {"noise", "noisy", "decorative", "publisher_logo"}:
+            reasons.append(f"figure_role:{role}")
+        if not role or role in {"unknown", "uncategorized", "unclassified", "other"}:
+            reasons.append("missing_figure_role")
+        summary = str(projected.get("content_summary") or "").strip()
+        if not summary:
+            reasons.append("missing_content_summary")
+        elif figure_summary_echoes_caption(summary, projected.get("caption")):
+            reasons.append("caption_echo_summary")
+        key_elements = flatten_figure_key_elements(projected.get("key_elements"))
+        if not key_elements:
+            reasons.append("missing_key_elements")
+        elif any(EvidenceReviewBundleService._is_placeholder_figure_key_element(item) for item in key_elements):
+            reasons.append("placeholder_key_elements")
+        return reasons
+
+    @staticmethod
+    def _is_placeholder_figure_key_element(value: Any) -> bool:
+        normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        return normalized in {
+            "verified_figure",
+            "figure_verified",
+            "reviewed_figure",
+            "ai_verified",
+            "verified",
+            "reviewed",
+            "ok",
         }
 
     def _validate_table_action(
@@ -679,6 +858,14 @@ class EvidenceReviewBundleService:
         if action.action in {"UPDATE", "CREATE"} and not self._looks_like_markdown_table(action.complete_markdown):
             block("invalid_markdown_table", f"{action.action} requires a complete markdown table with pipes and multiple rows")
         if action.action == "MERGE":
+            if not action.source_table_id or not action.target_table_id:
+                blocked.append("merge_requires_source_table_id_and_target_table_id")
+                blocked.append("local_ai_pdf_verification_required")
+                blocked.append("confirmation_required")
+            elif action.source_table_id == action.target_table_id:
+                blocked.append("merge_source_and_target_table_ids_must_differ")
+                blocked.append("local_ai_pdf_verification_required")
+                blocked.append("confirmation_required")
             if not self._has_local_ai_verification(action.local_ai_verification):
                 blocked.append("merge_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
@@ -687,10 +874,16 @@ class EvidenceReviewBundleService:
                 blocked.append("delete_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
         if action.action == "NEEDS_HUMAN":
+            if not action.evidence_checked:
+                blocked.append("evidence_not_checked")
+            if not action.evidence_ids:
+                blocked.append("missing_evidence_ids_for_pending_action")
             blocked.append("needs_human")
-            blocked.append("manual_confirmation_required")
+            blocked.append("local_ai_review_required")
+            blocked.append("confirmation_required")
         if (
-            action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE
+            action.action != "NEEDS_HUMAN"
+            and (action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE)
         ) and not self._has_local_ai_verification(action.local_ai_verification):
             blocked.append("confidence_below_auto_apply_threshold")
 
@@ -717,7 +910,12 @@ class EvidenceReviewBundleService:
         bundle_fingerprint: str,
         reviewer: str,
     ) -> dict[str, Any]:
-        preexisting = self._already_applied(op_id, bundle_fingerprint, target_type="paper_figure")
+        preexisting = self._already_applied(
+            op_id,
+            bundle_fingerprint,
+            target_type="paper_figure",
+            expected_action=action.model_dump(mode="json"),
+        )
         if preexisting is not None:
             return preexisting
 
@@ -782,6 +980,18 @@ class EvidenceReviewBundleService:
                 "correction_id": str(approved.id),
                 "actor_type": "ai",
                 "local_ai_verification": evidence_payload["local_ai_verification"],
+            }
+        elif action.action == "NEEDS_HUMAN":
+            figure = self.session.get(PaperFigure, UUID(str(action.figure_id)))
+            if figure is None:
+                raise ValueError("Figure not found during documented exception recording")
+            target_id = str(figure.id)
+            applied_updates = {
+                "documented_exception": True,
+                "requires_human_attention": True,
+                "updated": False,
+                "evidence_ids": list(action.evidence_ids),
+                "reason": action.reason,
             }
         else:
             figure = self.session.get(PaperFigure, UUID(str(action.figure_id)))
@@ -851,7 +1061,12 @@ class EvidenceReviewBundleService:
         bundle_fingerprint: str,
         reviewer: str,
     ) -> dict[str, Any]:
-        preexisting = self._already_applied(op_id, bundle_fingerprint, target_type="paper_table")
+        preexisting = self._already_applied(
+            op_id,
+            bundle_fingerprint,
+            target_type="paper_table",
+            expected_action=action.model_dump(mode="json"),
+        )
         if preexisting is not None:
             return preexisting
 
@@ -939,6 +1154,20 @@ class EvidenceReviewBundleService:
                 reason=action.reason,
                 evidence_payload=evidence_payload,
             )
+        elif action.action == "NEEDS_HUMAN":
+            table = self.session.get(PaperTable, UUID(str(action.table_id)))
+            if table is None:
+                raise ValueError("Table not found during documented exception recording")
+            target_id = str(table.id)
+            result = {
+                "paper_id": str(table.paper_id),
+                "table_id": target_id,
+                "action": "NEEDS_HUMAN",
+                "updated": False,
+                "documented_exception": True,
+                "requires_human_attention": True,
+                "evidence_payload": evidence_payload,
+            }
         else:
             raise ValueError(f"Table action {action.action} is not auto-applied")
 
@@ -1124,7 +1353,12 @@ class EvidenceReviewBundleService:
             if response.get("stage_status") == "completed":
                 if response.get("completed_snapshot_fingerprint") != current_snapshot_fingerprint:
                     continue
+                figure_rag_quality = current_materials.get("figure_rag_quality") or {}
+                if int(figure_rag_quality.get("blocked") or 0) > 0:
+                    continue
             elif response.get("post_apply_bundle_fingerprint") != current_bundle_fingerprint:
+                continue
+            elif response.get("unresolved_actions"):
                 continue
             cloned = dict(response)
             cloned["idempotent"] = True
@@ -1169,6 +1403,212 @@ class EvidenceReviewBundleService:
         return unresolved
 
     @staticmethod
+    def _rag_quality_unresolved_actions(figure_rag_quality: dict[str, Any]) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = []
+        for item in figure_rag_quality.get("blocked_items") or []:
+            if not isinstance(item, dict):
+                continue
+            actions.append(
+                {
+                    "code": "figure_rag_quality_incomplete",
+                    "category": "figure",
+                    "action": "REPAIR_METADATA",
+                    "target_id": item.get("source_id"),
+                    "figure_label": item.get("figure_label"),
+                    "page": item.get("page"),
+                    "blocked_reasons": list(item.get("reasons") or ["figure_rag_quality_incomplete"]),
+                    "reason": "Figure has completed review actions but is still not RAG-ready.",
+                    "requires_local_ai": True,
+                }
+            )
+        if actions:
+            return actions
+        if int(figure_rag_quality.get("blocked") or 0) > 0:
+            return [
+                {
+                    "code": "figure_rag_quality_incomplete",
+                    "category": "figure",
+                    "action": "REPAIR_METADATA",
+                    "target_id": None,
+                    "blocked_reasons": ["figure_rag_quality_incomplete"],
+                    "reason": "One or more figures are still not RAG-ready.",
+                    "requires_local_ai": True,
+                }
+            ]
+        return []
+
+    def _current_scope_completion(
+        self,
+        materials: dict[str, Any],
+        *,
+        reviewed_after: datetime | None = None,
+        changed_ids: dict[str, set[str]] | None = None,
+    ) -> dict[str, Any]:
+        figure_ids = set(materials.get("figure_id_map") or set())
+        table_ids = set(materials.get("table_id_map") or set())
+        reviewed_figures = self._reviewed_object_ids(
+            object_ids=figure_ids,
+            target_type="paper_figure",
+            positive_actions=FIGURE_REVIEWED_ACTIONS,
+            external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
+        )
+        reviewed_tables = self._reviewed_object_ids(
+            object_ids=table_ids,
+            target_type="paper_table",
+            positive_actions=TABLE_REVIEWED_ACTIONS,
+            external_target_types={"table", "tables", "paper_table", "paper_tables"},
+        )
+        changed_ids = changed_ids or {"figures": set(), "tables": set()}
+        changed_figure_ids = set(changed_ids.get("figures") or set()) & figure_ids
+        changed_table_ids = set(changed_ids.get("tables") or set()) & table_ids
+        reviewed_changed_figures = (
+            self._reviewed_object_ids(
+                object_ids=changed_figure_ids,
+                target_type="paper_figure",
+                positive_actions=FIGURE_REVIEWED_ACTIONS,
+                external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
+                created_after=reviewed_after,
+            )
+            if reviewed_after is not None and changed_figure_ids
+            else changed_figure_ids
+        )
+        reviewed_changed_tables = (
+            self._reviewed_object_ids(
+                object_ids=changed_table_ids,
+                target_type="paper_table",
+                positive_actions=TABLE_REVIEWED_ACTIONS,
+                external_target_types={"table", "tables", "paper_table", "paper_tables"},
+                created_after=reviewed_after,
+            )
+            if reviewed_after is not None and changed_table_ids
+            else changed_table_ids
+        )
+        missing_figures = sorted(figure_ids - reviewed_figures)
+        missing_tables = sorted(table_ids - reviewed_tables)
+        missing_changed_figures = sorted(changed_figure_ids - reviewed_changed_figures)
+        missing_changed_tables = sorted(changed_table_ids - reviewed_changed_tables)
+        missing_figures = sorted(set(missing_figures) | set(missing_changed_figures))
+        missing_tables = sorted(set(missing_tables) | set(missing_changed_tables))
+        return {
+            "complete": not missing_figures and not missing_tables,
+            "figure_scope": "main_all_plus_dft_related_supplementary",
+            "table_scope": "main_and_supplementary_all",
+            "expected_figure_ids": sorted(figure_ids),
+            "expected_table_ids": sorted(table_ids),
+            "reviewed_figure_ids": sorted(reviewed_figures),
+            "reviewed_table_ids": sorted(reviewed_tables),
+            "changed_figure_ids": sorted(changed_figure_ids),
+            "changed_table_ids": sorted(changed_table_ids),
+            "missing_figure_ids": missing_figures,
+            "missing_table_ids": missing_tables,
+        }
+
+    def _reviewed_object_ids(
+        self,
+        *,
+        object_ids: set[str],
+        target_type: str,
+        positive_actions: set[str],
+        external_target_types: set[str],
+        created_after: datetime | None = None,
+    ) -> set[str]:
+        if not object_ids:
+            return set()
+        reviewed: set[str] = set()
+        rows = self.session.scalars(
+            select(AuditLog)
+            .where(AuditLog.target_type == target_type)
+            .where(AuditLog.target_id.in_(object_ids))
+            .where(AuditLog.created_at > created_after if created_after is not None else True)
+            .order_by(AuditLog.target_id.asc(), AuditLog.created_at.desc(), AuditLog.id.desc())
+        ).all()
+        seen: set[str] = set()
+        for row in rows:
+            target_id = str(row.target_id or "")
+            if not target_id or target_id in seen:
+                continue
+            seen.add(target_id)
+            action = self._audit_review_action(row)
+            if action in positive_actions:
+                reviewed.add(target_id)
+        external_reviewed = self._external_reviewed_object_ids(
+            object_ids=object_ids,
+            external_target_types=external_target_types,
+            created_after=created_after,
+        )
+        return reviewed | external_reviewed
+
+    @staticmethod
+    def _audit_review_action(row: AuditLog) -> str:
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        action_payload = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+        table_result = payload.get("table_result") if isinstance(payload.get("table_result"), dict) else {}
+        action = (
+            action_payload.get("action")
+            or table_result.get("action")
+            or payload.get("action")
+            or row.action
+        )
+        return str(action or "").strip().upper()
+
+    def _external_reviewed_object_ids(
+        self,
+        *,
+        object_ids: set[str],
+        external_target_types: set[str],
+        created_after: datetime | None = None,
+    ) -> set[str]:
+        if not object_ids:
+            return set()
+        reviewed: set[str] = set()
+        normalized_types = {item.strip().lower() for item in external_target_types}
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
+            .where(ExternalAnalysisCandidate.status.in_(FINALIZED_REVIEW_STATUSES))
+            .where(ExternalAnalysisCandidate.created_at > created_after if created_after is not None else True)
+            .order_by(ExternalAnalysisCandidate.created_at.desc(), ExternalAnalysisCandidate.id.desc())
+        ).all()
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_id = str(payload.get("target_id") or candidate.materialized_target_id or "").strip()
+            target_type = str(payload.get("target_type") or candidate.materialized_target_type or "").strip().lower()
+            decision = str(payload.get("decision") or payload.get("verdict") or "").strip().upper()
+            if target_id in object_ids and target_type in normalized_types and decision in POSITIVE_REVIEW_DECISIONS:
+                reviewed.add(target_id)
+        return reviewed
+
+    @staticmethod
+    def _changed_snapshot_object_ids(previous: Any, current: dict[str, Any]) -> dict[str, set[str]]:
+        if not isinstance(previous, dict):
+            return {
+                "figures": {str(item.get("id")) for item in current.get("figures") or [] if item.get("id")},
+                "tables": {str(item.get("id")) for item in current.get("tables") or [] if item.get("id")},
+            }
+
+        def changed_ids(kind: str) -> set[str]:
+            previous_by_id = {
+                str(item.get("id")): item
+                for item in previous.get(kind) or []
+                if isinstance(item, dict) and item.get("id")
+            }
+            current_by_id = {
+                str(item.get("id")): item
+                for item in current.get(kind) or []
+                if isinstance(item, dict) and item.get("id")
+            }
+            changed: set[str] = set()
+            for item_id, item in current_by_id.items():
+                if previous_by_id.get(item_id) != item:
+                    changed.add(item_id)
+            return changed
+
+        return {
+            "figures": changed_ids("figures"),
+            "tables": changed_ids("tables"),
+        }
+
+    @staticmethod
     def _figure_action_modifies_state(action: OfflineEvidenceReviewFigureAction) -> bool:
         if action.action in {"RECROP", "CREATE", "REJECT"}:
             return True
@@ -1200,12 +1640,12 @@ class EvidenceReviewBundleService:
         covered_figures = {
             str(action.figure_id)
             for action in result.figure_actions
-            if action.figure_id and action.action in {"KEEP", "RECROP"}
+            if action.figure_id and action.action in {"KEEP", "RECROP", "NEEDS_HUMAN"}
         }
         covered_tables = {
             str(action.table_id)
             for action in result.table_actions
-            if action.table_id and action.action in {"KEEP", "UPDATE"}
+            if action.table_id and action.action in {"KEEP", "UPDATE", "NEEDS_HUMAN"}
         }
         for item in applied:
             if item.get("target_id"):
@@ -1219,6 +1659,16 @@ class EvidenceReviewBundleService:
             errors.append({"code": "finalize_incomplete_figure_status", "missing_figure_ids": missing_figures})
         if missing_tables:
             errors.append({"code": "finalize_incomplete_table_status", "missing_table_ids": missing_tables})
+        figure_rag_quality = refreshed.get("figure_rag_quality") or {}
+        if int(figure_rag_quality.get("blocked") or 0) > 0:
+            errors.append(
+                {
+                    "code": "finalize_figure_rag_quality_incomplete",
+                    "blocked_count": figure_rag_quality.get("blocked"),
+                    "blocked_reasons": figure_rag_quality.get("blocked_reasons") or {},
+                    "blocked_items": (figure_rag_quality.get("blocked_items") or [])[:50],
+                }
+            )
         return errors
 
     def _mark_figures_review_completed(self, paper_id: UUID, reviewer: str) -> None:
@@ -1262,10 +1712,15 @@ class EvidenceReviewBundleService:
         source_papers = self._source_papers(paper)
         source_ids = [item["paper"].id for item in source_papers]
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id.in_(source_ids))).all()
-        figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(source_ids))).all()
+        all_figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(source_ids))).all()
         source_by_id = {item["paper"].id: item for item in source_papers}
+        figures = [
+            row
+            for row in all_figures
+            if self._include_figure_in_bundle(row, source_by_id=source_by_id)
+        ]
+        excluded_support_figure_count = len(all_figures) - len(figures)
         warnings: list[str] = []
-
         source_documents = []
         for item in source_papers:
             source_doc = self._source_document_payload(item)
@@ -1287,6 +1742,7 @@ class EvidenceReviewBundleService:
         }
         extracted_tables = self._tables(source_by_id=source_by_id, tables=tables)
         extracted_figures = self._figures(source_by_id=source_by_id, figures=figures, source_documents=source_documents)
+        figure_rag_quality = build_figure_rag_quality_summary(self.session, figures)
         evidence_map = {
             item["evidence_id"]: item
             for item in [*extracted_tables, *extracted_figures]
@@ -1316,6 +1772,8 @@ class EvidenceReviewBundleService:
             warnings.append("no_tables_in_scope")
         if not extracted_figures:
             warnings.append("no_figures_in_scope")
+        if excluded_support_figure_count:
+            warnings.append(f"excluded_non_dft_supplementary_figures:{excluded_support_figure_count}")
 
         return {
             "paper_metadata": paper_metadata,
@@ -1323,6 +1781,8 @@ class EvidenceReviewBundleService:
             "page_geometry": page_geometry,
             "extracted_tables": extracted_tables,
             "extracted_figures": extracted_figures,
+            "figure_record_by_id": {str(item["source_record_id"]): item for item in extracted_figures},
+            "figure_rag_quality": figure_rag_quality,
             "evidence_map": evidence_map,
             "figure_id_map": {str(row.id) for row in figures},
             "table_id_map": {str(row.id) for row in tables},
@@ -1330,6 +1790,20 @@ class EvidenceReviewBundleService:
             "bundle_fingerprint": bundle_fingerprint,
             "warnings": warnings,
         }
+
+    @classmethod
+    def _include_figure_in_bundle(
+        cls,
+        row: PaperFigure,
+        *,
+        source_by_id: dict[UUID, dict[str, Any]],
+    ) -> bool:
+        source = source_by_id[row.paper_id]
+        return include_figure_in_chart_review_scope(row, source_prefix=source["prefix"])
+
+    @classmethod
+    def _is_dft_related_support_figure(cls, row: PaperFigure) -> bool:
+        return is_dft_related_support_figure(row)
 
     def _source_papers(self, paper: Paper) -> list[dict[str, Any]]:
         relationships = self.session.scalars(
@@ -1636,7 +2110,14 @@ class EvidenceReviewBundleService:
         used_tools = {str(item).strip() for item in verification.used_tools if str(item).strip()}
         return {"get_codex_item", "read_paper_page"} <= used_tools
 
-    def _already_applied(self, op_id: str, bundle_fingerprint: str, *, target_type: str) -> dict[str, Any] | None:
+    def _already_applied(
+        self,
+        op_id: str,
+        bundle_fingerprint: str,
+        *,
+        target_type: str,
+        expected_action: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
         rows = self.session.scalars(
             select(AuditLog)
             .where(AuditLog.action == "offline_evidence_review_op")
@@ -1647,6 +2128,12 @@ class EvidenceReviewBundleService:
         for row in rows:
             payload = row.payload if isinstance(row.payload, dict) else {}
             if payload.get("op_id") == op_id and payload.get("bundle_fingerprint") == bundle_fingerprint:
+                existing_action = payload.get("action") if isinstance(payload.get("action"), dict) else None
+                if expected_action is not None and existing_action is not None:
+                    existing_key = json.dumps(existing_action, ensure_ascii=False, sort_keys=True, default=str)
+                    expected_key = json.dumps(expected_action, ensure_ascii=False, sort_keys=True, default=str)
+                    if existing_key != expected_key:
+                        continue
                 return {
                     "op_id": op_id,
                     "category": "figure" if target_type == "paper_figure" else "table",
@@ -1878,15 +2365,18 @@ class EvidenceReviewBundleService:
 ## 必须遵守
 
 1. PDF 是最高优先级来源；当前抽取图片、表格只是候选。
-2. 每个当前 figure/table 都要有一个 action；如果无法判断，用 `NEEDS_HUMAN`。
+2. 每个当前 figure/table 都要有一个 action；如果无法判断，用 `NEEDS_HUMAN`，但它会被服务器视为待复核项，不能完成图表阶段。
 3. 图片 action：`KEEP`、`RECROP`、`CREATE`、`REJECT`、`NEEDS_HUMAN`。
 4. 表格 action：`KEEP`、`UPDATE`、`CREATE`、`MERGE`、`DELETE`、`NEEDS_HUMAN`。
 5. `RECROP` 和 `CREATE` 必须返回 `page` 与 `bbox_norm=[x0,y0,x1,y1]`；坐标是该 PDF 页面的归一化 top-left 坐标，范围 0 到 1。
-6. `UPDATE` 和 `CREATE` 表格必须返回完整 `complete_markdown`，包含列名、单位、脚注相关信息；不要只返回差异片段。
-7. 不要估读曲线、不要从柱状图/曲线图目测数值；只有图中文字、表格单元格、图注/脚注明确给出的 DFT 数值才可进入 `dft_evidence_candidates`。
-8. 不得声称已经写库、已经确认、已经 verified 或已经 ML_Ready。
-9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要输出 Markdown 代码块。
-10. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
+6. 对每张保留的科学图片，`KEEP` 或 `RECROP` 后必须具备具体 `figure_role`、非图注复读的 `content_summary` 和具体 `key_elements`；缺任一项时在 action 中补齐。不要使用 unknown/unclassified/other 或 verified/reviewed/ok 这类占位词。
+7. `dft_relevance` 只能填写 `none`、`possible`、`explicit_dft`、`unknown` 四者之一；不要写 true/false/yes/no/dft_relevant。
+8. `UPDATE` 和 `CREATE` 表格必须返回完整 `complete_markdown`，包含列名、单位、脚注相关信息；不要只返回差异片段。
+9. `MERGE` 只用于两个已有表格对象合并，必须填写 `source_table_id` 和 `target_table_id`，且二者不能相同；不要同时给同一表格输出 KEEP/UPDATE/MERGE 多个 action。没有把握时用 `NEEDS_HUMAN`。
+10. 不要估读曲线、不要从柱状图/曲线图目测数值；只有图中文字、表格单元格、图注/脚注明确给出的 DFT 数值才可进入 `dft_evidence_candidates`。
+11. 不得声称已经写库、已经确认、已经 verified 或已经 ML_Ready。
+12. 严格按 `return_schema.json` 输出一个 JSON 对象；不要输出 Markdown 代码块。
+13. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
 
 ## 建议阅读顺序
 

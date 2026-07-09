@@ -125,7 +125,7 @@ async function rerunExtraction() {
         const summary = $("summaryContent");
         if (summary) {
             summary.insertAdjacentHTML("afterbegin",
-                '<div class="section-card"><h3>最近一次 IDE AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | IDE AI 可继续接手" : " | 仍需补齐材料或人工检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
+                '<div class="section-card"><h3>最近一次 IDE AI 材料刷新结果</h3><div class="subtle">状态：' + esc(data.status || data.job_status || "已提交") + (data.external_ai_ready ? " | IDE AI 可继续接手" : " | 仍需补齐材料或检查") + (data.job_id ? " | 任务：" + esc(data.job_id) : "") + "</div></div>"
             );
         }
         await refreshSelectedPaperDetail({ reason: "prepare_ai_context" });

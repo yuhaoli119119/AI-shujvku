@@ -12,7 +12,7 @@ from app.db.models import DFTResult, ExternalAnalysisCandidate, ExternalAnalysis
 class VerificationSessionDFTConsensusMixin:
     """Apply the latest evidence-backed DFT opinion without AI identity voting."""
 
-    DFT_ACTIVE_AUDIT_STATUSES = {"candidate", "pending", "requires_resolution", "materialized"}
+    DFT_ACTIVE_AUDIT_STATUSES = {"candidate", "pending", "requires_resolution", "materialized", "ai_reviewed", "ai_applied"}
     DFT_APPLICABLE_DECISIONS = {
         "PASS",
         "PROPOSED",
@@ -122,12 +122,12 @@ class VerificationSessionDFTConsensusMixin:
                 status="need_repair",
                 reason="unsupported_dft_review_decision",
             )
-        if not self._opinion_has_anchor(opinion):
+        if not self._opinion_has_pdf_anchor(opinion):
             return self._hold_dft_opinion(
                 row_ref=row_ref,
                 opinion=opinion,
-                status="need_repair",
-                reason="missing_evidence_anchor",
+                status="rejected",
+                reason="missing_pdf_evidence_anchor",
             )
         if decision in {"PROPOSED", "REVISE"} and opinion.get("corrected_value") in (None, ""):
             return self._hold_dft_opinion(
@@ -173,7 +173,7 @@ class VerificationSessionDFTConsensusMixin:
         reason: str,
     ) -> dict[str, Any]:
         candidate = opinion["candidate"]
-        candidate.status = "requires_resolution"
+        candidate.status = "rejected_by_local_ai" if status == "rejected" else "requires_resolution"
         candidate.mapping_reason = reason
         self.session.add(candidate)
         row_ref.update(status=status, reason=reason)

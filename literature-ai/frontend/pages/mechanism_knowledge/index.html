@@ -287,7 +287,7 @@
             <div>
                 <p class="eyebrow">Mechanism Knowledge</p>
                 <h1>机理知识聚合</h1>
-                <p>汇总跨文献抽取出的催化剂、吸附物 / 中间体、命名别名与证据缺口。空字段会明确标记为“未解析、缺少证据、需重新解析或需人工确认”，避免把空白误读成已确认结论。</p>
+                <p>汇总跨文献抽取出的催化剂、吸附物 / 中间体、命名别名与证据缺口。空字段会明确标记为“未解析、缺少证据、需重新解析或需确认”，避免把空白误读成已确认结论。</p>
             </div>
             <button class="btn btn-primary" onclick="loadAggregationData()">刷新聚合数据</button>
         </section>
@@ -334,7 +334,7 @@
                 <div class="panel-heading">
                     <div>
                         <h2 class="panel-title">别名与命名变化</h2>
-                        <p class="panel-desc">展示系统检测到的可能同义词、缩写、表面符号或带电状态变体。这里只做提示，最终合并仍建议人工确认。</p>
+                        <p class="panel-desc">展示系统检测到的可能同义词、缩写、表面符号或带电状态变体。这里只做提示，最终合并仍建议确认。</p>
                     </div>
                 </div>
                 <div class="aggregate-grid" id="aliasesBox">
@@ -348,7 +348,7 @@
                 <div class="panel-heading">
                     <div>
                         <h2 class="panel-title">证据缺口与重解析提示</h2>
-                        <p class="panel-desc">列出关键结构字段、反应字段或证据字段缺失的位置，方便回到文献详情或人工确认工作台补证据。</p>
+                        <p class="panel-desc">列出关键结构字段、反应字段或证据字段缺失的位置，方便回到文献详情或确认工作台补证据。</p>
                     </div>
                 </div>
                 <div class="aggregate-grid" id="gapsBox">
@@ -479,7 +479,7 @@
         function fieldRow(label, value, missingText = "未解析") {
             const display = hasUsefulValue(value)
                 ? esc(valueText(value))
-                : statusChip(missingText, missingText === "需人工确认" ? "needs-review" : "missing");
+                : statusChip(missingText, missingText === "需确认" ? "needs-review" : "missing");
             return `<div class="meta-row"><strong>${esc(label)}：</strong>${display}</div>`;
         }
 
@@ -553,7 +553,7 @@
         function renderCatalysts(groups) {
             const box = document.getElementById("catalystsBox");
             if (!groups.length) {
-                box.innerHTML = '<div class="empty-state">暂无催化剂聚合数据。请先在入库中心导入并解析文献，或在人工确认工作台补充证据。</div>';
+                box.innerHTML = '<div class="empty-state">暂无催化剂聚合数据。请先在入库中心导入并解析文献，或在确认工作台补充证据。</div>';
                 return;
             }
             box.innerHTML = groups.map(group => {
@@ -570,7 +570,7 @@
                             ${fieldRow("金属中心", primary.metal_centers, "需重新解析")}
                             ${fieldRow("配位结构", primary.coordination, "缺少证据")}
                             ${fieldRow("载体", primary.support, "缺少证据")}
-                            ${fieldRow("合成方法", primary.synthesis_method, "需人工确认")}
+                            ${fieldRow("合成方法", primary.synthesis_method, "需确认")}
                             ${fieldRow("证据强度", primary.evidence_strength, "缺少证据")}
                         </div>
                         <div class="relation-list">
@@ -607,7 +607,7 @@
                             ${fieldRow("能量 / 数值", value, "缺少证据")}
                             ${fieldRow("反应步骤", primary.reaction_step, "需重新解析")}
                             ${fieldRow("来源章节", primary.source_section, "未解析")}
-                            ${fieldRow("置信度", confidence, "需人工确认")}
+                            ${fieldRow("置信度", confidence, "需确认")}
                         </div>
                         <div class="relation-list">
                             ${group.items.slice(0, 3).map(item => `<div class="relation-item">${paperLink(item.paper_id)}</div>`).join("")}
@@ -621,7 +621,7 @@
             const box = document.getElementById("aliasesBox");
             const aliases = Array.isArray(rawAliases) ? rawAliases : [];
             if (!aliases.length) {
-                box.innerHTML = '<div class="empty-state">未检测到别名 / 命名变化。若你预期有同义词，建议重新解析相关论文或在人工确认工作台补充标准名。</div>';
+                box.innerHTML = '<div class="empty-state">未检测到别名 / 命名变化。若你预期有同义词，建议重新解析相关论文或在确认工作台补充标准名。</div>';
                 return;
             }
             box.innerHTML = aliases.map(alias => {
@@ -636,8 +636,8 @@
                         </div>
                         <div class="meta-list">
                             ${fieldRow("规范化键", item.canonical_key, "未解析")}
-                            ${fieldRow("涉及文献数", item.paper_count, "需人工确认")}
-                            ${fieldRow("处理建议", "仅作为命名变体提示；合并前请人工确认。", "需人工确认")}
+                            ${fieldRow("涉及文献数", item.paper_count, "需确认")}
+                            ${fieldRow("处理建议", "仅作为命名变体提示；合并前请确认。", "需确认")}
                         </div>
                     </article>
                 `;
@@ -653,7 +653,7 @@
                 const missing = [];
                 if (!hasUsefulValue(primary.support)) missing.push("载体缺少证据");
                 if (!hasUsefulValue(primary.coordination)) missing.push("配位结构未解析");
-                if (!hasUsefulValue(primary.synthesis_method)) missing.push("合成方法需人工确认");
+                if (!hasUsefulValue(primary.synthesis_method)) missing.push("合成方法需确认");
                 if (!hasUsefulValue(primary.metal_centers)) missing.push("金属中心需重新解析");
                 if (missing.length) {
                     gaps.push({
@@ -686,13 +686,13 @@
                 gaps.push({
                     name: "当前库暂无机理聚合数据",
                     type: "全局缺口",
-                    missing: ["请先导入 PDF", "请完成正文解析", "请运行结构化抽取", "请人工确认关键证据"],
+                    missing: ["请先导入 PDF", "请完成正文解析", "请运行结构化抽取", "请确认关键证据"],
                     paper_id: null,
                 });
             }
 
             if (!gaps.length) {
-                box.innerHTML = '<div class="empty-state">当前聚合数据没有明显空字段。仍建议在导出或写作前检查人工确认状态。</div>';
+                box.innerHTML = '<div class="empty-state">当前聚合数据没有明显空字段。仍建议在导出或写作前检查确认状态。</div>';
                 return;
             }
 
@@ -704,7 +704,7 @@
                     </div>
                     <div class="meta-list">
                         ${fieldRow("缺口", gap.missing.join("、"), "缺少证据")}
-                        ${fieldRow("建议动作", "回到文献详情重新解析，或在人工确认工作台补充证据。", "需人工确认")}
+                        ${fieldRow("建议动作", "回到文献详情重新解析，或在确认工作台补充证据。", "需确认")}
                     </div>
                     <div class="relation-list">
                         <div class="relation-item">${paperLink(gap.paper_id)}</div>

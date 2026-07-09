@@ -13,12 +13,14 @@ from app.db.models import (
     EvidenceLocator,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
+    ExtractionFieldReview,
     Paper,
     PaperCorrection,
     PaperFigure,
     PaperNote,
 )
 from app.schemas.api import CodexContextResponse, CodexItemContextResponse, PaperDetailResponse, PaperFigureResponse
+from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.utils.artifact_status import build_paper_artifact_status
@@ -284,6 +286,11 @@ class CodexContextService:
         locator_status_counts = dict(Counter(item.get("locator_status") or "unknown" for item in locators))
         dft_results = self._dump_items(detail.dft_results_items, max_candidates)
         dft_review_handoff = self._load_pending_dft_review_handoff(detail.id, limit=max_candidates)
+        review_workflow_state = self._build_review_workflow_state(
+            detail,
+            dft_export_readiness=dft_export_readiness,
+            dft_review_handoff=dft_review_handoff,
+        )
         linked_supplementary_dft_groups = self._load_linked_supplementary_dft_groups(
             detail,
             limit=max_candidates,
@@ -457,6 +464,7 @@ class CodexContextService:
             },
             "dft_export_readiness": dft_export_readiness,
             "dft_review_handoff": dft_review_handoff,
+            "review_workflow_state": review_workflow_state,
             "evidence_locators": {
                 "status_counts": locator_status_counts,
                 "items": locators,
@@ -1002,6 +1010,20 @@ class CodexContextService:
             )
         lines.append("")
 
+        workflow_state = context.get("review_workflow_state") or {}
+        figure_table_state = workflow_state.get("figure_table_review") or {}
+        dft_state = workflow_state.get("dft_review") or {}
+        lines.extend(
+            [
+                "## Review Workflow State",
+                f"- Figure/table stage: `{figure_table_state.get('stage_status') or 'unknown'}`",
+                f"- Figure/table completed snapshot: `{figure_table_state.get('completed_snapshot_fingerprint') or '-'}`",
+                f"- DFT reviewed / active: {dft_state.get('reviewed_target_count', 0)} / {dft_state.get('active_candidates', 0)}",
+                f"- DFT unreviewed target ids: {dft_state.get('unreviewed_target_ids') or 'none'}",
+            ]
+        )
+        lines.append("")
+
         lines.append("## Evidence Locator Summary")
         counts = context["evidence_locators"]["status_counts"]
         lines.append(", ".join(f"{key}: {value}" for key, value in counts.items()) if counts else "No evidence locators.")
@@ -1046,7 +1068,7 @@ class CodexContextService:
             "- auto_apply_review_rules=false is candidate-only. It may record an unverified audit, but it does not mean PASS/completed/applied and must not be described as a finished review.",
             "- For missing DFT rows, use object_review_audits with decision=new_candidate and a structured corrected_value. With an evidence anchor and the dft_results write lock, import_analysis(auto_apply_review_rules=true) may create and settle the row in the same controlled operation.",
             "- AI product names and source identities are audit metadata, not admission roles. One evidence-backed PASS, REVISE, REJECT, or new_candidate opinion may settle a DFT row; NEEDS_HUMAN remains pending for user judgment.",
-            "- Export requires an explicit AI authorization: a local/web AI must submit PASS or REVISE with recommended_action=ready_for_ml_export. Verified status, no conflicts, no errors, human confirmation, or a materialized new_candidate do not imply export permission.",
+            "- Export eligibility is role-neutral: any authorized reviewer, human or AI, may settle a DFT row through evidence-backed PASS, REVISE, REJECT, or new_candidate review. Verified rows with complete evidence, material identity, and required units may be exported; rejected rows stay blocked.",
             "- Missing/placeholder units block normalized ML export. Bond-specific properties such as ICOHP/-ICOHP must also carry bond or bond_pair identity before an AI may recommend export.",
             "- Any authorized IDE AI with repair_dft_issues may call repair_dft_audit_issue for one issue_id at a time. Capability, evidence, locks, validation, audit logs, and readback control writes; no second-AI or primary-AI identity is required. False-positive closure remains human-only.",
             "- Treat the DFT audit center as a read-only queue and navigation entry. Use import_analysis or an explicit user-authorized review tool for final DFTResult changes, then read back the row and export safety before reporting completion.",
@@ -1340,6 +1362,66 @@ class CodexContextService:
             "blocked_count": summary["blocked"],
             "blocked_reasons": summary["blocked_reasons"],
             "items": items,
+        }
+
+    def _build_review_workflow_state(
+        self,
+        detail: PaperDetailResponse,
+        *,
+        dft_export_readiness: dict[str, Any],
+        dft_review_handoff: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            figure_table_review = DFTReviewBundleService(
+                self.session,
+                self.settings,
+            ).get_figure_table_review_state(detail.id)
+        except Exception as exc:
+            figure_table_review = {
+                "stage_status": "unknown",
+                "blocking_errors": [str(exc)],
+            }
+        rows = self.session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == detail.id)
+        ).all()
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == detail.id,
+                ExtractionFieldReview.target_type == "dft_results",
+            )
+        ).all()
+        review_status_by_target: dict[str, set[str]] = {}
+        for review in reviews:
+            if str(review.target_resolution_status or "active") != "active":
+                continue
+            review_status_by_target.setdefault(str(review.target_id), set()).add(
+                str(review.reviewer_status or "pending")
+            )
+        active_target_ids = {
+            str(row.id)
+            for row in rows
+            if str(row.candidate_status or "").strip().lower() != "rejected"
+        }
+        reviewed_target_ids = {
+            target_id
+            for target_id, statuses in review_status_by_target.items()
+            if any(status in {"verified", "rejected"} for status in statuses)
+        }
+        unreviewed_target_ids = sorted(active_target_ids - reviewed_target_ids)
+        return {
+            "figure_table_review": figure_table_review,
+            "dft_review": {
+                "total_candidates": dft_export_readiness.get("total_candidates", len(rows)),
+                "active_candidates": dft_export_readiness.get("active_candidates", len(active_target_ids)),
+                "eligible_count": dft_export_readiness.get("eligible_count", 0),
+                "blocked_count": dft_export_readiness.get("blocked_count", 0),
+                "blocked_reasons": dft_export_readiness.get("blocked_reasons", {}),
+                "pending_import_run_count": dft_review_handoff.get("pending_run_count", 0),
+                "pending_import_opinion_count": dft_review_handoff.get("processable_dft_candidate_count", 0),
+                "reviewed_target_count": len(reviewed_target_ids & active_target_ids),
+                "unreviewed_target_count": len(unreviewed_target_ids),
+                "unreviewed_target_ids": unreviewed_target_ids[:50],
+            },
         }
 
     def _dft_export_gate_payload(self, row: DFTResult, *, gate: Any = None) -> dict[str, Any]:

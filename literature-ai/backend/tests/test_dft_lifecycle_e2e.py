@@ -174,7 +174,7 @@ def _export_rows(session: Session):
     return response, list(csv.DictReader(io.StringIO(text)))
 
 
-def test_missing_issue_fast_processing_closes_issue_but_requires_explicit_ai_export_approval(setup_test_db):
+def test_missing_issue_fast_processing_closes_issue_and_exports_after_ai_confirmation(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "DFT lifecycle missing to verify")
         issue = _missing_issue(session, paper)
@@ -221,7 +221,7 @@ def test_missing_issue_fast_processing_closes_issue_but_requires_explicit_ai_exp
         dataset = build_dft_ml_dataset(session)
 
         assert row is not None
-        assert row.candidate_status == "human_reviewed_needs_evidence"
+        assert row.candidate_status == "ML_Ready"
         assert issue.status == "closed"
         assert issue.target_id == str(row.id)
         assert issue.resolved_by == "assigned_dft_audit"
@@ -232,12 +232,11 @@ def test_missing_issue_fast_processing_closes_issue_but_requires_explicit_ai_exp
         assert all(log.payload["writes_final_truth"] is False for log in repair_logs)
         assert repair_logs[0].payload["capability_used"] == "review_dft"
         assert any(log.payload["closed_audit_issue_ids"] == [issue_id] for log in verify_logs)
-        assert response.headers["x-d1-exported-count"] == "0"
-        assert "missing_explicit_ai_export_approval" in response.headers["x-d1-blocked-reasons"]
-        assert rows == []
-        assert dataset["metadata"]["eligible_count"] == 0
-        assert dataset["records"] == []
-        assert is_rag_eligible(session, row, "dft_result") is False
+        assert response.headers["x-d1-exported-count"] == "1"
+        assert rows and rows[0]["paper_id"] == str(paper_id)
+        assert dataset["metadata"]["eligible_count"] == 1
+        assert dataset["records"]
+        assert is_rag_eligible(session, row, "dft_result") is True
 
 
 def test_human_reject_closes_issue_and_blocks_export_even_with_historical_safe_review(setup_test_db):

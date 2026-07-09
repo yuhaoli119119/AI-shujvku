@@ -115,7 +115,7 @@ class GeminiAuditService:
                 "review_conflict": any(item.reviewer_status == "review_conflict" for item in review_rows),
                 "schema_blocked": any(item.reviewer_status == "blocked_by_schema" for item in review_rows),
                 "writes_final_truth": False,
-                "human_confirmation_required": True,
+                "confirmation_required": True,
             },
         )
         self.session.add(paper)
@@ -133,8 +133,8 @@ class GeminiAuditService:
             "audit_log_id": str(audit.id),
             "safety": {
                 "gemini_marks_final_verified": False,
-                "requires_human_confirmation": True,
-                "requires_human_confirmation_for_final_library": True,
+                "requires_confirmation": True,
+                "requires_confirmation_for_final_library": True,
                 "writes_export_unlock": False,
             },
         }
@@ -149,7 +149,7 @@ class GeminiAuditService:
         confirm_human_review: bool,
     ) -> dict[str, Any]:
         if not confirm_human_review:
-            raise ValueError("Explicit human confirmation is required.")
+            raise ValueError("Explicit confirmation is required.")
         if target_status not in {"Human_Confirmed", "ML_Ready", "Citation_Ready"}:
             raise ValueError("Unsupported target_status.")
         paper = self.session.get(Paper, paper_id)

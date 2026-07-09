@@ -9,7 +9,7 @@ role:
     - The assigned VLM-capable model may act as image_auditor for figure crops, captions, full-page screenshots, and chart interpretation.
     - The assigned science/text model may act as dft_data_auditor for DFT rows and extraction completeness.
     - The reviewer role is not fixed by model name; it is fixed by the evidence package, task instruction, and recorded agent_role/model_name.
-    - A reviewer must not silently promote its own extraction. Independent review or human confirmation is required.
+    - A reviewer must not silently promote its own extraction. Independent confirmation by an authorized reviewer, human or AI, is required.
     - First compare the paper type inferred from the original PDF with the system-parsed paper type; if they differ, directly correct the parsed type and use the corrected type for the rest of the audit.
   forbidden:
     - Do not invent values.
@@ -104,7 +104,7 @@ output_format:
   protocol_version: string
   protocol_sha256: string_or_null
   writes_final_truth: false
-  human_confirmation_required: true
+  confirmation_required: true
   decision: PASS_or_PROPOSED_or_REJECT_or_NEEDS_HUMAN_or_new_candidate
   can_promote_to_exportable_database: boolean
   corrected_value:
@@ -134,7 +134,7 @@ output_format:
   blocking_errors: list
 
 promotion_policy:
-  - accept alone from second AI is not enough if the workflow requires human confirmation.
+  - accept alone from second AI is not enough if the workflow requires independent confirmation.
   - PASS from one AI only confirms the checked fields; it does not establish full-row consensus.
   - PROPOSED must include material, property, value, unit, method/condition, and evidence_location before it can be auto-adopted.
   - REJECT duplicate must include duplicate_of when possible.
@@ -156,6 +156,6 @@ image_audit_micro_checklist:
 
 traceability_policy:
   - Every audit must be persisted as an AuditLog, ExtractionFieldReview.review_payload.ai_audits entry, PaperNote, PaperCorrection, ExternalAnalysisRun, or WorkflowJob.
-  - The persisted payload must include reviewer, model_name, agent_role, decision, reasons, protocol version/hash, evidence location, and whether human confirmation is still required.
+  - The persisted payload must include reviewer, model_name, agent_role, decision, reasons, protocol version/hash, evidence location, and whether additional confirmation is still required.
   - AI audit suggestions are visible from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, shared notes, and audit/task records.
   - External audit opinions imported as external_audit_opinion must remain visible to later MCP readers through get_review_coverage and workbench summaries.

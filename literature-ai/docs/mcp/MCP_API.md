@@ -223,7 +223,7 @@ Object-level audit payload example:
         "model_name": "assigned-model",
         "reason": "The table reports -1.35 eV, not the extracted -1.20 eV.",
         "writes_final_truth": false,
-        "human_confirmation_required": true
+        "confirmation_required": true
       }
     ]
   }
@@ -304,7 +304,7 @@ Third-AI adjudication payload example:
           "quoted_text": "-1.26 eV"
         },
         "writes_final_truth": false,
-        "human_confirmation_required": true
+        "confirmation_required": true
       }
     ]
   }

@@ -81,6 +81,18 @@ def test_import_warning_decision_aliases_match_dft_queue_semantics():
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("ambiguous") == "NEEDS_HUMAN"
 
 
+def test_external_analysis_extracts_json_from_surrounding_ai_text():
+    service = ExternalAnalysisService.__new__(ExternalAnalysisService)
+
+    parsed = service._try_parse_json(
+        "Here is the strict JSON you requested:\n"
+        '{"review_notes":[{"content":"Figure coverage needs local review."}]}\n'
+        "No database writes were performed."
+    )
+
+    assert parsed == {"review_notes": [{"content": "Figure coverage needs local review."}]}
+
+
 @pytest.mark.parametrize(
     ("operation", "target_path", "expected_tool"),
     [
@@ -1293,7 +1305,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
                 "model_name": "glm-test",
                 "reason": "Table 1 reports -1.35 eV.",
                 "writes_final_truth": False,
-                "human_confirmation_required": True,
+                "confirmation_required": True,
             }
             client = TestClient(app)
             imported = client.post(
@@ -1319,7 +1331,7 @@ def test_external_analysis_object_level_dft_audit_payload_creates_unverified_can
             assert candidate["normalized_payload"]["decision"] == "REVISE"
             assert candidate["normalized_payload"]["verification_status"] == "unverified"
             assert candidate["normalized_payload"]["writes_final_truth"] is False
-            assert candidate["normalized_payload"]["human_confirmation_required"] is True
+            assert candidate["normalized_payload"]["confirmation_required"] is True
             assert candidate["normalized_payload"]["raw_payload"]["corrected_value"] == -1.35
 
             with Session(engine) as session:

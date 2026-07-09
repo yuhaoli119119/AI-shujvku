@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -68,6 +69,7 @@ class DFTResultReviewService(
         if not selected_fields:
             raise ValueError("No non-empty DFT result fields are available for verification.")
 
+        verification_note = reviewer_note or "Verified through the DFT candidate review workflow."
         try:
             reviews = self.review_service.mark_verified(
                 paper_id,
@@ -78,7 +80,7 @@ class DFTResultReviewService(
                     expected_write_versions=expected_write_versions or {},
                     expected_write_version=expected_write_version,
                     reviewer=reviewer or "codex_review",
-                    reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
+                    reviewer_note=verification_note,
                 ),
                 commit=False,
             )
@@ -95,7 +97,7 @@ class DFTResultReviewService(
                     result_id=result_id,
                     field_names=selected_fields,
                     reviewer=reviewer or "codex_review",
-                    reviewer_note=reviewer_note or "Verified through the DFT candidate review workflow.",
+                    reviewer_note=verification_note,
                     evidence_payload=evidence_payload,
                     verification_actor_type=verification_actor_type,
                     source_label=source_label,
@@ -160,14 +162,40 @@ class DFTResultReviewService(
                 self.session.flush()
                 reviews.append(self.review_service._serialize(review))
         reviewer_name = reviewer or "codex_review"
+        if verification_actor_type == "ai":
+            row.candidate_status = "ai_verified_ml_ready"
+            row.ml_ready_at = datetime.utcnow()
+            row.ml_ready_source = source_label or reviewer_name
+            row.local_ai_verification_payload = {
+                "reviewer": reviewer_name,
+                "source_label": source_label,
+                "field_names": selected_fields,
+                "evidence_payload": evidence_payload,
+                "reviewer_note": verification_note,
+                "final_decision": "ready_for_ml_export",
+            }
+        self.session.add(row)
+        self.session.flush()
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
-        row.candidate_status = (
-            "ML_Ready"
-            if gate.eligible
-            else "human_reviewed_needs_evidence"
-            if verification_actor_type == "human"
-            else "ai_reviewed_needs_evidence"
-        )
+        if gate.eligible:
+            row.candidate_status = "ai_verified_ml_ready" if verification_actor_type == "ai" else "ML_Ready"
+            if verification_actor_type == "ai" and row.ml_ready_at is None:
+                row.ml_ready_at = datetime.utcnow()
+                row.ml_ready_source = source_label or reviewer_name
+        else:
+            row.candidate_status = (
+                "human_reviewed_needs_evidence"
+                if verification_actor_type == "human"
+                else "ai_repair_failed_not_imported"
+            )
+            if verification_actor_type == "ai":
+                row.ml_ready_at = None
+                row.ml_ready_source = None
+                row.local_ai_verification_payload = {
+                    **(row.local_ai_verification_payload or {}),
+                    "final_decision": "repair_failed_not_exportable",
+                    "blocked_reasons": list(gate.reasons),
+                }
         self.session.add(row)
         closed_issues = self.issue_lifecycle.apply_verify(
             paper_id=paper_id,
@@ -843,7 +871,7 @@ class DFTResultReviewService(
 
     @staticmethod
     def _normalize_manual_update_value(field_name: str, value: Any) -> Any:
-        if field_name in {"value", "confidence"}:
+        if field_name in {"value", "value_upper", "confidence"}:
             if value in ("", None):
                 return None
             try:

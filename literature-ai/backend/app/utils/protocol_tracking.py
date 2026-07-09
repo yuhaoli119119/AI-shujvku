@@ -64,7 +64,7 @@ def ai_review_payload(
         "reviewer_note": note,
         "protocol": protocol_snapshot(protocol_key),
         "writes_final_truth": False,
-        "requires_human_confirmation": True,
+        "requires_confirmation": True,
     }
     if extra:
         payload.update(extra)
@@ -79,7 +79,7 @@ def append_ai_audit(existing_payload: Any, audit: dict[str, Any]) -> tuple[dict[
     payload["ai_audits"] = audits
     payload["latest_ai_audit"] = audit
     payload["review_conflict"] = conflict
-    payload["conflict_policy"] = "AI disagreement blocks export and requires human confirmation."
+    payload["conflict_policy"] = "Reviewer disagreement blocks export until an authorized reviewer resolves the conflict."
     return payload, conflict
 
 

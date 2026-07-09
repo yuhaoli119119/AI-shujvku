@@ -208,9 +208,9 @@ function knowledgeCategoryMeta(category) {
         external_analysis: { label: "外部解析", group: "待核对补充", use: "作为补充线索，不可直接引用", order: 6 },
         correction_candidate: { label: "修正建议", group: "待核对补充", use: "校对已有解析结果", order: 6 },
         citation_relationship: { label: "引用关系", group: "待核对补充", use: "梳理文献关联", order: 6 },
-        curation_note: { label: "人工笔记", group: "待核对补充", use: "作为整理备注参考", order: 6 }
+        curation_note: { label: "整理笔记", group: "待核对补充", use: "作为整理备注参考", order: 6 }
     };
-    return mapping[category] || { label: prettifyToken(category || "unknown"), group: "其他候选", use: "待人工判断用途", order: 7 };
+    return mapping[category] || { label: prettifyToken(category || "unknown"), group: "其他候选", use: "待确认用途", order: 7 };
 }
 
 function knowledgeSourceMeta(sourceType) {
@@ -220,7 +220,7 @@ function knowledgeSourceMeta(sourceType) {
         paper_section: { label: "正文节选", tip: "直接来自正文解析的章节片段。" },
         paper_abstract: { label: "摘要原文", tip: "直接来自论文摘要。" },
         external_analysis_candidate: { label: "IDE AI 回写", tip: "来自 IDE AI 回写，通常优先走 MCP；若当时会话未暴露 MCP 工具，也可能来自仓库内 `app.mcp.*` 后备路径，仍必须再核对。" },
-        paper_note: { label: "人工笔记", tip: "来自人工或 Codex 整理的笔记。" }
+        paper_note: { label: "整理笔记", tip: "来自用户、AI 或 Codex 整理的笔记。" }
     };
     return mapping[sourceType] || { label: prettifyToken(sourceType || "unknown"), tip: "系统内部来源类型。" };
 }

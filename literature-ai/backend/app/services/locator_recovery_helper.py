@@ -78,7 +78,7 @@ class LocatorRepairProposal:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     blockers: tuple[str, ...] = field(default_factory=tuple)
     should_write_locator: bool = False
-    requires_human_confirmation: bool = True
+    requires_confirmation: bool = True
     mark_verified: bool = False
     safe_verified: bool = False
     export_eligible: bool = False
@@ -101,7 +101,7 @@ class LocatorRepairProposal:
             "warnings": list(self.warnings),
             "blockers": list(self.blockers),
             "should_write_locator": self.should_write_locator,
-            "requires_human_confirmation": self.requires_human_confirmation,
+            "requires_confirmation": self.requires_confirmation,
             "mark_verified": self.mark_verified,
             "safe_verified": self.safe_verified,
             "export_eligible": self.export_eligible,

@@ -377,7 +377,7 @@ class PaperWorkbenchReviewCenterMixin:
                 "Unparsed": "未解析",
                 "Initial_Parsed": "初步解析",
                 "Suspected_Missing": "疑似漏提",
-                "Human_Complete": "人工确认完整",
+                "Human_Complete": "确认完整",
                 "DB_Ready": "可入库",
             }.get(status, status),
             "detected_signal_count": parsed_count,

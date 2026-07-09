@@ -112,7 +112,7 @@ class ExternalAnalysisCandidatePersistenceMixin:
                 "status": "candidate",
                 "verification_status": "unverified",
                 "writes_final_truth": False,
-                "human_confirmation_required": True,
+                "confirmation_required": True,
             }
         )
         evidence_payload = {
@@ -140,7 +140,7 @@ class ExternalAnalysisCandidatePersistenceMixin:
             "raw_payload": payload.get("raw_payload"),
             "protocol": protocol_snapshot("gemini_audit_protocol"),
             "writes_final_truth": False,
-            "human_confirmation_required": True,
+            "confirmation_required": True,
         }
         self.session.add(
             ExternalAnalysisCandidate(
@@ -169,7 +169,7 @@ class ExternalAnalysisCandidatePersistenceMixin:
                 "status": "candidate",
                 "verification_status": "unverified",
                 "writes_final_truth": False,
-                "requires_human_confirmation": True,
+                "requires_confirmation": True,
             }
         )
         evidence_payload = {
@@ -185,7 +185,7 @@ class ExternalAnalysisCandidatePersistenceMixin:
             "raw_payload": payload.get("raw_payload"),
             "protocol": protocol_snapshot("gemini_audit_protocol"),
             "writes_final_truth": False,
-            "requires_human_confirmation": True,
+            "requires_confirmation": True,
         }
         self.session.add(
             ExternalAnalysisCandidate(

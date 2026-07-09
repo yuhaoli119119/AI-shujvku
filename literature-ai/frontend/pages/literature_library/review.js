@@ -251,7 +251,7 @@ function renderCandidates(runId, candidates) {
         } else if (action.mode === "apply_review_rules") {
             singleAction = '<button class="btn ghost small" onclick="applyReviewRulesForRun(\'' + escAttr(runId) + '\')">按本 run 审核规则处理</button>';
         } else if (item.status === "requires_resolution") {
-            singleAction = '<span class="muted" style="font-size:12px;">需人工处理</span>';
+            singleAction = '<span class="muted" style="font-size:12px;">待确认处理</span>';
         } else if (["materialized", "ai_reviewed", "ai_applied"].includes(String(item.status || "").toLowerCase())) {
             singleAction = '<span class="muted" style="font-size:12px;">已处理</span>';
         } else if (String(item.status || "").toLowerCase() === "skipped") {
@@ -334,7 +334,7 @@ async function applyReviewRulesForRun(runId) {
     var totalCount = actions.reviewRules.length + actions.materializable.length;
     var ok = confirm(
         "这是整 run 操作，将按审核规则处理该 run 的 " + totalCount + " 个可处理项。\n\n" +
-        "DFT 项只会生成或更新审核候选、issue 和共识状态，不会自动变成人工 verified，也不会绕过导出安全门。\n\n" +
+        "DFT 项只会生成或更新审核候选、issue 和共识状态，不会自动变成 verified，也不会绕过导出安全门。\n\n" +
         "是否继续？"
     );
     if (!ok) return;
@@ -357,7 +357,7 @@ async function applyReviewRulesForRun(runId) {
 }
 
 async function deleteExternalRun(runId) {
-    var ok = confirm("删除这条 IDE AI 回写记录？已生成的人工确认记录不会被删除。");
+    var ok = confirm("删除这条 IDE AI 回写记录？已生成的确认记录不会被删除。");
     if (!ok) return;
     showProgress("正在删除 IDE AI 回写记录...");
     try {
@@ -448,10 +448,10 @@ function renderAggregateGroups(title, groups, emptyText) {
 function renderAggregateAliases(items) {
     items = items || [];
     if (!items.length) {
-        return '<div class="section-card"><h3>可能别名</h3><div class="muted">暂无需要人工合并的别名。</div></div>';
+        return '<div class="section-card"><h3>可能别名</h3><div class="muted">暂无需要确认合并的别名。</div></div>';
     }
     return '<div class="section-card"><h3>可能别名</h3><div class="readable-grid">' + items.map(function(item) {
-        return '<div class="readable-field"><div class="k">' + esc(item.name || item.alias || "别名") + '</div><div class="v">' + esc(item.reason || item.note || "需要人工确认是否为同一名称。") + '</div></div>';
+        return '<div class="readable-field"><div class="k">' + esc(item.name || item.alias || "别名") + '</div><div class="v">' + esc(item.reason || item.note || "需要确认是否为同一名称。") + '</div></div>';
     }).join("") + '</div></div>';
 }
 

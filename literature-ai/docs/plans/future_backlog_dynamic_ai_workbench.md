@@ -105,7 +105,7 @@ Recommended fields:
 - `agent_role`
 - `model_name`
 - `writes_final_truth`
-- `human_confirmation_required`
+- `confirmation_required`
 
 ### First Useful Deliverable
 

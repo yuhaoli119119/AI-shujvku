@@ -26,7 +26,7 @@ async def promote_verification(
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     if not payload.confirm_human_review:
-        raise HTTPException(status_code=400, detail="Explicit human confirmation is required.")
+        raise HTTPException(status_code=400, detail="Explicit confirmation is required.")
         
     try:
         review, audit_id = VerificationService(session).promote(

@@ -423,7 +423,7 @@ class ExternalAnalysisNormalizationMixin:
             blocking = [blocking]
         normalized["blocking_errors"] = blocking if isinstance(blocking, list) else []
         normalized["writes_final_truth"] = False
-        normalized["human_confirmation_required"] = True
+        normalized["confirmation_required"] = True
         normalized["verification_status"] = "unverified"
         normalized["status"] = "candidate"
         normalized.setdefault("raw_payload", item)
@@ -442,9 +442,45 @@ class ExternalAnalysisNormalizationMixin:
         candidates = [stripped]
         fenced = re.findall(r"```(?:json)?\s*(.*?)```", stripped, flags=re.S)
         candidates.extend(item.strip() for item in fenced if item.strip())
+        extracted = ExternalAnalysisNormalizationMixin._extract_first_json_payload(stripped)
+        if extracted:
+            candidates.append(extracted)
         for candidate in candidates:
             try:
                 return json.loads(candidate)
             except json.JSONDecodeError:
                 continue
+        return None
+
+    @staticmethod
+    def _extract_first_json_payload(text: str) -> str | None:
+        start_positions = [index for index, char in enumerate(text) if char in "{["]
+        for start in start_positions:
+            opener = text[start]
+            closer = "}" if opener == "{" else "]"
+            stack = [closer]
+            in_string = False
+            escape = False
+            for index in range(start + 1, len(text)):
+                char = text[index]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif char == "\\":
+                        escape = True
+                    elif char == '"':
+                        in_string = False
+                    continue
+                if char == '"':
+                    in_string = True
+                    continue
+                if char in "{[":
+                    stack.append("}" if char == "{" else "]")
+                elif char in "}]":
+                    if not stack or char != stack[-1]:
+                        break
+                    stack.pop()
+                    if not stack:
+                        return text[start : index + 1].strip()
+            continue
         return None

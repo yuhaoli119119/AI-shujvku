@@ -10,7 +10,7 @@ function renderAiAuditTrail(items) {
     return (
         '<div id="aiAuditTrailPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;">' +
             '<h3>AI 审核建议记录</h3>' +
-            '<div class="subtle">这里显示 AI / GLM / 外部审核提交写入的审核意见。AI 结论不会直接进入可信数据库；冲突项会标记为 review_conflict 并要求人工确认。</div>' +
+            '<div class="subtle">这里显示 AI / GLM / 外部审核提交写入的审核意见。证据合格且无冲突的确认可进入可信数据库；冲突项会标记为 review_conflict 并要求授权确认者解决。</div>' +
             '<div style="display:grid;gap:10px;margin-top:12px;">' +
                 aiItems.map(renderAiAuditTrailItem).join("") +
             '</div>' +
@@ -211,7 +211,7 @@ function renderAiAuditTrailItem(item) {
             '</div>' +
             '<div class="subtle">协议：' + esc(protocol.version || protocol.key || "-") + ' ｜ hash：' + esc(hash) + '</div>' +
             (item.reviewer_note ? '<div style="margin-top:8px;">' + esc(item.reviewer_note) + '</div>' : '') +
-            (conflict ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">AI 结论冲突：该条必须人工确认后才能进入可信数据。</div>' : '') +
+            (conflict ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">AI 结论冲突：该条必须解决冲突后才能进入可信数据。</div>' : '') +
         '</div>'
     );
 }
@@ -310,7 +310,7 @@ function renderDftEditDialogBody(item) {
         dftEditField("修改原因", '<textarea id="dftEditReason" rows="3" placeholder="例如：对照原 PDF 表 2 后确认数值应为 -1.25 eV"></textarea>', "dft-edit-wide")
     ].join("");
     return '<div class="dft-detail-edit-grid dft-edit-grid">' + fields + '</div>' +
-        '<div class="dft-edit-note">保存会写入人工修正审计，并将这条数据退回待核验；需要再次“接受入库”后才能恢复可导出状态。</div>' +
+        '<div class="dft-edit-note">保存会写入修正审计，并将这条数据退回待核验；需要再次“接受入库”后才能恢复可导出状态。</div>' +
         '<div class="modal-actions">' +
             '<button class="btn ghost" type="button" onclick="closeDftEditDialog()">取消编辑</button>' +
             '<button id="dftEditSubmit" class="btn primary" type="button" onclick="submitDftEdit()">保存修改</button>' +
@@ -438,7 +438,7 @@ async function acceptDftResult(itemId) {
     const item = selectedDftItemById(itemId);
     const opinionMeta = dftAiOpinionMeta(item);
     if (opinionMeta && opinionMeta.label === "AI 冲突") {
-        showToast("这条 DFT 存在 AI 冲突，不能直接接受入库；请展开查看后人工拒绝或重新处理。", "error");
+        showToast("这条 DFT 存在 AI 冲突，不能直接接受入库；请展开查看后拒绝或重新处理。", "error");
         return;
     }
     const opinions = importedDftAcceptanceOpinions(item);
@@ -523,7 +523,7 @@ async function rejectDftResult(itemId) {
             item.candidate_status = "Rejected";
             item.dft_workflow_state = "rejected";
             item.dft_workflow_label = "已拒绝";
-            item.dft_workflow_reason = "这条 DFT 已被人工拒绝，当前为终态。";
+            item.dft_workflow_reason = "这条 DFT 已被拒绝，当前为终态。";
             item.next_required_action = "none";
             if (item.export_safety) item.export_safety.review_status = "rejected";
         });
@@ -609,7 +609,7 @@ async function recropPaperFigures(paperId) {
         showToast("当前文献无法重新裁图。", "error");
         return;
     }
-    const ok = window.confirm("将重新根据 PDF 页码、图注和候选裁剪框定位图片。裁剪图仍然只是候选证据，需要人工核对原 PDF 页。是否继续？");
+    const ok = window.confirm("将重新根据 PDF 页码、图注和候选裁剪框定位图片。裁剪图仍然只是候选证据，需要核对原 PDF 页。是否继续？");
     if (!ok) return;
     try {
         showToast("正在重新定位/重裁图片...", "info");

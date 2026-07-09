@@ -11,6 +11,10 @@ DFT_REVIEW_FIELD_ALIASES = {
     "reaction_step": "reaction_step",
     "catalyst": "catalyst",
     "value": "value",
+    "value_upper": "value",
+    "upper_value": "value",
+    "value_kind": "value",
+    "value_type": "value",
 }
 
 DFT_CORRECTION_FIELD_ALIASES = {
@@ -25,6 +29,10 @@ DFT_CORRECTION_FIELD_ALIASES = {
     "energy": "property_type",
     "value": "value",
     "energy_value": "value",
+    "value_upper": "value_upper",
+    "upper_value": "value_upper",
+    "value_kind": "value_kind",
+    "value_type": "value_kind",
     "unit": "unit",
     "adsorbate": "adsorbate",
     "reaction_step": "reaction_step",

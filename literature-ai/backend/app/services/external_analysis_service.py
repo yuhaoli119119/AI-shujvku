@@ -153,7 +153,7 @@ class ExternalAnalysisService(
                     "mapping_error": run.mapping_error,
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
                     "writes_final_truth": False,
-                    "requires_human_confirmation": True,
+                    "requires_confirmation": True,
                 },
             )
         )

@@ -70,7 +70,7 @@ Web AI 返回：
    防护：阶段 1 只允许写 `dft_evidence_candidates`；阶段 2 重新做 DFT 审核。
 
 5. 删除/合并类破坏性操作误执行
-   防护：`MERGE / DELETE / REJECT / NEEDS_HUMAN` 永不自动执行，只能留给本地 AI 或人工处理。
+   防护：`MERGE / DELETE / REJECT / NEEDS_HUMAN` 永不自动执行，只能留给本地 AI 或授权确认者处理。
 
 6. 阶段 1 未完成就进入 DFT 终审
    防护：DFT bundle 暴露 `figure_table_evidence_review_status`；提示词要求未 applied 时只能 `NEEDS_HUMAN / uncertainties`。

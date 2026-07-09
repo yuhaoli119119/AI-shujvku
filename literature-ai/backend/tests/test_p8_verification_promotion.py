@@ -94,18 +94,18 @@ def create_mock_data(engine, pdf_path="test.pdf", has_locator=True, has_evidence
         return str(review.id)
 
 def test_promotion_requires_explicit_confirmation(setup_test_db):
-    """Requires explicit confirm_human_review=True to proceed, otherwise 400"""
+    """Requires explicit confirmation to proceed, otherwise 400."""
     engine = setup_test_db
     review_id = create_mock_data(engine)
     
-    # Missing confirm_human_review
+    # Missing confirmation.
     response_no_confirm = client.post(f"/api/reviews/{review_id}/promote", json={
         "target_status": "verified",
         "reviewed_value": 2.0,
         "confirm_human_review": False
     })
     assert response_no_confirm.status_code == 400
-    assert "Explicit human confirmation is required" in response_no_confirm.json()["detail"]
+    assert "Explicit confirmation is required" in response_no_confirm.json()["detail"]
 
     # Invalid target_status
     response_bad_status = client.post(f"/api/reviews/{review_id}/promote", json={

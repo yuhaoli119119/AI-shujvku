@@ -645,7 +645,7 @@ def _reason(fields: list[str], evidence_status: str) -> str:
     if evidence_status == "verified":
         return f"Matches query terms in {field_text}; evidence is verified but still should be checked before use."
     if evidence_status.startswith("pending"):
-        return f"Matches query terms in {field_text}, but evidence is pending and requires human verification."
+        return f"Matches query terms in {field_text}, but evidence is pending and requires confirmation."
     if evidence_status == "unverified_extraction":
         return f"Matches extracted content in {field_text}; this is an unverified suggestion."
     return f"Matches metadata in {field_text}; metadata-only relevance cannot be used as direct evidence."

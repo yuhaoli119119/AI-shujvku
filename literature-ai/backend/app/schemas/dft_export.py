@@ -79,6 +79,8 @@ class DFTTargetPayloadV2(BaseModel):
     adsorbate: str | None = None
     canonical_adsorbate: str | None = None
     value: float | None = None
+    value_upper: float | None = None
+    value_kind: str | None = None
     unit: str | None = None
     reaction_step: str | None = None
     normalized_value: float | None = None
@@ -101,6 +103,8 @@ class DFTLMClaimPayloadV2(BaseModel):
     adsorbate: str | None = None
     canonical_adsorbate: str | None = None
     value: float | None = None
+    value_upper: float | None = None
+    value_kind: str | None = None
     unit: str | None = None
     reaction_step: str | None = None
     normalized_value: float | None = None

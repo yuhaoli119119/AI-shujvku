@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -37,6 +38,80 @@ def _normalize_string_list(value: list[Any] | None) -> list[Any] | None:
         else:
             normalized.append(item)
     return normalized
+
+
+def _normalize_literal(value: Any, *, allowed: set[str]) -> Any:
+    if value is None:
+        return value
+    text = str(value).strip()
+    normalized = text.upper().replace("-", "_").replace(" ", "_")
+    if normalized in allowed:
+        return normalized
+    upper = text.upper()
+    if upper in allowed:
+        return upper
+    lower = text.lower()
+    if lower.upper() in allowed:
+        return lower.upper()
+    return value
+
+
+def _normalize_dft_relevance(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, bool):
+        return "explicit_dft" if value else "none"
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if not text or text in {"n/a", "na", "null", "none/null"}:
+        return "unknown"
+    mapping = {
+        "none": "none",
+        "no": "none",
+        "false": "none",
+        "irrelevant": "none",
+        "not_relevant": "none",
+        "not_dft": "none",
+        "no_dft": "none",
+        "non_dft": "none",
+        "无": "none",
+        "否": "none",
+        "不是": "none",
+        "possible": "possible",
+        "maybe": "possible",
+        "possible_dft": "possible",
+        "potential": "possible",
+        "suspected": "possible",
+        "可能": "possible",
+        "疑似": "possible",
+        "explicit": "explicit_dft",
+        "explicit_dft": "explicit_dft",
+        "dft": "explicit_dft",
+        "yes": "explicit_dft",
+        "true": "explicit_dft",
+        "relevant": "explicit_dft",
+        "dft_relevant": "explicit_dft",
+        "明确": "explicit_dft",
+        "是": "explicit_dft",
+        "unknown": "unknown",
+        "unclear": "unknown",
+        "unsure": "unknown",
+        "不确定": "unknown",
+        "未知": "unknown",
+    }
+    return mapping.get(text, "unknown")
+
+
+def _dedupe_exact_actions(actions: list[Any]) -> list[Any]:
+    deduped: list[Any] = []
+    seen: set[str] = set()
+    for action in actions:
+        payload = action.model_dump(mode="json") if hasattr(action, "model_dump") else action
+        key = json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(action)
+    return deduped
 
 
 class OfflineEvidenceBBoxMixin(BaseModel):
@@ -101,10 +176,20 @@ class OfflineEvidenceFigureAction(OfflineEvidenceBBoxMixin):
     blocking_errors: list[str] = Field(default_factory=list)
     local_ai_verification: LocalAIVerification | None = None
 
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: Any) -> Any:
+        return _normalize_literal(value, allowed={"KEEP", "RECROP", "CREATE", "REJECT", "NEEDS_HUMAN"})
+
     @field_validator("figure_id", "source_paper_id", "figure_label", "figure_role")
     @classmethod
     def strip_optional_ids(cls, value: str | None) -> str | None:
         return _strip_optional_text(value)
+
+    @field_validator("dft_relevance", mode="before")
+    @classmethod
+    def normalize_dft_relevance_value(cls, value: Any) -> str:
+        return _normalize_dft_relevance(value)
 
     @field_validator("caption", "content_summary")
     @classmethod
@@ -166,10 +251,20 @@ class OfflineEvidenceTableAction(OfflineEvidenceBBoxMixin):
     blocking_errors: list[str] = Field(default_factory=list)
     local_ai_verification: LocalAIVerification | None = None
 
+    @field_validator("action", mode="before")
+    @classmethod
+    def normalize_action(cls, value: Any) -> Any:
+        return _normalize_literal(value, allowed={"KEEP", "UPDATE", "CREATE", "MERGE", "DELETE", "NEEDS_HUMAN"})
+
     @field_validator("table_id", "source_table_id", "target_table_id", "source_paper_id")
     @classmethod
     def strip_optional_ids(cls, value: str | None) -> str | None:
         return _strip_optional_text(value)
+
+    @field_validator("dft_relevance", mode="before")
+    @classmethod
+    def normalize_dft_relevance_value(cls, value: Any) -> str:
+        return _normalize_dft_relevance(value)
 
     @field_validator("caption", "complete_markdown")
     @classmethod
@@ -200,11 +295,6 @@ class OfflineEvidenceTableAction(OfflineEvidenceBBoxMixin):
                 raise ValueError("CREATE requires source_paper_id")
             if not (self.caption or self.complete_markdown):
                 raise ValueError("CREATE requires caption or complete_markdown")
-        if self.action == "MERGE":
-            if not self.source_table_id or not self.target_table_id:
-                raise ValueError("MERGE requires source_table_id and target_table_id")
-            if self.source_table_id == self.target_table_id:
-                raise ValueError("MERGE source_table_id and target_table_id must differ")
         if self.action in {"UPDATE", "CREATE"} and self.complete_markdown is None:
             raise ValueError(f"{self.action} requires complete_markdown")
         return self
@@ -283,6 +373,12 @@ class OfflineEvidenceReviewResult(BaseModel):
     @classmethod
     def normalize_notes(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    @model_validator(mode="after")
+    def dedupe_exact_duplicate_actions(self) -> "OfflineEvidenceReviewResult":
+        self.figure_actions = _dedupe_exact_actions(self.figure_actions)
+        self.table_actions = _dedupe_exact_actions(self.table_actions)
+        return self
 
 
 OfflineEvidenceReviewFigureAction = OfflineEvidenceFigureAction

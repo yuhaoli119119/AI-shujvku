@@ -68,7 +68,7 @@ def locator_degradation(
             provenance_level=APPROXIMATE_PDF_PAGE if has_page else TEXT_EVIDENCE_ONLY,
             can_jump_to_pdf_page=False,
             can_highlight_in_pdf=False,
-            warning_reason=warning_reason or "page match is approximate and requires human confirmation",
+            warning_reason=warning_reason or "page match is approximate and requires confirmation",
         )
 
     if status == UNRESOLVED:

@@ -167,6 +167,108 @@ def test_new_dft_materialization_merges_method_only_step_with_specific_adsorptio
         assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
 
 
+def test_new_dft_materialization_rejects_missing_pdf_page_anchor(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Missing PDF anchor paper", pdf_path="missing-anchor.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="pdf-anchor-test")
+        session.add(run)
+        session.flush()
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "FePc@WS2",
+                    "adsorbate": "Li2S4",
+                    "property_type": "pdos_overlap_energy_window",
+                    "value": -2.5,
+                    "value_upper": -0.5,
+                    "unit": "eV",
+                },
+                "evidence_location": {"quoted_text": "PDOS overlaps from -2.5 to -0.5 eV."},
+            },
+            status="candidate",
+        )
+        session.add(candidate)
+        session.flush()
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        assert result["materialized_count"] == 0
+        assert result["skipped_items"] == [{"candidate_id": str(candidate.id), "reason": "missing_pdf_evidence_anchor"}]
+        assert session.scalar(select(DFTResult).where(DFTResult.paper_id == paper.id)) is None
+        stored = session.get(ExternalAnalysisCandidate, candidate.id)
+        assert stored.status == "rejected_by_local_ai"
+        assert stored.mapping_reason == "missing_pdf_evidence_anchor"
+
+
+def test_new_dft_materialization_persists_range_and_pdf_locator(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Range DFT candidate paper", pdf_path="range.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="range-test")
+        session.add(run)
+        session.flush()
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "FePc@WS2",
+                    "adsorbate": "Li2S4",
+                    "property_type": "pdos_overlap_energy_window",
+                    "value": -2.5,
+                    "value_upper": -0.5,
+                    "unit": "eV",
+                },
+                "evidence_location": {
+                    "source_document_type": "main_text",
+                    "page": 15,
+                    "figure": "fig_5",
+                    "quoted_text": "PDOS overlaps from -2.5 to -0.5 eV.",
+                },
+            },
+            status="candidate",
+        )
+        session.add(candidate)
+        session.flush()
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+        row = session.scalar(select(DFTResult).where(DFTResult.paper_id == paper.id))
+        locator = session.scalar(select(EvidenceLocator).where(EvidenceLocator.target_id == str(row.id)))
+
+        assert result["materialized_count"] == 1
+        assert row.value == -2.5
+        assert row.value_upper == -0.5
+        assert row.value_kind == "energy_window"
+        assert row.source_figure == "fig_5"
+        assert row.evidence_payload["page"] == 15
+        assert locator is not None
+        assert locator.page == 15
+        assert locator.locator_status == "exact_page"
+
+
 def test_dft_material_binding_backfill_reuses_creates_and_skips_missing_identity(verification_env):
     Session = verification_env
     with Session() as session:
@@ -1070,5 +1172,5 @@ def test_single_dft_opinion_without_evidence_anchor_needs_repair():
         write_lock_tokens=None,
     )
 
-    assert result["status"] == "need_repair"
-    assert result["reason"] == "missing_evidence_anchor"
+    assert result["status"] == "rejected"
+    assert result["reason"] == "missing_pdf_evidence_anchor"

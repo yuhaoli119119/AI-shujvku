@@ -61,6 +61,8 @@ class ReviewService:
         "adsorbate",
         "property_type",
         "value",
+        "value_upper",
+        "value_kind",
         "unit",
         "reaction_step",
         "source_section",

@@ -250,6 +250,8 @@ class DFTResultResponse(BaseModel):
     adsorbate: str | None = None
     property_type: str | None = None
     value: float | None = None
+    value_upper: float | None = None
+    value_kind: str | None = None
     unit: str | None = None
     reaction_step: str | None = None
     source_section: str | None = None
@@ -259,6 +261,9 @@ class DFTResultResponse(BaseModel):
     candidate_status: str = "system_candidate"
     evidence_payload: dict[str, Any] | None = None
     extraction_protocol_version: str | None = None
+    local_ai_verification_payload: dict[str, Any] | None = None
+    ml_ready_at: datetime | None = None
+    ml_ready_source: str | None = None
     support_lifecycle_status: str | None = None
     support_writeback_paper_id: UUID | None = None
     support_writeback_dft_result_id: UUID | None = None
@@ -469,6 +474,7 @@ class PaperDetailResponse(PaperListItemResponse):
     dft_review_status: str = "missing"
     translation_review_status: str = "missing"
     rag_quality: dict[str, Any] = Field(default_factory=dict)
+    chart_review_status: dict[str, Any] = Field(default_factory=dict)
 
 
 class CodexContextResponse(BaseModel):

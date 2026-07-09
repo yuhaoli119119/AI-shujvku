@@ -15,7 +15,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, ExtractionFieldReview, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.mcp.context import MCPAuthInfo
@@ -27,6 +27,7 @@ from app.services.codex_context_service import CodexContextService
 from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
+from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
@@ -46,6 +47,7 @@ from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
+from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
 
 def _allowed_mcp_hosts() -> list[str]:
@@ -2558,7 +2560,7 @@ def review_figure(
 
 @mcp_server.tool(
     name="get_review_coverage",
-    description="Show which figures, tables, and sections of a paper have been reviewed and which haven't. Aggregates review_figure verdicts, historical chart notes, and PaperCorrection records to produce a coverage report.",
+    description="Show figure/table/section coverage plus current figure-table stage and DFT review/export coverage for a paper.",
 )
 def get_review_coverage(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")
@@ -2678,6 +2680,72 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 }
             )
 
+        try:
+            figure_table_review = DFTReviewBundleService(session, settings).get_figure_table_review_state(pid)
+        except Exception as exc:
+            figure_table_review = {
+                "stage_status": "unknown",
+                "blocking_errors": [str(exc)],
+            }
+
+        dft_rows = session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == pid)
+        ).all()
+        dft_reviews = session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == pid,
+                ExtractionFieldReview.target_type == "dft_results",
+            )
+        ).all()
+        dft_review_status_by_target: dict[str, set[str]] = {}
+        for review in dft_reviews:
+            if str(review.target_resolution_status or "active") != "active":
+                continue
+            dft_review_status_by_target.setdefault(str(review.target_id), set()).add(
+                str(review.reviewer_status or "pending")
+            )
+        dft_gate_by_id = bulk_export_gate_results(session, dft_rows, target_type="dft_results")
+        active_dft_gates = [
+            gate
+            for row in dft_rows
+            if str(row.candidate_status or "").strip().lower() != "rejected"
+            for gate in [dft_gate_by_id.get(str(row.id))]
+            if gate is not None
+        ]
+        dft_summary = summarize_gate_results(active_dft_gates)
+        dft_details = []
+        for row in dft_rows:
+            row_id = str(row.id)
+            gate = dft_gate_by_id.get(row_id)
+            review_statuses = sorted(dft_review_status_by_target.get(row_id, set()))
+            dft_details.append(
+                {
+                    "dft_result_id": row_id,
+                    "candidate_status": row.candidate_status or "system_candidate",
+                    "property_type": row.property_type,
+                    "adsorbate": row.adsorbate,
+                    "value": row.value,
+                    "unit": row.unit,
+                    "source_section": row.source_section,
+                    "source_figure": row.source_figure,
+                    "field_review_statuses": review_statuses,
+                    "review_status": gate.review_status if gate else "unknown",
+                    "exportable": bool(gate and gate.eligible),
+                    "blocked_reasons": list(gate.reasons) if gate else ["missing_export_gate"],
+                }
+            )
+        reviewed_dft_target_ids = {
+            target_id
+            for target_id, statuses in dft_review_status_by_target.items()
+            if any(status in {"verified", "rejected"} for status in statuses)
+        }
+        active_dft_target_ids = {
+            str(row.id)
+            for row in dft_rows
+            if str(row.candidate_status or "").strip().lower() != "rejected"
+        }
+        unreviewed_dft_target_ids = sorted(active_dft_target_ids - reviewed_dft_target_ids)
+
         # --- Summary ---
         fig_reviewed = sum(1 for f in figure_report if f["review_status"] == "reviewed")
         fig_analyzed = sum(1 for f in figure_report if f["review_status"] == "analyzed")
@@ -2711,6 +2779,26 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "source_distribution": dict(sorted(external_audit_source_distribution.items())),
             },
             "latest_external_audits": latest_external_audits[:10],
+            "workflow_stage": {
+                "figure_table_review": figure_table_review,
+                "dft_review": {
+                    "total_candidates": len(dft_rows),
+                    "active_candidates": len(active_dft_target_ids),
+                    "reviewed_target_count": len(reviewed_dft_target_ids & active_dft_target_ids),
+                    "unreviewed_target_count": len(unreviewed_dft_target_ids),
+                    "unreviewed_target_ids": unreviewed_dft_target_ids[:50],
+                    "eligible_count": dft_summary["eligible"],
+                    "blocked_count": dft_summary["blocked"],
+                    "blocked_reasons": dft_summary["blocked_reasons"],
+                },
+            },
+            "dft_results": {
+                "total": len(dft_rows),
+                "active": len(active_dft_target_ids),
+                "reviewed": len(reviewed_dft_target_ids & active_dft_target_ids),
+                "unreviewed": len(unreviewed_dft_target_ids),
+                "details": dft_details[:100],
+            },
         }
 
 

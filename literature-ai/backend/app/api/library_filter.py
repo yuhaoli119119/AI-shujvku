@@ -239,7 +239,7 @@ def metadata_diagnostics(
                 "title": paper.title or "Unknown Title",
                 "missing_fields": missing,
                 "metadata_source": "user_import",
-                "evidence_status_disclaimer": "注：元数据完整仅代表字段已填，不代表其内容已被人工核验通过。",
+                "evidence_status_disclaimer": "注：元数据完整仅代表字段已填，不代表其内容已被确认核验通过。",
             })
             
     return {

@@ -757,7 +757,7 @@ def test_gemini_audit_flags_candidate_without_human_confirmation(workbench_env):
         )
 
         assert response["decision"] == "PASS"
-        assert response["safety"]["requires_human_confirmation_for_final_library"] is True
+        assert response["safety"]["requires_confirmation_for_final_library"] is True
         refreshed_paper = session.get(Paper, paper_id)
         refreshed_dft = session.get(DFTResult, result_id)
         assert refreshed_paper.workflow_status == "Gemini_Verified"
@@ -896,7 +896,7 @@ def test_review_center_api_exposes_quality_and_candidate_counts(workbench_env):
                     "reason": "Check this value against the source PDF.",
                     "evidence_location": {"page": 4},
                     "writes_final_truth": False,
-                    "human_confirmation_required": True,
+                    "confirmation_required": True,
                 },
                 status="candidate",
                 confidence=0.62,
@@ -1179,7 +1179,7 @@ def test_dft_review_queue_api_exposes_object_review_audit_summary(workbench_env)
                         "quoted_text": "The adsorption energy is -1.20 eV.",
                     },
                     "writes_final_truth": False,
-                    "human_confirmation_required": True,
+                    "confirmation_required": True,
                 },
                 status="candidate",
                 confidence=0.74,

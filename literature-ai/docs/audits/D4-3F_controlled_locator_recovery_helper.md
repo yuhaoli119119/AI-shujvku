@@ -56,7 +56,7 @@ It returns `LocatorRepairProposal` only. The proposal includes:
 - `warnings`
 - `blockers`
 - `should_write_locator=false`
-- `requires_human_confirmation=true`
+- `requires_confirmation=true`
 - `mark_verified=false`
 - `safe_verified=false`
 - `export_eligible=false`
@@ -100,7 +100,7 @@ Coverage:
 9. helper does not claim export/writing eligible
 10. helper does not fabricate page when source lacks page
 11. helper does not fabricate bbox when source lacks bbox
-12. proposal defaults to `should_write_locator=false` and `requires_human_confirmation=true`
+12. proposal defaults to `should_write_locator=false` and `requires_confirmation=true`
 13. temp-DB regression confirms proposal generation does not write review rows or locator rows
 
 ## 5. D4-3E Feasibility Carried Forward

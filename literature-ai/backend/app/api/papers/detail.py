@@ -112,6 +112,7 @@ from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
+from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.llm_service import LLMService
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
@@ -499,6 +500,7 @@ async def set_manual_review_progress(
     paper_id: UUID,
     payload: ManualReviewProgressRequest,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     paper = session.get(Paper, paper_id)
     if not paper:
@@ -506,6 +508,31 @@ async def set_manual_review_progress(
     module = str(payload.module or "").strip().lower()
     if module not in {"content", "figures", "dft"}:
         raise HTTPException(status_code=400, detail="module must be one of: content, figures, dft")
+    if module == "figures" and payload.completed:
+        try:
+            chart_task = EvidenceReviewBundleService(session, settings).get_review_task(paper_id)
+        except (LookupError, ValueError) as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "figure_table_review_not_available",
+                    "message": "图表审核状态不可用，不能标记完成。",
+                    "error": str(exc),
+                },
+            ) from exc
+        if chart_task.get("stage_status") not in {"completed", "not_required"} or int(chart_task.get("unresolved_count") or 0) > 0:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "figure_table_review_not_completed",
+                    "message": "图表完成状态必须同时满足图片和表格审核闭环；当前仍有未解决项。",
+                    "chart_review": {
+                        "stage_status": chart_task.get("stage_status"),
+                        "unresolved_count": chart_task.get("unresolved_count"),
+                        "unresolved_actions": (chart_task.get("unresolved_actions") or [])[:50],
+                    },
+                },
+            )
     analysis = dict(paper.comprehensive_analysis or {})
     progress = _manual_review_progress(analysis)
     progress[module] = {

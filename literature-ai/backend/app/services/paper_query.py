@@ -7,7 +7,9 @@ from uuid import UUID
 from sqlalchemy import Integer, String, and_, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, load_only
 
+from app.config import get_settings
 from app.db.models import (
+    AuditLog,
     CatalystSample,
     DFTResult,
     DFTSetting,
@@ -34,6 +36,7 @@ from app.schemas.api import (
     FigureDataPointResponse,
 )
 from app.services.paper_codes import ensure_paper_codes
+from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -48,6 +51,91 @@ from app.services.paper_query_storage import cached_pdf_size_for_storage as _cac
 __all__ = ["PaperQueryService", "_cached_pdf_size_for_storage"]
 
 DFT_DETAIL_PAGE_SIZE = 28
+
+
+def _chart_review_status_for_detail(session: Session, paper_id: UUID) -> dict[str, Any]:
+    try:
+        task = EvidenceReviewBundleService(session, get_settings()).get_review_task(paper_id)
+    except Exception as exc:
+        return {
+            "stage_status": "unavailable",
+            "apply_ready": False,
+            "unresolved_count": 0,
+            "unresolved_actions": [],
+            "error": str(exc),
+        }
+    unresolved_actions = list(task.get("unresolved_actions") or [])
+    return {
+        "stage_status": task.get("stage_status"),
+        "apply_ready": bool(task.get("apply_ready")),
+        "rag_quality_status": task.get("rag_quality_status"),
+        "unresolved_count": int(task.get("unresolved_count") or len(unresolved_actions)),
+        "unresolved_actions": unresolved_actions[:50],
+        "blocking_errors": task.get("blocking_errors") or [],
+        "completed_snapshot_fingerprint": task.get("completed_snapshot_fingerprint"),
+        "current_snapshot_fingerprint": task.get("current_snapshot_fingerprint"),
+    }
+
+
+def _direct_table_review_audits_by_target(session: Session, target_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
+    if not target_ids:
+        return {}
+    rows = session.scalars(
+        select(AuditLog)
+        .where(AuditLog.target_type == "paper_table")
+        .where(AuditLog.target_id.in_(target_ids))
+        .where(
+            AuditLog.action.in_(
+                [
+                    "offline_evidence_review_op",
+                    "create_table",
+                    "update_table",
+                    "merge_table",
+                ]
+            )
+        )
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    ).all()
+    audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+    for row in rows:
+        target_id = str(row.target_id or "")
+        if target_id not in target_ids:
+            continue
+        payload = row.payload if isinstance(row.payload, dict) else {}
+        action_payload = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+        table_result = payload.get("table_result") if isinstance(payload.get("table_result"), dict) else {}
+        review_action = str(
+            action_payload.get("action")
+            or table_result.get("action")
+            or row.action.replace("_table", "").upper()
+        ).strip().upper()
+        if review_action in {"NEEDS_HUMAN", ""}:
+            continue
+        evidence_payload = payload.get("evidence_payload") if isinstance(payload.get("evidence_payload"), dict) else None
+        result_evidence = table_result.get("evidence_payload") if isinstance(table_result.get("evidence_payload"), dict) else None
+        audits_by_target[target_id].append(
+            {
+                "candidate_id": str(row.id),
+                "candidate_type": "direct_table_audit",
+                "status": "ai_reviewed",
+                "target_type": "table",
+                "target_id": target_id,
+                "field_name": "table_review_status",
+                "decision": "PASS",
+                "reason": payload.get("reason")
+                or table_result.get("reason")
+                or (evidence_payload or {}).get("reason")
+                or f"Direct table action {review_action} recorded.",
+                "source": row.source,
+                "source_label": row.source,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "evidence_location": result_evidence or evidence_payload,
+                "direct_action": review_action,
+            }
+        )
+    for target_id, audits in audits_by_target.items():
+        audits_by_target[target_id] = audits[:5]
+    return audits_by_target
 
 
 def _escape_like(value: str) -> str:
@@ -563,7 +651,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         elif incoming_supplementary_relationships:
             main_relationship = incoming_supplementary_relationships[0]
             table_review_paper_id = main_relationship.source_paper_id
-            table_correction_paper_ids = {main_relationship.source_paper_id}
+            table_correction_paper_ids = {main_relationship.source_paper_id, paper_id}
             for table in tables:
                 table_source_metadata[str(table.id)] = {
                     "source_document_type": "supplementary_information",
@@ -609,10 +697,18 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             figure_ids = {str(figure.id) for figure in figures}
             table_ids = {str(table.id) for table in tables_for_response}
             table_audits = self._object_review_audits_by_target(
-                table_review_paper_id,
+                table_correction_paper_ids,
                 table_ids,
                 target_types={"table", "tables", "paper_table", "paper_tables"},
             )
+            direct_table_audits = _direct_table_review_audits_by_target(self.session, table_ids)
+            for target_id, direct_audits in direct_table_audits.items():
+                if direct_audits:
+                    table_audits[target_id] = sorted(
+                        [*(table_audits.get(target_id) or []), *direct_audits],
+                        key=lambda item: str(item.get("created_at") or ""),
+                        reverse=True,
+                    )[:5]
             table_corrections = self._table_corrections_by_target(table_correction_paper_ids, table_ids)
             figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
             figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
@@ -778,6 +874,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                 writing_cards=writing_cards,
                 dft_gate_by_id=dft_gate_by_id,
             ),
+            chart_review_status=_chart_review_status_for_detail(self.session, paper_id),
             **review_status,
         )
 
@@ -861,6 +958,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             **base.model_dump(),
             artifact_status=build_paper_artifact_status(paper),
             dft_review_status=dft_review_status,
+            chart_review_status=_chart_review_status_for_detail(self.session, paper_id),
             dft_results_page={
                 "offset": 0,
                 "limit": DFT_DETAIL_PAGE_SIZE,

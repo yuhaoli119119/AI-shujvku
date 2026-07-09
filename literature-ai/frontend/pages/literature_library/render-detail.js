@@ -301,23 +301,23 @@ function renderDetail(detail, audit) {
         auditBanner =
             '<div class="section-card" style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px;">' +
                 '<h3 style="color: var(--color-danger); display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; font-weight: 800;">' +
-                    '⚠️ 人工校验需要重新确认' +
+                    '⚠️ 确认记录需要重新确认' +
                 '</h3>' +
                 '<p style="color: var(--color-text); font-size: 13px; margin-bottom: 12px; line-height: 1.6;">' +
-                    '该文献有 ' + totalAlerts + ' 条人工校验记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
+                    '该文献有 ' + totalAlerts + ' 条确认记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
                 '</p>' +
-                '<div class="subtle">请在审核中心或 DFT 数据库处理需要人工确认的数据；IDE AI 的总体意见会显示在“IDE AI 回写笔记”。</div>' +
+                '<div class="subtle">请在审核中心或 DFT 数据库处理需要确认的数据；IDE AI 的总体意见会显示在“IDE AI 回写笔记”。</div>' +
             '</div>';
 
         const reviewTabWarningHtml =
             '<div id="reviewTabAuditWarning" class="section-card" style="border: 1px dashed var(--color-danger); background: var(--color-danger-bg); padding: 18px; border-radius: var(--radius-lg); margin-bottom: 16px;">' +
                 '<h3 style="color: var(--color-danger); display: flex; align-items: center; gap: 8px; font-size: 15px; margin-bottom: 6px; font-weight: 800;">' +
-                    '⚠️ 人工校验需要重新确认' +
+                    '⚠️ 确认记录需要重新确认' +
                 '</h3>' +
                 '<p style="color: var(--color-text); font-size: 13px; margin-bottom: 12px; line-height: 1.6;">' +
-                    '该文献有 ' + totalAlerts + ' 条人工校验记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
+                    '该文献有 ' + totalAlerts + ' 条确认记录需要重新确认（已失效 ' + (audit.stale || 0) + '，有歧义 ' + (audit.ambiguous || 0) + '，未解析 ' + (audit.unresolved || 0) + '）。' +
                 '</p>' +
-                '<div class="subtle">请在审核中心或 DFT 数据库处理需要人工确认的数据；IDE AI 的总体意见会显示在“IDE AI 回写笔记”。</div>' +
+                '<div class="subtle">请在审核中心或 DFT 数据库处理需要确认的数据；IDE AI 的总体意见会显示在“IDE AI 回写笔记”。</div>' +
             '</div>';
         if (reviewTabEl) {
             reviewTabEl.insertAdjacentHTML("afterbegin", reviewTabWarningHtml);

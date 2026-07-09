@@ -24,7 +24,7 @@ class PaperQueryReviewMixin:
     def _paper_detail_review_status(
         self,
         *,
-        paper_id: UUID,
+        paper_id: UUID | set[UUID],
         paper: Paper,
         sections: list[PaperSection],
         figures: list[PaperFigure],
@@ -459,9 +459,10 @@ class PaperQueryReviewMixin:
         audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
         deduped_by_target: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {target_id: {} for target_id in target_ids}
         normalized_target_types = {target_type.strip().lower() for target_type in target_types}
+        paper_ids = set(paper_id) if isinstance(paper_id, set) else {paper_id}
         candidates = self.session.scalars(
             select(ExternalAnalysisCandidate)
-            .where(ExternalAnalysisCandidate.paper_id == paper_id)
+            .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
             .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
             .order_by(ExternalAnalysisCandidate.created_at.desc())
         ).all()

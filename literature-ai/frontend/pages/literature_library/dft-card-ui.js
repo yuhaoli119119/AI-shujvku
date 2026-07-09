@@ -15,7 +15,7 @@ function dftMissingReviewLabel(item) {
     if (audits.length === 0) return "尚无 AI 对象审核";
     const classified = classifyDftAutomationRows([item]);
     if (classified.readyToApply.length) return "AI 意见待系统写回";
-    if (classified.needsHuman.length) return "AI 无法确认，待人工处理";
+    if (classified.needsHuman.length) return "待确认处理";
     return "已有 AI 意见，等待受控写回";
 }
 
@@ -102,7 +102,7 @@ function renderDftItemSafety(item) {
     if (!safety) {
         return '<div class="figure-warning" style="margin-top:12px;">' +
             '<strong>安全状态待加载</strong>' +
-            '<div>' + esc(workflow && workflow.reason || "这条 DFT 记录暂未拿到导出安全门详情；仍可人工拒绝，接受入库时后端会重新校验。") + '</div>' +
+            '<div>' + esc(workflow && workflow.reason || "这条 DFT 记录暂未拿到导出安全门详情；仍可拒绝，接受入库时后端会重新校验。") + '</div>' +
             renderDftDecisionActions(item, false) +
         '</div>';
     }
@@ -111,7 +111,7 @@ function renderDftItemSafety(item) {
     return '<div class="figure-warning" style="margin-top:12px;">' +
         '<strong>' + (exportable ? "已审核可导出" : "候选不可进入正式数据库") + '</strong>' +
         '<div>' + (exportable
-            ? esc(workflow && workflow.reason || "该条记录已满足人工核验、证据原文和准确 PDF 定位要求。")
+            ? esc(workflow && workflow.reason || "该条记录已满足确认核验、证据原文和准确 PDF 定位要求。")
             : "阻断原因：" + esc(reasons || "待按 AI 协议和 PDF 证据检查")) + '</div>' +
         (workflow && workflow.action && workflow.action !== "none"
             ? '<div class="subtle" data-role="dft-next-required-action" style="margin-top:6px;">下一步：' + esc(workflow.action) + '</div>'
@@ -292,7 +292,7 @@ function dftAiOpinionMeta(item) {
         return {
             label: "AI 冲突",
             className: "failed",
-            title: "至少一个审核提交建议拒绝，同时存在保留/通过意见，必须人工裁决。"
+            title: "至少一个审核提交建议拒绝，同时存在保留/通过意见，必须确认裁决。"
         };
     }
     if (hasReject) {
@@ -306,7 +306,7 @@ function dftAiOpinionMeta(item) {
         return {
             label: "AI 无法确认",
             className: "meta",
-            title: "AI 无法从当前证据确认这条 DFT 候选，需要下一轮审核提交补证据或人工裁决。"
+            title: "AI 无法从当前证据确认这条 DFT 候选，需要下一轮审核提交补证据或确认裁决。"
         };
     }
     if (hasProposed && sourceCount >= 2) {

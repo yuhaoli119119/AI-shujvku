@@ -40,7 +40,7 @@
 - `POST /api/papers/{paper_id}/dft-review-result/validate` 校验 schema、paper_id、paper_code、包指纹、目标字段、目标记录和 evidence_id。
 - 校验接口只返回 `import_analysis_request`，不创建 run、不写候选、不修改 DFT 数据。
 - 本地执行 AI 复核校验结果后，再通过带认证身份的 MCP/API `import_analysis` 执行。
-- 导入后仍沿用现有 DFT 候选、双审/冲突、人工确认和导出安全门，不授予网页 AI 最终确认权。
+- 导入后仍沿用现有 DFT 候选、双审/冲突、确认和导出安全门；网页 AI 与其它授权确认者采用同一接受/拒绝规则。
 
 ## 数据库影响
 

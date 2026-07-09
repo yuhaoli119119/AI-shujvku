@@ -34,7 +34,7 @@ Scope: Playwright smoke inventory and minimal long-term regression locks for the
   - AI suggestions are labeled in the library review candidate area.
   - Generated pending records are labeled `已生成待确认记录`.
   - Manual corrections are labeled by the workbench status chip implementation.
-  - Human-confirmed state is labeled `人工确认通过`.
+  - Confirmed state is labeled `确认通过`.
 
 ### D. Export Safe Gate Contract
 

@@ -91,7 +91,7 @@ class ExternalObjectReviewAuditModel(BaseModel):
     status: str = "candidate"
     verification_status: str = "unverified"
     writes_final_truth: bool = False
-    human_confirmation_required: bool = True
+    confirmation_required: bool = True
     mapping_reason: str | None = None
 
 

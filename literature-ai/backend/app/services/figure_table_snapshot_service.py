@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import PaperFigure, PaperRelationship, PaperTable
+from app.services.figure_review_scope import include_figure_in_chart_review_scope
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 
 
@@ -41,9 +42,16 @@ def compute_figure_table_snapshot(
         .where(PaperFigure.paper_id.in_(source_ids))
         .order_by(PaperFigure.paper_id, PaperFigure.id)
     ).all()
+    figures = [
+        row
+        for row in figures
+        if include_figure_in_chart_review_scope(row, main_paper_id=paper_id)
+    ]
     payload = {
-        "schema_version": "figure_table_content_snapshot_v1",
+        "schema_version": "figure_table_content_snapshot_v2",
         "paper_id": str(paper_id),
+        "figure_scope": "main_all_plus_dft_related_supplementary",
+        "table_scope": "main_and_supplementary_all",
         "tables": [
             {
                 "id": str(row.id),

@@ -103,7 +103,7 @@ workflow_stages:
       - reviewer_model
       - accept_reject_needs_fix
       - audit_notes
-      - human_confirmation_required
+      - confirmation_required
       - internal_data_read_status
       - prior_external_audit_summary
   third_ai_adjudication:
@@ -158,7 +158,7 @@ required_fields_per_dft_record:
   - known_missing
   - extraction_protocol_version
   - protocol_sha256
-  - human_confirmation_required
+  - confirmation_required
   - notes
 
 DFT_locator_boundary:
@@ -226,7 +226,7 @@ ai_worker_protocol:
     - Role names must be recorded explicitly, for example assigned_image_auditor, assigned_dft_auditor, assigned_extractor, or second_ai_judge.
     - A model that extracted a record should not be the only reviewer of that same record.
     - AI outputs are recommendations and candidate records only; they do not write final truth.
-    - "Persisted AI payloads must include writes_final_truth: false and human_confirmation_required: true unless a separate human/final gate has explicitly promoted the row."
+    - "Persisted AI payloads must include writes_final_truth: false and confirmation_required: true unless a separate final gate has explicitly promoted the row."
     - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
     - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
     - External AI workers must first confirm they can read the active library paper, artifact status, parsed content, review coverage, and prior external_audit_opinion records through MCP or API.
@@ -273,7 +273,7 @@ paper_statuses:
   - DB_Ready
 
 promotion_rule:
-  chain: PDF original evidence -> AI protocol extraction -> deduplicate/merge -> completeness audit -> human or second-AI review -> exportable database
+  chain: PDF original evidence -> AI protocol extraction -> deduplicate/merge -> completeness audit -> authorized human or AI review -> exportable database
   final_database_filter: Only reviewed/exportable records are visible by default in the DFT database, exports, ML dataset, and trusted matrix.
   blocked_when:
     - candidate came only from Literature Intake and has not been ingested into papers.
@@ -315,7 +315,7 @@ output_schema:
     extraction_protocol_version: string
     protocol_sha256: string
     writes_final_truth: false
-    human_confirmation_required: true
+    confirmation_required: true
     confidence: number
     notes: string
     internal_data_read_status: readable | incomplete | unreadable

@@ -581,7 +581,7 @@
                 <div class="protocol-toolbar">
                     <div>
                         <div class="panel-title">当前提取协议</div>
-                        <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，明确定义系统预处理、AI 抽取、第二指定 AI 复核、证据定位和人工入库闸门。系统规则 DFT 结果只作为 system_candidate 候选。</div>
+                        <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，明确定义系统预处理、AI 抽取、第二指定 AI 复核、证据定位和确认入库闸门。系统规则 DFT 结果只作为 system_candidate 候选。</div>
                     </div>
                     <div class="protocol-actions">
                         <a class="btn btn-ghost" href="../extraction_workflow/index.html">高级协议参考</a>
@@ -646,14 +646,14 @@
                         <div id="guide-pane-overview" class="guide-pane active">
                             <div class="guide-section">
                                 <h3>系统怎么配合使用</h3>
-                                <p>这套系统把工作流拆成入库、解析、审阅、确认和写作五个阶段。先把论文放进文献库并完成解析，再看结构化结果，再让 AI 生成候选建议，最后经人工确认后进入正式数据或写作流程。</p>
+                                <p>这套系统把工作流拆成入库、解析、审阅、确认和写作五个阶段。先把论文放进文献库并完成解析，再看结构化结果，再让 AI 生成候选建议，最后经确认后进入正式数据或写作流程。</p>
                             </div>
                             <div class="guide-section">
                                 <h3>主要功能分区</h3>
                                 <ul>
                                     <li>文献库：上传 PDF、按 DOI / URL 入库、阅读摘要、章节和图表。</li>
                                     <li>DFT 数据库 / 机理知识：适合做横向比对和聚合浏览。</li>
-                                    <li>IDE 审阅与确认：IDE AI 通过 MCP 回写候选，再走人工核对。</li>
+                                    <li>IDE 审阅与确认：IDE AI 通过 MCP 回写候选，再走确认核对。</li>
                                     <li>写作辅助：基于文献和证据链整理草稿材料。</li>
                                     <li>设置：集中管理 API、MCP 和界面主题。</li>
                                 </ul>
@@ -698,7 +698,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                                     <li>在文献库选中论文。</li>
                                     <li>在 IDE 中调用 MCP，读取 prepare-ai-context / codex-item 材料。</li>
                                     <li>由 IDE AI 核对证据并通过 import_analysis 回写候选。</li>
-                                    <li>最后在人工确认工作台核对证据并确认。</li>
+                                    <li>最后在确认工作台核对证据并确认。</li>
                                 </ol>
                             </div>
                         </div>

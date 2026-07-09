@@ -6,7 +6,7 @@
 GET /api/papers/export/dft-dataset
 ```
 
-The endpoint keeps the existing safety gate strict: only DFT rows with `safe_verified` human review, required evidence text/reference, and an exact PDF locator are included in `records`. Text-only rows with paper/section/evidence text but no PDF page remain review candidates only. Blocked candidates are summarized in `metadata.blocked_reasons`; they are not exported as training facts.
+The endpoint keeps the existing safety gate strict: only DFT rows with a `safe_verified` review from an authorized reviewer, required evidence text/reference, and an exact PDF locator are included in `records`. Text-only rows with paper/section/evidence text but no PDF page remain review candidates only. Blocked candidates are summarized in `metadata.blocked_reasons`; they are not exported as training facts.
 
 ## Top-Level Shape
 
@@ -57,7 +57,7 @@ Each item in `records` has these blocks:
 
 | Reason | Meaning |
 | --- | --- |
-| `missing_review` | No human review exists for the DFT row. |
+| `missing_review` | No confirmed review exists for the DFT row. |
 | `unsafe_review` | Review exists but is not safe verified or target resolution is unsafe. |
 | `missing_evidence` | No required evidence reference/span/locator exists. |
 | `missing_evidence_text` | The DFT row has no evidence text. |

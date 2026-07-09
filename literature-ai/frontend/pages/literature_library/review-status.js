@@ -72,13 +72,69 @@ function manualReviewProgress(detail) {
 
 function isManualReviewCompleted(detail, module) {
     const progress = manualReviewProgress(detail);
+    if (module === "figures" && chartReviewCompleted(detail)) return true;
+    if (module === "figures" && figureReviewCompletionBlocked(detail)) return false;
     return !!(progress[module] && progress[module].completed);
+}
+
+function chartReviewCompleted(detail) {
+    const chartStatus = detail && detail.chart_review_status;
+    if (!chartStatus || typeof chartStatus !== "object") return false;
+    const stage = String(chartStatus.stage_status || "").trim();
+    const unresolved = Number(chartStatus.unresolved_count || 0);
+    const ragStatus = String(chartStatus.rag_quality_status || "").trim();
+    return (stage === "completed" || stage === "not_required") && unresolved === 0 && (!ragStatus || ragStatus === "ready");
+}
+
+function figureReviewCompletionBlocked(detail) {
+    const chartStatus = detail && detail.chart_review_status;
+    if (chartStatus && typeof chartStatus === "object") {
+        const stage = String(chartStatus.stage_status || "").trim();
+        const unresolved = Number(chartStatus.unresolved_count || 0);
+        if (stage && stage !== "completed" && stage !== "not_required") return true;
+        if (unresolved > 0) return true;
+    }
+    const quality = detail && detail.rag_quality && detail.rag_quality.figures;
+    if (quality && Number(quality.blocked || 0) > 0) return true;
+    if (detail && detail.figures_review_status === "risk") return true;
+    return false;
+}
+
+function figureReviewBlockingNote(detail) {
+    if (!figureReviewCompletionBlocked(detail)) return "";
+    const quality = detail && detail.rag_quality && detail.rag_quality.figures;
+    const chartStatus = detail && detail.chart_review_status;
+    if (chartStatus && typeof chartStatus === "object") {
+        const stage = String(chartStatus.stage_status || "").trim();
+        const unresolved = Number(chartStatus.unresolved_count || 0);
+        if ((stage && stage !== "completed" && stage !== "not_required") || unresolved > 0) {
+            const pendingTables = Array.isArray(chartStatus.unresolved_actions)
+                ? chartStatus.unresolved_actions.filter(function(item) { return String(item && item.category || "") === "table"; }).length
+                : 0;
+            return '<div class="subtle" style="margin-top:6px;color:#b45309;">当前图表审核尚未闭环' +
+                (stage ? "：stage_status=" + esc(stage) : "") +
+                (unresolved ? "，未解决 " + esc(String(unresolved)) + " 项" : "") +
+                (pendingTables ? "（表格 " + esc(String(pendingTables)) + " 项）" : "") +
+                "；图片和表格都完成后才可标记图表完成。</div>";
+        }
+    }
+    const blocked = quality ? Number(quality.blocked || 0) : 0;
+    const reasons = quality && quality.blocked_reasons ? quality.blocked_reasons : {};
+    const reasonText = Object.keys(reasons).slice(0, 4).map(function(key) {
+        return ragReasonLabel(key) + " " + reasons[key];
+    }).join("；");
+    return '<div class="subtle" style="margin-top:6px;color:#b45309;">当前图表尚未达标' +
+        (blocked ? "：" + esc(String(blocked)) + " 项 RAG 不合格" : "") +
+        (reasonText ? "（" + esc(reasonText) + "）" : "") +
+        "；完成标记已暂时失效，需先完成网页/本地 AI 图表复核。</div>";
 }
 
 function renderManualReviewCompletionCard(detail, module, title, message) {
     const progress = manualReviewProgress(detail);
     const moduleProgress = progress[module] || {};
-    const status = !!moduleProgress.completed;
+    const blocked = module === "figures" && figureReviewCompletionBlocked(detail);
+    const chartCompleted = module === "figures" && chartReviewCompleted(detail);
+    const status = (!!moduleProgress.completed || chartCompleted) && !blocked;
     const inherited = !!moduleProgress.inherited;
     const sourceText = moduleProgress.inherited_from_code || moduleProgress.inherited_from_title || "主文献";
     const inheritedNote = inherited
@@ -90,11 +146,16 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
             '<span class="status-chip ' + (status ? 'ok' : 'subtle') + '">' + esc(status ? '已完成' : '未完成') + '</span>' +
             (inherited
                 ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("该状态来自已绑定主文献。") + '">随主文献同步</button>'
+                : chartCompleted && !moduleProgress.completed
+                    ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("当前图片和表格审核已闭环。") + '">已闭环</button>'
+                : blocked
+                    ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表 RAG 不合格或风险项。") + '">需先复核</button>'
                 : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
                     esc(status ? '取消已完成' : '标记已完成') +
                   '</button>') +
         '</div>' +
         '<div class="subtle">' + esc(message) + '</div>' +
+        (module === "figures" ? figureReviewBlockingNote(detail) : "") +
         inheritedNote +
     '</div>';
 }
@@ -102,11 +163,17 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
 function renderManualReviewCompletionControls(detail, module) {
     const progress = manualReviewProgress(detail);
     const moduleProgress = progress[module] || {};
-    const status = !!moduleProgress.completed;
+    const blocked = module === "figures" && figureReviewCompletionBlocked(detail);
+    const chartCompleted = module === "figures" && chartReviewCompleted(detail);
+    const status = (!!moduleProgress.completed || chartCompleted) && !blocked;
     const inherited = !!moduleProgress.inherited;
     return '<span class="status-chip ' + (status ? 'ok' : 'subtle') + '">' + esc(status ? '已完成' : '未完成') + '</span>' +
         (inherited
             ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("该状态来自已绑定主文献。") + '">随主文献同步</button>'
+            : chartCompleted && !moduleProgress.completed
+                ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("当前图片和表格审核已闭环。") + '">已闭环</button>'
+            : blocked
+                ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表 RAG 不合格或风险项。") + '">需先复核</button>'
             : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
                 esc(status ? '取消已完成' : '标记已完成') +
               '</button>');

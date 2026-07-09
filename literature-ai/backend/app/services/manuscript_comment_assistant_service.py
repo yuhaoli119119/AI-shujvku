@@ -37,7 +37,7 @@ class ManuscriptCommentAssistantService:
 
         suggestions = []
         if candidates:
-            # If any candidate requires human verification, bubble up the warning
+            # If any candidate requires confirmation, bubble up the warning.
             has_unverified = any(
                 cand.get("requires_human_verification", True) for cand in candidates
             )

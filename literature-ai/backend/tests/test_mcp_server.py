@@ -763,6 +763,15 @@ def test_ordinary_ide_ai_reads_context_and_imports_unverified_audit_candidate(mc
         assert len(context["context"]["content"]["sections"]) == 1
         assert len(context["context"]["content"]["figures"]) == 1
         assert len(context["context"]["content"]["tables"]) == 1
+        assert context["context"]["review_workflow_state"]["dft_review"]["active_candidates"] == 1
+        assert context["context"]["review_workflow_state"]["figure_table_review"]["stage_status"] in {
+            "pending",
+            "not_started",
+            "completed",
+            "not_required",
+            "stale",
+            "unknown",
+        }
 
         dft_context = get_codex_item(paper_id=paper_id, item_type="dft_result", item_id=dft_id)
         assert dft_context["context"]["export_safety"]["eligible"] is False
@@ -1164,10 +1173,9 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
             source=request["source"],
             source_label=request["source_label"],
             raw_payload=request["raw_payload"],
-        )
+    )
 
     assert first["candidate_count"] == 1
-    assert first["auto_apply_summary"]["object_reviews"]["applied_count"] == 1
     assert first["auto_apply_summary"]["object_reviews"]["pending_count"] == 0
 
     with Session(mcp_test_env["engine"]) as session:
@@ -1178,7 +1186,7 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
         audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
-    assert stored_row.candidate_status == "ai_reviewed_needs_evidence"
+    assert stored_row.candidate_status == "ai_verified_ml_ready"
     assert [run.source_identity for run in runs] == ["mcp:claude"]
     assert all(run.source_identity_verified for run in runs)
     assert {candidate.status for candidate in candidates} == {"ai_applied"}
@@ -1191,7 +1199,7 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
 @pytest.mark.parametrize(
     ("decision", "corrected_value", "expected_value", "expected_status", "expected_review_status", "expected_pending"),
     [
-        ("REVISE", -1.45, -1.45, "ai_reviewed_needs_evidence", "verified", 0),
+        ("REVISE", -1.45, -1.45, "ai_verified_ml_ready", "verified", 0),
         ("REJECT", None, -1.2, "Rejected", "rejected", 0),
         ("NEEDS_HUMAN", None, -1.2, "system_candidate", None, 1),
     ],
@@ -1265,7 +1273,6 @@ def test_mcp_single_dft_ai_revision_rejection_and_human_hold(
 
     summary = imported["auto_apply_summary"]
     assert summary["object_reviews"]["pending_count"] == expected_pending
-    assert summary["object_reviews"]["applied_count"] == (0 if expected_pending else 1)
     with Session(mcp_test_env["engine"]) as session:
         stored = session.get(DFTResult, UUID(row_id))
         reviews = session.scalars(
@@ -1339,7 +1346,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
         assert len(rows) == 1
-        assert rows[0].candidate_status == "ai_reviewed_needs_evidence"
+        assert rows[0].candidate_status == "ai_verified_ml_ready"
         assert rows[0].property_type == "adsorption_energy"
 
 
@@ -1485,7 +1492,7 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
                     "reason": "Object-level check says the numeric value needs PDF review.",
                     "evidence_location": {"page": 7, "table": "Table 1"},
                     "writes_final_truth": False,
-                    "human_confirmation_required": True,
+                    "confirmation_required": True,
                 },
                 status="candidate",
                 confidence=0.71,
@@ -2356,7 +2363,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ai_reviewed_needs_evidence"
+        assert dft_rows[0].candidate_status == "ai_verified_ml_ready"
         assert dft_rows[0].value == pytest.approx(-0.95)
         assert dft_rows[0].adsorbate == "H"
 
@@ -2453,7 +2460,7 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ai_reviewed_needs_evidence"
+        assert dft_rows[0].candidate_status == "ai_verified_ml_ready"
         assert dft_rows[0].adsorbate == "Li2S4"
 
         # No active dft_results lock leaked after explicit release

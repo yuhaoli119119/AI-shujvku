@@ -16,7 +16,6 @@ from app.db.models import (
     EvidenceSpan,
     ExtractionFieldReview,
     ExternalAnalysisCandidate,
-    ExternalAnalysisRun,
     WritingCard,
 )
 from app.utils.locator_degradation import locator_degradation
@@ -27,25 +26,7 @@ SAFE_TARGET_RESOLUTION_STATUSES = {"active", "remapped"}
 UNSAFE_REVIEWER_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "pending", ""}
 UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", ""}
 
-AI_EXPORT_APPROVAL_DECISIONS = {
-    "pass",
-    "accept",
-    "accepted",
-    "approve",
-    "approved",
-    "verified",
-    "revise",
-    "revised",
-}
-AI_EXPORT_APPROVAL_ACTIONS = {
-    "allow_export",
-    "approve_export",
-    "approved_for_export",
-    "ready_for_export",
-    "ready_for_ml_export",
-}
-AI_EXPORT_APPLIED_STATUSES = {"ai_applied", "ai_reviewed", "materialized"}
-NON_AI_REVIEW_SOURCES = {"human", "manual", "owner", "system"}
+DFT_REJECTED_STATUSES = {"rejected", "ai_rejected", "rejected_by_local_ai"}
 MISSING_UNIT_MARKERS = {
     "n/a",
     "na",
@@ -171,91 +152,6 @@ def get_target_reviews(
                 ExtractionFieldReview.target_type.in_(target_types),
             )
         ).all()
-    )
-
-
-def _is_ai_review_source(run: ExternalAnalysisRun, payload: dict[str, Any]) -> bool:
-    source_values = (
-        payload.get("review_source_type"),
-        payload.get("source"),
-        run.source,
-        payload.get("source_label"),
-        run.source_label,
-    )
-    normalized = [_normalized(value) for value in source_values if not _is_blank(value)]
-    if not normalized:
-        return False
-    if any(value in NON_AI_REVIEW_SOURCES for value in normalized):
-        return False
-    return any(
-        "ai" in value
-        or any(token in value for token in ("codex", "gemini", "antigravity", "claude"))
-        for value in normalized
-    )
-
-
-def _audit_targets_dft_row(
-    candidate: ExternalAnalysisCandidate,
-    payload: dict[str, Any],
-    target_id: str,
-) -> bool:
-    dft_aliases = {_normalized(value) for value in _target_type_values("dft_results")}
-    payload_target_type = _normalized(payload.get("target_type"))
-    payload_target_id = str(payload.get("target_id") or "").strip()
-    if payload_target_type in dft_aliases and payload_target_id == target_id:
-        return True
-    return (
-        _normalized(candidate.materialized_target_type) in dft_aliases
-        and str(candidate.materialized_target_id or "").strip() == target_id
-    )
-
-
-def _is_explicit_ai_export_approval(
-    candidate: ExternalAnalysisCandidate,
-    run: ExternalAnalysisRun,
-    *,
-    target_id: str,
-) -> bool:
-    if candidate.candidate_type != "object_review_audit":
-        return False
-    if _normalized(candidate.status) not in AI_EXPORT_APPLIED_STATUSES:
-        return False
-    payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-    if not _audit_targets_dft_row(candidate, payload, target_id):
-        return False
-    if not _is_ai_review_source(run, payload):
-        return False
-    if payload.get("evidence_checked") is not True:
-        return False
-    if payload.get("blocking_errors"):
-        return False
-    decision = _normalized(payload.get("decision") or payload.get("verdict"))
-    action = _normalized(payload.get("recommended_action"))
-    return decision in AI_EXPORT_APPROVAL_DECISIONS and action in AI_EXPORT_APPROVAL_ACTIONS
-
-
-def has_explicit_ai_export_approval(
-    session: Session,
-    *,
-    paper_id: Any,
-    target_id: Any,
-) -> bool:
-    if not _table_exists(session, "external_analysis_candidates") or not _table_exists(
-        session, "external_analysis_runs"
-    ):
-        return False
-    target_id_str = str(target_id)
-    rows = session.execute(
-        select(ExternalAnalysisCandidate, ExternalAnalysisRun)
-        .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
-        .where(
-            ExternalAnalysisCandidate.paper_id == paper_id,
-            ExternalAnalysisCandidate.candidate_type == "object_review_audit",
-        )
-    ).all()
-    return any(
-        _is_explicit_ai_export_approval(candidate, run, target_id=target_id_str)
-        for candidate, run in rows
     )
 
 
@@ -601,15 +497,9 @@ def is_export_eligible_extraction(
     is_dft_target = _normalized(target_type) in {_normalized(value) for value in _target_type_values("dft_results")}
     if is_dft_target and has_evidence_text:
         reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
-    if is_dft_target and _normalized(getattr(row, "candidate_status", None)) == "rejected" and "target_rejected" not in reasons:
+    if is_dft_target and _normalized(getattr(row, "candidate_status", None)) in DFT_REJECTED_STATUSES and "target_rejected" not in reasons:
         reasons = (*reasons, "target_rejected")
     if is_dft_target:
-        if "target_rejected" not in reasons and not has_explicit_ai_export_approval(
-            session,
-            paper_id=row.paper_id,
-            target_id=row.id,
-        ):
-            reasons = (*reasons, "missing_explicit_ai_export_approval")
         if isinstance(row, DFTResult):
             reasons = (*reasons, *dft_export_data_quality_reasons(row))
         reasons = tuple(dict.fromkeys(reasons))
@@ -710,24 +600,6 @@ def bulk_export_gate_results(
                 if _catalyst_has_material_identity(catalyst):
                     material_identity_ids.add(str(catalyst.id))
 
-    explicit_ai_approval_ids: set[str] = set()
-    if is_dft_target and _table_exists(session, "external_analysis_candidates") and _table_exists(
-        session, "external_analysis_runs"
-    ):
-        audit_rows = session.execute(
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
-            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
-            .where(
-                ExternalAnalysisCandidate.paper_id.in_(paper_ids),
-                ExternalAnalysisCandidate.candidate_type == "object_review_audit",
-            )
-        ).all()
-        for candidate, run in audit_rows:
-            for target_id in target_ids:
-                if _is_explicit_ai_export_approval(candidate, run, target_id=target_id):
-                    explicit_ai_approval_ids.add(target_id)
-                    break
-
     gates: dict[str, ExportGateResult] = {}
     for target_id, row in row_by_id.items():
         reviews = reviews_by_target.get(target_id, [])
@@ -753,11 +625,9 @@ def bulk_export_gate_results(
         )
         if is_dft_target and has_required_evidence_text(row):
             reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
-        if is_dft_target and _normalized(getattr(row, "candidate_status", None)) == "rejected" and "target_rejected" not in reasons:
+        if is_dft_target and _normalized(getattr(row, "candidate_status", None)) in DFT_REJECTED_STATUSES and "target_rejected" not in reasons:
             reasons = (*reasons, "target_rejected")
         if is_dft_target:
-            if "target_rejected" not in reasons and target_id not in explicit_ai_approval_ids:
-                reasons = (*reasons, "missing_explicit_ai_export_approval")
             if isinstance(row, DFTResult):
                 reasons = (*reasons, *dft_export_data_quality_reasons(row))
             reasons = tuple(dict.fromkeys(reasons))

@@ -23,3 +23,14 @@ test('review center exposes local AI chart review copy instruction and status fi
   expect(reviewCenter).toContain('duplicate_or_conflicting_figure_action');
   expect(reviewCenter).toContain('missing_evidence_ids_for_modification');
 });
+
+test('literature detail treats chart review as combined figure and table completion', () => {
+  const reviewStatus = readFrontendFile('pages/literature_library/review-status.js');
+
+  expect(reviewStatus).toContain('chart_review_status');
+  expect(reviewStatus).toContain('unresolved_count');
+  expect(reviewStatus).toContain('表格');
+  expect(reviewStatus).toContain('图片和表格都完成后才可标记图表完成');
+  expect(reviewStatus).toContain('chartReviewCompleted');
+  expect(reviewStatus).toContain('已闭环');
+});

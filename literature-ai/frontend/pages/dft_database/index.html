@@ -549,7 +549,7 @@
             <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">展开面板</button>
           </div>
         </div>
-        <div class="export-note">CSV 仅导出人工已确认、证据完整、定位准确的 DFT 记录；需要处理的记录不会导出。</div>
+        <div class="export-note">CSV 仅导出已确认、证据完整、定位准确的 DFT 记录；需要处理的记录不会导出。</div>
         <div class="quality-topbar">
           <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
           <div class="stat-divider"></div>
@@ -656,8 +656,8 @@
       body.classList.toggle("hidden");
     }
     const REASON_LABELS = {
-      missing_review: "缺少人工确认",
-      unsafe_review: "人工确认未通过",
+      missing_review: "缺少确认",
+      unsafe_review: "确认未通过",
       missing_required_evidence: "缺少必要证据",
       missing_locator: "缺少 PDF 定位",
       missing_evidence: "缺少 PDF 定位",
@@ -673,18 +673,18 @@
     function reasonAction(reason) {
       if (reason === "missing_material_identity") return "先把这条 DFT 数据绑定到明确材料/结构，再允许入库或导出。";
       if (reason === "missing_review") return "到 review 页确认该条 DFT 数据是否可信。";
-      if (reason === "unsafe_review") return "检查被拒绝或需要修正的人工审核记录。";
+      if (reason === "unsafe_review") return "检查被拒绝或需要修正的审核记录。";
       if (reason === "missing_locator") return "补充或修复 PDF 页码定位。";
       if (reason === "missing_required_evidence") return "补充证据原文、页码或来源章节。";
       return "打开 review 页核对证据和状态。";
     }
     function reviewStatusLabel(status) {
       const labels = {
-        missing: "缺少人工确认",
-        pending: "待人工确认",
-        verified: "人工已确认",
-        corrected: "人工已修正",
-        rejected: "人工已拒绝",
+        missing: "缺少确认",
+        pending: "待确认",
+        verified: "已确认",
+        corrected: "已修正",
+        rejected: "已拒绝",
       };
       return labels[status] || String(status || "-").replace(/_/g, " ");
     }
@@ -715,7 +715,7 @@
       return labels[hint] || String(hint || "未知提示").replace(/_/g, " ");
     }
     function gateLabel(gate) {
-      if (!gate || gate === "safe_verified_with_required_evidence") return "人工确认 + 必要证据 + 准确定位";
+      if (!gate || gate === "safe_verified_with_required_evidence") return "已确认 + 必要证据 + 准确定位";
       return String(gate || "").replace(/_/g, " ");
     }
     function dftPropertyLabel(code) {

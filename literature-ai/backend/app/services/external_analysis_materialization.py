@@ -147,7 +147,7 @@ class ExternalAnalysisMaterializationMixin:
                         {
                             "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
                             "writes_final_truth": True,
-                            "requires_human_confirmation": False,
+                            "requires_confirmation": False,
                         }
                     )
                 correction = PaperCorrection(
@@ -214,7 +214,7 @@ class ExternalAnalysisMaterializationMixin:
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
                     "writes_final_truth": result.auto_applied_corrections > 0,
-                    "requires_human_confirmation": result.created_corrections > result.auto_applied_corrections,
+                    "requires_confirmation": result.created_corrections > result.auto_applied_corrections,
                 },
             )
         )
@@ -377,7 +377,7 @@ class ExternalAnalysisMaterializationMixin:
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
                     "writes_final_truth": True,
-                    "requires_human_confirmation": False,
+                    "requires_confirmation": False,
                     "dft_outputs_excluded": True,
                     "write_lock": {
                         "required_modules": [],
@@ -885,7 +885,7 @@ class ExternalAnalysisMaterializationMixin:
                 "source_label": run.source_label,
                 "protocol": protocol_snapshot("gemini_audit_protocol"),
                 "writes_final_truth": False,
-                "requires_human_confirmation": True,
+                "requires_confirmation": True,
             }
         )
         return payload

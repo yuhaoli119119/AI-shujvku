@@ -143,6 +143,31 @@ function addToEvidencePack() {
     showToast("已切到写作卡与整理区，可基于当前文献生成证据整理。", "info");
 }
 
+function reviewBundleErrorMessage(data, status) {
+    const detail = data && data.detail;
+    if (typeof detail === "string") return detail;
+    if (detail && typeof detail === "object") {
+        if (detail.code === "figure_table_review_not_completed") {
+            const gate = detail.figure_table_review || {};
+            const stage = gate.stage_status || "unknown";
+            const ragStatus = gate.rag_quality_status || (gate.rag_quality && gate.rag_quality.figures && gate.rag_quality.figures.status) || "";
+            const blocked = gate.rag_quality && gate.rag_quality.figures ? Number(gate.rag_quality.figures.blocked || 0) : 0;
+            if (ragStatus === "blocked" || blocked > 0) {
+                return "图表证据阶段不能进入 DFT：仍有 " + blocked + " 个图表 RAG 不合格。请先补齐图类型、图摘要、关键元素或修复裁图，再重新回传图表 JSON。";
+            }
+            return "图表证据阶段尚未完成或已过期（stage_status=" + stage + "）。请先到审核中心执行“1 导出图表证据包”和“2 回传图表 JSON”。";
+        }
+        if (detail.message) return detail.message;
+        if (detail.code) return detail.code;
+        try {
+            return JSON.stringify(detail);
+        } catch (_) {
+            return String(detail);
+        }
+    }
+    return "HTTP " + status;
+}
+
 async function exportSelectedDftReviewBundle() {
     closeDropdowns();
     if (!state.selectedPaperId || !state.selectedPaper) {
@@ -159,7 +184,7 @@ async function exportSelectedDftReviewBundle() {
             let message = "HTTP " + response.status;
             try {
                 const payload = await response.json();
-                message = payload.detail || message;
+                message = reviewBundleErrorMessage(payload, response.status);
             } catch (_) {
                 // Keep the HTTP status when the response is not JSON.
             }

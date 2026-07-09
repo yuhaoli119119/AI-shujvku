@@ -1676,7 +1676,7 @@ async function mockApi(route) {
           supporting_snippets: [
             { text: 'Catalysts can accelerate sulfur redox reactions.', source: 'section', page: 4, locator_status: 'page_only', verified: false, safe_verified: false }
           ],
-          reason: 'Matches query terms, but evidence is pending and requires human verification.',
+          reason: 'Matches query terms, but evidence is pending and requires confirmation.',
           warnings: ['suggestion_only_needs_human_verification']
         },
         {
@@ -1737,7 +1737,7 @@ async function mockApi(route) {
       can_insert = true;
       requires_human = false;
     } else if (payload.selected_paper_id === 'paper-needs-verification') {
-      warnings.push('使用前必须完成人工核验');
+      warnings.push('使用前必须完成确认核验');
     } else if (payload.selected_paper_id === 'paper-metadata-only') {
       warnings.push('Needs metadata and verification');
       evidence_status = 'metadata_only';
@@ -2225,7 +2225,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#schemaForm')).toContainText('Fe-N4');
     await expect(page.locator('#schemaForm')).toContainText('Energy value seems unusually high');
-    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('待确认');
 
     const evidenceBtn = page.locator('button:has-text("原文证据 ▾")').first();
     await evidenceBtn.click();
@@ -2240,9 +2240,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#toast')).toContainText('保存成功');
     expect(saveCalled).toBe(true);
 
-    const verifyBtn = page.locator('button:text-is("人工确认")').first();
+    const verifyBtn = page.locator('button:text-is("确认")').first();
     await verifyBtn.click();
-    await expect(page.locator('#toast')).toContainText('人工确认通过');
+    await expect(page.locator('#toast')).toContainText('确认通过');
     expect(verifyCalled).toBe(true);
 
     const filterSelect = page.locator('#filterSelect');
@@ -2261,8 +2261,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(scopeSummary).toContainText('即将处理字段');
 
     verifyCalled = false;
-    await page.click('.footer-actions button:has-text("人工确认校验")');
-    await expect(page.locator('#toast')).toContainText('批量人工确认通过成功');
+    await page.click('.footer-actions button:has-text("确认校验")');
+    await expect(page.locator('#toast')).toContainText('批量确认通过成功');
     expect(verifyCalled).toBe(true);
   });
 
@@ -2297,26 +2297,26 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#schemaForm')).toContainText('catalyst_type');
     await expect(page.locator('#schemaForm')).toContainText('metal_centers');
     await expect(page.locator('#schemaForm .status-chip')).toHaveCount(3);
-    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('待确认');
     await expect(page.locator('#schemaForm')).toContainText('Evidence text for the heterogeneous catalyst is present.');
     await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
     await expect(page.locator('#schemaForm')).toContainText('仅有证据文本，暂无 PDF 页码定位');
-    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     await page.locator('#schemaSelect').selectOption('DFTSetting');
     await expect(page.locator('#schemaForm')).toContainText('convergence_settings');
     await expect(page.locator('#schemaForm')).toContainText('DFT convergence evidence text is visible.');
-    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('待确认');
     await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
-    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     await page.locator('#schemaSelect').selectOption('ElectrochemicalPerformance');
     await expect(page.locator('#schemaForm')).toContainText('rate');
     await expect(page.locator('#schemaForm')).toContainText('Rate-performance evidence text is visible.');
-    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
-    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
+    await expect(page.locator('#schemaForm')).toContainText('待确认');
+    await expect(page.locator('#schemaForm')).toContainText('需要补全定位并确认后，才能导出或用于写作');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     const schemaText = await page.locator('#schemaForm').innerText();
@@ -2395,10 +2395,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.locator('#schemaSelect').selectOption('CatalystSample');
     const reviewQueue = page.locator('#schemaForm');
-    await expect(reviewQueue).toContainText('待人工确认');
+    await expect(reviewQueue).toContainText('待确认');
     await expect(reviewQueue).toContainText('缺少准确 PDF 定位');
     await expect(reviewQueue).toContainText('仅有证据文本，暂无 PDF 页码定位');
-    await expect(reviewQueue).toContainText('需要补全定位并人工确认后，才能导出或用于写作');
+    await expect(reviewQueue).toContainText('需要补全定位并确认后，才能导出或用于写作');
     await expect(reviewQueue.locator('button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
 
     const scopedText = `${await preparePanel.innerText()}\n${await reviewQueue.innerText()}`;
@@ -2426,7 +2426,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(prepareCalls).toBe(0);
 
     await page.locator('#schemaSelect').selectOption('CatalystSample');
-    await expect(page.locator('#schemaForm')).toContainText('待人工确认');
+    await expect(page.locator('#schemaForm')).toContainText('待确认');
     await expect(page.locator('#schemaForm')).toContainText('缺少准确 PDF 定位');
     await expect(page.locator('#schemaForm button[onclick^="triggerWorkbenchLocatorAction"]')).toHaveCount(0);
   });
@@ -2617,7 +2617,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   test('business flow: DFT export displays safety headers', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
     await expect(page.locator('.export-note')).toContainText('需要处理的记录不会导出');
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
 
@@ -2625,7 +2625,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button[onclick="exportCSV()"]');
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('人工确认 + 必要证据 + 准确定位');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('已确认 + 必要证据 + 准确定位');
     await expect(page.locator('#exportSafetyStatus')).toContainText('已导出 1 条');
     await expect(page.locator('#exportSafetyStatus')).toContainText('需处理 2 条');
   });
@@ -2639,7 +2639,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('button[onclick="exportMLDataset()"]');
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('人工确认 + 必要证据 + 准确定位');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('已确认 + 必要证据 + 准确定位');
     await expect(page.locator('#exportSafetyStatus')).toContainText('可导出 1 条');
     await expect(page.locator('#exportSafetyStatus')).toContainText('待完成 2 条');
   });
@@ -2746,7 +2746,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#qualityDonuts')).toContainText('1');
     await expect(page.locator('#qualityDonuts')).toContainText('待处理记录');
     await expect(page.locator('#qualityDonuts')).toContainText('2');
-    await expect(page.locator('#qualityReasonChips')).toContainText('缺少人工确认');
+    await expect(page.locator('#qualityReasonChips')).toContainText('缺少确认');
     await expect(page.locator('#qualityReasonChips')).toContainText('PDF 定位不可靠');
     await expect(page.locator('#resultSummary')).toContainText('2 条已审核可导出 DFT 记录');
     await expect(page.locator('#dftList')).toContainText('Li2S4');
@@ -2945,7 +2945,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -2978,7 +2978,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('人工已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -6044,7 +6044,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       const summaryBox = page.locator('#stabilitySummaryBox');
       await expect(summaryBox).toBeVisible();
-      await expect(summaryBox).toContainText('人工校验记录与当前抽取结果匹配正常');
+      await expect(summaryBox).toContainText('确认记录与当前抽取结果匹配正常');
       await expect(summaryBox).toContainText('有效: 1');
       await expect(summaryBox).toContainText('已重映射: 1');
     });
@@ -6097,7 +6097,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       const summaryBox = page.locator('#stabilitySummaryBox');
       await expect(summaryBox).toBeVisible();
-      await expect(summaryBox).toContainText('部分人工校验记录已无法安全匹配到当前抽取结果');
+      await expect(summaryBox).toContainText('部分确认记录已无法安全匹配到当前抽取结果');
       await expect(summaryBox).toContainText('已失效: 1');
 
       // The field verified status must override to "需重新确认"
@@ -6346,9 +6346,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(500);
 
       // Verify the warning banner inside summaryContent is visible
-      const warningBanner = page.locator('#summaryContent .section-card:has-text("人工校验需要重新确认")');
+      const warningBanner = page.locator('#summaryContent .section-card:has-text("确认记录需要重新确认")');
       await expect(warningBanner).toBeVisible();
-      await expect(warningBanner).toContainText('该文献有 2 条人工校验记录需要重新确认');
+      await expect(warningBanner).toContainText('该文献有 2 条确认记录需要重新确认');
       await expect(warningBanner).toContainText('已失效 2');
 
       // Go to Review Tab
@@ -6358,7 +6358,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       // Verify the tab review warning banner is visible
       const tabWarningBanner = page.locator('#tab-review #reviewTabAuditWarning');
       await expect(tabWarningBanner).toBeVisible();
-      await expect(tabWarningBanner).toContainText('该文献有 2 条人工校验记录需要重新确认');
+      await expect(tabWarningBanner).toContainText('该文献有 2 条确认记录需要重新确认');
     });
 
     test('9. Orphan stale/unknown review renders properly in dedicated section without safe verified state and respects filters', async ({ page }) => {
@@ -6412,7 +6412,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
       await page.waitForTimeout(500);
 
-      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧人工校验记录")');
+      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧确认记录")');
       await expect(orphanTitle).toBeVisible();
 
       const staleCard = page.locator('.field-container:has-text("old-target-1")');
@@ -6424,7 +6424,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(staleCard).toContainText('DFTResult.value');
       await expect(staleCard).toContainText('-9.99 eV');
       await expect(staleCard).toContainText('old evidence showing -9.99 eV');
-      await expect(staleCard).toContainText('这是一条旧目标人工校验记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的人工确认。');
+      await expect(staleCard).toContainText('这是一条旧目标确认记录，当前抽取结果中未能安全匹配。请在当前字段中重新确认后保存为新的确认。');
 
       const unknownCard = page.locator('.field-container:has-text("old-target-2")');
       await expect(unknownCard).toBeVisible();
@@ -6545,7 +6545,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
       await page.waitForTimeout(500);
 
-      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧人工校验记录")');
+      const orphanTitle = page.locator('h3:has-text("需要重新确认的旧确认记录")');
       await expect(orphanTitle).toBeVisible();
 
       const card = page.locator('.field-container:has-text("old-target-empty-status")');
@@ -7034,7 +7034,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Save and verify buttons still exist
       await expect(page.locator('.footer-actions button:has-text("保存修改")')).toBeVisible();
-      await expect(page.locator('.footer-actions button:has-text("人工确认校验")')).toBeVisible();
+      await expect(page.locator('.footer-actions button:has-text("确认校验")')).toBeVisible();
     });
 
     test('G2. Locator warnings do not override G2B review_target warnings', async ({ page }) => {
@@ -7182,13 +7182,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Unrepaired name check (HIGH-CAUTION)
       const nameField = form.locator('#field-11111111-1111-4111-8111-111111111111-name');
-      await expect(nameField).toContainText('待人工确认');
+      await expect(nameField).toContainText('待确认');
       await expect(nameField).toContainText('高风险：缺少准确 PDF 定位');
       await expect(nameField.locator('button:has-text("查看 PDF")')).toHaveCount(0);
 
       // Repaired catalyst_type check
       const catalystTypeField = form.locator('#field-11111111-1111-4111-8111-111111111111-catalyst_type');
-      await expect(catalystTypeField).toContainText('待人工确认');
+      await expect(catalystTypeField).toContainText('待确认');
       await expect(catalystTypeField).toContainText('PDF 定位准确');
       await expect(catalystTypeField).toContainText('page 7');
       await expect(catalystTypeField).toContainText('Docling source if available');
@@ -7197,7 +7197,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       // Repaired metal_centers check
       const metalCentersField = form.locator('#field-11111111-1111-4111-8111-111111111111-metal_centers');
-      await expect(metalCentersField).toContainText('待人工确认');
+      await expect(metalCentersField).toContainText('待确认');
       await expect(metalCentersField).toContainText('PDF 定位准确');
       await expect(metalCentersField).toContainText('page 7');
       await expect(metalCentersField).toContainText('Docling source if available');
@@ -7208,7 +7208,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(200);
 
       const convField = form.locator('#field-22222222-2222-4222-8222-222222222222-convergence_settings');
-      await expect(convField).toContainText('待人工确认');
+      await expect(convField).toContainText('待确认');
       await expect(convField).toContainText('缺少准确 PDF 定位');
       await expect(convField.locator('button:has-text("查看 PDF")')).toHaveCount(0);
 
@@ -7217,7 +7217,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.waitForTimeout(200);
 
       const rateField = form.locator('#field-33333333-3333-4333-8333-333333333333-rate');
-      await expect(rateField).toContainText('待人工确认');
+      await expect(rateField).toContainText('待确认');
       await expect(rateField).toContainText('PDF 定位准确');
       await expect(rateField).toContainText('page 6');
       await expect(rateField).toContainText('Docling source if available');
@@ -7402,9 +7402,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const needsVerificationCard = page.locator('.candidate-card').filter({ hasText: 'Unverified Heterogeneous' });
     await expect(needsVerificationCard).toBeVisible();
     // legacy assertion replaced by localized check
-    await expect(needsVerificationCard.locator('.safety-badge')).toContainText('需要人工核验');
+    await expect(needsVerificationCard.locator('.safety-badge')).toContainText('需要确认核验');
     // legacy assertion replaced by localized check
-    await expect(needsVerificationCard.locator('.card-warning-box')).toContainText('人工核验');
+    await expect(needsVerificationCard.locator('.card-warning-box')).toContainText('确认核验');
     const metadataOnlyCard = page.locator('.candidate-card').filter({ hasText: 'A Review on Lithium-Sulfur' });
     await expect(metadataOnlyCard).toBeVisible();
     // legacy assertion replaced by localized check
@@ -7430,13 +7430,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     // legacy assertion replaced by localized check
     await confirmedCard.locator('button:has-text("生成引用建议草稿")').click();
     // legacy assertion replaced by localized check
-    await expect(confirmedCard.locator('.proposal-banner')).toContainText('使用前仍建议进行人工核对');
+    await expect(confirmedCard.locator('.proposal-banner')).toContainText('使用前仍建议进行确认核对');
     
     // 8. Click Generate Draft on Needs Verification Candidate
     // legacy assertion replaced by localized check
     await needsVerificationCard.locator('button:has-text("生成引用建议草稿")').click();
     // legacy assertion replaced by localized check
-    await expect(needsVerificationCard.locator('.proposal-banner')).toContainText('引用前必须完成人工核验');
+    await expect(needsVerificationCard.locator('.proposal-banner')).toContainText('引用前必须完成确认核验');
     // legacy assertion replaced by localized check
     // legacy assertion replaced by localized check
     
@@ -7552,7 +7552,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(card).toContainText('metadata_only');
     
     // Check warnings
-    await expect(card.locator('.card-warning-message').first()).toContainText('仅为建议，需先完成人工核验。');
+    await expect(card.locator('.card-warning-message').first()).toContainText('仅为建议，需先完成确认核验。');
 
     // Strict safety check for this feature: no dangerous buttons
     const pageBody = await page.locator('body').innerText();

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 import hashlib
 from io import BytesIO
@@ -20,6 +21,7 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
     Paper,
     PaperFigure,
     PaperRelationship,
@@ -27,9 +29,12 @@ from app.db.models import (
     PaperTable,
 )
 from app.schemas.dft_review_bundle import OfflineDFTReviewResult
+from app.services.evidence_review_bundle_service import EvidenceReviewBundleService, pending_needs_human_actions_from_review_payload
 from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
+from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_pdf_evidence_anchor
 from app.utils.review_safety import bulk_export_gate_results
 
 
@@ -38,12 +43,15 @@ MAX_TEXT_SNIPPETS = 100
 MAX_TEXT_SNIPPET_CHARS = 6000
 MAX_FIGURE_FILES = 24
 MAX_TOTAL_FIGURE_BYTES = 24 * 1024 * 1024
+SINGLE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 DFT_SIGNAL_RE = re.compile(
     r"(?:\bDFT\b|density\s+functional|first[-\s]?principles?|computational\s+details?|"
     r"calculation\s+method|adsorption\s+energ|binding\s+energ|free\s+energ|gibbs|"
     r"delta\s*g|Δ\s*G|reaction\s+barrier|activation\s+energ|dissociation\s+energ|"
+    r"binding\s+strength|Li2S\w*|Li2S\s*n|polysulfide|"
     r"bader|charge\s+transfer|electronic\s+structure|density\s+of\s+states|\bDOS\b|"
+    r"orbital\s+occupanc|d[-\s]?orbital|"
     r"\bVASP\b|quantum\s+espresso|\bCASTEP\b|\bDMol|pseudopotential|k[-\s]?point|"
     r"plane[-\s]?wave|cutoff\s+energ|\bPBE\b|\bHSE\d*\b|van\s+der\s+waals|\bvdW\b)",
     re.IGNORECASE,
@@ -54,6 +62,9 @@ ALLOWED_DFT_REVIEW_FIELDS = {
     "property_type",
     "energy_type",
     "value",
+    "value_upper",
+    "value_kind",
+    "value_type",
     "unit",
     "adsorbate",
     "reaction_step",
@@ -82,7 +93,7 @@ class FigureTableReviewNotCompletedError(ValueError):
     def detail(self) -> dict[str, Any]:
         return {
             "code": self.code,
-            "message": "Figure/table review must be completed or not_required before DFT review.",
+            "message": "Figure/table review must be completed or not_required, and figure RAG quality must be ready, before DFT review.",
             "figure_table_review": self.state,
         }
 
@@ -133,6 +144,13 @@ class DFTReviewBundleService:
         completed_fingerprint = str(state.get("completed_snapshot_fingerprint") or "").strip()
         if status not in FIGURE_TABLE_REVIEW_READY_STATUSES:
             raise FigureTableReviewNotCompletedError(state)
+        rag_quality = state.get("rag_quality") if isinstance(state.get("rag_quality"), dict) else {}
+        figure_quality = rag_quality.get("figures") if isinstance(rag_quality.get("figures"), dict) else {}
+        rag_quality_status = str(state.get("rag_quality_status") or figure_quality.get("status") or "ready").strip()
+        if rag_quality_status and rag_quality_status != "ready":
+            raise FigureTableReviewNotCompletedError(state)
+        if int(figure_quality.get("blocked") or 0) > 0:
+            raise FigureTableReviewNotCompletedError(state)
         if not current_fingerprint or not completed_fingerprint:
             raise FigureTableReviewNotCompletedError({**state, "stage_status": "stale"})
         if completed_fingerprint != current_fingerprint:
@@ -154,10 +172,12 @@ class DFTReviewBundleService:
         files: dict[str, bytes] = {
             "parsed/paper_metadata.json": _json_bytes(materials["paper_metadata"]),
             "parsed/initial_dft_candidates.json": _json_bytes(materials["initial_dft_candidates"]),
+            "parsed/dft_review_checklist.json": _json_bytes(self._dft_review_checklist(materials)),
             "parsed/extracted_tables.json": _json_bytes(materials["extracted_tables"]),
             "parsed/extracted_figures.json": _json_bytes(self._public_figures(materials["extracted_figures"])),
             "parsed/curated_figure_table_evidence_snapshot.json": _json_bytes(materials["curated_evidence_snapshot"]),
             "evidence/text_snippets.jsonl": self._jsonl_bytes(materials["text_snippets"]),
+            "format_examples.json": _json_bytes(self._format_examples()),
             "return_schema.json": _json_bytes(OfflineDFTReviewResult.model_json_schema()),
         }
 
@@ -218,6 +238,14 @@ class DFTReviewBundleService:
             "writeback_paper_id": materials["paper_metadata"]["paper_id"],
             "evidence_ids": sorted(materials["evidence_map"]),
             "target_dft_result_ids": sorted(materials["target_dft_result_ids"]),
+            "expected_dft_review_coverage": {
+                "target_ids": sorted(materials["target_dft_result_ids"]),
+                "required_decisions_for_existing_targets": ["PASS", "REVISE", "REJECT", "NEEDS_HUMAN"],
+                "completion_rule": (
+                    "Every target_dft_result_id must appear exactly once in object_review_audits before "
+                    "the server will generate an import_analysis_request."
+                ),
+            },
             "counts": {
                 "main_dft_candidates": len(materials["initial_dft_candidates"]["existing_candidates"]),
                 "supporting_si_dft_candidates": len(
@@ -248,6 +276,7 @@ class DFTReviewBundleService:
         }
 
     def validate_result(self, paper_id: UUID, raw_payload: dict[str, Any]) -> dict[str, Any]:
+        raw_payload, normalization_warnings = self._normalize_common_web_ai_result_json(raw_payload)
         try:
             result = OfflineDFTReviewResult.model_validate(raw_payload)
         except ValidationError as exc:
@@ -261,13 +290,13 @@ class DFTReviewBundleService:
                     }
                     for error in exc.errors()
                 ],
-                "warnings": [],
+                "warnings": normalization_warnings,
                 "import_analysis_request": None,
             }
 
         materials = self._build_materials(paper_id)
         errors: list[dict[str, Any]] = []
-        warnings: list[dict[str, Any]] = []
+        warnings: list[dict[str, Any]] = list(normalization_warnings)
         metadata = materials["paper_metadata"]
 
         def add_error(code: str, message: str, *, audit_index: int | None = None) -> None:
@@ -295,6 +324,7 @@ class DFTReviewBundleService:
 
         normalized_audits: list[dict[str, Any]] = []
         reviewed_target_ids: set[str] = set()
+        new_candidate_count = 0
         seen_target_fields: dict[tuple[str, str], str] = {}
         for index, audit in enumerate(result.object_review_audits):
             target_field_key = (audit.target_id, audit.field_name)
@@ -326,6 +356,8 @@ class DFTReviewBundleService:
                 )
             elif audit.target_id.lower() != "new":
                 reviewed_target_ids.add(audit.target_id)
+            else:
+                new_candidate_count += 1
             missing_evidence = [item for item in audit.evidence_ids if item not in materials["evidence_map"]]
             if missing_evidence:
                 add_error(
@@ -349,7 +381,8 @@ class DFTReviewBundleService:
                 materials=materials,
             ):
                 add_error(error["code"], error["message"], audit_index=index)
-            primary = evidence_items[0]
+            primary = self._best_pdf_evidence_item(evidence_items) or evidence_items[0]
+            quote_item = self._best_quote_evidence_item(evidence_items) or primary
             primary_table = (
                 primary.get("table") or primary.get("caption")
                 if primary.get("evidence_kind") == "table"
@@ -361,7 +394,11 @@ class DFTReviewBundleService:
                 "section": primary.get("section") or primary.get("section_title"),
                 "table": primary_table,
                 "figure": primary.get("figure") or primary.get("figure_label"),
-                "quoted_text": self._evidence_quote(primary),
+                "bbox": primary.get("bbox"),
+                "locator_id": primary.get("locator_id"),
+                "locator_status": primary.get("locator_status"),
+                "locator_confidence": primary.get("locator_confidence"),
+                "quoted_text": self._evidence_quote(quote_item),
                 "evidence_ids": audit.evidence_ids,
                 "bundle_fingerprint": result.bundle_fingerprint,
                 "figure_table_completed_snapshot_fingerprint": result.figure_table_completed_snapshot_fingerprint,
@@ -395,7 +432,7 @@ class DFTReviewBundleService:
                     },
                     "reason": audit.reason,
                     "writes_final_truth": False,
-                    "human_confirmation_required": True,
+                    "confirmation_required": True,
                 }
             )
 
@@ -406,13 +443,42 @@ class DFTReviewBundleService:
                     "message": "The result contains no DFT row review or new-candidate proposal.",
                 }
             )
-        if result.overall_status == "completed":
-            missing_targets = sorted(materials["target_dft_result_ids"] - reviewed_target_ids)
-            if missing_targets:
+        missing_targets = sorted(materials["target_dft_result_ids"] - reviewed_target_ids)
+        coverage = {
+            "expected_target_ids": sorted(materials["target_dft_result_ids"]),
+            "reviewed_target_ids": sorted(reviewed_target_ids),
+            "missing_target_ids": missing_targets,
+            "expected_count": len(materials["target_dft_result_ids"]),
+            "reviewed_existing_count": len(reviewed_target_ids),
+            "new_candidate_count": new_candidate_count,
+            "coverage_complete": not missing_targets,
+        }
+        if missing_targets:
+            add_error(
+                "incomplete_candidate_coverage",
+                "DFT review requires PASS, REVISE, REJECT, or NEEDS_HUMAN for every current main-paper "
+                "DFT candidate before an import request can be generated; missing target ids: "
+                + ", ".join(missing_targets),
+            )
+        coverage_ack = result.coverage_acknowledgement
+        if coverage_ack is not None:
+            ack_expected = set(coverage_ack.expected_target_ids)
+            expected = set(materials["target_dft_result_ids"])
+            if ack_expected and ack_expected != expected:
                 add_error(
-                    "incomplete_candidate_coverage",
-                    "overall_status=completed requires a review for every current main-paper DFT candidate; "
-                    f"missing target ids: {', '.join(missing_targets)}",
+                    "coverage_acknowledgement_mismatch",
+                    "coverage_acknowledgement.expected_target_ids differs from the current DFT review target set",
+                )
+            ack_reviewed = set(coverage_ack.reviewed_target_ids)
+            if ack_reviewed and ack_reviewed != reviewed_target_ids:
+                warnings.append(
+                    {
+                        "code": "coverage_acknowledgement_ignored",
+                        "message": (
+                            "coverage_acknowledgement.reviewed_target_ids differs from object_review_audits; "
+                            "server-derived coverage is used."
+                        ),
+                    }
                 )
         if result.overall_status == "completed" and result.uncertainties:
             warnings.append(
@@ -464,6 +530,7 @@ class DFTReviewBundleService:
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "errors": errors,
             "warnings": warnings,
+            "coverage": coverage,
             "validated_audit_count": len(normalized_audits) if not errors else 0,
             "import_analysis_request": import_request,
             "safety": {
@@ -498,12 +565,14 @@ class DFTReviewBundleService:
         sample_by_id = {row.id: row for row in samples}
         dft_rows = sorted(dft_rows, key=lambda row: (row.paper_id != paper.id, str(row.id)))
         review_dft_rows, excluded_terminal_main_count = self._dft_rows_for_review_bundle(dft_rows, main_paper_id=paper.id)
+        locator_by_target = self._dft_locator_payloads_by_target(review_dft_rows)
         anchors = self._collect_anchors(review_dft_rows)
 
         text_snippets, text_map = self._text_snippets(
             source_by_id=source_by_id,
             dft_rows=review_dft_rows,
             sections=sections,
+            locator_by_target=locator_by_target,
         )
         extracted_tables, table_map = self._tables(
             source_by_id=source_by_id,
@@ -515,12 +584,23 @@ class DFTReviewBundleService:
             figures=figures,
             anchors=anchors,
         )
+        figure_by_id = {str(row.id): row for row in figures}
+        evidence_figure_ids = {
+            str(item.get("source_record_id"))
+            for item in extracted_figures
+            if item.get("source_record_id")
+        }
+        figure_rag_quality = build_figure_rag_quality_summary(
+            self.session,
+            [row for figure_id, row in figure_by_id.items() if figure_id in evidence_figure_ids],
+        )
         evidence_map = {**text_map, **table_map, **figure_map}
 
         curated_evidence_snapshot = self._curated_evidence_snapshot(
             paper=paper,
             extracted_tables=extracted_tables,
             extracted_figures=extracted_figures,
+            figure_rag_quality=figure_rag_quality,
         )
         if enforce_figure_table_gate:
             self.ensure_figure_table_review_ready(curated_evidence_snapshot["review_gate"])
@@ -551,13 +631,23 @@ class DFTReviewBundleService:
             "schema_version": "offline_initial_dft_candidates_v1",
             "writeback_paper_id": str(paper.id),
             "existing_candidates": [
-                self._dft_row_payload(row, sample_by_id=sample_by_id, source_by_id=source_by_id)
+                self._dft_row_payload(
+                    row,
+                    sample_by_id=sample_by_id,
+                    source_by_id=source_by_id,
+                    locator_by_target=locator_by_target,
+                )
                 for row in review_dft_rows
                 if row.paper_id == paper.id
             ],
             "supporting_si_candidates": [
                 {
-                    **self._dft_row_payload(row, sample_by_id=sample_by_id, source_by_id=source_by_id),
+                    **self._dft_row_payload(
+                        row,
+                        sample_by_id=sample_by_id,
+                        source_by_id=source_by_id,
+                        locator_by_target=locator_by_target,
+                    ),
                     "review_instruction": (
                         "Use as supplementary evidence. If it is missing from the main writeback record, submit "
                         "decision=new_candidate with target_id=new; do not use this SI record id as a main target."
@@ -677,6 +767,7 @@ class DFTReviewBundleService:
         source_by_id: dict[UUID, dict[str, Any]],
         dft_rows: list[DFTResult],
         sections: list[PaperSection],
+        locator_by_target: dict[str, list[dict[str, Any]]],
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         items: list[dict[str, Any]] = []
         counters = {"main": 0, "si": 0}
@@ -710,16 +801,21 @@ class DFTReviewBundleService:
             source = source_by_id[row.paper_id]
             evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
             location = evidence.get("source_location") if isinstance(evidence.get("source_location"), dict) else {}
+            primary_locator = self._primary_locator(locator_by_target.get(str(row.id), []))
             append_item(
                 source=source,
-                text=row.evidence_text or evidence.get("quoted_text") or "",
+                text=row.evidence_text or evidence.get("quoted_text") or (primary_locator or {}).get("evidence_text") or "",
                 payload={
                     "source_record_id": str(row.id),
                     "source_record_type": "dft_result_candidate_evidence",
-                    "page": evidence.get("page") or location.get("page"),
-                    "section": row.source_section or evidence.get("section") or location.get("section"),
+                    "page": evidence.get("page") or location.get("page") or (primary_locator or {}).get("page"),
+                    "section": row.source_section or evidence.get("section") or location.get("section") or (primary_locator or {}).get("section"),
                     "figure": row.source_figure or evidence.get("figure") or location.get("figure"),
                     "table": evidence.get("table") or location.get("table"),
+                    "bbox": (primary_locator or {}).get("bbox"),
+                    "locator_id": (primary_locator or {}).get("id"),
+                    "locator_status": (primary_locator or {}).get("locator_status"),
+                    "locator_confidence": (primary_locator or {}).get("locator_confidence"),
                 },
             )
 
@@ -901,9 +997,12 @@ class DFTReviewBundleService:
         *,
         sample_by_id: dict[UUID, CatalystSample],
         source_by_id: dict[UUID, dict[str, Any]],
+        locator_by_target: dict[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         sample = sample_by_id.get(row.catalyst_sample_id) if row.catalyst_sample_id else None
         source = source_by_id[row.paper_id]
+        locators = list((locator_by_target or {}).get(str(row.id), []))
+        primary_locator = DFTReviewBundleService._primary_locator(locators)
         return {
             "target_id": str(row.id),
             "target_type": "dft_results",
@@ -915,6 +1014,8 @@ class DFTReviewBundleService:
             "adsorbate": row.adsorbate,
             "property_type": row.property_type,
             "value": row.value,
+            "value_upper": row.value_upper,
+            "value_kind": row.value_kind,
             "unit": row.unit,
             "reaction_step": row.reaction_step,
             "reaction_type": row.reaction_type,
@@ -924,6 +1025,67 @@ class DFTReviewBundleService:
             "confidence": row.confidence,
             "candidate_status": row.candidate_status,
             "evidence_payload": DFTReviewBundleService._sanitize_for_bundle(row.evidence_payload),
+            "primary_evidence_locator": primary_locator,
+            "evidence_locators": locators,
+        }
+
+    def _dft_locator_payloads_by_target(self, rows: list[DFTResult]) -> dict[str, list[dict[str, Any]]]:
+        if not rows:
+            return {}
+        target_ids = {str(row.id) for row in rows}
+        locators_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
+        locators = self.session.scalars(
+            select(EvidenceLocator)
+            .where(
+                EvidenceLocator.paper_id.in_({row.paper_id for row in rows}),
+                EvidenceLocator.target_id.in_(target_ids),
+                EvidenceLocator.target_type.in_(("dft_results", "dft_result", "DFTResult")),
+            )
+            .order_by(
+                EvidenceLocator.target_id.asc(),
+                EvidenceLocator.page.asc().nulls_last(),
+                EvidenceLocator.created_at.asc(),
+            )
+        ).all()
+        for locator in locators:
+            target_id = str(locator.target_id)
+            if len(locators_by_target.setdefault(target_id, [])) >= 5:
+                continue
+            locators_by_target[target_id].append(self._locator_payload(locator))
+        return locators_by_target
+
+    @staticmethod
+    def _primary_locator(locators: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not locators:
+            return None
+        exact = [
+            item
+            for item in locators
+            if str(item.get("locator_status") or "").strip() == "exact_page" and item.get("page") is not None
+        ]
+        if exact:
+            return exact[0]
+        with_page = [item for item in locators if item.get("page") is not None]
+        if with_page:
+            return with_page[0]
+        return locators[0]
+
+    @staticmethod
+    def _locator_payload(locator: EvidenceLocator) -> dict[str, Any]:
+        return {
+            "id": str(locator.id),
+            "page": locator.page,
+            "source_type": locator.source_type,
+            "section": locator.section,
+            "figure_id": str(locator.figure_id) if locator.figure_id else None,
+            "table_id": str(locator.table_id) if locator.table_id else None,
+            "field_name": locator.field_name,
+            "locator_status": locator.locator_status,
+            "locator_confidence": locator.locator_confidence,
+            "parser_source": locator.parser_source,
+            "evidence_text": locator.evidence_text,
+            "bbox": locator.bbox,
+            "warning_reason": locator.warning_reason,
         }
 
     @staticmethod
@@ -961,10 +1123,14 @@ class DFTReviewBundleService:
         paper: Paper,
         extracted_tables: list[dict[str, Any]],
         extracted_figures: list[dict[str, Any]],
+        figure_rag_quality: dict[str, Any],
     ) -> dict[str, Any]:
         public_figures = self._public_figures(extracted_figures)
         content_snapshot = compute_figure_table_snapshot(self.session, paper.id)
-        current_snapshot_fingerprint = content_snapshot["fingerprint"]
+        chart_task = EvidenceReviewBundleService(self.session, self.settings).get_review_task(paper.id)
+        current_snapshot_fingerprint = str(
+            chart_task.get("current_snapshot_fingerprint") or content_snapshot["fingerprint"]
+        )
         latest = self.session.scalars(
             select(AuditLog)
             .where(AuditLog.paper_id == paper.id)
@@ -974,7 +1140,7 @@ class DFTReviewBundleService:
         ).first()
         payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
         completed_snapshot_fingerprint = (
-            str(payload.get("completed_snapshot_fingerprint") or "").strip()
+            str(chart_task.get("completed_snapshot_fingerprint") or payload.get("completed_snapshot_fingerprint") or "").strip()
             if isinstance(payload, dict)
             else ""
         )
@@ -982,9 +1148,9 @@ class DFTReviewBundleService:
             stage_status = "not_required"
             completed_snapshot_fingerprint = current_snapshot_fingerprint
         elif latest is None:
-            stage_status = "not_started"
+            stage_status = str(chart_task.get("stage_status") or "not_started")
         else:
-            stage_status = str(payload.get("stage_status") or "").strip() or (
+            stage_status = str(chart_task.get("stage_status") or payload.get("stage_status") or "").strip() or (
                 "completed" if completed_snapshot_fingerprint else "incomplete"
             )
             if (
@@ -992,12 +1158,51 @@ class DFTReviewBundleService:
                 and completed_snapshot_fingerprint != current_snapshot_fingerprint
             ):
                 stage_status = "stale"
+        chart_rag_quality = (
+            chart_task.get("rag_quality")
+            if isinstance(chart_task.get("rag_quality"), dict)
+            else {"figures": figure_rag_quality}
+        )
+        chart_figure_quality = (
+            chart_rag_quality.get("figures")
+            if isinstance(chart_rag_quality.get("figures"), dict)
+            else figure_rag_quality
+        )
+        rag_quality_status = str(chart_task.get("rag_quality_status") or chart_figure_quality.get("status") or "ready")
+        quality_blocking_errors: list[dict[str, Any]] = list(chart_task.get("blocking_errors") or [])
+        needs_human_pending = pending_needs_human_actions_from_review_payload(payload)
+        chart_scope_completion = chart_task.get("scope_completion") if isinstance(chart_task.get("scope_completion"), dict) else {}
+        effective_needs_human_pending = [] if chart_scope_completion.get("complete") else needs_human_pending
+        if stage_status == "completed" and effective_needs_human_pending:
+            stage_status = "needs_local_ai"
+            quality_blocking_errors.append(
+                {
+                    "code": "needs_human_pending",
+                    "message": "Figure/table review still contains NEEDS_HUMAN actions that must be resolved before DFT export.",
+                    "blocked_count": len(effective_needs_human_pending),
+                    "blocked_items": effective_needs_human_pending[:50],
+                }
+            )
+        if stage_status == "completed" and rag_quality_status != "ready":
+            stage_status = "needs_local_ai"
+            quality_blocking_errors.append(
+                {
+                    "code": "figure_rag_quality_incomplete",
+                    "message": "Figure review action coverage is completed, but one or more current figures are not RAG-ready.",
+                    "blocked_count": chart_figure_quality.get("blocked"),
+                    "blocked_reasons": chart_figure_quality.get("blocked_reasons") or {},
+                    "blocked_items": (chart_figure_quality.get("blocked_items") or [])[:50],
+                }
+            )
         snapshot = {
             "schema_version": "curated_figure_table_evidence_snapshot_v1",
             "evidence_review_status": (
                 "applied" if stage_status in FIGURE_TABLE_REVIEW_READY_STATUSES else "not_recorded"
             ),
             "stage_status": stage_status,
+            "rag_quality_status": rag_quality_status,
+            "rag_quality": {"figures": chart_figure_quality},
+            "blocking_errors": quality_blocking_errors,
             "current_snapshot_fingerprint": current_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint or None,
             "review_run_id": str(latest.id) if latest is not None else None,
@@ -1007,7 +1212,10 @@ class DFTReviewBundleService:
             "post_apply_bundle_fingerprint": payload.get("post_apply_bundle_fingerprint") if isinstance(payload, dict) else None,
             "applied_count": len(payload.get("applied") or []) if isinstance(payload, dict) else 0,
             "skipped_count": len(payload.get("skipped") or []) if isinstance(payload, dict) else 0,
-            "unresolved_count": len(payload.get("unresolved_actions") or []) if isinstance(payload, dict) else 0,
+            "unresolved_count": max(
+                int(chart_task.get("unresolved_count") or 0),
+                (len(payload.get("unresolved_actions") or []) + len(effective_needs_human_pending)) if isinstance(payload, dict) else 0,
+            ),
             "dft_evidence_candidates": payload.get("dft_evidence_candidates") if isinstance(payload, dict) else [],
             "tables": extracted_tables,
             "figures": public_figures,
@@ -1016,6 +1224,9 @@ class DFTReviewBundleService:
         snapshot["review_gate"] = {
             "stage_status": stage_status,
             "allowed_statuses": sorted(FIGURE_TABLE_REVIEW_READY_STATUSES),
+            "rag_quality_status": rag_quality_status,
+            "rag_quality": {"figures": chart_figure_quality},
+            "blocking_errors": quality_blocking_errors,
             "current_snapshot_fingerprint": current_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint or None,
             "review_run_id": snapshot["review_run_id"],
@@ -1023,6 +1234,179 @@ class DFTReviewBundleService:
         }
         snapshot["snapshot_fingerprint"] = current_snapshot_fingerprint
         return snapshot
+
+    @staticmethod
+    def _normalize_common_web_ai_result_json(raw_payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        if not isinstance(raw_payload, dict):
+            return raw_payload, []
+        payload = deepcopy(raw_payload)
+        audits = payload.get("object_review_audits")
+        if not isinstance(audits, list):
+            return payload, []
+
+        warnings: list[dict[str, Any]] = []
+        normalized_audits: list[Any] = []
+        seen: dict[tuple[str, str, str], int] = {}
+        converted_numeric_values = 0
+        deduped_audits = 0
+        for audit in audits:
+            if not isinstance(audit, dict):
+                normalized_audits.append(audit)
+                continue
+            audit = deepcopy(audit)
+            converted_numeric_values += DFTReviewBundleService._normalize_corrected_numeric_values(audit)
+            key = (
+                str(audit.get("target_type") or "dft_results").strip(),
+                str(audit.get("target_id") or "").strip(),
+                str(audit.get("field_name") or "dft_results").strip(),
+            )
+            if not key[1]:
+                normalized_audits.append(audit)
+                continue
+            previous_index = seen.get(key)
+            if previous_index is None:
+                seen[key] = len(normalized_audits)
+                normalized_audits.append(audit)
+                continue
+            merged = DFTReviewBundleService._merge_duplicate_web_ai_audit(normalized_audits[previous_index], audit)
+            if merged is None:
+                normalized_audits.append(audit)
+                continue
+            normalized_audits[previous_index] = merged
+            deduped_audits += 1
+
+        payload["object_review_audits"] = normalized_audits
+        if converted_numeric_values:
+            warnings.append(
+                {
+                    "code": "normalized_dft_numeric_string",
+                    "message": "Converted unambiguous corrected_value numeric strings before validation.",
+                    "count": converted_numeric_values,
+                }
+            )
+        if deduped_audits:
+            warnings.append(
+                {
+                    "code": "normalized_duplicate_object_review_audit",
+                    "message": "Merged duplicate web-AI DFT review entries with the same decision and corrected value.",
+                    "count": deduped_audits,
+                }
+            )
+        return payload, warnings
+
+    @staticmethod
+    def _normalize_corrected_numeric_values(audit: dict[str, Any]) -> int:
+        corrected = audit.get("corrected_value")
+        if not isinstance(corrected, dict):
+            return 0
+        converted = 0
+        for key in ("value", "value_upper"):
+            parsed = DFTReviewBundleService._parse_unambiguous_number(corrected.get(key))
+            if parsed is None:
+                continue
+            corrected[key] = parsed
+            converted += 1
+        return converted
+
+    @staticmethod
+    def _parse_unambiguous_number(value: Any) -> float | None:
+        if isinstance(value, bool) or value is None:
+            return None
+        if isinstance(value, int | float):
+            return float(value)
+        if not isinstance(value, str):
+            return None
+        text = (
+            value.strip()
+            .replace("\u2212", "-")
+            .replace("\u2013", "-")
+            .replace("\u2014", "-")
+            .replace("\uff0b", "+")
+        )
+        if not text:
+            return None
+        matches = list(SINGLE_NUMBER_RE.finditer(text))
+        if len(matches) != 1:
+            return None
+        match = matches[0]
+        prefix = text[: match.start()].strip()
+        suffix = text[match.end() :].strip()
+        if prefix and not re.fullmatch(r"(?:[~≈≃∼]|ca\.?|about|around|\(|=)+", prefix, flags=re.IGNORECASE):
+            return None
+        if suffix and not re.fullmatch(r"[A-Za-zµμΩÅ°/%·^_{}().\s-]+", suffix):
+            return None
+        try:
+            return float(match.group(0))
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _merge_duplicate_web_ai_audit(existing: Any, duplicate: dict[str, Any]) -> dict[str, Any] | None:
+        if not isinstance(existing, dict):
+            return None
+        if str(existing.get("decision") or "") != str(duplicate.get("decision") or ""):
+            return None
+        if bool(existing.get("evidence_checked")) != bool(duplicate.get("evidence_checked")):
+            return None
+        if DFTReviewBundleService._canonical_review_value(existing.get("corrected_value")) != (
+            DFTReviewBundleService._canonical_review_value(duplicate.get("corrected_value"))
+        ):
+            return None
+        existing_action = str(existing.get("recommended_action") or "").strip()
+        duplicate_action = str(duplicate.get("recommended_action") or "").strip()
+        if existing_action and duplicate_action and existing_action != duplicate_action:
+            return None
+
+        merged = deepcopy(existing)
+        merged["evidence_ids"] = DFTReviewBundleService._merge_string_lists(
+            existing.get("evidence_ids"),
+            duplicate.get("evidence_ids"),
+        )
+        merged["blocking_errors"] = DFTReviewBundleService._merge_string_lists(
+            existing.get("blocking_errors"),
+            duplicate.get("blocking_errors"),
+        )
+        if not merged.get("recommended_action") and duplicate_action:
+            merged["recommended_action"] = duplicate_action
+        merged["reason"] = DFTReviewBundleService._merge_reason(existing.get("reason"), duplicate.get("reason"))
+        merged["confidence"] = DFTReviewBundleService._merge_confidence(
+            existing.get("confidence"),
+            duplicate.get("confidence"),
+        )
+        return merged
+
+    @staticmethod
+    def _canonical_review_value(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
+    @staticmethod
+    def _merge_string_lists(*values: Any) -> list[str]:
+        merged: list[str] = []
+        for value in values:
+            if not isinstance(value, list):
+                continue
+            for item in value:
+                text = str(item).strip()
+                if text and text not in merged:
+                    merged.append(text)
+        return merged
+
+    @staticmethod
+    def _merge_reason(first: Any, second: Any) -> str:
+        first_text = str(first or "").strip()
+        second_text = str(second or "").strip()
+        if not first_text:
+            return second_text
+        if not second_text or second_text == first_text:
+            return first_text
+        return f"{first_text} / {second_text}"
+
+    @staticmethod
+    def _merge_confidence(first: Any, second: Any) -> float | None:
+        values = [value for value in (first, second) if isinstance(value, int | float) and not isinstance(value, bool)]
+        if not values:
+            return None
+        return float(min(values))
 
     @staticmethod
     def _public_figures(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1079,6 +1463,13 @@ class DFTReviewBundleService:
             )
         if decision in {"REVISE", "new_candidate"}:
             errors.extend(self._validate_structured_dft_value(audit))
+        if decision == "new_candidate" and not has_pdf_evidence_anchor(evidence_items):
+            errors.append(
+                {
+                    "code": "missing_pdf_evidence_anchor",
+                    "message": "new_candidate requires at least one cited evidence_id with a PDF page anchor.",
+                }
+            )
         return errors
 
     @staticmethod
@@ -1186,6 +1577,23 @@ class DFTReviewBundleService:
             return False
         return True
 
+    @classmethod
+    def _best_pdf_evidence_item(cls, items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        anchored = [item for item in items if first_pdf_evidence_anchor(item)]
+        if not anchored:
+            return None
+        return sorted(
+            anchored,
+            key=lambda item: (
+                0 if (item.get("figure") or item.get("figure_label") or item.get("table") or item.get("caption")) else 1,
+                0 if cls._evidence_quote(item) else 1,
+            ),
+        )[0]
+
+    @classmethod
+    def _best_quote_evidence_item(cls, items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        return next((item for item in items if cls._evidence_quote(item)), None)
+
     @staticmethod
     def _table_markdown(table: dict[str, Any]) -> str:
         return (
@@ -1240,9 +1648,149 @@ class DFTReviewBundleService:
                 "tool_capabilities": ["none"],
             },
             "overall_status": "uncertain",
+            "coverage_acknowledgement": {
+                "expected_target_ids": sorted(materials["target_dft_result_ids"]),
+                "reviewed_target_ids": [],
+                "coverage_complete": False,
+            },
             "object_review_audits": [],
             "uncertainties": [],
             "notes": [],
+        }
+
+    @staticmethod
+    def _dft_review_checklist(materials: dict[str, Any]) -> dict[str, Any]:
+        existing_candidates = materials["initial_dft_candidates"]["existing_candidates"]
+        candidate_by_id = {str(item.get("target_id")): item for item in existing_candidates}
+        evidence_by_target: dict[str, list[str]] = {target_id: [] for target_id in materials["target_dft_result_ids"]}
+        for evidence_id, evidence in sorted(materials["evidence_map"].items()):
+            target_id = str(evidence.get("source_record_id") or "")
+            if target_id in evidence_by_target and len(evidence_by_target[target_id]) < 8:
+                evidence_by_target[target_id].append(evidence_id)
+        targets = []
+        for target_id in sorted(materials["target_dft_result_ids"]):
+            candidate = candidate_by_id.get(target_id, {})
+            targets.append(
+                {
+                    "target_id": target_id,
+                    "target_type": "dft_results",
+                    "field_name": "dft_results",
+                    "required_once": True,
+                    "allowed_decisions": ["PASS", "REVISE", "REJECT", "NEEDS_HUMAN"],
+                    "preferred_evidence_ids": evidence_by_target.get(target_id, []),
+                    "candidate_summary": {
+                        "material_identity": candidate.get("material_identity"),
+                        "property_type": candidate.get("property_type"),
+                        "value": candidate.get("value"),
+                        "value_upper": candidate.get("value_upper"),
+                        "value_kind": candidate.get("value_kind"),
+                        "unit": candidate.get("unit"),
+                        "adsorbate": candidate.get("adsorbate"),
+                        "reaction_step": candidate.get("reaction_step"),
+                        "source_section": candidate.get("source_section"),
+                        "source_figure": candidate.get("source_figure"),
+                        "candidate_status": candidate.get("candidate_status"),
+                    },
+                }
+            )
+        return {
+            "schema_version": "offline_dft_review_checklist_v1",
+            "target_ids": sorted(materials["target_dft_result_ids"]),
+            "expected_count": len(materials["target_dft_result_ids"]),
+            "completion_rule": (
+                "Return exactly one object_review_audits item for every target_id in this checklist. "
+                "Use NEEDS_HUMAN when evidence is insufficient."
+            ),
+            "targets": targets,
+            "new_candidate_rule": {
+                "target_type": "dft_results",
+                "target_id": "new",
+                "field_name": "dft_results",
+                "decision": "new_candidate",
+                "when_to_use": "Only when the package evidence contains a DFT result missing from existing candidates.",
+                "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
+            },
+        }
+
+    @staticmethod
+    def _format_examples() -> dict[str, Any]:
+        target_id = "<target_id from parsed/dft_review_checklist.json>"
+        evidence_id = "<supporting evidence_id from manifest.json or evidence files>"
+        base = {
+            "target_type": "dft_results",
+            "target_id": target_id,
+            "field_name": "dft_results",
+            "evidence_checked": True,
+            "evidence_ids": [evidence_id],
+            "confidence": 0.9,
+            "blocking_errors": [],
+            "recommended_action": "ready_for_local_ai_pdf_verification",
+        }
+        return {
+            "schema_version": "offline_dft_review_format_examples_v1",
+            "usage": [
+                "These examples are format only; do not copy placeholder IDs into the final answer.",
+                "Use real target_id values from parsed/dft_review_checklist.json and real evidence_ids from this package.",
+                "The final answer must be the return_template.json object shape, not this examples wrapper.",
+            ],
+            "examples": {
+                "pass_existing_candidate": {
+                    "object_review_audits": [
+                        {
+                            **base,
+                            "decision": "PASS",
+                            "corrected_value": None,
+                            "reason": "The cited package evidence directly supports the existing DFT candidate.",
+                        }
+                    ]
+                },
+                "revise_existing_candidate": {
+                    "object_review_audits": [
+                        {
+                            **base,
+                            "decision": "REVISE",
+                            "corrected_value": {
+                                "material_identity": "Fe-N-C",
+                                "property_type": "adsorption_energy",
+                                "value": -1.2,
+                                "unit": "eV",
+                                "adsorbate": "Li2S",
+                            },
+                            "reason": "The cited package evidence reports the same property with a corrected numeric value.",
+                        }
+                    ]
+                },
+                "needs_human_existing_candidate": {
+                    "object_review_audits": [
+                        {
+                            **base,
+                            "decision": "NEEDS_HUMAN",
+                            "corrected_value": None,
+                            "confidence": 0.2,
+                            "blocking_errors": ["evidence_ambiguous"],
+                            "recommended_action": "local_ai_pdf_check_required",
+                            "reason": "The package evidence is ambiguous or insufficient for a safe PASS/REVISE/REJECT.",
+                        }
+                    ]
+                },
+                "new_candidate": {
+                    "object_review_audits": [
+                        {
+                            **base,
+                            "target_id": "new",
+                            "decision": "new_candidate",
+                            "corrected_value": {
+                                "material_identity": "Co-N4/G",
+                                "property_type": "free_energy",
+                                "value": 0.42,
+                                "unit": "eV",
+                                "reaction_step": "Li2S2 to Li2S",
+                            },
+                            "reason": "The cited package evidence contains a DFT result missing from existing candidates.",
+                        }
+                    ]
+                },
+            },
         }
 
     @staticmethod
@@ -1260,18 +1808,20 @@ class DFTReviewBundleService:
 2. 不得猜测。证据不足、材料身份不清或来源冲突时，使用 `NEEDS_HUMAN`，并写入 `uncertainties`。
 3. 每条 `object_review_audits` 都必须引用一个或多个真实 `evidence_ids`。证据编号来自 `manifest.json` 和 `evidence/`，且必须和该 DFT 目标直接相关。
 4. 已有主文献 DFT candidate 使用 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`。
-5. 只有 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交了审核结果时，才能使用 `overall_status="completed"`；未覆盖全部已有候选时，使用 `uncertain` 或 `needs_human`。
-6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`；`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`。
+5. 必须为 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交 1 条审核结果；同一个 `target_id + field_name` 不要复制多条，多个证据合并到同一条的 `evidence_ids`。证据不足也要提交 `NEEDS_HUMAN`，不能漏掉该 target_id。只有全部覆盖时才能使用 `overall_status="completed"`；未覆盖全部已有候选时服务器不会生成导入请求。
+6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`；`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`；`value` 必须是 JSON number，不要写成 `"−1.20 eV"`，单位只写入 `unit`。
 7. SI 是主文献的证据来源，不是独立审核任务。SI 中发现的漏项仍写回当前主文献，使用 `new_candidate`。
-8. 不得声称已写数据库、已入库、已人工确认、已 verified 或已成为 ML_Ready。
+8. 不得声称已写数据库、已入库、已确认、已 verified 或已成为 ML_Ready。
 9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要修改 schema，不要用自由散文替代 JSON，也不要包 Markdown 代码块。
 10. 保留 `return_template.json` 中的 `bundle_fingerprint`、`figure_table_completed_snapshot_fingerprint`、`paper_id`、`paper_code` 原值。
+11. 更新 `coverage_acknowledgement.reviewed_target_ids` 和 `coverage_acknowledgement.coverage_complete`；服务器最终仍会按 `object_review_audits` 重新计算覆盖率，缺一个 target_id 就不会生成导入请求。
+12. `format_examples.json` 只是格式示例；不要照抄示例 ID，也不要输出示例文件外层 wrapper。最终只输出 `return_template.json` 的对象结构。
 
 ## 材料顺序
 
-先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
+先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/dft_review_checklist.json`、`format_examples.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
 
-如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `completed_snapshot_fingerprint` 与当前快照不一致，说明图表证据还没有完成第一阶段闭环；此时不要继续产出 DFT 终审 JSON，应先完成图表证据整理。
+如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `rag_quality_status=blocked`，或 `completed_snapshot_fingerprint` 与当前快照不一致，说明图表证据还没有完成第一阶段闭环；此时不要继续产出 DFT 终审 JSON，应先完成图表证据整理。
 
 最终只输出符合 `return_schema.json` 的 JSON。
 """

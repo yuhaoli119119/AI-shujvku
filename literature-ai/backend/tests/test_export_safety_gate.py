@@ -79,7 +79,7 @@ def _dft(
     return row
 
 
-def _explicit_ai_export_approval(
+def _object_review_audit(
     session: Session,
     paper: Paper,
     row: DFTResult,
@@ -139,7 +139,7 @@ def _safe_review(
     session.add(review)
     session.flush()
     if add_ai_approval:
-        _explicit_ai_export_approval(session, paper, row)
+        _object_review_audit(session, paper, row)
     return review
 
 
@@ -249,7 +249,7 @@ def test_dft_fast_mode_allows_verified_text_without_separate_evidence_reference(
         engine.dispose()
 
 
-def test_dft_export_blocks_verified_row_without_explicit_ai_export_approval(tmp_path):
+def test_dft_export_allows_verified_row_without_extra_review_audit(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -260,13 +260,13 @@ def test_dft_export_blocks_verified_row_without_explicit_ai_export_approval(tmp_
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert "missing_explicit_ai_export_approval" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d1-blocked-count"] == "0"
     finally:
         engine.dispose()
 
 
-def test_dft_export_requires_ai_to_explicitly_recommend_export(tmp_path):
+def test_dft_export_does_not_require_separate_ai_export_recommendation(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -281,8 +281,37 @@ def test_dft_export_requires_ai_to_explicitly_recommend_export(tmp_path):
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert "missing_explicit_ai_export_approval" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert response.headers["x-d1-blocked-count"] == "0"
+    finally:
+        engine.dispose()
+
+
+def test_local_ai_verified_ml_ready_exports_without_separate_approval(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            paper = _paper(session)
+            row = _dft(session, paper)
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper.id,
+                result_id=row.id,
+                confirm_reviewed_against_pdf=True,
+                reviewer="local_ai_after_pdf_evidence_check",
+                reviewer_note="Local AI read the cited PDF page and approved this DFT row for ML.",
+                evidence_payload={"page": 1, "quoted_text": row.evidence_text},
+                verification_actor_type="ai",
+                source_label="local_ai_after_pdf_evidence_check",
+            )
+            session.commit()
+
+            response, rows = _export_rows(session)
+            stored = session.get(DFTResult, row.id)
+
+            assert stored.candidate_status == "ai_verified_ml_ready"
+            assert stored.ml_ready_at is not None
+            assert rows and rows[0]["paper_id"] == str(paper.id)
+            assert response.headers["x-d1-blocked-count"] == "0"
     finally:
         engine.dispose()
 
@@ -295,7 +324,7 @@ def test_dft_export_accepts_explicit_local_or_web_ai_approval(tmp_path):
                 paper = _paper(session)
                 row = _dft(session, paper)
                 _safe_review(session, paper, row, add_ai_approval=False)
-                _explicit_ai_export_approval(session, paper, row, source=source)
+                _object_review_audit(session, paper, row, source=source)
             session.commit()
 
             response, rows = _export_rows(session)
@@ -438,7 +467,7 @@ def test_dft_export_accepts_safe_verified_imported_pdf_page_anchor(tmp_path):
                     },
                 )
             )
-            _explicit_ai_export_approval(session, paper, row)
+            _object_review_audit(session, paper, row)
             _evidence_ref(session, paper, row, page=None)
             session.commit()
 
@@ -458,7 +487,7 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
             paper = _paper(session)
             row = _dft(session, paper)
             _evidence_ref(session, paper, row, page=None)
-            _explicit_ai_export_approval(session, paper, row, source="local_ai")
+            _object_review_audit(session, paper, row, source="local_ai")
             session.commit()
 
             DFTResultReviewService(session).verify_result(
@@ -1256,10 +1285,7 @@ def test_dft_quality_panel_reports_blocked_rows_and_links(tmp_path):
             assert payload["metadata"]["blocked_reasons"]["missing_review"] == 1
             blocked = [row for row in payload["rows"] if not row["is_exportable"]][0]
             assert blocked["record_id"] == str(blocked_row.id)
-            assert blocked["blocked_reasons"] == [
-                "missing_review",
-                "missing_explicit_ai_export_approval",
-            ]
+            assert blocked["blocked_reasons"] == ["missing_review"]
             assert "paper_id=" + str(paper.id) in blocked["library_detail_url"]
             assert "external_analysis_workbench" in blocked["review_workbench_url"]
     finally:

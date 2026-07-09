@@ -19,7 +19,7 @@ from app.services.dft_review_service import DFTResultReviewService
 from app.services.review_conflict_service import DECISION_NEGATIVE, DECISION_POSITIVE
 from app.services.review_service import ReviewService
 from app.services.review_target_resolver import canonical_target_type
-from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.evidence_anchors import has_evidence_anchor, has_pdf_evidence_anchor
 
 
 class VerificationSessionReviewApplicationMixin:
@@ -69,7 +69,7 @@ class VerificationSessionReviewApplicationMixin:
                     "source_label": run.source_label,
                     "source_id": str(candidate.id),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
-                    "human_confirmation_required": bool(payload.get("human_confirmation_required", True)),
+                    "confirmation_required": bool(payload.get("confirmation_required", True)),
                     "raw_payload": payload,
                 }
             )
@@ -78,11 +78,11 @@ class VerificationSessionReviewApplicationMixin:
         skipped: list[dict[str, Any]] = []
         for (paper_id_text, target_type, target_id, field_name), opinions in grouped.items():
             if target_type == "dft_results":
-                anchored = [opinion for opinion in opinions if self._opinion_has_anchor(opinion)]
+                anchored = [opinion for opinion in opinions if self._opinion_has_pdf_anchor(opinion)]
                 decision = (
                     {"status": "consensus", "reason": "single_ai_dft_review", "opinion": anchored[-1]}
                     if anchored
-                    else {"status": "manual", "reason": "missing_evidence_anchor"}
+                    else {"status": "rejected", "reason": "missing_pdf_evidence_anchor"}
                 )
             else:
                 decision = self._consensus_opinion(
@@ -94,6 +94,25 @@ class VerificationSessionReviewApplicationMixin:
                     field_name=field_name,
                 )
             if decision["status"] != "consensus":
+                if decision["status"] == "rejected" and target_type == "dft_results":
+                    for opinion in opinions:
+                        candidate = opinion.get("candidate")
+                        if candidate is None:
+                            continue
+                        candidate.status = "rejected_by_local_ai"
+                        candidate.mapping_reason = decision["reason"]
+                        self.session.add(candidate)
+                    skipped.append(
+                        {
+                            "paper_id": paper_id_text,
+                            "target_type": target_type,
+                            "target_id": target_id,
+                            "field_name": field_name,
+                            "reason": decision["reason"],
+                            "count": len(opinions),
+                        }
+                    )
+                    continue
                 pending_conflicts.append(
                     {
                         "paper_id": paper_id_text,
@@ -166,7 +185,20 @@ class VerificationSessionReviewApplicationMixin:
         *,
         reason: str,
     ) -> None:
-        candidate.status = "ignored" if reason == "borrowed_supporting_reference" else "requires_resolution"
+        if reason == "borrowed_supporting_reference":
+            candidate.status = "ignored"
+        elif reason in {
+            "missing_pdf_evidence_anchor",
+            "missing_material_identity",
+            "missing_property_type",
+            "missing_value",
+            "missing_unit",
+            "ml_predicted_not_dft_result",
+        }:
+            candidate.status = "rejected_by_local_ai"
+        else:
+            candidate.status = "requires_resolution"
+        candidate.mapping_reason = reason
         self.session.add(candidate)
 
     def _consensus_opinion(
@@ -470,6 +502,10 @@ class VerificationSessionReviewApplicationMixin:
     @staticmethod
     def _opinion_has_anchor(opinion: dict[str, Any]) -> bool:
         return has_evidence_anchor(opinion.get("evidence_payload"))
+
+    @staticmethod
+    def _opinion_has_pdf_anchor(opinion: dict[str, Any]) -> bool:
+        return has_pdf_evidence_anchor(opinion.get("evidence_payload"))
 
     @staticmethod
     def _value_key(value: Any) -> Any:

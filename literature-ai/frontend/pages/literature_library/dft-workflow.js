@@ -228,7 +228,7 @@ async function autoProcessLowRiskDftRows() {
         showToast("请先选择一篇文献。", "error");
         return;
     }
-    showToast("低风险自动处理入口已停用；DFT final truth 需在 DFT 详情页人工 verify/reject。", "info");
+    showToast("低风险自动处理入口已停用；DFT final truth 需在 DFT 详情页 verify/reject。", "info");
 }
 
 function decorateDftReadinessPanel(detail) {
@@ -251,7 +251,7 @@ function decorateDftReadinessPanel(detail) {
         (blockedCount
             ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
                 '<span class="status-chip meta" data-role="dft-new-review-count">待审核 / 补证据 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-needs-human-count">需人工确认 ...</span>' +
+                '<span class="status-chip failed" data-role="dft-needs-human-count">待确认 ...</span>' +
               '</div>'
             : "") +
         '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">刷新审核状态</button>' +

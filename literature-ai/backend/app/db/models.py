@@ -406,6 +406,8 @@ class DFTResult(Base):
     adsorbate: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     property_type: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     value: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    value_upper: Mapped[float | None] = mapped_column(sa.Float, nullable=True)
+    value_kind: Mapped[str | None] = mapped_column(sa.String(32), nullable=True)
     unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     reaction_step: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     reaction_type: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
@@ -427,6 +429,9 @@ class DFTResult(Base):
     evidence_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     extraction_protocol_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     candidate_identity: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    local_ai_verification_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    ml_ready_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    ml_ready_source: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
     support_lifecycle_status: Mapped[str | None] = mapped_column(sa.String(32), nullable=True, index=True)
     support_writeback_paper_id: Mapped[uuid.UUID | None] = mapped_column(
         sa.ForeignKey("papers.id", ondelete="SET NULL"), nullable=True, index=True

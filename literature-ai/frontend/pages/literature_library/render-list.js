@@ -37,7 +37,7 @@ function renderPaperList() {
             Initial_Parsed: "初步解析",
             Suspected_Missing: "疑似漏提",
             AI_Rescanned: "AI已重扫",
-            Human_Complete: "人工已确认",
+            Human_Complete: "已确认",
             DB_Ready: "可入库",
             Codex_Candidate: "系统候选",
             Gemini_Verified: "AI核验",
@@ -45,7 +45,7 @@ function renderPaperList() {
             Gemini_Flagged: "AI标红",
             Evidence_Insufficient: "证据不足",
             Rejected: "已废弃",
-            Needs_Human_Confirmation: "待人工审核"
+            Needs_Human_Confirmation: "待确认"
         };
         return mapping[status] || status || "Imported";
     }
@@ -74,7 +74,7 @@ function renderPaperList() {
             Unparsed: "未解析",
             Initial_Parsed: "初步解析",
             Suspected_Missing: "疑似漏提",
-            Human_Complete: "人工确认",
+            Human_Complete: "已确认",
             DB_Ready: "可入库"
         };
         return mapping[status] || status || "";

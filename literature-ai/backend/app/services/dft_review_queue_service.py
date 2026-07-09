@@ -339,7 +339,7 @@ class DFTReviewQueueService:
             "figure_reliability": figure_reliability,
             "can_mark_verified": (
                 "missing_review" in set(reasons)
-                and set(reasons).issubset({"missing_review", "missing_explicit_ai_export_approval"})
+                and set(reasons).issubset({"missing_review"})
                 and not sanity_flags
             ),
             "recommended_action": self._recommended_action(reasons, gate, sanity_flags),
@@ -729,7 +729,7 @@ class DFTReviewQueueService:
             return {
                 "status": "needs_human",
                 "label": "AI 无法确认",
-                "reason": "At least one AI review audit requested human review.",
+                "reason": "At least one AI review audit requested additional review.",
                 "class_name": "meta",
             }
         if has_proposed:
@@ -820,9 +820,9 @@ class DFTReviewQueueService:
             action = "bind_material_identity"
         elif latest_effective_decision == "NEEDS_HUMAN":
             state = "needs_human"
-            label = "需要人工确认"
-            reason = "AI 明确标记为无法可靠判断，系统不会自动写入这条意见。"
-            action = "human_review"
+            label = "需要复核"
+            reason = "AI 明确标记为无法可靠判断，需要另一个确认者复核后再决定接受或拒绝。"
+            action = "review"
         elif raw_count > 0 and valid_count == 0:
             state = "missing_evidence_anchor"
             label = "AI 意见缺证据定位"
@@ -841,7 +841,7 @@ class DFTReviewQueueService:
         else:
             state = "unknown_blocked"
             label = "阻塞原因待判定"
-            reason = "不能入库：导出安全门仍阻塞，但现有 AI 意见尚未匹配到明确 workflow 状态，请重新检查写回或人工复核。"
+            reason = "不能入库：导出安全门仍阻塞，但现有 AI 意见尚未匹配到明确 workflow 状态，请重新检查写回或复核。"
             action = "none"
 
         return {
@@ -955,8 +955,6 @@ class DFTReviewQueueService:
             return "add_bond_identity"
         if "missing_review" in reason_set:
             return "verify_against_pdf"
-        if "missing_explicit_ai_export_approval" in reason_set:
-            return "request_explicit_ai_export_decision"
         if "unsafe_review" in reason_set:
             return "resolve_review_status"
         return "review_candidate"
@@ -1066,11 +1064,11 @@ class DFTReviewQueueService:
             "system_candidate": "系统规则候选",
             "candidate_unverified": "未审核候选",
             "Gemini_Verified": "AI 复核候选",
-            "Human_Confirmed": "人工确认",
+            "Human_Confirmed": "已确认",
             "ML_Ready": "已审核可导出",
             "blocked_from_export": "当前不可导出",
             "Rejected": "已拒绝",
-            "human_reviewed_needs_evidence": "人工审核后仍缺证据",
+            "human_reviewed_needs_evidence": "已审核但仍缺证据",
         }.get(normalized, normalized)
 
     @staticmethod
@@ -1111,12 +1109,11 @@ class DFTReviewQueueService:
     ) -> list[dict[str, Any]]:
         issue_map = {
             "missing_material_identity": ("缺少材料/结构绑定", "danger"),
-            "missing_review": ("缺人工确认", "warning"),
+            "missing_review": ("缺少确认", "warning"),
             "unsafe_review": ("复核状态不安全", "danger"),
             "missing_evidence_text": ("缺证据原文", "danger"),
             "missing_evidence": ("缺 PDF 定位", "danger"),
             "unsafe_locator": ("PDF 定位不可靠", "danger"),
-            "missing_explicit_ai_export_approval": ("缺少 AI 明确导出授权", "danger"),
             "missing_required_unit": ("缺少来源支持的有效单位", "danger"),
             "missing_bond_identity": ("键相关性质缺少键类型", "danger"),
             "rejected": ("候选已拒绝", "muted"),

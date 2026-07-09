@@ -193,7 +193,7 @@ class WritingCitationInsertionService:
         elif evidence_status == "verified":
             warnings.append("Verified does not equal safe_verified; safety review is still required.")
         elif evidence_status in {"pending_with_locator", "pending_without_locator", "unverified_extraction", "unknown"}:
-            warnings.append("VERIFY SOURCE BEFORE USE: this candidate requires human verification.")
+            warnings.append("VERIFY SOURCE BEFORE USE: this candidate requires confirmation.")
         if impact_missing:
             warnings.append("Impact Factor metadata is missing; do not treat metadata completeness as evidence quality.")
         if client_claimed_confirmed and not safe_confirmed:

@@ -473,6 +473,31 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 "candidate_status",
                 "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS candidate_status VARCHAR(64) NOT NULL DEFAULT 'system_candidate'",
             )
+            execute_migration_step(
+                "dft_results",
+                "value_upper",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS value_upper DOUBLE PRECISION",
+            )
+            execute_migration_step(
+                "dft_results",
+                "value_kind",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS value_kind VARCHAR(32)",
+            )
+            execute_migration_step(
+                "dft_results",
+                "local_ai_verification_payload",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS local_ai_verification_payload JSONB",
+            )
+            execute_migration_step(
+                "dft_results",
+                "ml_ready_at",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS ml_ready_at TIMESTAMP",
+            )
+            execute_migration_step(
+                "dft_results",
+                "ml_ready_source",
+                "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS ml_ready_source VARCHAR(128)",
+            )
             try:
                 connection.execute(
                     text(

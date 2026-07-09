@@ -69,7 +69,7 @@ Any `repair_dft_issues_non_primary_repair_key` warning should be fixed before ru
 - "Accept AI adjudication", "batch AI auto-advance", and ambiguous "use none" actions are not valid for DFT final truth.
 - DFT audit issues with real `dft_results` targets link to the paper detail DFT tab.
 - Issues with `target_id="new"`, empty targets, or source-scope errors must not show fake DFT detail links.
-- Primary repair AI output still needs human review before export, RAG use, or ML-ready inclusion.
+- Primary repair AI output still needs confirmed review before export, RAG use, or ML-ready inclusion.
 
 ## Known Non-Blocking Risks
 

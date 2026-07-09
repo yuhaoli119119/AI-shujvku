@@ -449,11 +449,11 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(overlay.locator('#conflictEvidencePanel')).toContainText('The adsorption energy of Li2S4 on Fe-N4 is -1.80 eV in Table 2.');
     await expect(overlay).toContainText('自动推进 0');
     await expect(overlay).toContainText('建议裁定 1');
-    await expect(overlay).toContainText('必须人工 1');
+    await expect(overlay).toContainText('必须处理 1');
     await expect(overlay).not.toContainText('接受 AI 裁定');
     await expect(overlay).not.toContainText('都不采用');
     await expect(overlay).not.toContainText('生成修正草案');
-    await expect(overlay).toContainText('DFT final truth 请到详情页人工处理');
+    await expect(overlay).toContainText('DFT final truth 请到详情页确认处理');
     await expect(overlay).toContainText('前往 DFT 详情');
 
     const conflictItems = overlay.locator('.conflict-list-item');
@@ -671,7 +671,7 @@ test.describe('Review Center Conflict Modal', () => {
 
     await expect(page.locator('#statusFilter option[value="group:ai_processing"]')).toContainText('AI 处理中 (1)');
     await expect(page.locator('#workflowStatusFilter option[value="Parsed_Material_Ready"]')).toContainText('材料已就绪 (1)');
-    await expect(page.locator('#workflowStatusFilter option[value="Needs_Human_Confirmation"]')).toContainText('待人工确认 (1)');
+    await expect(page.locator('#workflowStatusFilter option[value="Needs_Human_Confirmation"]')).toContainText('待确认 (1)');
     await expect(page.locator('#statusFilter option[value="Parsed_Material_Ready"]')).toHaveCount(0);
 
     await page.selectOption('#workflowStatusFilter', 'Parsed_Material_Ready');
