@@ -88,6 +88,10 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   expect(page).toContain('include_blocked');
   expect(page).toContain('currentRunId');
   expect(page).toContain('run_id:runId');
+  expect(page).toContain('scopeBanner');
+  expect(page).toContain('当前审核范围：AI 批次');
+  expect(page).toContain('external_analysis_run');
+  expect(page).toContain('item_count');
   expect(page).toContain('finalizeReview');
   expect(page).toContain('完成审核');
   expect(page).toContain('仍有未解决项');

@@ -93,6 +93,7 @@ class ContentKnowledgeService:
         self,
         *,
         paper_id: str | uuid.UUID | None = None,
+        run_id: str | uuid.UUID | None = None,
         library_name: str | None = None,
         category: str | None = None,
         query: str | None = None,
@@ -109,12 +110,16 @@ class ContentKnowledgeService:
         papers = self._scoped_papers(paper_id=paper_id, library_name=normalized_library)
         paper_by_id = {paper.id: paper for paper in papers}
         paper_ids = list(paper_by_id)
+        run_uuid = _maybe_uuid(run_id) if run_id else None
+        if run_id and run_uuid is None:
+            paper_ids = []
         # Projection is deliberately explicit: callers that need a durable review
         # package call sync_items() (and commit).  A GET remains read-only and can
         # still render legacy source rows until the first sync is performed.
         items = self._persistent_items(
             paper_ids=paper_ids,
             paper_by_id=paper_by_id,
+            run_id=run_uuid,
             category=category,
             query=query,
             include_candidates=include_candidates,
@@ -125,7 +130,7 @@ class ContentKnowledgeService:
             problem_status=problem_status,
             limit=limit_value,
         )
-        if not items and paper_ids:
+        if not items and paper_ids and not run_id:
             items = self._legacy_items(paper_ids, paper_by_id, include_candidates=include_candidates)
         filtered = [item for item in items if self._include_item(
             item, category=category, query=query, include_candidates=include_candidates, include_blocked=include_blocked,
@@ -142,6 +147,7 @@ class ContentKnowledgeService:
             },
             "filters": {
                 "paper_id": str(paper_id) if paper_id else None,
+                "run_id": str(run_uuid) if run_uuid else None,
                 "library_name": normalized_library,
                 "category": _clean_text(category),
                 "query": _clean_text(query),
@@ -329,11 +335,13 @@ class ContentKnowledgeService:
                 items.extend(self._external_candidate_items(paper_ids, paper_by_id))
         return items
 
-    def _persistent_items(self, *, paper_ids, paper_by_id, category, query, include_candidates,
+    def _persistent_items(self, *, paper_ids, paper_by_id, run_id, category, query, include_candidates,
                           include_blocked, review_status, citation_status, source_trust, problem_status, limit):
         if not paper_ids:
             return []
         stmt = select(ContentEvidenceItem).where(ContentEvidenceItem.paper_id.in_(paper_ids))
+        if run_id:
+            stmt = stmt.where(ContentEvidenceItem.run_id == run_id)
         if category:
             stmt = stmt.where(ContentEvidenceItem.category == category)
         if review_status:

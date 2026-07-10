@@ -18,6 +18,7 @@ router = APIRouter()
 @router.get("")
 def list_content_knowledge(
     paper_id: str | None = Query(default=None),
+    run_id: UUID | None = Query(default=None),
     library_name: str | None = Query(default=None),
     category: str | None = Query(default=None),
     query: str | None = Query(default=None),
@@ -32,6 +33,7 @@ def list_content_knowledge(
 ) -> dict:
     return ContentKnowledgeService(session).list_items(
         paper_id=paper_id,
+        run_id=run_id,
         library_name=library_name,
         category=category,
         query=query,

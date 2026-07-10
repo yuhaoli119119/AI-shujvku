@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, ContentEvidenceItem, ContentReviewBundle, Paper
+from app.db.models import AuditLog, ContentEvidenceItem, ContentReviewBundle, ExternalAnalysisRun, Paper
 from app.services.task_log_service import TaskLogService
 
 
@@ -30,17 +30,22 @@ class ContentReviewBundleService:
 
     def generate(self, *, paper_id: UUID, run_id: UUID | None = None, created_by: str = "user") -> dict[str, Any]:
         paper = self._paper(paper_id)
-        items = self.session.scalars(
-            select(ContentEvidenceItem)
-            .where(ContentEvidenceItem.paper_id == paper_id)
-            .order_by(ContentEvidenceItem.created_at.asc())
-        ).all()
+        scope_type = "external_analysis_run" if run_id else "paper"
+        if run_id:
+            run = self.session.get(ExternalAnalysisRun, run_id)
+            if run is None or run.paper_id != paper.id:
+                raise ValueError("content_review_run_not_found_for_paper")
+        items = self._scoped_items(paper.id, run_id)
+        if run_id and not items:
+            raise ValueError("content_review_no_items_for_run")
         fingerprint = self._fingerprint(paper, items)
         manifest = {
             "schema_version": "content_evidence_review_bundle_v1",
             "bundle_type": "content_evidence_review",
+            "scope_type": scope_type,
             "paper_id": str(paper.id), "paper_code": paper.paper_code,
             "run_id": str(run_id) if run_id else None,
+            "item_count": len(items),
             "snapshot_fingerprint": fingerprint,
             "items": [self._item_manifest(item) for item in items],
             "evidence_refs": [self._evidence_ref(item) for item in items if item.evidence_text],
@@ -50,7 +55,7 @@ class ContentReviewBundleService:
                 "Unknown item_id/evidence_id, different paper_code, or stale fingerprint is rejected.",
                 "Candidate and needs_review material cannot be upgraded from AI assertion alone.",
             ],
-            "instructions": self._instructions(paper, fingerprint),
+            "instructions": self._instructions(paper, fingerprint, run_id=run_id, item_count=len(items)),
         }
         bundle = ContentReviewBundle(
             paper_id=paper.id, run_id=run_id, snapshot_fingerprint=fingerprint,
@@ -60,8 +65,8 @@ class ContentReviewBundleService:
         self.session.flush()
         return {
             "bundle_id": str(bundle.id), "manifest": manifest,
-            "return_template": self._return_template(paper, fingerprint),
-            "format_example": self._format_example(paper, fingerprint, items),
+            "return_template": self._return_template(paper, fingerprint, run_id=run_id, scope_type=scope_type),
+            "format_example": self._format_example(paper, fingerprint, items, run_id=run_id, scope_type=scope_type),
         }
 
     def validate_result(
@@ -76,9 +81,7 @@ class ContentReviewBundleService:
         paper = self._paper(bundle.paper_id)
         self._assert_snapshot_current(bundle, paper)
         self._validate_envelope(bundle, paper, result)
-        current = {str(item.id): item for item in self.session.scalars(
-            select(ContentEvidenceItem).where(ContentEvidenceItem.paper_id == paper.id)
-        ).all()}
+        current = {str(item.id): item for item in self._scoped_items(paper.id, bundle.run_id)}
         seen: set[str] = set()
         errors: list[str] = []
         actions = result.get("items")
@@ -184,10 +187,14 @@ class ContentReviewBundleService:
         bundle = self._bundle(bundle_id)
         if bundle.status != "applied":
             raise ValueError("content_review_result_must_be_applied_before_finalize")
-        unresolved = self.session.scalars(select(ContentEvidenceItem.id).where(
+        paper = self._paper(bundle.paper_id)
+        unresolved_stmt = select(ContentEvidenceItem.id).where(
             ContentEvidenceItem.paper_id == bundle.paper_id,
             ContentEvidenceItem.review_status.in_(("needs_review", "needs_human")),
-        )).all()
+        )
+        if bundle.run_id:
+            unresolved_stmt = unresolved_stmt.where(ContentEvidenceItem.run_id == bundle.run_id)
+        unresolved = self.session.scalars(unresolved_stmt).all()
         if unresolved:
             raise ValueError("content_review_unresolved_items:" + ",".join(str(item) for item in unresolved[:8]))
         bundle.status = "finalized"
@@ -208,6 +215,11 @@ class ContentReviewBundleService:
             raise ValueError("content_review_validation_failed:stale_snapshot")
         if str(result.get("paper_id") or "") != str(paper.id) or str(result.get("paper_code") or "") != str(paper.paper_code):
             raise ValueError("content_review_validation_failed:wrong_paper_code")
+        if bundle.run_id:
+            if str(result.get("run_id") or "") != str(bundle.run_id):
+                raise ValueError("content_review_validation_failed:wrong_run_scope")
+            if str(result.get("scope_type") or "") != "external_analysis_run":
+                raise ValueError("content_review_validation_failed:wrong_scope_type")
         source = result.get("review_source") if isinstance(result.get("review_source"), dict) else {}
         if source.get("source_identity_verified") is True:
             raise ValueError("content_review_validation_failed:forged_source_identity")
@@ -217,12 +229,7 @@ class ContentReviewBundleService:
         expected_ids = [str(item.get("item_id") or "") for item in manifest_items if isinstance(item, dict)]
         if not expected_ids or len(expected_ids) != len(set(expected_ids)):
             raise ValueError("content_review_validation_failed:stale_snapshot")
-        rows = self.session.scalars(
-            select(ContentEvidenceItem).where(
-                ContentEvidenceItem.paper_id == paper.id,
-                ContentEvidenceItem.id.in_([UUID(item_id) for item_id in expected_ids]),
-            )
-        ).all()
+        rows = [item for item in self._scoped_items(paper.id, bundle.run_id) if str(item.id) in expected_ids]
         by_id = {str(item.id): item for item in rows}
         if len(by_id) != len(expected_ids):
             raise ValueError("content_review_validation_failed:stale_snapshot")
@@ -278,20 +285,34 @@ class ContentReviewBundleService:
                 "section_title": item.section_title}
 
     @staticmethod
-    def _return_template(paper, fingerprint):
+    def _return_template(paper, fingerprint, *, run_id=None, scope_type="paper"):
         return {"schema_version": RESULT_SCHEMA, "bundle_fingerprint": fingerprint, "paper_id": str(paper.id),
-                "paper_code": paper.paper_code, "review_source": {"review_source_type": "ide_ai", "reviewer_label": "", "source_identity_verified": False}, "items": []}
+                "paper_code": paper.paper_code, "scope_type": scope_type,
+                "run_id": str(run_id) if run_id else None,
+                "review_source": {"review_source_type": "ide_ai", "reviewer_label": "", "source_identity_verified": False}, "items": []}
 
     @staticmethod
-    def _format_example(paper, fingerprint, items):
+    def _format_example(paper, fingerprint, items, *, run_id=None, scope_type="paper"):
         item = items[0] if items else None
         return {"schema_version": RESULT_SCHEMA, "bundle_fingerprint": fingerprint, "paper_id": str(paper.id),
+                "scope_type": scope_type, "run_id": str(run_id) if run_id else None,
                 "paper_code": paper.paper_code, "review_source": {"review_source_type": "web_ai", "reviewer_label": "external AI", "source_identity_verified": False},
                 "items": [] if item is None else [{"item_id": str(item.id), "decision": "needs_human", "evidence_id": f"evidence:{item.id}", "risk_flags": ["example_only"]}]}
 
     @staticmethod
-    def _instructions(paper, fingerprint):
-        return f"Return JSON only. Review paper {paper.paper_code}; preserve snapshot {fingerprint}. Do not claim verified identity or PDF evidence you cannot quote."
+    def _instructions(paper, fingerprint, *, run_id=None, item_count=None):
+        scope = (
+            f"Review only external-analysis run {run_id} ({item_count} items); do not include other runs or paper-level content."
+            if run_id
+            else "Review the paper-level content scope."
+        )
+        return f"Return JSON only. Review paper {paper.paper_code}; {scope} Preserve snapshot {fingerprint}. Do not claim verified identity or PDF evidence you cannot quote."
+
+    def _scoped_items(self, paper_id: UUID, run_id: UUID | None = None) -> list[ContentEvidenceItem]:
+        stmt = select(ContentEvidenceItem).where(ContentEvidenceItem.paper_id == paper_id)
+        if run_id:
+            stmt = stmt.where(ContentEvidenceItem.run_id == run_id)
+        return list(self.session.scalars(stmt.order_by(ContentEvidenceItem.created_at.asc())).all())
 
     def _paper(self, paper_id):
         paper = self.session.get(Paper, paper_id)

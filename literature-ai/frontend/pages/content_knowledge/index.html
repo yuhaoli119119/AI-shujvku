@@ -232,6 +232,7 @@
       </div>
       <div class="status-pill" id="schemaStatus">content_knowledge.v1</div>
     </section>
+    <section class="empty" id="scopeBanner"></section>
 
     <form class="toolbar" id="knowledgeForm">
       <div class="field">
@@ -360,6 +361,8 @@
       }
       params.set("include_candidates", document.getElementById("candidateToggle").checked ? "true" : "false");
       params.set("include_blocked", document.getElementById("blockedToggle").checked ? "true" : "false");
+      const runId = new URLSearchParams(window.location.search).get("run_id");
+      if (runId) params.set("run_id", runId);
       return params;
     }
 
@@ -387,6 +390,20 @@
       }
       summary.innerHTML = chips.join("");
       document.getElementById("schemaStatus").textContent = payload.schema_version || "content_knowledge.v1";
+    }
+
+    function renderScope(payload) {
+      const banner = document.getElementById("scopeBanner");
+      const runId = new URLSearchParams(window.location.search).get("run_id");
+      if (runId) {
+        const taskLink = '<a href="../literature_library/index.html?run_id=' + encodeURIComponent(runId) + '">查看关联任务</a>';
+        banner.hidden = false;
+        banner.innerHTML = '<strong>当前审核范围：AI 批次</strong> · run_id=' + esc(runId) +
+          ' · 仅显示该批次内容 · 内容项 ' + esc((payload.items || []).length) + ' · ' + taskLink;
+      } else {
+        banner.hidden = false;
+        banner.textContent = "当前审核范围：论文级内容审核（未指定 run_id）";
+      }
     }
 
     function renderItems(items) {
@@ -442,6 +459,7 @@
         const payload = await fetchKnowledge();
         lastKnowledge = payload;
         renderSummary(payload);
+        renderScope(payload);
         renderItems(payload.items || []);
       } catch (error) {
         document.getElementById("itemsRoot").innerHTML = '<div class="error">内容知识加载失败：' + esc(error.message) + '</div>';
@@ -483,7 +501,9 @@
         const response = await fetch("/api/content-knowledge/review-bundles", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({paper_id:paperId, run_id:runId || undefined, created_by:"web_ui"})});
         const result = await response.json(); if (!response.ok) throw new Error(result.detail || response.status);
         lastBundle = result; reviewReadyToFinalize = false; document.getElementById("finalizeReviewButton").hidden = true;
-        setActionResult("审核包已生成。可复制 IDE 指令或导入同一 JSON 回传。bundle=" + result.bundle_id + (runId ? "；已关联任务。" : ""));
+        const scope = result.manifest && result.manifest.scope_type || (runId ? "external_analysis_run" : "paper");
+        const itemCount = result.manifest && result.manifest.item_count != null ? result.manifest.item_count : (result.manifest.items || []).length;
+        setActionResult("审核包已生成。scope=" + scope + "，item_count=" + itemCount + "。可复制 IDE 指令或导入同一 JSON 回传。bundle=" + result.bundle_id + (runId ? "；已关联任务。" : ""));
       } catch (error) { setActionResult("生成审核包失败：" + error.message, true); }
     }
 
