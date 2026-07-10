@@ -84,6 +84,10 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 )
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
+        # A snapshot may be exported to both web AI and IDE AI; bundles are
+        # distinct audit records even when they start from the same snapshot.
+        connection.execute(text("DROP INDEX IF EXISTS ix_content_review_bundles_snapshot_fingerprint"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_content_review_bundles_snapshot_fingerprint ON content_review_bundles (snapshot_fingerprint)"))
         connection.execute(text("ALTER TABLE papers DROP CONSTRAINT IF EXISTS papers_doi_key"))
         connection.execute(text("DROP INDEX IF EXISTS ix_papers_doi"))
         connection.execute(text("ALTER TABLE paper_notes ALTER COLUMN section_title TYPE TEXT"))

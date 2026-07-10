@@ -415,20 +415,45 @@ function hasCompleteDftResults(detail) {
     return page.has_more !== true && loaded >= total;
 }
 
-function renderDftPageControls(detail) {
+function dftPaginationState(detail) {
     const page = detail && detail.dft_results_page || {};
     const loaded = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
     const total = Number(page.total || (detail && detail.counts && detail.counts.dft_results) || loaded);
-    if (hasCompleteDftResults(detail)) return "";
     const paperId = String(detail && (detail.paper_id || detail.id) || state.selectedPaperId || "");
     const isLoading = Boolean(state.dftResultsInflight && state.dftResultsInflight[paperId]);
     const loadError = state.dftResultsLoadErrors && state.dftResultsLoadErrors[paperId];
-    return '<div class="dft-pagination" data-role="dft-pagination">' +
-        '<span>' + (loadError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据") +
-            " " + loaded + " / " + total + " 条</span>" +
-        (loadError
+    return { paperId: paperId, loaded: loaded, total: total, isLoading: isLoading, loadError: loadError };
+}
+
+function dftPaginationInnerHtml(info) {
+    return '<span data-role="dft-pagination-label">' +
+        (info.loadError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据") +
+        " " + info.loaded + " / " + info.total + " 条</span>" +
+        (info.loadError
             ? '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">重新加载完整数据</button>'
-            : (isLoading ? "" : '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">立即加载完整数据</button>')) +
+            : (info.isLoading ? "" : '<button class="btn primary small" type="button" data-role="load-more-dft" onclick="loadMoreSelectedDftResults(this)">立即加载完整数据</button>'));
+}
+
+function updateDftPaginationControls(detail) {
+    const info = dftPaginationState(detail);
+    const controls = Array.from(document.querySelectorAll('[data-role="dft-pagination"]')).filter(function(el) {
+        return !info.paperId || el.getAttribute("data-paper-id") === info.paperId;
+    });
+    if (hasCompleteDftResults(detail)) {
+        controls.forEach(function(el) { el.remove(); });
+        return controls.length;
+    }
+    controls.forEach(function(el) {
+        el.innerHTML = dftPaginationInnerHtml(info);
+    });
+    return controls.length;
+}
+
+function renderDftPageControls(detail) {
+    if (hasCompleteDftResults(detail)) return "";
+    const info = dftPaginationState(detail);
+    return '<div class="dft-pagination" data-role="dft-pagination" data-paper-id="' + escAttr(info.paperId) + '">' +
+        dftPaginationInnerHtml(info) +
     '</div>';
 }
 

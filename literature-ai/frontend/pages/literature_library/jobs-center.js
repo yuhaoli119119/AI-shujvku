@@ -167,7 +167,8 @@ function jobCenterFiltersHtml() {
         ["", "全部类型"],
         ["ai_workflow", "检索入库"],
         ["extraction", "结构化解析"],
-        ["classify_batch", "批量分类"]
+        ["classify_batch", "批量分类"],
+        ["agent_activity", "AI任务记录"]
     ];
     return '<div class="modal-actions" style="justify-content:flex-start;margin-top:12px;gap:8px;flex-wrap:wrap;">' +
         statusItems.map(function(item) {
@@ -218,7 +219,7 @@ function renderJobCenter(jobs) {
     }, {});
     setAcquisitionResult(
         '<div class="writer-block"><h3>任务中心</h3>' +
-        '<div class="subtle">统一查看 AI 检索入库、结构化解析和批量分类任务；重试会复用正在运行的同类任务，避免重复入库或重复解析。</div>' +
+        '<div class="subtle">统一查看 AI 检索入库、结构化解析、批量分类和 AI 批次任务；重试会复用正在运行的同类任务，避免重复入库或重复解析。</div>' +
         '<div style="display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;">' +
             renderJobMetric("总数", jobs.length) +
             renderJobMetric("运行中", (counts.queued || 0) + (counts.running || 0)) +
@@ -344,8 +345,9 @@ function renderWorkflowJobCard(job) {
     const summary = job.summary || {};
     const canRetry = job.status === "failed" || job.status === "cancelled";
     const retryHint = canRetry ? '<div class="muted" style="margin-top:6px;">重试会复用 identity 去重与同一 paper_id 替换逻辑，不会重复写入同一篇论文。</div>' : "";
+    const title = summary.title || summary.task_display_name || summary.source_label || job.type || "job";
     return '<div class="section-card">' +
-        '<h3>' + esc(summary.source_label || job.type || "job") + " · " + esc(job.status || "-") + "</h3>" +
+        '<h3>' + esc(title) + " · " + esc(job.status || "-") + "</h3>" +
         '<div class="subtle">任务 ' + esc(job.job_id || "-") + " | 文献库 " + esc(job.library_name || "-") + (summary.retried_from_job_id ? " | 重试来源 " + esc(summary.retried_from_job_id) : "") + "</div>" +
         renderJobSummaryByType(job) +
         renderJobFailureExplanation(job) +
@@ -363,18 +365,47 @@ function renderJobSummaryByType(job) {
 
 function renderGenericJobSummary(job) {
     const summary = job.summary || {};
+    const problemItems = Array.isArray(summary.problem_items) ? summary.problem_items.slice(0, 5) : [];
+    const problemHtml = problemItems.length
+        ? '<details style="margin-top:10px;"><summary>问题项 ' + esc(summary.problem_count || problemItems.length) + '</summary>' +
+            '<div style="display:grid;gap:8px;margin-top:8px;">' +
+                problemItems.map(function(item) {
+                    const bits = [
+                        item.status || item.code || "problem",
+                        item.candidate_type || item.target_type || "",
+                        item.field_name || item.target_path || "",
+                        item.reason || item.error || item.message || ""
+                    ].filter(Boolean).join(" | ");
+                    return '<div class="subtle">' + esc(bits) + '</div>';
+                }).join("") +
+            '</div>' +
+        '</details>'
+        : "";
+    const paperText = summary.paper_code || summary.paper_title
+        ? '<div class="subtle" style="margin-top:8px;">文献：' + esc(summary.paper_code || "-") + (summary.paper_title ? " | " + esc(summary.paper_title) : "") + "</div>"
+        : "";
+    const runLink = summary.external_analysis_run_id
+        ? ' | <a href="/api/external-analysis/runs/' + encodeURIComponent(summary.external_analysis_run_id) + '" target="_blank">run 详情</a>'
+        : "";
     return '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;">' +
             renderJobMetric("成功", summary.success_count) +
             renderJobMetric("失败", summary.failure_count) +
             renderJobMetric("总数", summary.total) +
+            renderJobMetric("待处理", summary.pending_count) +
+            renderJobMetric("阻断", summary.blocking_count) +
+            renderJobMetric("问题", summary.problem_count) +
             renderJobMetric("阶段", summary.phase || job.status) +
         "</div>" +
-        '<div class="subtle">来源：' + esc(summary.source_label || summary.source || job.type || "-") +
+        '<div class="subtle">来源：' + esc(summary.source_display || summary.source_label || summary.source || job.type || "-") +
             " | 创建：" + esc(formatJobTime(summary.created_at || job.created_at)) +
             " | 更新：" + esc(formatJobTime(summary.updated_at || job.updated_at)) +
             " | 文献库：" + esc(summary.library_name || job.library_name || "-") +
         "</div>" +
-        (summary.message ? '<div class="subtle" style="margin-top:8px;">状态说明：' + esc(summary.message) + "</div>" : "");
+        paperText +
+        (summary.module_label ? '<div class="subtle" style="margin-top:8px;">模块：' + esc(summary.module_label) + ' | 当前阶段：' + esc(summary.lifecycle || summary.phase || "-") + ' | 最后动作：' + esc(summary.last_action || "-") + runLink + '</div>' : '') +
+        (summary.summary_text ? '<div class="subtle" style="margin-top:8px;">批次摘要：' + esc(summary.summary_text) + "</div>" : "") +
+        (summary.message && summary.message !== summary.summary_text ? '<div class="subtle" style="margin-top:8px;">状态说明：' + esc(summary.message) + "</div>" : "") +
+        problemHtml;
 }
 
 async function retryWorkflowJob(jobId) {

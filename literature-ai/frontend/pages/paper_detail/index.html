@@ -270,6 +270,8 @@
   <div id="toast" class="toast"></div>
   <script>
     const API_BASE = "/api/papers";
+    const DFT_RESULTS_PAGE_SIZE = 100;
+    const DFT_RESULTS_FALLBACK_PAGE_SIZE = 50;
     const state = {
       paperId: null,
       paper: null,
@@ -280,6 +282,7 @@
       currentTab: "summary",
       fullDetailLoaded: false,
       fullDetailPromise: null,
+      dftResultsPageSize: DFT_RESULTS_PAGE_SIZE,
       dftResultsPromise: null,
       dftResultsError: null
     };
@@ -333,7 +336,12 @@
       const text = await resp.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch (_) {}
-      if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+      if (!resp.ok) {
+        const error = new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+        error.status = resp.status;
+        error.detail = data && data.detail;
+        throw error;
+      }
       return data;
     }
 
@@ -691,6 +699,40 @@
       </div>`;
     }
 
+    function updateDftPagination() {
+      const panel = document.getElementById("dftResults");
+      const control = panel && panel.querySelector('[data-role="dft-pagination"]');
+      if (!control) return false;
+      if (hasCompleteDftResultCollection()) {
+        control.remove();
+        return true;
+      }
+      const page = state.paper && state.paper.dft_results_page || {};
+      const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || 0);
+      const loaded = (state.paper && state.paper.dft_results_items || []).length;
+      control.innerHTML = `
+        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条</span>
+        ${state.dftResultsError
+          ? '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">重新加载完整数据</button>'
+          : (state.dftResultsPromise ? "" : '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">立即加载完整数据</button>')}
+      `;
+      return true;
+    }
+
+    async function fetchDftResultsPage(offset) {
+      const urlForLimit = limit =>
+        `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?offset=${offset}&limit=${limit}`;
+      try {
+        return await fetchJSON(urlForLimit(state.dftResultsPageSize || DFT_RESULTS_PAGE_SIZE));
+      } catch (error) {
+        if (error && error.status === 422 && (state.dftResultsPageSize || DFT_RESULTS_PAGE_SIZE) > DFT_RESULTS_FALLBACK_PAGE_SIZE) {
+          state.dftResultsPageSize = DFT_RESULTS_FALLBACK_PAGE_SIZE;
+          return fetchJSON(urlForLimit(state.dftResultsPageSize));
+        }
+        throw error;
+      }
+    }
+
     async function ensureCompleteDftResults() {
       if (!state.paper || !state.paperId) return;
       if (hasCompleteDftResultCollection()) return state.paper;
@@ -706,9 +748,7 @@
         while (page.has_more === true || existing.length < total) {
           requestCount += 1;
           if (requestCount > 100) throw new Error("DFT 分页超过安全批次数。");
-          const nextPage = await fetchJSON(
-            `${API_BASE}/${encodeURIComponent(state.paperId)}/dft-results?offset=${existing.length}&limit=50`
-          );
+          const nextPage = await fetchDftResultsPage(existing.length);
           total = Number(nextPage.total || total);
           const seen = new Set(existing.map(item => String(item && item.id || "")));
           const appended = (nextPage.items || []).filter(item => !seen.has(String(item && item.id || "")));
@@ -725,9 +765,7 @@
           };
           state.paper.dft_results_items = existing;
           state.paper.dft_results_page = page;
-          document.getElementById("dftResults").innerHTML =
-            deepLinkIssueContextHtml() +
-            renderStructuredCollection(existing, "暂无 DFT 候选结果。", { collection: "dft_results" });
+          updateDftPagination();
         }
         state.paper.dft_results_page = {
           ...page,
@@ -739,7 +777,7 @@
         return state.paper;
       })();
       state.dftResultsPromise = task;
-      document.getElementById("dftResults").innerHTML =
+      if (!updateDftPagination()) document.getElementById("dftResults").innerHTML =
         deepLinkIssueContextHtml() +
         renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
       try {

@@ -51,3 +51,45 @@ test('DFT audit center is not a daily primary prompt entrypoint', () => {
   expect(auditCenter).not.toContain('复制主 AI 处理提示');
   expect(auditCenter).toContain('日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制');
 });
+
+test('AI task center main log stays batch-oriented', () => {
+  const detailActions = readFrontendFile('pages/literature_library/detail-actions.js');
+  const jobsCenter = readFrontendFile('pages/literature_library/jobs-center.js');
+  const libraryIndex = readFrontendFile('pages/literature_library/index.html');
+  const collectScope = detailActions.slice(
+    detailActions.indexOf('function collectTaskLogEntries'),
+    detailActions.indexOf('function renderTaskLogPanel')
+  );
+
+  expect(libraryIndex).toContain('AI任务中心');
+  expect(libraryIndex).toContain('刷新AI任务中心');
+  expect(collectScope).toContain('import_analysis 批次导入');
+  expect(collectScope).toContain('候选总数');
+  expect(collectScope).toContain('candidates.length');
+  expect(collectScope).not.toContain('object_review_audits');
+  expect(collectScope).not.toContain('对象审核');
+  expect(jobsCenter).toContain('["agent_activity", "AI任务记录"]');
+  expect(jobsCenter).toContain('summary.problem_items');
+  expect(jobsCenter).toContain('批次摘要');
+});
+
+test('content knowledge page exposes unified safe retrieval surface', () => {
+  const topnav = readFrontendFile('shared/topnav.js');
+  const page = readFrontendFile('pages/content_knowledge/index.html');
+
+  expect(topnav).toContain('id: "content-knowledge"');
+  expect(topnav).toContain('label: "内容知识"');
+  expect(page).toContain('/api/content-knowledge?');
+  expect(page).toContain('mechanism_evidence');
+  expect(page).toContain('writing_material');
+  expect(page).toContain('citation_policy');
+  expect(page).toContain('risk_flags');
+  expect(page).toContain('include_candidates');
+  expect(page).toContain('include_blocked');
+  expect(page).toContain('currentRunId');
+  expect(page).toContain('run_id:runId');
+  expect(page).toContain('finalizeReview');
+  expect(page).toContain('完成审核');
+  expect(page).toContain('仍有未解决项');
+  expect(page).toContain('声明来源；未认证');
+});

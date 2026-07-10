@@ -94,6 +94,7 @@ class TopNav {
     { id: "dft-database", label: "DFT 数据库", href: "../dft_database/index.html" },
     { id: "dft-ml-dataset", label: "DFT ML 数据集", href: "../dft_ml_dataset/index.html" },
     { id: "visuals", label: "数据可视化", href: "../visuals/index.html" },
+    { id: "content-knowledge", label: "内容知识", href: "../content_knowledge/index.html" },
     { id: "writing-assistant", label: "写作辅助", href: "../writing_assistant/index.html" },
     { id: "settings", label: "设置", href: "../settings/index.html" },
   ];

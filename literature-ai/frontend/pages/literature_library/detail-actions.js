@@ -21,7 +21,11 @@ function renderAiAuditTrail(items) {
 function taskLogActorLabel(value) {
     const normalized = compactText(value).toLowerCase();
     if (!normalized) return "system";
+    if (["web_ai", "web", "browser_ai", "gemini_web", "chatgpt"].includes(normalized)) return "网页AI审核";
     if (normalized === "ide_ai") return "IDE AI";
+    if (["internal_ai", "local_ai", "codex", "mcp"].includes(normalized)) return "本地IDE AI审核";
+    if (["system_parser", "parser", "system"].includes(normalized)) return "系统解析";
+    if (["human", "manual", "user"].includes(normalized)) return "人工修改";
     return compactText(value);
 }
 
@@ -30,6 +34,27 @@ function taskLogTargetLabel(targetType, targetId, fieldName) {
     const base = bits.filter(Boolean).join(" / ");
     if (!compactText(targetId)) return base || "paper";
     return (base || "target") + " / " + String(targetId).slice(0, 8);
+}
+
+function taskLogModuleLabelFromRun(run) {
+    const candidates = Array.isArray(run && run.candidates) ? run.candidates : [];
+    const text = candidates.map(function(item) {
+        const payload = item && item.normalized_payload || {};
+        return [
+            item && item.candidate_type,
+            payload.target_type,
+            payload.field_name,
+            payload.target_path,
+            payload.claim_type,
+            payload.dft_status ? "dft" : "",
+            payload.figure_status ? "figure" : "",
+            payload.table_status ? "table" : ""
+        ].map(compactText).join(" ");
+    }).join(" ").toLowerCase();
+    if (text.indexOf("dft") >= 0) return "DFT数据审核";
+    if (/(figure|table|chart)/i.test(text)) return "图表证据整理";
+    if (/(writing|card|draft)/i.test(text)) return "写作RAG生成";
+    return "内容知识审核";
 }
 
 function collectTaskLogEntries(detail, audit) {
@@ -52,69 +77,35 @@ function collectTaskLogEntries(detail, audit) {
     (state.externalRuns || []).forEach(function(run) {
         const candidates = Array.isArray(run && run.candidates) ? run.candidates : [];
         const counts = {};
+        const statusCounts = {};
         candidates.forEach(function(item) {
             const type = compactText(item && item.candidate_type) || "candidate";
             counts[type] = (counts[type] || 0) + 1;
+            const status = compactText(item && item.status) || "unknown";
+            statusCounts[status] = (statusCounts[status] || 0) + 1;
         });
-        const summary = Object.keys(counts).sort().map(function(type) {
+        const typeSummary = Object.keys(counts).sort().map(function(type) {
             return type + " x" + counts[type];
+        }).join(", ");
+        const problemCount = (run.mapping_error ? 1 : 0) +
+            (statusCounts.requires_resolution || 0) +
+            (statusCounts.mapping_error || 0) +
+            (statusCounts.unmapped || 0) +
+            (statusCounts.failed || 0) +
+            (statusCounts.skipped || 0);
+        const statusSummary = Object.keys(statusCounts).sort().map(function(status) {
+            return status + " x" + statusCounts[status];
         }).join(", ");
         pushEntry({
             time: run.created_at || null,
             actor: taskLogActorLabel(run.source_label || run.source || "ide_ai"),
-            action: "import_analysis 导入",
-            target: "paper",
-            detail: summary || "no candidates",
-            tone: "meta"
-        });
-    });
-
-    (detail.paper_notes || []).forEach(function(note) {
-        pushEntry({
-            time: note.created_at || null,
-            actor: taskLogActorLabel(note.source || "ide_ai"),
-            action: "写入 AI 笔记",
-            target: taskLogTargetLabel("paper_note", "", note.field_name || "overall"),
-            detail: clipText(note.content || "", 180),
-            tone: "meta"
-        });
-    });
-
-    [
-        ["figure", detail.figures || []],
-        ["dft_result", detail.dft_results_items || []],
-        ["writing_card", detail.writing_cards_items || []],
-        ["mechanism_claim", detail.mechanism_claims_items || []],
-        ["table", detail.tables || []]
-    ].forEach(function(group) {
-        const targetType = group[0];
-        (group[1] || []).forEach(function(item) {
-            (item.object_review_audits || []).slice(0, 3).forEach(function(auditItem) {
-                const decision = compactText(auditItem.decision || auditItem.verification_status || "reviewed");
-                pushEntry({
-                    time: auditItem.created_at || auditItem.reviewed_at || null,
-                    actor: taskLogActorLabel(auditItem.source_label || auditItem.source || auditItem.reviewer || "ide_ai"),
-                    action: "对象审核",
-                    target: taskLogTargetLabel(targetType, item.id, auditItem.field_name || item.figure_label || item.claim_type || ""),
-                    detail: decision,
-                    tone: /reject|conflict|need|repair|block/i.test(decision) ? "danger" : "ok"
-                });
-            });
-        });
-    });
-
-    ((audit && audit.items) || []).forEach(function(item) {
-        const payload = item.review_payload || {};
-        const latest = payload.latest_ai_audit || ((payload.ai_audits || []).slice(-1)[0]) || {};
-        if (!latest || (!latest.reviewer && !latest.model_name && !latest.decision)) return;
-        const decision = compactText(latest.decision || item.reviewer_status || "reviewed");
-        pushEntry({
-            time: latest.created_at || item.reviewed_at || item.updated_at || item.created_at || null,
-            actor: taskLogActorLabel(latest.reviewer || item.reviewer || "ide_ai"),
-            action: "字段审核",
-            target: taskLogTargetLabel(item.target_type, item.target_id, item.field_name),
-            detail: decision,
-            tone: /reject|conflict/i.test(decision) ? "danger" : "ok"
+            action: "import_analysis 批次导入",
+            target: taskLogModuleLabelFromRun(run),
+            detail: "候选总数 " + candidates.length +
+                (typeSummary ? " | 类型：" + typeSummary : "") +
+                (statusSummary ? " | 状态：" + statusSummary : "") +
+                " | 问题 " + problemCount,
+            tone: problemCount ? "danger" : "meta"
         });
     });
 
@@ -128,20 +119,20 @@ function collectTaskLogEntries(detail, audit) {
 function renderTaskLogPanel(detail, audit) {
     const entries = collectTaskLogEntries(detail || {}, audit || null);
     if (!entries.length) {
-        return '<div id="taskLogPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;"><h3>任务日志</h3><div class="muted">当前还没有可展示的任务日志。</div></div>';
+        return '<div id="taskLogPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;"><h3>AI任务中心</h3><div class="muted">当前还没有可展示的批次任务。</div></div>';
     }
     return (
         '<div id="taskLogPanel" class="section-card" style="border:1px solid var(--color-border);margin-bottom:16px;">' +
-            '<h3>任务日志</h3>' +
-            '<div class="subtle">这里只按时间记录 AI 何时导入、审核、写回了什么。</div>' +
+            '<h3>AI任务中心</h3>' +
+            '<div class="subtle">这里按批次展示 AI 导入和审核任务；具体候选项仍可在下方 run 详情中展开查看。</div>' +
             '<div style="display:grid;gap:10px;margin-top:12px;">' +
                 entries.map(function(entry) {
                     return '<div class="candidate-card">' +
                         '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">' +
-                            '<strong>' + esc(entry.actor || "system") + '</strong>' +
+                            '<strong>' + esc(entry.actor || "system") + '：' + esc(entry.target || "内容知识审核") + '</strong>' +
                             '<span class="status-chip ' + escAttr(entry.tone || "meta") + '">' + esc(entry.time ? formatDate(entry.time) : "time unknown") + '</span>' +
                         '</div>' +
-                        '<div style="margin-top:6px;">' + esc(entry.action || "action") + ' | ' + esc(entry.target || "paper") + '</div>' +
+                        '<div style="margin-top:6px;">' + esc(entry.action || "action") + '</div>' +
                         (entry.detail ? '<div class="subtle" style="margin-top:6px;">' + esc(entry.detail) + '</div>' : '') +
                     '</div>';
                 }).join("") +

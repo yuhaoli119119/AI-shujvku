@@ -88,6 +88,8 @@ const LOCATORS_VARIANT = "evidence/locators";
 const CODEX_CONTEXT_VARIANT = "max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=500";
 const KNOWLEDGE_CONTEXT_VARIANT = "max_candidates=24&max_chars_per_candidate=600";
 const PAPER_RESOURCE_CACHE_LIMIT = 60;
+const DFT_RESULTS_PAGE_SIZE = 100;
+const DFT_RESULTS_FALLBACK_PAGE_SIZE = 50;
 
 function formatPaperResourceFreshness(freshness) {
     if (!freshness || !freshness.updatedAt) return "";
@@ -327,6 +329,23 @@ function applyPendingPdfJump(paperId) {
     }, 0);
 }
 
+async function fetchDftResultsPage(paperId, offset) {
+    state.dftResultsPageSize = state.dftResultsPageSize || DFT_RESULTS_PAGE_SIZE;
+    const urlForLimit = function(limit) {
+        return API_BASE + "/" + encodeURIComponent(paperId) +
+            "/dft-results?offset=" + offset + "&limit=" + limit;
+    };
+    try {
+        return await fetchJSON(urlForLimit(state.dftResultsPageSize));
+    } catch (error) {
+        if (error && error.status === 422 && state.dftResultsPageSize > DFT_RESULTS_FALLBACK_PAGE_SIZE) {
+            state.dftResultsPageSize = DFT_RESULTS_FALLBACK_PAGE_SIZE;
+            return fetchJSON(urlForLimit(state.dftResultsPageSize));
+        }
+        throw error;
+    }
+}
+
 async function loadPaperDetail(paperId, options) {
     if (!paperId) {
         showEmptyWorkspace();
@@ -417,15 +436,15 @@ async function ensureCompleteSelectedDftResults() {
         let page = detail.dft_results_page || {};
         let total = Number(page.total || (detail.counts && detail.counts.dft_results) || existing.length);
         let requestCount = 0;
+        if (typeof updateDftPaginationControls === "function") {
+            updateDftPaginationControls(detail);
+        }
         while (page.has_more === true || existing.length < total) {
             requestCount += 1;
             if (requestCount > 100) {
                 throw new Error("DFT 分页超过安全批次数。");
             }
-            const nextPage = await fetchJSON(
-                API_BASE + "/" + encodeURIComponent(paperId) +
-                "/dft-results?offset=" + existing.length + "&limit=50"
-            );
+            const nextPage = await fetchDftResultsPage(paperId, existing.length);
             total = Number(nextPage.total || total);
             const seen = new Set(existing.map(function(item) { return String(item && item.id || ""); }));
             const appended = (nextPage.items || []).filter(function(item) {
@@ -444,8 +463,8 @@ async function ensureCompleteSelectedDftResults() {
             };
             detail.dft_results_items = existing;
             detail.dft_results_page = page;
-            if (state.selectedPaperId === paperId) {
-                rerenderSelectedDetail(paperId);
+            if (state.selectedPaperId === paperId && typeof updateDftPaginationControls === "function") {
+                updateDftPaginationControls(detail);
             }
         }
         detail.dft_results_page = {
@@ -459,7 +478,9 @@ async function ensureCompleteSelectedDftResults() {
         return detail;
     })();
     state.dftResultsInflight[paperId] = task;
-    rerenderSelectedDetail(paperId);
+    if (typeof updateDftPaginationControls === "function" && updateDftPaginationControls(detail) === 0 && state.currentTab === "dft") {
+        rerenderSelectedDetail(paperId);
+    }
     try {
         return await task;
     } catch (error) {

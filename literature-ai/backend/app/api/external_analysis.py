@@ -20,6 +20,7 @@ from app.schemas.external_analysis import (
     ExternalAnalysisRunResponse,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.task_log_service import TaskLogService
 from app.services.external_analysis_identity import UNTRUSTED_HTTP_SOURCE_IDENTITY
 
 router = APIRouter()
@@ -138,6 +139,7 @@ async def import_external_analysis(
                 auto_lock_owner=effective_reviewer,
                 lock_meta_source="http_import_analysis",
             )
+            TaskLogService(session).refresh_external_analysis_task(run.id, last_action="apply-review-rules")
         session.commit()
         return _serialize_run(service, run, auto_apply_summary=auto_apply_summary)
     except ValueError as exc:
@@ -217,6 +219,7 @@ async def materialize_external_analysis_run(
             explicit_all=payload.explicit_all,
             created_by=payload.created_by,
         )
+        TaskLogService(session).refresh_external_analysis_task(run_id, last_action="materialize")
         session.commit()
         response = {
             "run_id": str(run_id),
@@ -271,6 +274,7 @@ async def apply_review_rules_for_run(
             auto_lock_owner=effective_reviewer,
             lock_meta_source="http_apply_review_rules",
         )
+        TaskLogService(session).refresh_external_analysis_task(run_id, last_action="apply-review-rules")
         session.commit()
         candidates = service.list_candidates(run_id)
         warnings = service.diagnose_import_warnings(

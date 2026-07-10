@@ -151,7 +151,7 @@
                         <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">文字审核</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
-                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">任务日志</button>
+                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI任务中心</button>
                     </div>
 
                     <section id="tab-summary" class="tab-panel active">
@@ -191,10 +191,10 @@
 
                     <section id="tab-review" class="tab-panel">
                         <div class="writer-block ai-review-section">
-                            <h3>任务日志</h3>
-                            <p class="subtle">按时间记录每个 AI 导入、审核、写回了什么。</p>
+                            <h3>AI任务中心</h3>
+                            <p class="subtle">按批次展示 AI 导入、审核和回写任务；具体候选项可在 run 详情中展开查看。</p>
                             <div class="modal-actions" style="justify-content:flex-start;">
-                                <button class="btn ghost" onclick="loadExternalRuns()">刷新任务日志</button>
+                                <button class="btn ghost" onclick="loadExternalRuns()">刷新AI任务中心</button>
                             </div>
                         </div>
                         <div id="externalRuns"></div>

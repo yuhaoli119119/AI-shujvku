@@ -124,7 +124,7 @@ class TinySemanticEmbedding:
         return sum(a * b for a, b in zip(left, right))
 
 
-def test_hybrid_score_embeds_structured_text_without_stored_embedding():
+def test_hybrid_score_uses_lexical_when_stored_embedding_missing():
     embedding = TinySemanticEmbedding()
     retriever = Retriever(MagicMock(), embedding_dimension=1536, embedding=embedding)
 
@@ -132,23 +132,26 @@ def test_hybrid_score_embeds_structured_text_without_stored_embedding():
 
     score, breakdown = retriever._hybrid_score({"orr"}, [1.0, 0.0], "oxygen reduction reaction", None, False)
 
-    assert embedding.calls == 1
-    assert breakdown["semantic"] == 1.0
-    assert score == 0.675
+    assert embedding.calls == 0
+    assert breakdown["semantic"] == 0.0
+    assert breakdown["lexical"] == 0.5
+    assert breakdown["hybrid"] == score == 0.5
 
 
-def test_hybrid_score_uses_cached_structured_text_embedding():
+def test_hybrid_score_uses_persisted_structured_text_embedding_without_reembedding():
     embedding = TinySemanticEmbedding()
     retriever = Retriever(MagicMock(), embedding_dimension=1536, embedding=embedding)
 
-    retriever._score_text = MagicMock(return_value=0.0)
+    retriever._score_text = MagicMock(return_value=0.5)
 
-    first_score, first_breakdown = retriever._hybrid_score({"orr"}, [1.0, 0.0], "oxygen reduction reaction", None, False)
-    second_score, second_breakdown = retriever._hybrid_score({"orr"}, [1.0, 0.0], "oxygen reduction reaction", None, False)
+    first_score, first_breakdown = retriever._hybrid_score({"orr"}, [1.0, 0.0], "oxygen reduction reaction", [1.0, 0.0], False)
+    second_score, second_breakdown = retriever._hybrid_score({"orr"}, [1.0, 0.0], "oxygen reduction reaction", [1.0, 0.0], False)
 
-    assert embedding.calls == 1
+    assert embedding.calls == 0
     assert first_score == second_score
     assert first_breakdown == second_breakdown
+    assert first_breakdown["semantic"] == 1.0
+    assert first_breakdown["hybrid"] == first_score == 0.675
 
 
 def test_query_embedding_failure_falls_back_to_lexical():
@@ -379,7 +382,8 @@ def test_full_context_mode():
     p2 = uuid.uuid4()
     session.scalars.return_value.all.side_effect = [
         [MockSection(p1, "text1"), MockSection(p1, "text2")],
-        [MockSection(p2, "text3")]
+        [MockSection(p2, "text3")],
+        [],  # read-only content-evidence query has no projection in this mock
     ]
 
     req = RetrievalSearchRequest(query="test", mode="full_context", paper_ids=[p1, p2], limit=10, rerank=True)

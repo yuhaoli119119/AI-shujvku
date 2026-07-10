@@ -7,6 +7,7 @@ const PAGES = [
   { name: 'Paper Detail', path: '/pages/paper_detail/index.html', coreSelector: '.panel-card' },
   { name: 'DFT Database', path: '/pages/dft_database/index.html', coreSelector: '#dftTable' },
   { name: 'Data Visuals', path: '/pages/visuals/index.html', coreSelector: '#metrics' },
+  { name: 'Content Knowledge', path: '/pages/content_knowledge/index.html', coreSelector: '.knowledge-item' },
   { name: 'Mechanism Knowledge', path: '/pages/mechanism_knowledge/index.html', coreSelector: '#mechanismTabs' },
   { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
@@ -1319,6 +1320,75 @@ async function mockApi(route) {
       reranker: { enabled: true, name: 'noop_score_sort' },
       total: EVIDENCE_ITEMS.length,
       items: EVIDENCE_ITEMS,
+    });
+  }
+
+  if (pathname === '/api/content-knowledge') {
+    return jsonResponse(route, {
+      schema_version: 'content_knowledge.v1',
+      policy: {
+        source_of_truth: 'postgresql',
+        citation_policy_values: ['citable', 'writing_only', 'needs_review', 'blocked'],
+      },
+      filters: {
+        query: requestUrl.searchParams.get('query') || null,
+        include_candidates: requestUrl.searchParams.get('include_candidates') !== 'false',
+        include_blocked: requestUrl.searchParams.get('include_blocked') === 'true',
+      },
+      category_counts: {
+        mechanism_evidence: 1,
+        writing_material: 1,
+      },
+      items: [
+        {
+          item_id: 'mechanism_claim:1',
+          paper_id: 'paper-1',
+          paper_code: 'P001',
+          paper_title: 'Test Paper for Smoke Validation',
+          category: 'mechanism_evidence',
+          category_label: '机理证据卡',
+          source_type: 'mechanism_claim',
+          source_id: '1',
+          source_table: 'mechanism_claims',
+          content: 'Fe-N4 sites accelerate LiPS conversion.',
+          evidence_text: 'The mechanism evidence needs review before citation.',
+          review_status: 'needs_review',
+          review_gate_status: 'needs_review',
+          candidate_status: null,
+          citation_policy: 'needs_review',
+          can_use_for_writing: true,
+          can_use_for_citation: false,
+          risk_flags: ['missing_locator'],
+          recommended_action: 'review_mechanism_claim_evidence',
+          source_ai: null,
+          source_label: null,
+          metadata: {},
+        },
+        {
+          item_id: 'writing_card:1',
+          paper_id: 'paper-1',
+          paper_code: 'P001',
+          paper_title: 'Test Paper for Smoke Validation',
+          category: 'writing_material',
+          category_label: '写作素材卡',
+          source_type: 'writing_card',
+          source_id: '1',
+          source_table: 'writing_cards',
+          content: 'research_gap: conversion kinetics need stable catalyst evidence',
+          evidence_text: 'stable catalyst evidence links conversion kinetics',
+          review_status: 'content_ready',
+          review_gate_status: 'content_verified',
+          candidate_status: null,
+          citation_policy: 'writing_only',
+          can_use_for_writing: true,
+          can_use_for_citation: false,
+          risk_flags: [],
+          recommended_action: null,
+          source_ai: null,
+          source_label: null,
+          metadata: {},
+        },
+      ],
     });
   }
 
@@ -3033,8 +3103,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.click('.paper-row');
     await page.click('button[data-tab="review"]');
     await expect(page.locator('#taskLogPanel')).toContainText('外部 AI 候选建议');
-    await expect(page.locator('#taskLogPanel')).toContainText('import_analysis 导入');
+    await expect(page.locator('#taskLogPanel')).toContainText('import_analysis 批次导入');
     await expect(page.locator('#taskLogPanel')).toContainText('correction x1');
+    await expect(page.locator('#taskLogPanel')).not.toContainText('对象审核');
+    await expect(page.locator('#taskLogPanel')).not.toContainText('GLM figure audit');
 
     await page.evaluate(() => materializeCandidate('run-1', 'candidate-1'));
     await expect.poll(() => materializePayloads.length).toBe(1);
@@ -4817,8 +4889,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
 
-    await expect(page.locator('#tab-review')).toContainText('任务日志');
-    await expect(page.locator('#tab-review')).toContainText('刷新任务日志');
+    await expect(page.locator('#tab-review')).toContainText('AI任务中心');
+    await expect(page.locator('#tab-review')).toContainText('刷新AI任务中心');
     await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
     await expect(page.locator('#tab-review button[onclick="loadAgentGuide()"]')).toHaveCount(0);
     await page.click('button[data-tab="writing"]');
@@ -4874,7 +4946,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.locator('.paper-row').first().click();
     await page.click('button[data-tab="review"]');
 
-    await expect(page.locator('#tab-review')).toContainText('任务日志');
+    await expect(page.locator('#tab-review')).toContainText('AI任务中心');
     await expect(page.locator('#tab-review button[onclick="runInternalAIParse()"]')).toHaveCount(0);
     await expect(page.locator('#tab-review button[onclick="loadAgentGuide()"]')).toHaveCount(0);
     await page.click('button[data-tab="writing"]');

@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.api.corrections import router as corrections_router
+from app.api.content_knowledge import router as content_knowledge_router
 from app.api.dft import router as dft_router
 from app.api.external_analysis import router as external_analysis_router
 from app.api.evidence import router as evidence_router
@@ -109,6 +110,7 @@ app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
 app.include_router(writing_router, prefix="/api/writing", tags=["writing"])
 app.include_router(writer_router, prefix="/api/writer", tags=["writer"])
+app.include_router(content_knowledge_router, prefix="/api/content-knowledge", tags=["content-knowledge"])
 app.include_router(verification_router, prefix="/api/reviews", tags=["verification"])
 app.include_router(corrections_router, prefix="/api/corrections", tags=["corrections"])
 app.include_router(dft_router, prefix="/api/dft", tags=["dft"])

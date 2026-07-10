@@ -16,6 +16,7 @@ from app.db.models import AuditLog, Base, CatalystSample, DFTAuditIssue, DFTResu
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
+from app.services.workflow_jobs import build_job_summary, serialize_job
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.verification_session_service import VerificationSessionService
 from app.utils.review_safety import is_export_eligible_extraction
@@ -371,9 +372,92 @@ def test_external_analysis_import_and_materialize_flow():
                 assert session.query(PaperRelationship).count() == 1
                 jobs = session.scalars(select(WorkflowJob)).all()
                 assert len(jobs) == 1
-                assert jobs[0].type == "agent_activity"
-                assert jobs[0].payload["source_label"] == "ChatGPT web upload"
-                assert jobs[0].payload["paper_id"] == str(main_paper.id)
+                job = jobs[0]
+                assert job.type == "agent_activity"
+                assert job.payload["task_log_version"] == 1
+                assert job.payload["task_source"] == "web_ai"
+                assert job.payload["task_source_label"] == "网页AI审核"
+                assert job.payload["task_display_name"] == "网页AI审核：内容知识审核"
+                assert job.payload["source_label"] == "ChatGPT web upload"
+                assert job.payload["paper_id"] == str(main_paper.id)
+                assert job.result["metrics"]["candidate_count"] == 3
+                assert job.result["metrics"]["by_candidate_type"] == {
+                    "note": 1,
+                    "correction": 1,
+                    "relationship": 1,
+                }
+                assert job.result["metrics"]["problem_count"] == 0
+                assert job.result["problem_items"] == []
+
+                summary = build_job_summary(job)
+                assert summary["title"] == "网页AI审核：内容知识审核"
+                assert summary["total"] == 3
+                assert summary["problem_count"] == 0
+                assert summary["problem_items"] == []
+        finally:
+            app.dependency_overrides.clear()
+            engine.dispose()
+
+
+def test_import_analysis_records_single_batch_task_log_with_metrics_and_problems():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+        TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+        def override_get_db_session():
+            db = TestingSessionLocal()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db_session] = override_get_db_session
+
+        try:
+            with Session(engine) as session:
+                paper = Paper(
+                    title="Batch Log Paper",
+                    doi="10.1000/task-log",
+                    paper_code="B9001",
+                    pdf_path="batch-log.pdf",
+                )
+                session.add(paper)
+                session.commit()
+                session.refresh(paper)
+
+            client = TestClient(app)
+            imported = client.post(
+                "/api/external-analysis/import",
+                json={
+                    "paper_id": str(paper.id),
+                    "source": "web_ai",
+                    "source_label": "Web AI figure pass",
+                    "raw_payload": {
+                        "review_notes": [{"content": "Readable note.", "field_name": "overall"}],
+                        "unmapped_items": [{"raw_item": "unmapped chart instruction", "mapping_reason": "target not found"}],
+                    },
+                },
+            )
+            assert imported.status_code == 200, imported.text
+            assert len(imported.json()["candidates"]) == 2
+
+            with Session(engine) as session:
+                jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "agent_activity")).all()
+                assert len(jobs) == 1
+                job = jobs[0]
+                assert job.payload["task_log_version"] == 1
+                assert job.payload["task_display_name"] == "网页AI审核：内容知识审核"
+                data = serialize_job(job)
+                summary = data["summary"]
+                assert summary["task_source"] == "web_ai"
+                assert summary["task_source_label"] == "网页AI审核"
+                assert summary["paper_code"] == "B9001"
+                assert summary["total"] == 2
+                assert summary["metrics"]["by_candidate_type"] == {"note": 1, "unmapped": 1}
+                assert summary["metrics"]["by_status"]["requires_resolution"] == 1
+                assert summary["problem_count"] == 1
+                assert summary["problem_items"][0]["status"] == "unmapped"
         finally:
             app.dependency_overrides.clear()
             engine.dispose()

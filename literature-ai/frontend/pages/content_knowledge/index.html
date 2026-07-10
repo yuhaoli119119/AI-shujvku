@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>内容知识 - Literature AI</title>
+  <link rel="stylesheet" href="../../shared/fonts.css">
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <script src="../../shared/topnav.js"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--color-bg);
+      color: var(--color-text);
+      font-family: var(--font-body);
+    }
+    .workspace {
+      width: min(1480px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 22px 0 40px;
+    }
+    .page-head {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin: 6px 0 18px;
+      flex-wrap: wrap;
+    }
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.25;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-pill);
+      padding: 6px 10px;
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1.6fr) minmax(160px, 1fr) minmax(170px, 1fr) minmax(180px, 1fr) 90px auto;
+      gap: 10px;
+      align-items: end;
+      padding: 14px;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      border-radius: var(--radius);
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .field label {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .field input,
+    .field select {
+      min-height: 38px;
+      width: 100%;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      background: var(--color-surface-alt);
+      color: var(--color-text);
+      font: inherit;
+      font-size: 13px;
+    }
+    .toggles {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      min-height: 38px;
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .toggles label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .primary-btn {
+      min-height: 38px;
+      border: 0;
+      border-radius: var(--radius);
+      padding: 8px 14px;
+      background: var(--color-primary);
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .summary-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 14px 0;
+    }
+    .count-chip,
+    .policy-chip,
+    .risk-chip {
+      display: inline-flex;
+      align-items: center;
+      border-radius: var(--radius-pill);
+      padding: 4px 9px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .count-chip {
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      color: var(--color-text-secondary);
+    }
+    .policy-chip.citable { background: var(--color-success-bg); color: var(--color-success); }
+    .policy-chip.writing-only { background: var(--color-primary-bg); color: var(--color-primary); }
+    .policy-chip.needs-review { background: var(--color-warning-bg); color: var(--color-warning); }
+    .policy-chip.blocked { background: var(--color-danger-bg); color: var(--color-danger); }
+    .risk-chip {
+      background: var(--color-danger-bg);
+      color: var(--color-danger);
+    }
+    .items {
+      display: grid;
+      gap: 10px;
+    }
+    .knowledge-item {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      padding: 14px;
+    }
+    .item-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: flex-start;
+      margin-bottom: 10px;
+    }
+    .item-title {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .item-title strong {
+      font-size: 14px;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+    .item-title span {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+    }
+    .item-content {
+      color: var(--color-text);
+      line-height: 1.65;
+      font-size: 13px;
+      word-break: break-word;
+    }
+    .item-evidence {
+      margin-top: 8px;
+      padding: 9px 10px;
+      border-left: 3px solid var(--color-border);
+      background: var(--color-surface-alt);
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+    }
+    .item-foot {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .empty,
+    .error {
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius);
+      background: var(--color-surface);
+      padding: 18px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+    }
+    .error {
+      border-color: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+      color: var(--color-danger);
+      background: var(--color-danger-bg);
+    }
+    @media (max-width: 980px) {
+      .toolbar {
+        grid-template-columns: 1fr 1fr;
+      }
+      .primary-btn,
+      .toggles {
+        width: 100%;
+      }
+    }
+    @media (max-width: 640px) {
+      .workspace { width: min(100% - 24px, 1480px); padding-top: 16px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .item-head { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div id="topnav-mount"></div>
+  <main class="workspace">
+    <section class="page-head">
+      <div>
+        <h1>内容知识</h1>
+      </div>
+      <div class="status-pill" id="schemaStatus">content_knowledge.v1</div>
+    </section>
+
+    <form class="toolbar" id="knowledgeForm">
+      <div class="field">
+        <label for="queryInput">关键词</label>
+        <input id="queryInput" name="query" autocomplete="off" placeholder="mechanism conflict">
+      </div>
+      <div class="field">
+        <label for="paperInput">论文号 / ID</label>
+        <input id="paperInput" name="paper_id" autocomplete="off" placeholder="B0078 或 UUID">
+      </div>
+      <div class="field">
+        <label for="libraryInput">文献库</label>
+        <input id="libraryInput" name="library_name" autocomplete="off" placeholder="默认文献库">
+      </div>
+      <div class="field">
+        <label for="categorySelect">分类</label>
+        <select id="categorySelect" name="category"></select>
+      </div>
+      <div class="field">
+        <label for="reviewSelect">审核状态</label>
+        <select id="reviewSelect" name="review_status"><option value="">全部</option><option value="needs_review">待审核</option><option value="needs_human">需人工</option><option value="validated">已审核</option><option value="rejected">已拒绝</option></select>
+      </div>
+      <div class="field">
+        <label for="citationSelect">引用资格</label>
+        <select id="citationSelect" name="citation_status"><option value="">全部</option><option value="citable">可引用</option><option value="writing_only">仅写作</option><option value="needs_review">待审核</option><option value="blocked">阻断</option></select>
+      </div>
+      <div class="field">
+        <label for="limitInput">数量</label>
+        <input id="limitInput" name="limit" type="number" min="1" max="500" value="100">
+      </div>
+      <div>
+        <div class="toggles">
+          <label><input id="candidateToggle" type="checkbox" checked>候选</label>
+          <label><input id="blockedToggle" type="checkbox">阻断项</label>
+        </div>
+        <button class="primary-btn" type="submit">检索</button>
+      </div>
+    </form>
+
+    <section class="summary-row">
+      <button class="primary-btn" type="button" onclick="syncKnowledge()">同步内容索引</button>
+      <button class="primary-btn" type="button" onclick="generateReviewBundle()">生成审核包</button>
+      <button class="primary-btn" type="button" onclick="copyIDEInstruction()">复制 IDE AI 指令</button>
+      <button class="primary-btn" type="button" onclick="importReviewResult()">导入 AI 回传</button>
+      <button class="primary-btn" id="finalizeReviewButton" type="button" onclick="finalizeReview()" hidden>完成审核</button>
+      <button class="primary-btn" type="button" onclick="buildWritingPlan()">导出 Evidence / Citation Plan</button>
+    </section>
+    <section class="empty" id="actionResult" hidden></section>
+
+    <section class="summary-row" id="summaryRow"></section>
+    <section class="items" id="itemsRoot"></section>
+  </main>
+
+  <script>
+    let lastKnowledge = null;
+    let lastBundle = null;
+    let reviewReadyToFinalize = false;
+    const CATEGORY_LABELS = {
+      mechanism_evidence: "机理证据卡",
+      performance_evidence: "性能证据卡",
+      dft_evidence: "DFT证据卡",
+      figure_table_evidence: "图表证据卡",
+      material_evidence: "材料信息卡",
+      method_evidence: "方法信息卡",
+      writing_material: "写作素材卡",
+      review_viewpoint: "综述观点卡",
+      uncertainty_note: "争议/风险卡",
+      draft_evidence_check: "草稿证据核验"
+    };
+
+    const CATEGORY_ORDER = Object.keys(CATEGORY_LABELS);
+
+    function esc(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function policyClass(policy) {
+      return String(policy || "needs_review").replace(/_/g, "-");
+    }
+
+    function policyLabel(policy) {
+      const labels = {
+        citable: "可引用",
+        writing_only: "仅写作",
+        needs_review: "待审核",
+        blocked: "已阻断"
+      };
+      return labels[policy] || "待审核";
+    }
+
+    function initCategorySelect() {
+      const select = document.getElementById("categorySelect");
+      select.innerHTML = '<option value="">全部分类</option>' + CATEGORY_ORDER.map(function(key) {
+        return '<option value="' + key + '">' + CATEGORY_LABELS[key] + '</option>';
+      }).join("");
+    }
+
+    function applyUrlState() {
+      const params = new URLSearchParams(window.location.search);
+      for (const key of ["query", "paper_id", "library_name", "category", "review_status", "citation_status", "limit"]) {
+        const value = params.get(key);
+        if (value == null) continue;
+        const el = document.querySelector('[name="' + key + '"]');
+        if (el) el.value = value;
+      }
+      if (params.get("include_candidates") === "false") {
+        document.getElementById("candidateToggle").checked = false;
+      }
+      if (params.get("include_blocked") === "true") {
+        document.getElementById("blockedToggle").checked = true;
+      }
+    }
+
+    function buildParams() {
+      const form = document.getElementById("knowledgeForm");
+      const data = new FormData(form);
+      const params = new URLSearchParams();
+      for (const [key, value] of data.entries()) {
+        const text = String(value || "").trim();
+        if (text) params.set(key, text);
+      }
+      params.set("include_candidates", document.getElementById("candidateToggle").checked ? "true" : "false");
+      params.set("include_blocked", document.getElementById("blockedToggle").checked ? "true" : "false");
+      return params;
+    }
+
+    async function fetchKnowledge() {
+      const params = buildParams();
+      const root = document.getElementById("itemsRoot");
+      const summary = document.getElementById("summaryRow");
+      root.innerHTML = '<div class="empty">加载中...</div>';
+      summary.innerHTML = "";
+      const response = await fetch("/api/content-knowledge?" + params.toString());
+      if (!response.ok) {
+        throw new Error("HTTP " + response.status);
+      }
+      return response.json();
+    }
+
+    function renderSummary(payload) {
+      const summary = document.getElementById("summaryRow");
+      const counts = payload.category_counts || {};
+      const chips = ['<span class="count-chip">总数 ' + (payload.items || []).length + '</span>'];
+      for (const key of CATEGORY_ORDER) {
+        if (counts[key]) {
+          chips.push('<span class="count-chip">' + CATEGORY_LABELS[key] + ' ' + counts[key] + '</span>');
+        }
+      }
+      summary.innerHTML = chips.join("");
+      document.getElementById("schemaStatus").textContent = payload.schema_version || "content_knowledge.v1";
+    }
+
+    function renderItems(items) {
+      const root = document.getElementById("itemsRoot");
+      if (!items || !items.length) {
+        root.innerHTML = '<div class="empty">没有匹配的内容知识。</div>';
+        return;
+      }
+      root.innerHTML = items.map(function(item) {
+        const risks = (item.risk_flags || []).map(function(flag) {
+          return '<span class="risk-chip">' + esc(flag) + '</span>';
+        }).join("");
+        const source = [item.source_table, item.source_id].filter(Boolean).join(" / ");
+        const paper = [item.paper_code, item.paper_title].filter(Boolean).join(" · ");
+        const evidence = item.evidence_text
+          ? '<div class="item-evidence">' + esc(item.evidence_text) + (item.page_start ? ' · 第 ' + esc(item.page_start) + ' 页' : '') + '</div>'
+          : "";
+        const pdfLink = item.page_start && item.paper_id
+          ? '<a href="../paper_detail/index.html?id=' + encodeURIComponent(item.paper_id) + '&page=' + encodeURIComponent(item.page_start) + '">跳转 PDF 证据</a>' : '';
+        const runId = (item.metadata || {}).external_analysis_run_id || (item.metadata || {}).run_id;
+        const runLink = runId ? '<a href="../literature_library/index.html?run_id=' + encodeURIComponent(runId) + '">查看任务</a>' : '';
+        return (
+          '<article class="knowledge-item">' +
+            '<div class="item-head">' +
+              '<div class="item-title">' +
+                '<strong>' + esc(item.category_label || item.category) + '</strong>' +
+                '<span>' + esc(paper || item.paper_id) + '</span>' +
+                '<span>' + esc(source) + '</span>' +
+              '</div>' +
+              '<span class="policy-chip ' + policyClass(item.citation_policy) + '">' + policyLabel(item.citation_policy) + '</span>' +
+            '</div>' +
+            '<div class="item-content">' + esc(item.content || "-") + '</div>' +
+            evidence +
+            '<div class="item-foot">' +
+              '<span class="count-chip">' + esc(item.review_status || "needs_review") + '</span>' +
+              '<span class="count-chip">' + esc(item.review_gate_status || "needs_review") + '</span>' +
+              (item.candidate_status ? '<span class="count-chip">' + esc(item.candidate_status) + '</span>' : '') +
+              '<span class="count-chip">来源 ' + esc(item.source_identity_verified ? '已认证' : '声明来源；未认证') + '</span>' +
+              risks +
+              pdfLink + runLink +
+            '</div>' +
+          '</article>'
+        );
+      }).join("");
+    }
+
+    async function loadKnowledge(pushState) {
+      try {
+        const params = buildParams();
+        if (pushState) {
+          window.history.replaceState(null, "", "?" + params.toString());
+        }
+        const payload = await fetchKnowledge();
+        lastKnowledge = payload;
+        renderSummary(payload);
+        renderItems(payload.items || []);
+      } catch (error) {
+        document.getElementById("itemsRoot").innerHTML = '<div class="error">内容知识加载失败：' + esc(error.message) + '</div>';
+      }
+    }
+
+    function setActionResult(message, isError) {
+      const el = document.getElementById("actionResult");
+      el.hidden = false; el.className = isError ? "error" : "empty"; el.textContent = message;
+    }
+
+    function currentPaperId() {
+      const entered = document.getElementById("paperInput").value.trim();
+      if (entered && /^[0-9a-f-]{36}$/i.test(entered)) return entered;
+      const first = (lastKnowledge && lastKnowledge.items || [])[0];
+      return first && first.paper_id;
+    }
+
+    function currentRunId() {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("run_id")) return params.get("run_id");
+      const first = (lastKnowledge && lastKnowledge.items || [])[0];
+      return first && first.metadata && first.metadata.external_analysis_run_id;
+    }
+
+    async function syncKnowledge() {
+      try {
+        const params = buildParams();
+        const response = await fetch("/api/content-knowledge/sync?" + params.toString(), {method: "POST"});
+        const result = await response.json(); if (!response.ok) throw new Error(result.detail || response.status);
+        setActionResult("内容索引已同步：新增 " + result.created + "，更新 " + result.updated); loadKnowledge(false);
+      } catch (error) { setActionResult("同步失败：" + error.message, true); }
+    }
+
+    async function generateReviewBundle() {
+      try {
+        const paperId = currentPaperId(); if (!paperId) throw new Error("请先按论文号或 UUID 筛选一篇文献");
+        const runId = currentRunId();
+        const response = await fetch("/api/content-knowledge/review-bundles", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({paper_id:paperId, run_id:runId || undefined, created_by:"web_ui"})});
+        const result = await response.json(); if (!response.ok) throw new Error(result.detail || response.status);
+        lastBundle = result; reviewReadyToFinalize = false; document.getElementById("finalizeReviewButton").hidden = true;
+        setActionResult("审核包已生成。可复制 IDE 指令或导入同一 JSON 回传。bundle=" + result.bundle_id + (runId ? "；已关联任务。" : ""));
+      } catch (error) { setActionResult("生成审核包失败：" + error.message, true); }
+    }
+
+    async function copyIDEInstruction() {
+      if (!lastBundle) { await generateReviewBundle(); if (!lastBundle) return; }
+      const text = (lastBundle.manifest.instructions || "") + "\n\nRETURN TEMPLATE:\n" + JSON.stringify(lastBundle.return_template, null, 2);
+      try { await navigator.clipboard.writeText(text); setActionResult("IDE AI 指令与 JSON 模板已复制。"); }
+      catch (_) { setActionResult(text); }
+    }
+
+    async function importReviewResult() {
+      if (!lastBundle) { setActionResult("请先生成审核包。", true); return; }
+      const raw = window.prompt("粘贴与审核包匹配的 JSON 回传："); if (!raw) return;
+      try {
+        const result = JSON.parse(raw); const base = "/api/content-knowledge/review-bundles/" + encodeURIComponent(lastBundle.bundle_id);
+        let response = await fetch(base + "/validate", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(result)});
+        let body = await response.json(); if (!response.ok) throw new Error(body.detail || response.status);
+        response = await fetch(base + "/apply", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({reviewer:"web_human"})});
+        body = await response.json(); if (!response.ok) throw new Error(body.detail || response.status);
+        reviewReadyToFinalize = body.needs_human === 0;
+        document.getElementById("finalizeReviewButton").hidden = !reviewReadyToFinalize;
+        setActionResult(reviewReadyToFinalize
+          ? "回传已验证并事务回填：" + body.applied + " 项。请点击“完成审核”关闭本审核阶段。"
+          : "回传已验证并事务回填：" + body.applied + " 项；仍有 " + body.needs_human + " 项需人工处理，不能完成审核。问题与原因保留在内容列表和任务中心。");
+        loadKnowledge(false);
+      } catch (error) { setActionResult("回传被拒绝：" + error.message, true); }
+    }
+
+    async function finalizeReview() {
+      if (!lastBundle || !reviewReadyToFinalize) {
+        setActionResult("仍有未解决项，不能完成审核。", true); return;
+      }
+      try {
+        const response = await fetch("/api/content-knowledge/review-bundles/" + encodeURIComponent(lastBundle.bundle_id) + "/finalize", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({reviewer:"web_human"})});
+        const body = await response.json(); if (!response.ok) throw new Error(body.detail || response.status);
+        reviewReadyToFinalize = false; document.getElementById("finalizeReviewButton").hidden = true;
+        setActionResult("审核已完成；内容知识和关联任务状态已刷新。");
+        loadKnowledge(false);
+      } catch (error) { setActionResult("无法完成审核：" + error.message, true); }
+    }
+
+    async function buildWritingPlan() {
+      try {
+        const query = document.getElementById("queryInput").value.trim(); if (!query) throw new Error("先输入写作主题或检索词");
+        const paperId = currentPaperId(); const response = await fetch("/api/content-knowledge/writing-plan", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({query:query, paper_ids:paperId ? [paperId] : []})});
+        const body = await response.json(); if (!response.ok) throw new Error(body.detail || response.status);
+        setActionResult(JSON.stringify(body, null, 2));
+      } catch (error) { setActionResult("计划生成失败：" + error.message, true); }
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+      TopNav.init({ currentPage: "content-knowledge", mountId: "topnav-mount" });
+      initCategorySelect();
+      applyUrlState();
+      document.getElementById("knowledgeForm").addEventListener("submit", function(event) {
+        event.preventDefault();
+        loadKnowledge(true);
+      });
+      loadKnowledge(false);
+    });
+  </script>
+</body>
+</html>

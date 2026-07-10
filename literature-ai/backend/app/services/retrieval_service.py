@@ -14,6 +14,7 @@ from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse, RetrievalSearchResult
 from app.services.embedding import get_embedding_service
+from app.services.content_knowledge_service import ContentKnowledgeService
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 from app.utils.paper_type import normalize_paper_type_filter
 
@@ -58,7 +59,9 @@ class RetrievalService:
     def search(self, payload: RetrievalSearchRequest) -> RetrievalSearchResponse:
         is_full_context = payload.mode == "full_context" and bool(payload.paper_ids)
         if is_full_context:
-            items = self._search_full_context(payload.paper_ids, payload.limit)
+            sections = self._search_full_context(payload.paper_ids, payload.limit)
+            content_items = self._content_knowledge_results(payload)
+            items = self._compose_full_context(sections, content_items, payload.limit)
         else:
             retrieved = self.retriever.retrieve(
                 query=payload.query,
@@ -68,6 +71,7 @@ class RetrievalService:
                 paper_type_filter=normalize_paper_type_filter(payload.target_paper_type),
             )
             items = self._flatten_retrieved(retrieved)
+            items = self._merge_content_knowledge(items, payload)
 
         actually_reranked = False
         if is_full_context:
@@ -78,7 +82,7 @@ class RetrievalService:
         else:
             items = sorted(items, key=lambda item: item.score, reverse=True)
 
-        limited = items[: payload.limit]
+        limited = items if is_full_context else items[: payload.limit]
         
         reranker_name = self.reranker.name if actually_reranked else ("disabled_for_full_context" if payload.rerank and is_full_context else "disabled")
         
@@ -235,6 +239,115 @@ class RetrievalService:
                 )
         return items[:limit]
 
+    def _merge_content_knowledge(
+        self,
+        items: list[RetrievalSearchResult],
+        payload: RetrievalSearchRequest,
+    ) -> list[RetrievalSearchResult]:
+        seen = {
+            (item.source_type, item.source_id)
+            for item in items
+            if item.source_type and item.source_id
+        }
+        merged = list(items)
+        for item in self._content_knowledge_results(payload):
+            key = (item.source_type, item.source_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+        return merged
+
+    @staticmethod
+    def _compose_full_context(
+        sections: list[RetrievalSearchResult],
+        content_items: list[RetrievalSearchResult],
+        limit: int,
+    ) -> list[RetrievalSearchResult]:
+        """Reserve a bounded content-evidence lane without reordering sections."""
+        if not content_items:
+            return sections[:limit]
+        content_slots = min(len(content_items), max(1, limit // 4))
+        section_slots = max(0, limit - content_slots)
+        # The section lane remains in original paper/page order.  Content is
+        # appended as an explicit evidence appendix, never interleaved into it.
+        return [*sections[:section_slots], *content_items[:content_slots]]
+
+    def _content_knowledge_results(self, payload: RetrievalSearchRequest) -> list[RetrievalSearchResult]:
+        service = ContentKnowledgeService(self.session)
+        # Retrieval is read-only.  Projection/backfill is explicit through the
+        # content sync endpoint or source-change workers, never a query side effect.
+        scored_items = service.search_for_rag(
+            query=payload.query, paper_ids=payload.paper_ids or None,
+            include_review_assist=payload.include_review_assist,
+            limit=max(payload.limit_per_type * 2, payload.limit),
+        )
+
+        results: list[RetrievalSearchResult] = []
+        for item, score_breakdown in scored_items:
+            row = item.payload()
+            score = score_breakdown["hybrid"]
+            if score <= 0:
+                continue
+            paper_id = UUID(str(row["paper_id"]))
+            locator = row.get("evidence_locator") if isinstance(row.get("evidence_locator"), dict) else {}
+            page_start = row.get("page_start") or locator.get("page") or locator.get("page_start")
+            page_end = row.get("page_end") or locator.get("page") or locator.get("page_end")
+            text = _clean_retrieval_text(row.get("content") or row.get("evidence_text") or "")
+            if not text:
+                continue
+            evidence_text = _clean_retrieval_text(row.get("evidence_text") or text) or text
+            results.append(
+                RetrievalSearchResult(
+                    score=score,
+                    source="content_knowledge",
+                    source_type=row.get("source_type"),
+                    source_id=row.get("source_id"),
+                    paper_id=paper_id,
+                    paper_code=row.get("paper_code"),
+                    chunk_id=row.get("source_id"),
+                    section_title=_clean_retrieval_text(row.get("section_title")),
+                    text=text,
+                    page=page_start,
+                    evidence_text=evidence_text,
+                    review_status=row.get("review_status"),
+                    page_start=page_start,
+                    page_end=page_end,
+                    score_breakdown=score_breakdown,
+                    evidence=EvidenceRef(
+                        paper_id=paper_id,
+                        chunk_id=row.get("source_id"),
+                        page_span=PageSpan(page_start=page_start, page_end=page_end),
+                        evidence_text=evidence_text,
+                        confidence=score,
+                        source="content_knowledge",
+                        section_title=_clean_retrieval_text(row.get("section_title")),
+                        target_type=row.get("source_type"),
+                        target_id=row.get("source_id"),
+                        locator_status=locator.get("locator_status"),
+                        locator_confidence=locator.get("locator_confidence"),
+                    ),
+                    metadata=normalize_text_tree(
+                        {
+                            "category": row.get("category"),
+                            "category_label": row.get("category_label"),
+                            "source_table": row.get("source_table"),
+                            "review_gate_status": row.get("review_gate_status"),
+                            "candidate_status": row.get("candidate_status"),
+                            "citation_policy": row.get("citation_policy"),
+                            "can_use_for_writing": row.get("can_use_for_writing"),
+                            "can_use_for_citation": row.get("can_use_for_citation"),
+                            "risk_flags": row.get("risk_flags") or [],
+                            "recommended_action": row.get("recommended_action"),
+                            "source_ai": row.get("source_ai"),
+                            "source_label": row.get("source_label"),
+                            "content_knowledge_metadata": row.get("metadata") or {},
+                        }
+                    ),
+                )
+            )
+        return results
+
     @staticmethod
     def _flatten_retrieved(retrieved: dict[str, list[dict[str, Any]]]) -> list[RetrievalSearchResult]:
         flat: list[RetrievalSearchResult] = []
@@ -300,4 +413,39 @@ def _clean_retrieval_text(value: Any) -> str | None:
     text = re.sub(r"\s+([,.;:])", r"\1", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
+
+
+def _content_knowledge_score(query: str, row: dict[str, Any]) -> float:
+    query_tokens = _retrieval_tokens(query)
+    if not query_tokens:
+        return 0.0
+    haystack = _retrieval_tokens(
+        " ".join(
+            [
+                str(row.get("content") or ""),
+                str(row.get("evidence_text") or ""),
+                str(row.get("paper_title") or ""),
+                str(row.get("paper_code") or ""),
+                str(row.get("category") or ""),
+                str(row.get("category_label") or ""),
+                str(row.get("metadata") or ""),
+            ]
+        )
+    )
+    if not haystack:
+        return 0.0
+    overlap = len(query_tokens & haystack)
+    if overlap == 0:
+        return 0.0
+    coverage = overlap / max(1, len(query_tokens))
+    density = overlap / max(1, len(haystack))
+    return round(min(0.98, 0.35 + coverage * 0.55 + density * 0.1), 4)
+
+
+def _retrieval_tokens(value: Any) -> set[str]:
+    text = str(value or "").casefold()
+    tokens = set(re.findall(r"[A-Za-z0-9][A-Za-z0-9+./-]*", text))
+    compact = "".join(re.findall(r"[\u3400-\u9fff]", text))
+    tokens.update(compact[index:index + 2] for index in range(max(0, len(compact) - 1)))
+    return {token for token in tokens if token}
 

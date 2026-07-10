@@ -288,7 +288,7 @@ def get_paper(
 def get_paper_dft_results(
     paper_id: UUID,
     offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=50),
+    limit: int = Query(default=50, ge=1, le=100),
     result_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:

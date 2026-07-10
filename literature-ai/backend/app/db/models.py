@@ -621,6 +621,73 @@ class PaperNote(Base):
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 
 
+class ContentEvidenceItem(Base):
+    """Stable, reviewable evidence contract for content/RAG/writing workflows.
+
+    Legacy extraction tables remain their own source records.  This table is the
+    workflow projection that carries review, citation and provenance state, so a
+    writing card or an external AI candidate can never gain citation eligibility
+    merely because its source row exists.
+    """
+
+    __tablename__ = "content_evidence_items"
+    __table_args__ = (
+        sa.UniqueConstraint("source_type", "source_id", name="uq_content_evidence_source"),
+        sa.Index("ix_content_evidence_scope", "paper_id", "category", "review_status"),
+        sa.Index("ix_content_evidence_citation", "citation_status", "review_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("external_analysis_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    category: Mapped[str] = mapped_column(sa.String(64), index=True)
+    source_type: Mapped[str] = mapped_column(sa.String(64), index=True)
+    source_id: Mapped[str] = mapped_column(sa.String(96), index=True)
+    source_record: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    content: Mapped[str] = mapped_column(sa.Text)
+    evidence_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    evidence_locator: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    page_start: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    section_title: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    review_status: Mapped[str] = mapped_column(sa.String(32), default="needs_review", index=True)
+    citation_status: Mapped[str] = mapped_column(sa.String(32), default="needs_review", index=True)
+    risk_flags: Mapped[list] = mapped_column(json_type(), default=list)
+    source_identity: Mapped[str | None] = mapped_column(sa.String(160), nullable=True)
+    source_identity_verified: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=sa.false())
+    reviewer: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    snapshot_fingerprint: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    embedding: Mapped[list[float] | None] = mapped_column(VectorType(EMBEDDING_DIMENSION), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
+class ContentReviewBundle(Base):
+    __tablename__ = "content_review_bundles"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("external_analysis_runs.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    bundle_type: Mapped[str] = mapped_column(sa.String(64), default="content_evidence_review")
+    snapshot_fingerprint: Mapped[str] = mapped_column(sa.String(64), index=True)
+    manifest: Mapped[dict] = mapped_column(json_type(), default=dict)
+    result_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), default="generated", index=True)
+    created_by: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
 class PaperCorrection(Base):
     __tablename__ = "paper_corrections"
 

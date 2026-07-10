@@ -77,6 +77,7 @@ test('literature library waits for all DFT pages before rendering material group
     dft_results_page: { offset: 0, limit: 28, returned: 28, total: 30, has_more: true },
   };
   let remainingPageRequests = 0;
+  let requestedDftLimit = null;
 
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/api/**', async route => {
@@ -99,6 +100,7 @@ test('literature library waits for all DFT pages before rendering material group
     }
     if (pathname === '/api/papers/paper-1/dft-results') {
       remainingPageRequests += 1;
+      requestedDftLimit = url.searchParams.get('limit');
       await new Promise(resolve => setTimeout(resolve, 1500));
       return jsonResponse(route, {
         paper_id: 'paper-1',
@@ -152,4 +154,120 @@ test('literature library waits for all DFT pages before rendering material group
   await expect(page.locator('[data-role="dft-pagination"]')).toHaveCount(0);
   await expect(page.locator('[data-role="load-more-dft"]')).toHaveCount(0);
   expect(remainingPageRequests).toBe(1);
+  expect(requestedDftLimit).toBe('100');
+});
+
+test('literature library falls back to 50 item DFT pages when backend rejects larger pages', async ({ page }) => {
+  const allItems = Array.from({ length: 60 }, (_, index) => dftItem(index + 1));
+  const paper = {
+    id: 'paper-compat',
+    paper_id: 'paper-compat',
+    title: 'Backward Compatible DFT Paging Paper',
+    year: 2026,
+    journal: 'Journal of Compatible DFT',
+    paper_type: 'research',
+    library_name: 'Default Library',
+    pdf_path: 'paper.pdf',
+    counts: { sections: 0, figures: 0, dft_results: 60, writing_cards: 0 },
+  };
+  const commonDetail = {
+    ...paper,
+    abstract: 'DFT fallback fixture.',
+    sections: [],
+    tables: [],
+    figures: [],
+    paper_notes: [],
+    dft_settings_items: [],
+    catalyst_samples_items: [{
+      id: 'sample-sc',
+      name: 'Sc-BP',
+      catalyst_type: 'unknown',
+      metal_centers: [],
+    }],
+    electrochemical_performance_items: [],
+    mechanism_claims_items: [],
+    writing_cards_items: [],
+    outgoing_relationships: [],
+    incoming_relationships: [],
+    references: [],
+  };
+  const lightDetail = {
+    ...commonDetail,
+    dft_results_items: [],
+    dft_results_page: { offset: 0, limit: 28, returned: 0, total: 60, has_more: true },
+  };
+  const fullDetail = {
+    ...commonDetail,
+    dft_results_items: allItems.slice(0, 28),
+    dft_results_page: { offset: 0, limit: 28, returned: 28, total: 60, has_more: true },
+  };
+  const requestedLimits = [];
+
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route('**/api/**', async route => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const pathname = url.pathname;
+    if (pathname === '/api/libraries') {
+      return jsonResponse(route, [{
+        name: 'Default Library',
+        is_active: true,
+        root_path: '/libraries/default',
+        paper_count: 1,
+      }]);
+    }
+    if (pathname === '/api/papers/libraries') {
+      return jsonResponse(route, [{ name: 'Default Library', paper_count: 1 }]);
+    }
+    if ((pathname === '/api/papers' || pathname === '/api/papers/') && request.method() === 'GET') {
+      return jsonResponse(route, [paper]);
+    }
+    if (pathname === '/api/papers/paper-compat/dft-results') {
+      const limit = url.searchParams.get('limit');
+      requestedLimits.push(limit);
+      if (limit === '100') {
+        return route.fulfill({
+          status: 422,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify({ detail: [{ loc: ['query', 'limit'], msg: 'Input should be less than or equal to 50' }] }),
+        });
+      }
+      return jsonResponse(route, {
+        paper_id: 'paper-compat',
+        items: allItems.slice(28),
+        offset: 28,
+        limit: 50,
+        returned: 32,
+        total: 60,
+        has_more: false,
+      });
+    }
+    if (pathname === '/api/papers/paper-compat') {
+      return jsonResponse(route, url.searchParams.get('mode') === 'light' ? lightDetail : fullDetail);
+    }
+    if (pathname === '/api/papers/paper-compat/codex-context') {
+      return jsonResponse(route, {
+        context: {
+          dft_export_readiness: {
+            total_candidates: 60,
+            eligible_count: 60,
+            blocked_count: 0,
+            blocked_reasons: {},
+            items: [],
+          },
+        },
+      });
+    }
+    if (pathname.endsWith('/reviews/audit')) return jsonResponse(route, { items: [] });
+    if (pathname.endsWith('/evidence/locators')) return jsonResponse(route, { items: [] });
+    return jsonResponse(route, {});
+  });
+
+  await page.goto(
+    `${BASE_URL}/pages/literature_library/index.html?library_name=${encodeURIComponent('Default Library')}&paper_id=paper-compat&tab=dft`
+  );
+
+  await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toHaveCount(1);
+  await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toContainText('DFT 60 条');
+  expect(requestedLimits).toEqual(['100', '50']);
 });

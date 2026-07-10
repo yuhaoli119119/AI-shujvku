@@ -16,6 +16,7 @@ class RetrievalSearchRequest(BaseModel):
     limit_per_type: int = Field(default=5, ge=1, le=20)
     target_paper_type: str | None = None
     rerank: bool = True
+    include_review_assist: bool = False
 
 
 class RetrievalSearchResult(BaseModel):

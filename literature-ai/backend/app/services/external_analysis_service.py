@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -13,7 +13,6 @@ from app.db.models import (
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     Paper,
-    WorkflowJob,
 )
 from app.services.external_analysis_candidates import ExternalAnalysisCandidatePersistenceMixin
 from app.services.external_analysis_materialization import ExternalAnalysisMaterializationMixin
@@ -29,7 +28,7 @@ from app.services.external_analysis_models import (
 from app.services.external_analysis_identity import normalize_external_source_identity
 from app.services.external_analysis_normalization import ExternalAnalysisNormalizationMixin
 from app.services.llm_service import LLMService
-from app.utils.library_names import normalize_library_name
+from app.services.task_log_service import TaskLogService
 from app.utils.protocol_tracking import protocol_snapshot
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text
 
@@ -177,54 +176,12 @@ class ExternalAnalysisService(
         source: str,
         source_label: str | None,
     ) -> None:
-        label = str(source_label or source or "ide_ai").strip() or "ide_ai"
-        candidate_count = self._normalized_candidate_count(normalized)
-        action = "import_analysis"
-        title = f"IDE AI analysis imported: {label}"
-        self.session.add(
-            WorkflowJob(
-                job_id=str(uuid4()),
-                type="agent_activity",
-                status="completed",
-                library_name=normalize_library_name(paper.library_name),
-                payload={
-                    "agent": label,
-                    "action": action,
-                    "title": title,
-                    "paper_id": str(paper.id),
-                    "paper_code": paper.paper_code,
-                    "paper_title": paper.title,
-                    "source": source,
-                    "source_label": source_label,
-                    "external_analysis_run_id": str(run.id),
-                },
-                progress={
-                    "phase": action,
-                    "action": action,
-                    "message": title,
-                    "agent": label,
-                    "paper_id": str(paper.id),
-                    "paper_code": paper.paper_code,
-                },
-                result={
-                    "metrics": {
-                        "success_count": 1 if not run.mapping_error else 0,
-                        "failure_count": 1 if run.mapping_error else 0,
-                        "candidate_count": candidate_count,
-                    },
-                    "details": {
-                        "mapping_status": run.mapping_status,
-                        "mapping_error": run.mapping_error,
-                        "paper_code": paper.paper_code,
-                        "source": source,
-                        "source_label": source_label,
-                    },
-                    "artifacts": [{"type": "external_analysis_run", "run_id": str(run.id)}],
-                    "success_count": 1 if not run.mapping_error else 0,
-                    "failure_count": 1 if run.mapping_error else 0,
-                },
-                runtime_context={},
-            )
+        TaskLogService(self.session).record_external_analysis_import(
+            paper=paper,
+            run=run,
+            normalized=normalized,
+            source=source,
+            source_label=source_label,
         )
 
     @staticmethod

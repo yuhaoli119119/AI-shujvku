@@ -378,17 +378,43 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
         metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
         action = payload.get("action") or progress.get("action") or "activity"
         agent = payload.get("agent") or "AI"
+        problem_items = result.get("problem_items") if isinstance(result.get("problem_items"), list) else []
+        artifacts = result.get("artifacts") if isinstance(result.get("artifacts"), list) else []
+        task_display_name = payload.get("task_display_name") or result.get("task_display_name")
+        task_source = payload.get("task_source") or result.get("task_source") or payload.get("source")
+        task_source_label = payload.get("task_source_label") or result.get("task_source_label")
         summary.update(
             {
-                "source_label": f"{agent} 工作留痕",
+                "source_label": task_source_label or f"{agent} 工作留痕",
                 "action": action,
                 "agent": agent,
-                "title": payload.get("title") or progress.get("message") or action,
+                "title": task_display_name or payload.get("title") or progress.get("message") or action,
+                "summary_text": result.get("summary_text") or progress.get("message"),
+                "task_display_name": task_display_name,
+                "task_source": task_source,
+                "task_source_label": task_source_label,
+                "source_display": payload.get("source_display") or result.get("source_display"),
+                "source_identity": payload.get("source_identity") or result.get("source_identity"),
+                "source_identity_verified": bool(payload.get("source_identity_verified") or result.get("source_identity_verified")),
+                "module": payload.get("module") or result.get("module"),
+                "module_label": payload.get("module_label") or result.get("module_label"),
                 "paper_id": payload.get("paper_id"),
+                "paper_code": payload.get("paper_code") or result.get("paper_code"),
                 "paper_title": payload.get("paper_title"),
                 "query": payload.get("query") or summary.get("query"),
+                "total": _first_int(metrics.get("total"), metrics.get("candidate_count"), result.get("total")),
+                "problem_count": _first_int(metrics.get("problem_count"), len(problem_items)),
+                "pending_count": _first_int(metrics.get("pending_count")),
+                "blocking_count": _first_int(metrics.get("blocking_count")),
+                "lifecycle": result.get("lifecycle") or progress.get("lifecycle"),
+                "last_action": result.get("last_action"),
+                "external_analysis_run_id": payload.get("external_analysis_run_id") or result.get("external_analysis_run_id"),
+                "problem_items": problem_items,
+                "metrics": metrics,
                 "success_count": _first_int(
                     metrics.get("success_count"),
+                    metrics.get("created"),
+                    metrics.get("applied"),
                     metrics.get("papers"),
                     metrics.get("items"),
                     result.get("success_count"),
@@ -399,9 +425,11 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
                     result.get("failure_count"),
                     1 if job.status == "failed" else 0,
                 ),
-                "artifacts": result.get("artifacts") if isinstance(result.get("artifacts"), list) else [],
+                "artifacts": artifacts,
             }
         )
+        if task_source:
+            summary["source"] = task_source
     else:
         summary.update({"source_label": job.type, "failure_count": 1 if job.status == "failed" else 0})
 
