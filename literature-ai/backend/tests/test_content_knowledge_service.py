@@ -196,6 +196,7 @@ def test_retrieval_search_includes_content_knowledge_with_policy_metadata(setup_
     content_items = [item for item in payload["items"] if item["source"] == "content_knowledge"]
     assert content_items
     candidate = next(item for item in content_items if item["source_type"] == "external_analysis_candidate")
+    assert candidate["paper_code"] == "CK001"
     assert candidate["review_status"] == "needs_review"
     assert candidate["metadata"]["citation_policy"] == "needs_review"
     assert "candidate_requires_resolution" in candidate["metadata"]["risk_flags"]

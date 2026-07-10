@@ -15,13 +15,17 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     Base,
     CatalystSample,
+    ContentEvidenceItem,
+    ContentReviewBundle,
     DFTResult,
+    EvidenceClaim,
     EvidenceSpan,
     ExtractionFieldReview,
     FigureDataPoint,
     Paper,
     PaperFigure,
     PaperSection,
+    WorkflowJob,
     WritingCard,
 )
 
@@ -393,6 +397,93 @@ def test_full_context_mode():
     assert res.reranker["enabled"] is False
     assert res.reranker["name"] == "disabled_for_full_context"
     assert len(res.items) == 3
+
+
+def test_full_context_assigns_paper_code_for_all_sections_beyond_limit(setup_test_db):
+    engine = setup_test_db
+    with Session(engine) as session:
+        paper = Paper(title="Full context code paper", paper_code="FC001", pdf_path="fc001.pdf", authors=[])
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                PaperSection(
+                    paper_id=paper.id,
+                    section_title=f"Section {index}",
+                    section_type="body",
+                    text=f"Full context text {index}",
+                    page_start=index,
+                    page_end=index,
+                )
+                for index in range(1, 8)
+            ]
+        )
+        session.commit()
+        before = {
+            "content": session.query(ContentEvidenceItem).count(),
+            "claims": session.query(EvidenceClaim).count(),
+            "jobs": session.query(WorkflowJob).count(),
+            "bundles": session.query(ContentReviewBundle).count(),
+        }
+
+        items = RetrievalService(session)._search_full_context([paper.id], limit=3)
+
+        assert len(items) == 3
+        assert [item.paper_code for item in items] == ["FC001"] * 3
+        assert [item.page_start for item in items] == [1, 2, 3]
+        assert all(item.metadata["paper_code"] == "FC001" for item in items)
+        after = {
+            "content": session.query(ContentEvidenceItem).count(),
+            "claims": session.query(EvidenceClaim).count(),
+            "jobs": session.query(WorkflowJob).count(),
+            "bundles": session.query(ContentReviewBundle).count(),
+        }
+        assert after == before
+
+
+def test_full_context_assigns_paper_code_by_paper_for_multiple_papers(setup_test_db):
+    engine = setup_test_db
+    with Session(engine) as session:
+        first = Paper(title="First full context paper", paper_code="FC002", pdf_path="fc002.pdf", authors=[])
+        second = Paper(title="Second full context paper", paper_code="FC003", pdf_path="fc003.pdf", authors=[])
+        session.add_all([first, second])
+        session.flush()
+        session.add_all(
+            [
+                PaperSection(
+                    paper_id=first.id,
+                    section_title=f"First {index}",
+                    section_type="body",
+                    text=f"First text {index}",
+                    page_start=index,
+                    page_end=index,
+                )
+                for index in range(1, 4)
+            ]
+            + [
+                PaperSection(
+                    paper_id=second.id,
+                    section_title=f"Second {index}",
+                    section_type="body",
+                    text=f"Second text {index}",
+                    page_start=index,
+                    page_end=index,
+                )
+                for index in range(1, 4)
+            ]
+        )
+        session.commit()
+
+        items = RetrievalService(session)._search_full_context([first.id, second.id], limit=6)
+
+        assert [(item.paper_id, item.paper_code) for item in items] == [
+            (first.id, "FC002"),
+            (first.id, "FC002"),
+            (first.id, "FC002"),
+            (second.id, "FC003"),
+            (second.id, "FC003"),
+            (second.id, "FC003"),
+        ]
 
 
 def test_retrieval_service_cleans_mojibake_result_text():

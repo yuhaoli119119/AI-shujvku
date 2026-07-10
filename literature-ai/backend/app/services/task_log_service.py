@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -181,9 +181,252 @@ def _problem_items(
     return items
 
 
+_SUCCESS_CANDIDATE_STATUSES = {"ai_applied", "materialized", "applied", "validated", "approved", "ai_reviewed"}
+_PENDING_CANDIDATE_STATUSES = {"pending", "candidate"}
+_PROBLEM_CANDIDATE_STATUSES = {"requires_resolution", "unmapped", "failed", "skipped", "needs_human"}
+_BLOCKING_CANDIDATE_STATUSES = {"failed", "skipped", "unmapped"}
+
+
+def _infer_module_from_candidates(candidates: list[ExternalAnalysisCandidate]) -> str:
+    targets: list[str] = []
+    for candidate in candidates:
+        candidate_type = _compact_text(candidate.candidate_type).lower()
+        targets.append(candidate_type)
+        payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+        for key in ("target_type", "field_name", "target_path", "module", "module_name"):
+            targets.append(_compact_text(payload.get(key)).lower())
+        nested = payload.get("raw_payload") if isinstance(payload.get("raw_payload"), dict) else {}
+        for key in ("target_type", "field_name", "target_path", "module", "module_name"):
+            targets.append(_compact_text(nested.get(key)).lower())
+    joined = " ".join(targets)
+    if "dft" in joined:
+        return "dft"
+    if any(token in joined for token in ("figure", "table", "chart")):
+        return "figure_table_evidence"
+    if any(token in joined for token in ("writing", "card", "draft")):
+        return "writing"
+    if any(token in joined for token in ("text", "evidence_check")):
+        return "text_review"
+    return "content_knowledge"
+
+
+def _external_analysis_candidate_summary(
+    run: ExternalAnalysisRun,
+    candidates: list[ExternalAnalysisCandidate],
+) -> dict[str, Any]:
+    statuses = Counter(_compact_text(item.status).lower() or "pending" for item in candidates)
+    candidate_types = Counter(_compact_text(item.candidate_type).lower() or "unknown" for item in candidates)
+    problem_items = [
+        {
+            "status": _compact_text(item.status) or "pending",
+            "candidate_type": item.candidate_type,
+            "reason": item.mapping_reason,
+            "candidate_id": str(item.id),
+        }
+        for item in candidates
+        if _compact_text(item.status).lower() in _PROBLEM_CANDIDATE_STATUSES
+    ][:8]
+    if run.mapping_error:
+        problem_items.insert(
+            0,
+            {"status": "failed", "reason": run.mapping_error, "candidate_type": "external_analysis_run"},
+        )
+        problem_items = problem_items[:8]
+    total = len(candidates)
+    success = sum(statuses.get(status, 0) for status in _SUCCESS_CANDIDATE_STATUSES)
+    pending = sum(statuses.get(status, 0) for status in _PENDING_CANDIDATE_STATUSES)
+    problem = sum(statuses.get(status, 0) for status in _PROBLEM_CANDIDATE_STATUSES) + (1 if run.mapping_error else 0)
+    blocking = sum(statuses.get(status, 0) for status in _BLOCKING_CANDIDATE_STATUSES) + (1 if run.mapping_error else 0)
+    if run.mapping_error:
+        lifecycle = "failed"
+    elif any(statuses.get(status, 0) for status in ("needs_human", "requires_resolution", "unmapped")):
+        lifecycle = "needs_human"
+    elif pending:
+        lifecycle = "awaiting_review"
+    elif success:
+        lifecycle = "applied"
+    elif total:
+        lifecycle = "validated"
+    else:
+        lifecycle = "imported"
+    metrics = {
+        "total": total,
+        "candidate_count": total,
+        "success": success,
+        "success_count": success,
+        "pending": pending,
+        "pending_count": pending,
+        "problem": problem,
+        "problem_count": problem,
+        "blocking": blocking,
+        "blocking_count": blocking,
+        "by_candidate_type": dict(candidate_types),
+        "by_status": dict(statuses),
+        "failure_count": statuses.get("failed", 0) + (1 if run.mapping_error else 0),
+    }
+    return {
+        "module": _infer_module_from_candidates(candidates),
+        "metrics": metrics,
+        "problem_items": problem_items,
+        "lifecycle": lifecycle,
+    }
+
+
 class TaskLogService:
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def backfill_missing_external_analysis_tasks(
+        self,
+        *,
+        paper_code: str | None = None,
+        paper_id: UUID | str | None = None,
+        apply: bool = False,
+    ) -> dict[str, Any]:
+        """Report or create one audit task for each candidate-bearing run without one.
+
+        This method only adds missing WorkflowJob rows when ``apply`` is true. It
+        never changes the run, candidates, content projection, or review state.
+        """
+        stmt = (
+            select(ExternalAnalysisRun, Paper)
+            .join(Paper, Paper.id == ExternalAnalysisRun.paper_id)
+            .order_by(ExternalAnalysisRun.created_at.asc(), ExternalAnalysisRun.id.asc())
+        )
+        if paper_code:
+            stmt = stmt.where(Paper.paper_code == str(paper_code).strip())
+        if paper_id:
+            stmt = stmt.where(Paper.id == UUID(str(paper_id)))
+
+        report: dict[str, Any] = {
+            "apply": apply,
+            "paper_code": paper_code,
+            "paper_id": str(paper_id) if paper_id else None,
+            "scanned_runs": 0,
+            "candidate_runs": 0,
+            "existing_tasks": 0,
+            "missing_runs": [],
+            "expected_new_tasks": 0,
+            "created_tasks": 0,
+            "created_job_ids": [],
+        }
+        for run, paper in self.session.execute(stmt).all():
+            report["scanned_runs"] += 1
+            candidates = list(
+                self.session.scalars(
+                    select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id)
+                ).all()
+            )
+            if not candidates:
+                continue
+            report["candidate_runs"] += 1
+            existing = self.session.scalar(
+                select(WorkflowJob).where(
+                    WorkflowJob.type == "agent_activity",
+                    WorkflowJob.payload["external_analysis_run_id"].astext == str(run.id),
+                )
+            )
+            if existing is not None:
+                report["existing_tasks"] += 1
+                continue
+
+            summary = _external_analysis_candidate_summary(run, candidates)
+            task_source, task_source_label = normalize_task_source(run.source)
+            task_module, module_label = normalize_task_module(summary["module"])
+            display_name = f"{task_source_label}：{module_label}"
+            source_display = (
+                f"{task_source_label}（已认证：{run.source_identity}）"
+                if run.source_identity_verified
+                else f"{task_source_label}（声明来源；未认证 HTTP 载荷）"
+            )
+            metrics = summary["metrics"]
+            summary_text = (
+                f"历史补建：{metrics['total']} 个候选项；成功 {metrics['success']}，"
+                f"待处理 {metrics['pending']}，问题 {metrics['problem']}。"
+            )
+            common = {
+                "task_log_version": 1,
+                "task_display_name": display_name,
+                "task_source": task_source,
+                "task_source_label": task_source_label,
+                "source": task_source,
+                "source_label": run.source_label or task_source_label,
+                "source_display": source_display,
+                "source_identity": run.source_identity,
+                "source_identity_verified": bool(run.source_identity_verified),
+                "source_trust": "verified" if run.source_identity_verified else "unverified",
+                "module": task_module,
+                "module_label": module_label,
+                "paper_id": str(paper.id),
+                "paper_code": paper.paper_code,
+                "paper_title": paper.title,
+                "external_analysis_run_id": str(run.id),
+                "backfilled": True,
+            }
+            report["expected_new_tasks"] += 1
+            report["missing_runs"].append(
+                {
+                    "run_id": str(run.id),
+                    "paper_id": str(paper.id),
+                    "paper_code": paper.paper_code,
+                    "candidate_count": metrics["total"],
+                    "source": task_source,
+                    "source_label": run.source_label or task_source_label,
+                    "source_identity": run.source_identity,
+                    "source_identity_verified": bool(run.source_identity_verified),
+                    "module": task_module,
+                    "module_label": module_label,
+                    "lifecycle": summary["lifecycle"],
+                }
+            )
+            if not apply:
+                continue
+            job = WorkflowJob(
+                job_id=str(uuid4()),
+                type="agent_activity",
+                status="failed" if summary["lifecycle"] == "failed" else "completed",
+                library_name=normalize_library_name(paper.library_name),
+                payload={
+                    **common,
+                    "action": "backfill_external_analysis_task",
+                    "agent": run.source_label or task_source_label,
+                    "title": display_name,
+                },
+                progress={
+                    "phase": summary["lifecycle"],
+                    "action": "backfilled",
+                    "message": summary_text,
+                    "paper_id": str(paper.id),
+                    "paper_code": paper.paper_code,
+                    "task_display_name": display_name,
+                    "lifecycle": summary["lifecycle"],
+                    "backfilled": True,
+                },
+                result={
+                    **common,
+                    "summary_text": summary_text,
+                    "metrics": metrics,
+                    "problem_items": summary["problem_items"],
+                    "artifacts": [{"type": "external_analysis_run", "run_id": str(run.id)}],
+                    "details": {
+                        "mapping_status": run.mapping_status,
+                        "mapping_error": run.mapping_error,
+                        "paper_code": paper.paper_code,
+                        "source": run.source,
+                        "source_label": run.source_label,
+                    },
+                    "success_count": metrics["success"],
+                    "failure_count": metrics["failure_count"],
+                    "lifecycle": summary["lifecycle"],
+                    "last_action": "backfilled",
+                    "backfilled": True,
+                },
+                runtime_context={},
+            )
+            self.session.add(job)
+            report["created_tasks"] += 1
+            report["created_job_ids"].append(job.job_id)
+        return report
 
     def record_external_analysis_import(
         self,

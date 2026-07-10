@@ -8,7 +8,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import PaperSection
+from app.db.models import Paper, PaperSection
 from app.rag.eligibility import is_rag_eligible
 from app.rag.retriever import Retriever
 from app.schemas.evidence import EvidenceRef, PageSpan
@@ -113,6 +113,12 @@ class RetrievalService:
         if not ordered_paper_ids:
             return []
 
+        paper_codes = dict(
+            self.session.execute(
+                select(Paper.id, Paper.paper_code).where(Paper.id.in_(ordered_paper_ids))
+            ).all()
+        )
+
         sections_by_paper: list[list[tuple[PaperSection, str, str]]] = []
         seen_section_ids: set[UUID] = set()
         for paper_id in ordered_paper_ids:
@@ -165,6 +171,7 @@ class RetrievalService:
                         score=score,
                         source="full_context",
                         paper_id=section.paper_id,
+                        paper_code=paper_codes.get(section.paper_id),
                         chunk_id=chunk_key,
                         section_id=section.id,
                         section_title=section_title,
@@ -184,13 +191,21 @@ class RetrievalService:
                             target_type="section",
                             target_id=chunk_key,
                         ),
-                        metadata={"section_type": section.section_type},
+                        metadata={
+                            "section_type": section.section_type,
+                            "paper_code": paper_codes.get(section.paper_id),
+                        },
                     )
                 )
         return items
 
     def _full_context(self, paper_ids: list[UUID], limit: int) -> list[RetrievalSearchResult]:
         items: list[RetrievalSearchResult] = []
+        paper_codes = dict(
+            self.session.execute(
+                select(Paper.id, Paper.paper_code).where(Paper.id.in_(set(paper_ids)))
+            ).all()
+        ) if paper_ids else {}
         limit_per_paper = max(1, math.ceil(limit / len(paper_ids))) if paper_ids else limit
         index = 0
         for paper_id in paper_ids:
@@ -215,6 +230,7 @@ class RetrievalService:
                         score=score,
                         source="full_context",
                         paper_id=section.paper_id,
+                        paper_code=paper_codes.get(section.paper_id),
                         chunk_id=str(section.id),
                         section_id=section.id,
                         section_title=section_title,
@@ -234,7 +250,10 @@ class RetrievalService:
                             target_type="section",
                             target_id=str(section.id),
                         ),
-                        metadata={"section_type": section.section_type},
+                        metadata={
+                            "section_type": section.section_type,
+                            "paper_code": paper_codes.get(section.paper_id),
+                        },
                     )
                 )
         return items[:limit]
