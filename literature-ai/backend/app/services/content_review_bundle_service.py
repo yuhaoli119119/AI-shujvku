@@ -3,15 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.db.models import AuditLog, ContentEvidenceItem, ContentReviewBundle, ExternalAnalysisRun, Paper
 from app.services.task_log_service import TaskLogService
+from app.utils.artifact_paths import resolve_paper_pdf_path
 
 
 RESULT_SCHEMA = "content_evidence_review_result_v1"
@@ -25,8 +26,9 @@ class ContentReviewBundleService:
     The server rechecks the current item, paper code, fingerprint and locator.
     """
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
+        self.settings = settings or get_settings()
 
     def generate(self, *, paper_id: UUID, run_id: UUID | None = None, created_by: str = "user") -> dict[str, Any]:
         paper = self._paper(paper_id)
@@ -108,7 +110,9 @@ class ContentReviewBundleService:
             if evidence_id and evidence_id != f"evidence:{item.id}":
                 errors.append(f"unknown_evidence_id:{evidence_id}")
             if decision == "approve_citable":
-                if not self._has_real_pdf_evidence(paper, item, action):
+                if item.category == "figure_table_evidence":
+                    errors.append(f"figure_field_review_requires_chart_bundle:{item_id}")
+                elif not self._has_real_pdf_evidence(paper, item, action):
                     errors.append(f"citable_requires_real_pdf_evidence:{item_id}")
             quoted = str(action.get("evidence_text") or "").strip()
             if quoted and item.evidence_text and quoted not in item.evidence_text:
@@ -147,8 +151,11 @@ class ContentReviewBundleService:
             if item is None:
                 raise ValueError("content_review_item_disappeared")
             decision = action["decision"]
-            if decision == "approve_citable" and not self._has_real_pdf_evidence(paper, item, action):
-                raise ValueError(f"citable_requires_real_pdf_evidence:{item.id}")
+            if decision == "approve_citable":
+                if item.category == "figure_table_evidence":
+                    raise ValueError(f"figure_field_review_requires_chart_bundle:{item.id}")
+                if not self._has_real_pdf_evidence(paper, item, action):
+                    raise ValueError(f"citable_requires_real_pdf_evidence:{item.id}")
             item.reviewer = reviewer
             item.reviewed_at = datetime.utcnow()
             if decision == "approve_citable":
@@ -254,12 +261,12 @@ class ContentReviewBundleService:
             "identity_verified": bool(authenticated_identity_verified and authenticated_identity),
         }
 
-    @staticmethod
-    def _has_real_pdf_evidence(paper, item, action):
+    def _has_real_pdf_evidence(self, paper, item, action):
         locator = item.evidence_locator or {}
         has_locator = bool(item.page_start or item.section_title or locator.get("page") or locator.get("page_start") or locator.get("section_title"))
         return bool(
-            paper.pdf_path and Path(str(paper.pdf_path)).is_file() and item.evidence_text and has_locator
+            resolve_paper_pdf_path(paper.pdf_path, self.settings.storage_root) is not None
+            and item.evidence_text and has_locator
             and action.get("evidence_id") == f"evidence:{item.id}"
         )
 

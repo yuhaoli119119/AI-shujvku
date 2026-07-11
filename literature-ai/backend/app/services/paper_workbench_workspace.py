@@ -301,10 +301,15 @@ class PaperWorkbenchWorkspaceMixin:
         for index, figure in enumerate(figures, start=1):
             label = self._figure_label(figure.caption, index)
             figure.figure_label = label
-            crop_payload = self._figure_crop_payload(figure)
-            figure.crop_status = crop_payload["crop_status"]
-            figure.crop_confidence = crop_payload["crop_confidence"]
-            figure.crop_source = crop_payload["crop_source"]
+            # Workspace regeneration is an export/read convenience.  It must not
+            # overwrite the reviewed crop state that an evidence-review RECROP
+            # just persisted, otherwise a harmless workspace refresh changes the
+            # chart-review snapshot and falsely marks the completed run stale.
+            if not self._has_offline_evidence_review_state(figure):
+                crop_payload = self._figure_crop_payload(figure)
+                figure.crop_status = crop_payload["crop_status"]
+                figure.crop_confidence = crop_payload["crop_confidence"]
+                figure.crop_source = crop_payload["crop_source"]
             src = resolve_persisted_artifact_path(
                 figure.image_path,
                 category="figures",
@@ -317,6 +322,15 @@ class PaperWorkbenchWorkspaceMixin:
                 if src.resolve() != target.resolve():
                     shutil.copy2(src, target)
             self.session.add(figure)
+
+    @staticmethod
+    def _has_offline_evidence_review_state(figure: PaperFigure) -> bool:
+        return any(
+            isinstance(item, dict)
+            and item.get("action") in {"offline_evidence_review_crop", "offline_evidence_review_keep"}
+            and str(item.get("source_action") or "").upper() in {"KEEP", "RECROP"}
+            for item in reversed(figure.prov or [])
+        )
 
     @staticmethod
     def _figure_label(caption: str | None, index: int) -> str:

@@ -12,17 +12,16 @@ import uuid
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import AuditLog, ExternalAnalysisCandidate, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
+from app.db.models import AuditLog, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
 from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewFigureAction,
     OfflineEvidenceReviewResult,
     OfflineEvidenceReviewTableAction,
 )
-from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.figure_review_scope import (
     include_figure_in_chart_review_scope,
@@ -31,6 +30,7 @@ from app.services.figure_review_scope import (
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.review_service import ReviewService
 from app.services.table_curation_service import TableCurationService
+from app.services.task_log_service import TaskLogService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import (
     figure_summary_echoes_caption,
@@ -153,10 +153,11 @@ class EvidenceReviewBundleService:
         self,
         paper_id: UUID,
         *,
+        run_id: UUID | None = None,
         include_pdf_files: bool = True,
         include_figure_files: bool = True,
     ) -> dict[str, Any]:
-        materials = self._build_materials(paper_id)
+        materials = self._build_materials(paper_id, run_id=run_id)
         files: dict[str, bytes] = {
             "parsed/paper_metadata.json": _json_bytes(materials["paper_metadata"]),
             "parsed/source_documents.json": _json_bytes(self._public_source_documents(materials["source_documents"])),
@@ -227,9 +228,15 @@ class EvidenceReviewBundleService:
             {"path": path, "size_bytes": len(data), "sha256": _sha256(data)}
             for path, data in sorted(files.items())
         ]
+        bundle_id = str(uuid.uuid4())
         manifest = {
             "schema_version": OFFLINE_EVIDENCE_REVIEW_BUNDLE_SCHEMA_VERSION,
+            "bundle_id": bundle_id,
+            "bundle_type": "chart_field_review" if run_id else "figure_table_evidence_review",
             "generated_at": datetime.now(UTC).isoformat(),
+            "scope_type": "external_analysis_run" if run_id else "paper",
+            "run_id": str(run_id) if run_id else None,
+            "chart_run_id": str(run_id) if run_id else None,
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "paper": {
                 "paper_id": materials["paper_metadata"]["paper_id"],
@@ -237,11 +244,15 @@ class EvidenceReviewBundleService:
                 "title": materials["paper_metadata"].get("title"),
             },
             "review_scope": "single_paper_main_plus_supplementary_figures_and_tables",
+            "field_writeback": ["key_elements", "content_summary", "figure_role", "caption", "page", "crop_status"],
             "expected_coverage": {
                 "figure_ids": sorted(materials["figure_id_map"]),
                 "table_ids": sorted(materials["table_id_map"]),
                 "source_paper_ids": sorted(materials["source_paper_ids"]),
             },
+            "target_figure_snapshots": self._public_records(materials["extracted_figures"], include_bundle_file=False),
+            "target_table_snapshots": self._public_records(materials["extracted_tables"], include_bundle_file=False),
+            "source_page_geometry": materials["page_geometry"],
             "auto_apply_policy": {
                 "local_ai_role": "evidence_verification_and_atomic_resolution",
                 "figure_auto_confidence_min": FIGURE_AUTO_CONFIDENCE,
@@ -265,6 +276,24 @@ class EvidenceReviewBundleService:
         }
         files["manifest.json"] = _json_bytes(manifest)
 
+        self.session.add(AuditLog(
+            paper_id=paper_id,
+            action="chart_review_bundle_generated",
+            source="web_ui",
+            target_type="chart_review_bundle",
+            target_id=bundle_id,
+            payload={
+                "bundle_id": bundle_id,
+                "scope_type": manifest["scope_type"],
+                "run_id": manifest["run_id"],
+                "bundle_fingerprint": manifest["bundle_fingerprint"],
+                "target_figure_ids": manifest["expected_coverage"]["figure_ids"],
+                "target_table_ids": manifest["expected_coverage"]["table_ids"],
+            },
+            created_at=utcnow(),
+        ))
+        self.session.flush()
+
         buffer = BytesIO()
         with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
             for path, data in sorted(files.items()):
@@ -275,9 +304,10 @@ class EvidenceReviewBundleService:
             "filename": f"{paper_code}_figure_table_evidence_review_bundle.zip",
             "content": buffer.getvalue(),
             "manifest": manifest,
+            "bundle_id": bundle_id,
         }
 
-    def validate_result(self, paper_id: UUID, raw_payload: dict[str, Any]) -> dict[str, Any]:
+    def validate_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None) -> dict[str, Any]:
         try:
             result = OfflineEvidenceReviewResult.model_validate(raw_payload)
         except ValidationError as exc:
@@ -301,7 +331,14 @@ class EvidenceReviewBundleService:
                 "unresolved_actions": [],
             }
 
-        materials = self._build_materials(paper_id)
+        payload_run_id = self._payload_run_id(raw_payload)
+        if run_id is not None and payload_run_id != run_id:
+            return {"valid": False, "stage_status": "invalid", "apply_ready": False,
+                    "errors": [{"code": "run_scope_mismatch", "message": "run_id does not match the requested chart review scope"}],
+                    "warnings": [], "execution_plan": [], "auto_apply_count": 0,
+                    "needs_confirmation_count": 0, "unresolved_count": 0, "unresolved_actions": []}
+        run_id = payload_run_id
+        materials = self._build_materials(paper_id, run_id=run_id)
         metadata = materials["paper_metadata"]
         errors: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = []
@@ -317,6 +354,9 @@ class EvidenceReviewBundleService:
             add_error("paper_id_mismatch", "review_result paper_id does not match the selected paper")
         if result.paper_code != metadata["paper_code"]:
             add_error("paper_code_mismatch", "review_result paper_code does not match the selected paper")
+        expected_scope = "external_analysis_run" if run_id else "paper"
+        if result.scope_type != expected_scope or (result.run_id and result.run_id != str(run_id)):
+            add_error("run_scope_mismatch", "review_result run_id/scope_type does not match the chart review bundle")
         if result.bundle_fingerprint != materials["bundle_fingerprint"]:
             add_error(
                 "stale_or_mismatched_bundle",
@@ -427,6 +467,9 @@ class EvidenceReviewBundleService:
             "apply_ready": apply_ready,
             "paper_id": metadata["paper_id"],
             "paper_code": metadata["paper_code"],
+            "scope_type": materials.get("scope_type", "paper"),
+            "run_id": materials.get("run_id"),
+            "chart_run_id": materials.get("run_id"),
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "coverage": {
                 "expected_figure_ids": sorted(materials["figure_id_map"]),
@@ -455,14 +498,16 @@ class EvidenceReviewBundleService:
             },
         }
 
-    def apply_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
+    def apply_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
         payload_hash = _payload_sha256(raw_payload)
+        payload_run_id = self._payload_run_id(raw_payload)
+        run_id = run_id or payload_run_id
         if not dry_run:
-            existing = self._existing_review_response(paper_id, payload_hash)
+            existing = self._existing_review_response(paper_id, payload_hash, run_id=run_id)
             if existing is not None:
                 return existing
 
-        validation = self.validate_result(paper_id, raw_payload)
+        validation = self.validate_result(paper_id, raw_payload, run_id=run_id)
         result = OfflineEvidenceReviewResult.model_validate(raw_payload) if validation["valid"] else None
         if not validation["valid"] or dry_run:
             return {
@@ -477,7 +522,7 @@ class EvidenceReviewBundleService:
             }
 
         assert result is not None
-        materials = self._build_materials(paper_id)
+        materials = self._build_materials(paper_id, run_id=run_id)
         auto_op_ids = {
             item["op_id"]
             for item in validation.get("execution_plan", [])
@@ -503,6 +548,7 @@ class EvidenceReviewBundleService:
             if unresolved_actions:
                 response = self._record_partial_review(
                     paper_id=paper_id,
+                    run_id=run_id,
                     result=result,
                     validation=validation,
                     applied=applied,
@@ -513,6 +559,7 @@ class EvidenceReviewBundleService:
             else:
                 response = self._record_completed_review(
                     paper_id=paper_id,
+                    run_id=run_id,
                     result=result,
                     validation=validation,
                     applied=applied,
@@ -526,11 +573,11 @@ class EvidenceReviewBundleService:
 
         return response
 
-    def get_review_task(self, paper_id: UUID) -> dict[str, Any]:
-        materials = self._build_materials(paper_id)
-        current_snapshot = compute_figure_table_snapshot(self.session, paper_id)
-        current_snapshot_fingerprint = current_snapshot["fingerprint"]
-        latest = self._latest_review_audit(paper_id)
+    def get_review_task(self, paper_id: UUID, *, run_id: UUID | None = None) -> dict[str, Any]:
+        materials = self._build_materials(paper_id, run_id=run_id)
+        current_snapshot = self._scope_snapshot(materials)
+        current_snapshot_fingerprint = materials["bundle_fingerprint"]
+        latest = self._latest_review_audit(paper_id, run_id=run_id)
         latest_payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
         latest_response = latest_payload.get("response") if isinstance(latest_payload.get("response"), dict) else None
         stage_status = "not_started"
@@ -553,14 +600,24 @@ class EvidenceReviewBundleService:
             stage_status == "completed"
             and completed_snapshot_fingerprint != current_snapshot_fingerprint
         ):
-            stage_status = "stale"
-            unresolved_actions = [
-                {
-                    "code": "figure_table_snapshot_changed",
-                    "message": "Persisted figure/table content changed after chart review completion.",
-                    "requires_local_ai": True,
-                }
-            ]
+            # Older workspace refreshes rewrote only the three derived crop
+            # metadata fields after an offline RECROP, while preserving the
+            # reviewed image, geometry, evidence, and provenance.  Recognize
+            # that exact legacy shape without weakening any real stale check.
+            if self._is_known_workspace_crop_metadata_drift(
+                latest_payload.get("completed_snapshot") or state_payload.get("completed_snapshot"),
+                current_snapshot,
+            ):
+                completed_snapshot_fingerprint = current_snapshot_fingerprint
+            else:
+                stage_status = "stale"
+                unresolved_actions = [
+                    {
+                        "code": "figure_table_snapshot_changed",
+                        "message": "Persisted figure/table content changed after chart review completion.",
+                        "requires_local_ai": True,
+                    }
+                ]
         needs_human_pending = pending_needs_human_actions_from_review_payload(latest_payload)
         if stage_status == "completed" and needs_human_pending:
             stage_status = "needs_local_ai"
@@ -582,6 +639,7 @@ class EvidenceReviewBundleService:
         )
         scope_completion = self._current_scope_completion(
             materials,
+            run_id=run_id,
             reviewed_after=latest.created_at if latest is not None and stage_status == "stale" else None,
             changed_ids=stale_changed_ids,
         )
@@ -597,6 +655,9 @@ class EvidenceReviewBundleService:
             "schema_version": "chart_review_task_v1",
             "paper_id": materials["paper_metadata"]["paper_id"],
             "paper_code": materials["paper_metadata"]["paper_code"],
+            "scope_type": materials.get("scope_type", "paper"),
+            "run_id": materials.get("run_id"),
+            "chart_run_id": materials.get("run_id"),
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "stage_status": stage_status,
             "apply_ready": stage_status in {"completed", "not_required"} and rag_quality_status == "ready",
@@ -616,6 +677,7 @@ class EvidenceReviewBundleService:
             "current_snapshot_fingerprint": current_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
             "latest_review_run_id": str(latest.id) if latest is not None else None,
+            "reviewed_at": latest.created_at.isoformat() if latest is not None and latest.created_at else None,
             "unresolved_count": len(unresolved_actions),
             "unresolved_actions": unresolved_actions,
             "scope_completion": scope_completion,
@@ -631,12 +693,12 @@ class EvidenceReviewBundleService:
             "tables": self._public_records(materials["extracted_tables"]),
         }
 
-    def resolve_review_actions(self, paper_id: UUID, raw_payload: dict[str, Any], *, dry_run: bool = False) -> dict[str, Any]:
-        return self.apply_result(paper_id, raw_payload, dry_run=dry_run)
+    def resolve_review_actions(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
+        return self.apply_result(paper_id, raw_payload, run_id=run_id, dry_run=dry_run)
 
-    def finalize_review(self, paper_id: UUID, raw_payload: dict[str, Any] | None = None, *, dry_run: bool = False) -> dict[str, Any]:
+    def finalize_review(self, paper_id: UUID, raw_payload: dict[str, Any] | None = None, *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
         if raw_payload is not None:
-            response = self.apply_result(paper_id, raw_payload, dry_run=dry_run)
+            response = self.apply_result(paper_id, raw_payload, run_id=run_id, dry_run=dry_run)
             if dry_run or response.get("chart_review_completed"):
                 return response
             return {
@@ -644,9 +706,9 @@ class EvidenceReviewBundleService:
                 "finalize_ready": False,
                 "finalize_blocking_errors": response.get("unresolved_actions") or response.get("errors") or [],
             }
-        latest = self._latest_review_audit(paper_id, actions={"offline_evidence_review_applied"})
-        materials = self._build_materials(paper_id)
-        current_task = self.get_review_task(paper_id)
+        latest = self._latest_review_audit(paper_id, run_id=run_id, actions={"offline_evidence_review_applied"})
+        materials = self._build_materials(paper_id, run_id=run_id)
+        current_task = self.get_review_task(paper_id, run_id=run_id)
         if current_task["stage_status"] == "not_required":
             return {
                 **current_task,
@@ -999,6 +1061,10 @@ class EvidenceReviewBundleService:
                 raise ValueError("Figure not found during apply")
             target_id = str(figure.id)
             applied_updates = self._apply_figure_metadata(figure, action)
+            if action.action == "KEEP":
+                figure.prov = list(figure.prov or []) + [
+                    self._figure_keep_prov(action, reviewer, bundle_fingerprint)
+                ]
             if action.action == "RECROP":
                 paper = self.session.get(Paper, figure.paper_id)
                 if paper is None:
@@ -1035,6 +1101,8 @@ class EvidenceReviewBundleService:
             payload={
                 "op_id": op_id,
                 "bundle_fingerprint": bundle_fingerprint,
+                "run_id": materials.get("run_id"),
+                "chart_run_id": materials.get("run_id"),
                 "action": action.model_dump(mode="json"),
                 "applied_updates": applied_updates,
                 "actor_type": "ai" if action.local_ai_verification is not None else "review_source",
@@ -1180,6 +1248,8 @@ class EvidenceReviewBundleService:
             payload={
                 "op_id": op_id,
                 "bundle_fingerprint": bundle_fingerprint,
+                "run_id": materials.get("run_id"),
+                "chart_run_id": materials.get("run_id"),
                 "action": action.model_dump(mode="json"),
                 "table_result": result,
                 "actor_type": "ai" if action.local_ai_verification is not None else "review_source",
@@ -1202,6 +1272,7 @@ class EvidenceReviewBundleService:
         self,
         *,
         paper_id: UUID,
+        run_id: UUID | None,
         result: OfflineEvidenceReviewResult,
         validation: dict[str, Any],
         applied: list[dict[str, Any]],
@@ -1209,7 +1280,7 @@ class EvidenceReviewBundleService:
         reviewer: str,
         payload_hash: str,
     ) -> dict[str, Any]:
-        refreshed = self._build_materials(paper_id)
+        refreshed = self._build_materials(paper_id, run_id=run_id)
         response = {
             **validation,
             "dry_run": False,
@@ -1239,6 +1310,8 @@ class EvidenceReviewBundleService:
                 "schema_version": result.schema_version,
                 "stage_status": "needs_local_ai",
                 "bundle_fingerprint": result.bundle_fingerprint,
+                "scope_type": result.scope_type,
+                "run_id": result.run_id,
                 "input_payload_sha256": payload_hash,
                 "paper_code": result.paper_code,
                 "review_source": result.review_source.model_dump(mode="json"),
@@ -1257,25 +1330,31 @@ class EvidenceReviewBundleService:
         response["review_run_id"] = str(audit.id)
         audit.payload = {**audit.payload, "response": response}
         self.session.add(audit)
+        if run_id is not None:
+            TaskLogService(self.session).refresh_external_analysis_task(
+                run_id, last_action="chart_review_partial", lifecycle="needs_human"
+            )
         return response
 
     def _record_completed_review(
         self,
         *,
         paper_id: UUID,
+        run_id: UUID | None,
         result: OfflineEvidenceReviewResult,
         validation: dict[str, Any],
         applied: list[dict[str, Any]],
         reviewer: str,
         payload_hash: str,
     ) -> dict[str, Any]:
-        refreshed = self._build_materials(paper_id)
+        refreshed = self._build_materials(paper_id, run_id=run_id)
         final_errors = self._final_status_errors(result=result, validation=validation, applied=applied, refreshed=refreshed)
         if final_errors:
             raise ValueError("chart_review_finalize_failed: " + json.dumps(final_errors, ensure_ascii=False))
-        completed_snapshot = compute_figure_table_snapshot(self.session, paper_id)
-        completed_snapshot_fingerprint = completed_snapshot["fingerprint"]
-        self._mark_figures_review_completed(paper_id, reviewer)
+        completed_snapshot = self._scope_snapshot(refreshed)
+        completed_snapshot_fingerprint = refreshed["bundle_fingerprint"]
+        if run_id is None:
+            self._mark_figures_review_completed(paper_id, reviewer)
         response = {
             **validation,
             "dry_run": False,
@@ -1307,6 +1386,8 @@ class EvidenceReviewBundleService:
                 "schema_version": result.schema_version,
                 "stage_status": "completed",
                 "bundle_fingerprint": result.bundle_fingerprint,
+                "scope_type": result.scope_type,
+                "run_id": result.run_id,
                 "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
                 "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
                 "completed_snapshot": completed_snapshot,
@@ -1330,12 +1411,16 @@ class EvidenceReviewBundleService:
         response["review_run_id"] = str(audit.id)
         audit.payload = {**audit.payload, "response": response}
         self.session.add(audit)
+        if run_id is not None:
+            TaskLogService(self.session).refresh_external_analysis_task(
+                run_id, last_action="chart_review_applied", lifecycle="applied"
+            )
         return response
 
-    def _existing_review_response(self, paper_id: UUID, payload_hash: str) -> dict[str, Any] | None:
-        current_materials = self._build_materials(paper_id)
+    def _existing_review_response(self, paper_id: UUID, payload_hash: str, *, run_id: UUID | None = None) -> dict[str, Any] | None:
+        current_materials = self._build_materials(paper_id, run_id=run_id)
         current_bundle_fingerprint = current_materials["bundle_fingerprint"]
-        current_snapshot_fingerprint = compute_figure_table_snapshot(self.session, paper_id)["fingerprint"]
+        current_snapshot_fingerprint = current_bundle_fingerprint
         latest_rows = self.session.scalars(
             select(AuditLog)
             .where(AuditLog.paper_id == paper_id)
@@ -1346,6 +1431,9 @@ class EvidenceReviewBundleService:
         for row in latest_rows:
             payload = row.payload if isinstance(row.payload, dict) else {}
             if payload.get("input_payload_sha256") != payload_hash:
+                continue
+            stored_run_id = self._optional_uuid(payload.get("run_id")) if payload.get("run_id") else None
+            if stored_run_id != run_id:
                 continue
             response = payload.get("response") if isinstance(payload.get("response"), dict) else None
             if response is None:
@@ -1367,15 +1455,19 @@ class EvidenceReviewBundleService:
             return cloned
         return None
 
-    def _latest_review_audit(self, paper_id: UUID, *, actions: set[str] | None = None) -> AuditLog | None:
+    def _latest_review_audit(self, paper_id: UUID, *, run_id: UUID | None = None, actions: set[str] | None = None) -> AuditLog | None:
         action_names = sorted(actions or {"offline_evidence_review_applied", "offline_evidence_review_partial"})
-        return self.session.scalars(
+        rows = self.session.scalars(
             select(AuditLog)
             .where(AuditLog.paper_id == paper_id)
             .where(AuditLog.action.in_(action_names))
             .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-            .limit(1)
-        ).first()
+        ).all()
+        for row in rows:
+            payload = row.payload if isinstance(row.payload, dict) else {}
+            if (self._optional_uuid(payload.get("run_id")) if payload.get("run_id") else None) == run_id:
+                return row
+        return None
 
     @staticmethod
     def _unresolved_actions(execution_plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1441,6 +1533,7 @@ class EvidenceReviewBundleService:
         self,
         materials: dict[str, Any],
         *,
+        run_id: UUID | None = None,
         reviewed_after: datetime | None = None,
         changed_ids: dict[str, set[str]] | None = None,
     ) -> dict[str, Any]:
@@ -1451,12 +1544,14 @@ class EvidenceReviewBundleService:
             target_type="paper_figure",
             positive_actions=FIGURE_REVIEWED_ACTIONS,
             external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
+            run_id=run_id,
         )
         reviewed_tables = self._reviewed_object_ids(
             object_ids=table_ids,
             target_type="paper_table",
             positive_actions=TABLE_REVIEWED_ACTIONS,
             external_target_types={"table", "tables", "paper_table", "paper_tables"},
+            run_id=run_id,
         )
         changed_ids = changed_ids or {"figures": set(), "tables": set()}
         changed_figure_ids = set(changed_ids.get("figures") or set()) & figure_ids
@@ -1468,6 +1563,7 @@ class EvidenceReviewBundleService:
                 positive_actions=FIGURE_REVIEWED_ACTIONS,
                 external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
                 created_after=reviewed_after,
+                run_id=run_id,
             )
             if reviewed_after is not None and changed_figure_ids
             else changed_figure_ids
@@ -1479,6 +1575,7 @@ class EvidenceReviewBundleService:
                 positive_actions=TABLE_REVIEWED_ACTIONS,
                 external_target_types={"table", "tables", "paper_table", "paper_tables"},
                 created_after=reviewed_after,
+                run_id=run_id,
             )
             if reviewed_after is not None and changed_table_ids
             else changed_table_ids
@@ -1511,6 +1608,7 @@ class EvidenceReviewBundleService:
         positive_actions: set[str],
         external_target_types: set[str],
         created_after: datetime | None = None,
+        run_id: UUID | None = None,
     ) -> set[str]:
         if not object_ids:
             return set()
@@ -1524,6 +1622,9 @@ class EvidenceReviewBundleService:
         ).all()
         seen: set[str] = set()
         for row in rows:
+            payload = row.payload if isinstance(row.payload, dict) else {}
+            if run_id is not None and self._optional_uuid(payload.get("run_id") or payload.get("chart_run_id")) != run_id:
+                continue
             target_id = str(row.target_id or "")
             if not target_id or target_id in seen:
                 continue
@@ -1557,6 +1658,7 @@ class EvidenceReviewBundleService:
         object_ids: set[str],
         external_target_types: set[str],
         created_after: datetime | None = None,
+        run_id: UUID | None = None,
     ) -> set[str]:
         if not object_ids:
             return set()
@@ -1570,6 +1672,8 @@ class EvidenceReviewBundleService:
             .order_by(ExternalAnalysisCandidate.created_at.desc(), ExternalAnalysisCandidate.id.desc())
         ).all()
         for candidate in candidates:
+            if run_id is not None and candidate.run_id != run_id:
+                continue
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_id = str(payload.get("target_id") or candidate.materialized_target_id or "").strip()
             target_type = str(payload.get("target_type") or candidate.materialized_target_type or "").strip().lower()
@@ -1607,6 +1711,67 @@ class EvidenceReviewBundleService:
             "figures": changed_ids("figures"),
             "tables": changed_ids("tables"),
         }
+
+    @staticmethod
+    def _workspace_crop_metadata_from_prov(prov: Any, *, image_available: bool) -> dict[str, Any]:
+        entries = prov if isinstance(prov, list) else []
+        extraction = next(
+            (item for item in reversed(entries) if isinstance(item, dict) and item.get("image_extraction")),
+            None,
+        )
+        if image_available and extraction:
+            return {
+                "crop_status": "candidate_crop",
+                "crop_confidence": extraction.get("confidence"),
+                "crop_source": extraction.get("source") or extraction.get("image_extraction"),
+            }
+        if image_available:
+            return {"crop_status": "needs_recrop", "crop_confidence": None, "crop_source": "legacy_image"}
+        return {"crop_status": "caption_only", "crop_confidence": None, "crop_source": "caption"}
+
+    @classmethod
+    def _is_known_workspace_crop_metadata_drift(cls, previous: Any, current: dict[str, Any]) -> bool:
+        """Accept only the historical workspace-refresh regression, never a real edit."""
+        if not isinstance(previous, dict):
+            return False
+        changed_any = False
+        for kind in ("figures", "tables"):
+            previous_by_id = {
+                str(item.get("id")): item for item in previous.get(kind) or []
+                if isinstance(item, dict) and item.get("id")
+            }
+            current_by_id = {
+                str(item.get("id")): item for item in current.get(kind) or []
+                if isinstance(item, dict) and item.get("id")
+            }
+            if previous_by_id.keys() != current_by_id.keys():
+                return False
+            for item_id, before in previous_by_id.items():
+                after = current_by_id[item_id]
+                if before == after:
+                    continue
+                if kind != "figures":
+                    return False
+                changed_fields = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+                if changed_fields - {"crop_status", "crop_source", "crop_confidence"}:
+                    return False
+                has_review_crop = any(
+                    isinstance(entry, dict)
+                    and entry.get("action") == "offline_evidence_review_crop"
+                    and str(entry.get("source_action") or "").upper() == "RECROP"
+                    for entry in reversed(before.get("prov") or [])
+                )
+                if not has_review_crop:
+                    return False
+                expected = cls._workspace_crop_metadata_from_prov(
+                    after.get("prov"), image_available=bool(after.get("image_available")),
+                )
+                if any(after.get(key) != value for key, value in expected.items()):
+                    return False
+                if before.get("crop_status") != "recropped" or before.get("crop_source") != "offline_evidence_review":
+                    return False
+                changed_any = True
+        return changed_any
 
     @staticmethod
     def _figure_action_modifies_state(action: OfflineEvidenceReviewFigureAction) -> bool:
@@ -1702,7 +1867,152 @@ class EvidenceReviewBundleService:
         paper.comprehensive_analysis = analysis
         self.session.add(paper)
 
-    def _build_materials(self, paper_id: UUID) -> dict[str, Any]:
+    @staticmethod
+    def _optional_uuid(value: Any) -> UUID | None:
+        if not value:
+            return None
+        try:
+            return UUID(str(value))
+        except (TypeError, ValueError, AttributeError):
+            raise ValueError("invalid_external_analysis_run_id")
+
+    @classmethod
+    def _payload_run_id(cls, payload: dict[str, Any]) -> UUID | None:
+        run_id = cls._optional_uuid(payload.get("run_id"))
+        chart_run_id = cls._optional_uuid(payload.get("chart_run_id"))
+        if run_id is not None and chart_run_id is not None and run_id != chart_run_id:
+            raise ValueError("chart_run_id and run_id must match")
+        return chart_run_id or run_id
+
+    def get_review_scope_options(self, paper_id: UUID, *, selected_run_id: UUID | None = None) -> dict[str, Any]:
+        """Expose scope choices without silently selecting one for a write path."""
+        paper_task = self.get_review_task(paper_id)
+        runs = self.session.scalars(
+            select(ExternalAnalysisRun)
+            .where(ExternalAnalysisRun.paper_id == paper_id)
+            .order_by(ExternalAnalysisRun.created_at.desc(), ExternalAnalysisRun.id.desc())
+        ).all()
+        options: list[dict[str, Any]] = []
+        for run in runs:
+            figure_ids, table_ids = self._run_target_ids(paper_id, run.id)
+            if not figure_ids and not table_ids:
+                continue
+            task = self.get_review_task(paper_id, run_id=run.id)
+            candidate_count = self.session.scalar(
+                select(func.count(ExternalAnalysisCandidate.id)).where(
+                    ExternalAnalysisCandidate.run_id == run.id,
+                    ExternalAnalysisCandidate.paper_id == paper_id,
+                )
+            ) or 0
+            options.append({
+                "chart_run_id": str(run.id),
+                "run_id": str(run.id),
+                "paper_id": str(paper_id),
+                "source": run.source,
+                "source_label": run.source_label,
+                "created_at": run.created_at.isoformat() if run.created_at else None,
+                "candidate_count": int(candidate_count),
+                "counts": {"figures": len(figure_ids), "tables": len(table_ids)},
+                "stage_status": task.get("stage_status"),
+                "unresolved_count": int(task.get("unresolved_count") or 0),
+                "completed_snapshot_fingerprint": task.get("completed_snapshot_fingerprint"),
+                "current_snapshot_fingerprint": task.get("current_snapshot_fingerprint"),
+                "reviewed_at": task.get("reviewed_at"),
+                "scope_type": "external_analysis_run",
+                "selected": selected_run_id == run.id,
+                # The scope signature intentionally excludes the run UUID.  Re-running
+                # the same prompt against the same targets should not turn into several
+                # indistinguishable choices in the review centre.
+                "target_signature": json.dumps({
+                    "source": str(run.source or "").strip().lower(),
+                    "source_label": str(run.source_label or "").strip(),
+                    "figures": sorted(figure_ids),
+                    "tables": sorted(table_ids),
+                }, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            })
+        duplicate_groups: dict[str, list[dict[str, Any]]] = {}
+        for option in options:
+            duplicate_groups.setdefault(str(option["target_signature"]), []).append(option)
+        for group_key, group in duplicate_groups.items():
+            # Preserve the existing newest-first ordering, except that a completed
+            # run is always the representative when a duplicate group has one.
+            representative = next(
+                (item for item in group if item.get("stage_status") == "completed"),
+                group[0],
+            )
+            for item in group:
+                item["duplicate_group_key"] = group_key
+                item["duplicate_run_count"] = len(group)
+                item["is_duplicate_representative"] = item is representative
+        completed = sorted(
+            [item for item in options if item.get("stage_status") == "completed"],
+            # Main-figure completion is the DFT prerequisite.  A completed
+            # table-only pass must not displace a completed main-figure pass.
+            key=lambda item: (
+                int((item.get("counts") or {}).get("figures") or 0) > 0,
+                item.get("reviewed_at") or item.get("created_at") or "",
+            ),
+            reverse=True,
+        )
+        primary = next((item for item in options if item.get("chart_run_id") == str(selected_run_id)), None)
+        if primary is None and completed:
+            primary = completed[0]
+        if primary is not None:
+            primary["is_primary_completed_run"] = True
+        return {
+            "paper_scope": {**paper_task, "scope_type": "paper", "chart_run_id": None},
+            "chart_runs": options,
+            "chart_run_count": len(options),
+            "selected_chart_run_id": str(selected_run_id) if selected_run_id else None,
+            "primary_completed_run": primary,
+        }
+
+    def _run_target_ids(self, paper_id: UUID, run_id: UUID) -> tuple[set[str], set[str]]:
+        run = self.session.get(ExternalAnalysisRun, run_id)
+        if run is None or run.paper_id != paper_id:
+            raise LookupError("external_analysis_run_not_found_for_paper")
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.run_id == run_id,
+                ExternalAnalysisCandidate.paper_id == paper_id,
+            )
+        ).all()
+        figure_ids: set[str] = set()
+        table_ids: set[str] = set()
+        for candidate in candidates:
+            kind = str(candidate.candidate_type or "").lower()
+            if "dft" in kind:
+                continue
+            payloads = [candidate.normalized_payload, candidate.evidence_payload]
+            def visit(value: Any) -> None:
+                if isinstance(value, dict):
+                    for key, item in value.items():
+                        key_lower = str(key).lower()
+                        if key_lower in {"target_path", "path"} and item:
+                            path_parts = str(item).split(":")
+                            if len(path_parts) >= 2 and path_parts[0].lower() in {"figure", "figures"}:
+                                figure_ids.add(path_parts[1])
+                            elif len(path_parts) >= 2 and path_parts[0].lower() in {"table", "tables"}:
+                                table_ids.add(path_parts[1])
+                        if key_lower in {"figure_id", "figure_uuid"} and item:
+                            figure_ids.add(str(item))
+                        elif key_lower in {"table_id", "table_uuid"} and item:
+                            table_ids.add(str(item))
+                        elif key_lower in {"target_id", "object_id", "source_record_id"} and item:
+                            target_type = str(value.get("target_type") or value.get("object_type") or "").lower()
+                            if "figure" in target_type:
+                                figure_ids.add(str(item))
+                            elif "table" in target_type:
+                                table_ids.add(str(item))
+                        visit(item)
+                elif isinstance(value, list):
+                    for item in value:
+                        visit(item)
+            for payload in payloads:
+                visit(payload)
+        return figure_ids, table_ids
+
+    def _build_materials(self, paper_id: UUID, *, run_id: UUID | None = None) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             raise LookupError("Paper not found")
@@ -1719,6 +2029,12 @@ class EvidenceReviewBundleService:
             for row in all_figures
             if self._include_figure_in_bundle(row, source_by_id=source_by_id)
         ]
+        if run_id is not None:
+            figure_ids, table_ids = self._run_target_ids(paper_id, run_id)
+            figures = [row for row in figures if str(row.id) in figure_ids]
+            tables = [row for row in tables if str(row.id) in table_ids]
+            if not figures and not tables:
+                raise ValueError("chart_review_no_targets_for_run")
         excluded_support_figure_count = len(all_figures) - len(figures)
         warnings: list[str] = []
         source_documents = []
@@ -1789,6 +2105,27 @@ class EvidenceReviewBundleService:
             "source_paper_ids": {str(item["paper"].id) for item in source_papers},
             "bundle_fingerprint": bundle_fingerprint,
             "warnings": warnings,
+            "run_id": str(run_id) if run_id else None,
+            "chart_run_id": str(run_id) if run_id else None,
+            "scope_type": "external_analysis_run" if run_id else "paper",
+        }
+
+    @classmethod
+    def _scope_snapshot(cls, materials: dict[str, Any]) -> dict[str, Any]:
+        def normalize(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            rows = []
+            for item in cls._public_records(items, include_bundle_file=False):
+                row = dict(item)
+                row["id"] = row.get("source_record_id") or row.get("id")
+                rows.append(row)
+            return rows
+        return {
+            "schema_version": "figure_table_content_snapshot_scoped_v1",
+            "paper_id": materials["paper_metadata"]["paper_id"],
+            "run_id": materials.get("run_id"),
+            "figures": normalize(materials["extracted_figures"]),
+            "tables": normalize(materials["extracted_tables"]),
+            "fingerprint": materials["bundle_fingerprint"],
         }
 
     @classmethod
@@ -2046,6 +2383,20 @@ class EvidenceReviewBundleService:
             "bbox_norm": action.bbox_norm,
             "page_no": action.page,
             "pixel_size": pixel_size,
+            "created_by": reviewer,
+            "bundle_fingerprint": bundle_fingerprint,
+            "reason": action.reason,
+        }
+
+    @staticmethod
+    def _figure_keep_prov(
+        action: OfflineEvidenceReviewFigureAction,
+        reviewer: str,
+        bundle_fingerprint: str,
+    ) -> dict[str, Any]:
+        return {
+            "action": "offline_evidence_review_keep",
+            "source_action": "KEEP",
             "created_by": reviewer,
             "bundle_fingerprint": bundle_fingerprint,
             "reason": action.reason,
@@ -2331,6 +2682,9 @@ class EvidenceReviewBundleService:
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "paper_id": metadata["paper_id"],
             "paper_code": metadata["paper_code"],
+            "scope_type": materials.get("scope_type", "paper"),
+            "run_id": materials.get("run_id"),
+            "chart_run_id": materials.get("chart_run_id"),
             "review_source": {
                 "review_source_type": "web_ai",
                 "reviewer_label": "user-provided AI",
@@ -2351,6 +2705,7 @@ class EvidenceReviewBundleService:
         return f"""# Literature AI 离线图表证据整理任务
 
 目标文献：`{metadata['paper_code']}`（paper_id=`{metadata['paper_id']}`）
+审核范围：`{materials.get('scope_type', 'paper')}`；run_id=`{materials.get('run_id') or '-'}`
 
 你是图表证据审核建议来源，不是数据库执行者。你不能连接 MCP、数据库、服务器或外部检索；只能使用本压缩包中的 PDF、图片、表格和 JSON。
 
@@ -2370,6 +2725,7 @@ class EvidenceReviewBundleService:
 4. 表格 action：`KEEP`、`UPDATE`、`CREATE`、`MERGE`、`DELETE`、`NEEDS_HUMAN`。
 5. `RECROP` 和 `CREATE` 必须返回 `page` 与 `bbox_norm=[x0,y0,x1,y1]`；坐标是该 PDF 页面的归一化 top-left 坐标，范围 0 到 1。
 6. 对每张保留的科学图片，`KEEP` 或 `RECROP` 后必须具备具体 `figure_role`、非图注复读的 `content_summary` 和具体 `key_elements`；缺任一项时在 action 中补齐。不要使用 unknown/unclassified/other 或 verified/reviewed/ok 这类占位词。
+   在 run-scoped 图表审核中，`content_summary` 与 `key_elements` 是实际字段回填建议；只能填写 manifest 中当前 target figure/table，不能生成内容知识 claim。
 7. `dft_relevance` 只能填写 `none`、`possible`、`explicit_dft`、`unknown` 四者之一；不要写 true/false/yes/no/dft_relevant。
 8. `UPDATE` 和 `CREATE` 表格必须返回完整 `complete_markdown`，包含列名、单位、脚注相关信息；不要只返回差异片段。
 9. `MERGE` 只用于两个已有表格对象合并，必须填写 `source_table_id` 和 `target_table_id`，且二者不能相同；不要同时给同一表格输出 KEEP/UPDATE/MERGE 多个 action。没有把握时用 `NEEDS_HUMAN`。
@@ -2377,6 +2733,7 @@ class EvidenceReviewBundleService:
 11. 不得声称已经写库、已经确认、已经 verified 或已经 ML_Ready。
 12. 严格按 `return_schema.json` 输出一个 JSON 对象；不要输出 Markdown 代码块。
 13. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
+14. `figure_table_evidence` 的缺失字段提醒不是可引用科学论断；不要把它提交到纸级内容审核包或用它升级 `citable`。
 
 ## 建议阅读顺序
 

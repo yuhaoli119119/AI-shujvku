@@ -691,5 +691,15 @@ function openSelectedReviewCenter() {
         (state.selectedPaper && state.selectedPaper.library_name) ||
         "";
     if (libraryName) params.set("library_name", libraryName);
+    const chartStatus = state.selectedPaper && state.selectedPaper.chart_review_status;
+    const recommendedChartRunId = chartStatus && (
+        chartStatus.selected_chart_run_id ||
+        (chartStatus.primary_completed_run && chartStatus.primary_completed_run.chart_run_id)
+    );
+    if (recommendedChartRunId) {
+        params.set("chart_run_id", recommendedChartRunId);
+        params.set("run_id", recommendedChartRunId);
+        params.set("mode", "evidence");
+    }
     window.open("/pages/review_center/index.html?" + params.toString(), "_blank");
 }

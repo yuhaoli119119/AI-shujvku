@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -8,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 ReviewSourceType = Literal["web_ai", "local_ai", "human", "other"]
 ReviewDecision = Literal["PASS", "REVISE", "REJECT", "NEEDS_HUMAN", "new_candidate"]
 OverallReviewStatus = Literal["completed", "needs_human", "uncertain"]
+DFTReviewMode = Literal["target_review", "gap_discovery"]
 
 
 class OfflineReviewSource(BaseModel):
@@ -55,6 +58,7 @@ class OfflineObjectReviewAudit(BaseModel):
     reason: str = Field(min_length=1)
     blocking_errors: list[str] = Field(default_factory=list)
     recommended_action: str | None = None
+    dedupe_analysis: dict[str, Any] | None = None
 
     @field_validator("target_id", "field_name", "reason")
     @classmethod
@@ -97,8 +101,6 @@ class OfflineObjectReviewAudit(BaseModel):
         if self.decision == "new_candidate":
             if self.target_id.lower() != "new" or self.field_name != "dft_results":
                 raise ValueError("new_candidate requires target_id='new' and field_name='dft_results'")
-            if not self.temporary_id:
-                raise ValueError("new_candidate requires a unique temporary_id")
             if not isinstance(self.corrected_value, dict):
                 raise ValueError("new_candidate requires corrected_value to be an object")
             missing = [
@@ -108,6 +110,9 @@ class OfflineObjectReviewAudit(BaseModel):
             ]
             if missing:
                 raise ValueError(f"new_candidate corrected_value is missing: {', '.join(missing)}")
+            if not self.temporary_id:
+                canonical = json.dumps(self.corrected_value, ensure_ascii=False, sort_keys=True, default=str)
+                self.temporary_id = "new-dft-auto-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
         elif self.target_id.lower() == "new":
             raise ValueError("target_id='new' is only valid for decision='new_candidate'")
         if self.decision == "REVISE" and self.corrected_value is None:
@@ -143,11 +148,14 @@ class OfflineDFTReviewResult(BaseModel):
     )
     paper_id: str = Field(min_length=1, max_length=64)
     paper_code: str = Field(min_length=1, max_length=64)
+    chart_scope_type: Literal["paper", "external_analysis_run", "paper_reviewed_aggregate"] = "paper_reviewed_aggregate"
+    chart_run_id: str | None = Field(default=None, max_length=64)
+    review_mode: DFTReviewMode
     review_source: OfflineReviewSource
     overall_status: OverallReviewStatus = Field(
         description=(
-            "Use completed only after reviewing every current main-paper DFT candidate; "
-            "coverage must still include NEEDS_HUMAN entries for targets that cannot be decided."
+            "In target_review, use completed only after reviewing every current writable main-paper DFT target. "
+            "In gap_discovery, completed means the missing-data search is complete, not that terminal rows were re-reviewed."
         )
     )
     coverage_acknowledgement: OfflineDFTReviewCoverageAck | None = Field(
@@ -168,6 +176,14 @@ class OfflineDFTReviewResult(BaseModel):
         if not stripped:
             raise ValueError("identity value must not be blank")
         return stripped
+
+    @model_validator(mode="after")
+    def validate_chart_scope(self) -> "OfflineDFTReviewResult":
+        if self.chart_scope_type == "external_analysis_run" and not self.chart_run_id:
+            raise ValueError("external_analysis_run DFT review requires chart_run_id")
+        if self.chart_scope_type in {"paper", "paper_reviewed_aggregate"} and self.chart_run_id:
+            raise ValueError("paper-level DFT review must not include chart_run_id")
+        return self
 
     @field_validator("uncertainties", "notes")
     @classmethod

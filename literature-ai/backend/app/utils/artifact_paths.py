@@ -15,6 +15,45 @@ WINDOWS_MIRROR_COLON = "\uf03a"
 WINDOWS_MIRROR_SEP = "\uf05c"
 
 
+def resolve_paper_pdf_path(pdf_path: str | Path | None, storage_root: str | Path) -> Path | None:
+    """Resolve a persisted Paper.pdf_path without allowing relative escapes.
+
+    Stored references are commonly ``storage/pdf/<name>.pdf`` while the
+    runtime storage root is ``/data/storage`` (or a temporary test root).
+    Absolute references remain supported, but every returned path must exist
+    and be a regular file.
+    """
+    if pdf_path is None or not str(pdf_path).strip():
+        return None
+    raw = str(pdf_path).strip()
+    parts = [part for part in re.split(r"[\\/]+", raw) if part]
+    if any(part == ".." for part in parts):
+        return None
+    root = Path(storage_root).resolve()
+    candidate = Path(raw)
+    allowed_root: Path | None = None
+    if not candidate.is_absolute():
+        lowered = [part.lower() for part in parts]
+        if len(parts) >= 2 and lowered[:2] == ["storage", "pdf"]:
+            candidate = root.parent.joinpath(*parts)
+            allowed_root = (root.parent / "storage" / "pdf").resolve()
+        elif parts and lowered[0] == "pdf":
+            candidate = root.joinpath(*parts)
+            allowed_root = (root / "pdf").resolve()
+        else:
+            candidate = root.joinpath(*parts)
+            allowed_root = root
+    try:
+        resolved = candidate.resolve(strict=False)
+    except OSError:
+        return None
+    if allowed_root is not None and not resolved.is_relative_to(allowed_root):
+        return None
+    if not resolved.is_file():
+        return None
+    return resolved
+
+
 def _strip_container_prefix(path_str: str) -> str:
     normalized = path_str.strip()
     lowered = normalized.lower()

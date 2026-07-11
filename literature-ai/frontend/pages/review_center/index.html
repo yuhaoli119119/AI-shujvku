@@ -1303,6 +1303,36 @@
         display: grid;
       }
     }
+    .manual-review-scope-card {
+      margin: 0 0 12px;
+      padding: 11px 14px;
+      border: 2px solid #2563eb;
+      border-radius: 10px;
+      background: #eff6ff;
+      color: #173a73;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .manual-review-scope-card.is-unconfirmed {
+      border-color: #d97706;
+      background: #fff7ed;
+      color: #7c2d12;
+    }
+    .manual-review-scope-title { font-weight: 800; margin-right: 8px; }
+    .manual-review-scope-details { font-family: var(--font-mono, ui-monospace, monospace); }
+    .review-scope-chooser {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface);
+    }
+    .review-scope-chooser-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .review-scope-run-list { display: grid; gap: 8px; margin-top: 10px; }
+    .review-scope-run-option { display: block; width: 100%; text-align: left; padding: 9px 11px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt); cursor: pointer; }
+    .review-scope-run-option:hover { border-color: var(--color-primary); background: var(--color-primary-bg); }
+    .review-scope-run-main { font-weight: 800; }
+    .review-scope-run-meta { margin-top: 3px; color: var(--color-text-secondary); font-size: 12px; }
   </style>
 </head>
 <body>
@@ -1314,13 +1344,13 @@
         <button class="btn btn-ghost icon-btn" type="button" onclick="loadReviewCenter()" title="刷新审核中心" aria-label="刷新审核中心">↻</button>
         <select class="btn btn-ghost" id="webAiWorkflowSelect" title="网页 AI 图表/DFT 离线审核流程" onchange="handleWebAiWorkflowSelect()">
           <option value="">网页 AI 流程</option>
-          <option value="export_evidence">1 导出图表证据包</option>
+          <option id="exportEvidenceWorkflowOption" value="export_evidence">1 导出图表证据包</option>
           <option value="copy_evidence_prompt">复制图表提示词</option>
-          <option value="return_evidence">2 回传图表 JSON</option>
+          <option id="returnEvidenceWorkflowOption" value="return_evidence">2 回传图表 JSON</option>
           <option value="copy_evidence_local_ai">复制本地 AI 图表复核指令</option>
-          <option value="export_dft">3 导出 DFT 终审包</option>
+          <option id="exportDftWorkflowOption" value="export_dft">3 导出 DFT 审核包</option>
           <option value="copy_dft_prompt">复制 DFT 提示词</option>
-          <option value="return_dft">4 回传 DFT JSON</option>
+          <option id="returnDftWorkflowOption" value="return_dft">4 回传 DFT JSON</option>
         </select>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
@@ -1337,6 +1367,24 @@
         </select>
       </div>
     </div>
+    <section class="manual-review-scope-card is-unconfirmed" id="manualReviewScopeCard" aria-live="polite">
+      <span class="manual-review-scope-title">当前图表审核范围</span>
+      <span class="manual-review-scope-details" id="manualReviewScopeDetails">请先选择 AI 批次或明确选择整篇论文审核；已禁用导出图表证据包和回传图表 JSON。</span>
+    </section>
+    <section class="manual-review-scope-card" id="dftEvidenceSummary" aria-live="polite">
+      <span class="manual-review-scope-title">DFT 论文级证据</span>
+      <span class="manual-review-scope-details">请选择一篇主文献；DFT 导出会自动聚合全部已完成且未过期的图表审核结果。</span>
+    </section>
+    <section class="review-scope-chooser" id="reviewScopeChooser" aria-live="polite">
+      <div class="review-scope-chooser-head">
+        <div>
+          <strong>选择审核范围</strong>
+          <div class="muted">默认只列出已有图表证据候选的 AI 批次；点击批次后才会固定审核范围。</div>
+        </div>
+        <button class="btn btn-tinted btn-sm" id="wholePaperScopeButton" type="button" onclick="selectWholePaperScope()" disabled>整篇论文审核</button>
+      </div>
+      <div class="review-scope-run-list" id="reviewScopeRunList"><div class="muted">正在读取关联 AI 批次...</div></div>
+    </section>
 
     <section class="panel">
       <div class="panel-head">
@@ -1447,6 +1495,7 @@
         </div>
         <div class="web-ai-return-footer-group">
           <button class="btn btn-tinted btn-sm" id="webAiApplyEvidenceBtn" type="button" onclick="applyWebAiEvidenceResult()" disabled style="display:none;">应用图表结果</button>
+          <button class="btn btn-tinted btn-sm" id="webAiFinalizeEvidenceBtn" type="button" onclick="finalizeWebAiEvidenceReview()" disabled style="display:none;">完成图表审核</button>
           <button class="btn btn-tinted btn-sm" id="webAiCopyInstructionBtn" type="button" onclick="copyLocalAiImportInstruction()" disabled>复制本地 AI 处理指令</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="closeWebAiReturnDialog()">关闭</button>
         </div>
@@ -1459,6 +1508,7 @@
       rows: [],
       metadata: {},
       libraries: [],
+      scopeRuns: [],
       pagination: {
         page: 1,
         pageSize: 25
@@ -1466,8 +1516,21 @@
     };
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const REVIEW_CENTER_FILTER_SESSION_KEY = "litai:review-center:filters:v1";
+    const REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY = "litai:review-center:manual-chart-context:v1";
     const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
     const selectedPaperIds = new Set();
+    const manualReviewContext = {
+      paperId: "",
+      paperCode: "",
+      runId: "",
+      mode: "",
+      confirmed: false,
+      scopeType: "",
+      figureCount: null,
+      tableCount: null,
+      bundleId: "",
+      bundleFingerprint: ""
+    };
     const webAiReturnState = {
       mode: "dft",
       paperId: "",
@@ -1475,6 +1538,8 @@
       validatedRawText: "",
       validationResponse: null
     };
+    let dftReviewPreview = null;
+    let manualScopeMismatchMessage = "";
     const PROMPT_COPY_ACTIONS = {
       main_figure: {
         kind: "figure",
@@ -1533,6 +1598,401 @@
       requestToken: 0
     };
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    function readManualReviewContext() {
+      try {
+        const stored = JSON.parse(window.sessionStorage.getItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY) || "null");
+        return stored && typeof stored === "object" ? stored : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function persistManualReviewContext() {
+      try {
+        window.sessionStorage.setItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY, JSON.stringify(manualReviewContext));
+      } catch (_) {
+        // Keep the URL contract usable when sessionStorage is unavailable.
+      }
+    }
+
+    function activeEvidenceScope() {
+      return manualReviewContext.confirmed && manualReviewContext.mode === "evidence" && Boolean(manualReviewContext.paperId);
+    }
+
+    function resetManualReviewContext() {
+      Object.assign(manualReviewContext, {
+        paperId: "", paperCode: "", runId: "", mode: "", confirmed: false,
+        scopeType: "", figureCount: null, tableCount: null, bundleId: "", bundleFingerprint: ""
+      });
+    }
+
+    function replaceReviewCenterTargetUrl(paperId) {
+      const url = new URL(window.location.href);
+      if (paperId) url.searchParams.set("paper_id", String(paperId));
+      ["run_id", "chart_run_id", "mode", "scope"].forEach(function(key) { url.searchParams.delete(key); });
+      window.history.replaceState({}, "", url.pathname + "?" + url.searchParams.toString() + url.hash);
+    }
+
+    function clearMismatchedManualReviewContext(target) {
+      const selectedPaperId = String(target && target.paper_id || "").trim();
+      const scopedPaperId = String(manualReviewContext.paperId || "").trim();
+      if (!selectedPaperId || !scopedPaperId || selectedPaperId === scopedPaperId) return false;
+      const stalePaper = String(manualReviewContext.paperCode || scopedPaperId).trim();
+      const selectedPaper = String(target.paper_code || selectedPaperId).trim();
+      manualScopeMismatchMessage = "当前范围属于 " + stalePaper + "，已清除；请从 " + selectedPaper + " 重新选择批次。";
+      resetManualReviewContext();
+      state.scopeRuns = [];
+      webAiReturnState.paperId = "";
+      webAiReturnState.paperCode = "";
+      webAiReturnState.validatedRawText = "";
+      webAiReturnState.validationResponse = null;
+      try { window.sessionStorage.removeItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY); } catch (_) {}
+      replaceReviewCenterTargetUrl(selectedPaperId);
+      clearWebAiReturnTransientState(manualScopeMismatchMessage);
+      showToast(manualScopeMismatchMessage, "error");
+      return true;
+    }
+
+    function requireSelectedMainEvidenceScope(target) {
+      if (!target) {
+        showToast("请先只选择一篇主文献。", "error");
+        return false;
+      }
+      if (!activeEvidenceScope() || String(manualReviewContext.paperId) !== String(target.paper_id)) {
+        showToast(manualScopeMismatchMessage || "请先从 " + (target.paper_code || "当前主文献") + " 选择图表审核批次。", "error");
+        return false;
+      }
+      return true;
+    }
+
+    function evidenceScopeLabel() {
+      const figures = manualReviewContext.figureCount == null ? "?" : manualReviewContext.figureCount;
+      const tables = manualReviewContext.tableCount == null ? "?" : manualReviewContext.tableCount;
+      const range = manualReviewContext.runId ? "指定 run" : "整篇论文";
+      return "本次将审核/修改：" + (manualReviewContext.paperCode || "-") + "、" + range + "、" + figures + " 图、" + tables + " 表";
+    }
+
+    function updateManualReviewUrl() {
+      if (!manualReviewContext.paperId) {
+        renderManualReviewScope();
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set("paper_id", manualReviewContext.paperId);
+      if (manualReviewContext.runId) {
+        url.searchParams.set("run_id", manualReviewContext.runId);
+        url.searchParams.set("chart_run_id", manualReviewContext.runId);
+      } else {
+        url.searchParams.delete("run_id");
+        url.searchParams.delete("chart_run_id");
+      }
+      if (manualReviewContext.mode) url.searchParams.set("mode", manualReviewContext.mode);
+      if (manualReviewContext.scopeType === "paper" && manualReviewContext.confirmed) url.searchParams.set("scope", "paper");
+      else url.searchParams.delete("scope");
+      window.history.replaceState({}, "", url.pathname + "?" + url.searchParams.toString() + url.hash);
+    }
+
+    function renderManualReviewScope() {
+      const card = document.getElementById("manualReviewScopeCard");
+      const details = document.getElementById("manualReviewScopeDetails");
+      if (!card || !details) return;
+      const ready = activeEvidenceScope();
+      card.classList.toggle("is-unconfirmed", !ready);
+      if (!ready) {
+        details.textContent = manualScopeMismatchMessage || "请先选择 AI 批次或明确选择整篇论文审核；已禁用导出图表证据包和回传图表 JSON。";
+      } else {
+        const scope = manualReviewContext.runId ? "当前 AI 批次" : "整篇论文";
+        details.textContent = "论文编号 " + (manualReviewContext.paperCode || manualReviewContext.paperId) +
+          " | " + scope +
+          " | " + (manualReviewContext.figureCount == null ? "图数待读取" : manualReviewContext.figureCount + " 图") +
+          "，" + (manualReviewContext.tableCount == null ? "表数待读取" : manualReviewContext.tableCount + " 表");
+      }
+      ["exportEvidenceWorkflowOption", "returnEvidenceWorkflowOption"].forEach(function(id) {
+        const option = document.getElementById(id);
+        if (option) option.disabled = !ready;
+      });
+      const wholePaperButton = document.getElementById("wholePaperScopeButton");
+      if (wholePaperButton) wholePaperButton.disabled = !selectedWebAiReturnTarget();
+    }
+
+    function restoreManualReviewContext() {
+      const params = new URLSearchParams(window.location.search);
+      let stored = readManualReviewContext();
+      const urlPaperId = String(params.get("paper_id") || "").trim();
+      const urlRunId = String(params.get("chart_run_id") || params.get("run_id") || "").trim();
+      const urlMode = String(params.get("mode") || "").trim();
+      const urlScope = String(params.get("scope") || "").trim();
+      let next = null;
+      if (urlPaperId && stored && stored.paperId && String(stored.paperId) !== urlPaperId) {
+        const stalePaper = String(stored.paperCode || stored.paperId).trim();
+        manualScopeMismatchMessage = "当前范围属于 " + stalePaper + "，已清除；请从当前主文重新选择批次。";
+        try { window.sessionStorage.removeItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY); } catch (_) {}
+        stored = null;
+        state.scopeRuns = [];
+        webAiReturnState.paperId = "";
+        webAiReturnState.paperCode = "";
+        webAiReturnState.validatedRawText = "";
+        webAiReturnState.validationResponse = null;
+      }
+      if (urlPaperId && urlRunId) {
+        next = {
+          paperId: urlPaperId,
+          paperCode: stored && stored.paperId === urlPaperId ? stored.paperCode || "" : "",
+          runId: urlRunId,
+          mode: urlMode || "evidence",
+          confirmed: true,
+          scopeType: "external_analysis_run",
+          figureCount: null,
+          tableCount: null,
+          bundleId: stored && stored.paperId === urlPaperId && stored.runId === urlRunId ? stored.bundleId || "" : "",
+          bundleFingerprint: stored && stored.paperId === urlPaperId && stored.runId === urlRunId ? stored.bundleFingerprint || "" : ""
+        };
+      } else if (urlPaperId && urlScope === "paper") {
+        next = {
+          paperId: urlPaperId,
+          paperCode: stored && stored.paperId === urlPaperId ? stored.paperCode || "" : "",
+          runId: "",
+          mode: urlMode || "evidence",
+          confirmed: true,
+          scopeType: "paper",
+          figureCount: null,
+          tableCount: null,
+          bundleId: "",
+          bundleFingerprint: ""
+        };
+      } else if (!urlPaperId && stored && stored.paperId && stored.runId && stored.mode === "evidence") {
+        // Bare/top navigation may restore an explicitly chosen batch, but never a paper scope.
+        next = stored;
+      } else {
+        resetManualReviewContext();
+        if (stored && (!stored.runId || stored.mode !== "evidence")) {
+          try { window.sessionStorage.removeItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY); } catch (_) {}
+        }
+      }
+      if (next) Object.assign(manualReviewContext, next);
+      if (manualReviewContext.paperId) {
+        persistManualReviewContext();
+        updateManualReviewUrl();
+      }
+      renderManualReviewScope();
+      renderReviewScopeChooser();
+    }
+
+    function updateManualReviewContextFromRows() {
+      const target = selectedWebAiReturnTarget();
+      if (target) clearMismatchedManualReviewContext(target);
+      if (target && manualScopeMismatchMessage.includes("当前主文")) {
+        manualScopeMismatchMessage = manualScopeMismatchMessage.replace("当前主文", String(target.paper_code || "当前主文献"));
+      }
+      if (!manualReviewContext.paperId) return;
+      const row = (state.rows || []).find(function(item) { return String(item.paper_id || "") === manualReviewContext.paperId; });
+      if (row && row.paper_code) manualReviewContext.paperCode = String(row.paper_code);
+      persistManualReviewContext();
+      renderManualReviewScope();
+      renderReviewScopeChooser();
+    }
+
+    function scopeTargetCounts(run) {
+      if (run && run.counts && (run.counts.figures != null || run.counts.tables != null)) {
+        return { figures: Number(run.counts.figures || 0), tables: Number(run.counts.tables || 0) };
+      }
+      const figureIds = new Set();
+      const tableIds = new Set();
+      function visit(value, inheritedType) {
+        if (Array.isArray(value)) {
+          value.forEach(function(item) { visit(item, inheritedType); });
+          return;
+        }
+        if (!value || typeof value !== "object") return;
+        const type = String(value.target_type || value.object_type || inheritedType || "").toLowerCase();
+        const figureId = value.figure_id || value.figure_uuid || (type.includes("figure") ? value.target_id || value.object_id || value.source_record_id : "");
+        const tableId = value.table_id || value.table_uuid || (type.includes("table") ? value.target_id || value.object_id || value.source_record_id : "");
+        if (figureId) figureIds.add(String(figureId));
+        if (tableId) tableIds.add(String(tableId));
+        if (value.target_path || value.path) {
+          [value.target_path, value.path].forEach(function(pathValue) {
+            const parts = String(pathValue || "").split(":");
+            if (parts.length >= 2 && /^figures?$/i.test(parts[0])) figureIds.add(parts[1]);
+            if (parts.length >= 2 && /^tables?$/i.test(parts[0])) tableIds.add(parts[1]);
+          });
+        }
+        Object.keys(value).forEach(function(key) { visit(value[key], type); });
+      }
+      (run && run.candidates || []).forEach(function(candidate) {
+        if (String(candidate.candidate_type || "").toLowerCase() === "dft" || String(candidate.candidate_type || "").toLowerCase().includes("dft")) return;
+        visit(candidate.normalized_payload, "");
+        visit(candidate.evidence_payload, "");
+      });
+      return { figures: figureIds.size, tables: tableIds.size };
+    }
+
+    function scopeRunPaper(run) {
+      return (state.rows || []).find(function(row) { return String(row.paper_id || "") === String(run && run.paper_id || ""); }) || null;
+    }
+
+    function renderReviewScopeChooser() {
+      const list = document.getElementById("reviewScopeRunList");
+      const wholePaperButton = document.getElementById("wholePaperScopeButton");
+      if (!list) return;
+      const target = selectedWebAiReturnTarget();
+      if (wholePaperButton) wholePaperButton.disabled = !target;
+      const runs = (state.scopeRuns || []).filter(function(run) {
+        if (manualReviewContext.paperId && String(run.paper_id || "") !== String(manualReviewContext.paperId)) return false;
+        return scopeTargetCounts(run).figures > 0 || scopeTargetCounts(run).tables > 0;
+      });
+      if (!runs.length) {
+        list.innerHTML = '<div class="muted">当前没有可用于图表审核的 AI 批次。请先从任务中心产生图表证据候选。</div>';
+        return;
+      }
+      const activeRuns = runs.filter(function(run) {
+        return ["not_started", "needs_local_ai", "stale", "completed", "not_required"].includes(String(run.stage_status || ""));
+      });
+      const historyRuns = runs.filter(function(run) { return !activeRuns.includes(run); });
+      const renderRun = function(run) {
+        const counts = scopeTargetCounts(run);
+        const row = scopeRunPaper(run);
+        const source = String(run.source_label || run.source || "AI");
+        const created = run.created_at ? new Date(run.created_at).toLocaleString("zh-CN") : "时间未知";
+        const candidateCount = run.candidate_count != null ? run.candidate_count : (Array.isArray(run.candidates) ? run.candidates.length : 0);
+        const runId = String(run.chart_run_id || run.id || "");
+        const selected = activeEvidenceScope() && manualReviewContext.runId === runId;
+        const status = String(run.stage_status || "待读取");
+        return '<button class="review-scope-run-option" type="button" data-run-id="' + esc(runId) + '" onclick="selectRunScope(\'' + esc(runId) + '\')"' + (selected ? ' aria-current="true"' : '') + '>' +
+          '<div class="review-scope-run-main">' + esc(row && row.paper_code || "主文献") + ' · ' + esc(source) + (selected ? ' · 当前选择' : '') + '</div>' +
+          '<div class="review-scope-run-meta">' + esc(created) + ' · ' + esc(status) + ' · 候选 ' + candidateCount + ' · ' + counts.figures + ' 图、' + counts.tables + ' 表</div>' +
+          '</button>';
+      };
+      const recommendedRuns = [];
+      const duplicateRuns = [];
+      const duplicateGroups = new Map();
+      activeRuns.forEach(function(run) {
+        const groupKey = String(run.duplicate_group_key || run.chart_run_id || run.id || "");
+        const group = duplicateGroups.get(groupKey) || [];
+        group.push(run);
+        duplicateGroups.set(groupKey, group);
+      });
+      duplicateGroups.forEach(function(group) {
+        const representative = group.find(function(run) { return Boolean(run.is_duplicate_representative); }) || group[0];
+        recommendedRuns.push(representative);
+        group.forEach(function(run) {
+          if (run !== representative) duplicateRuns.push(run);
+        });
+      });
+      const preferred = recommendedRuns.find(function(run) { return Boolean(run.is_primary_completed_run); }) ||
+        recommendedRuns.find(function(run) { return String(run.stage_status || "") === "completed"; });
+      const visibleRuns = recommendedRuns.filter(function(run) { return run !== preferred; });
+      const preferredCard = preferred
+        ? '<div class="muted" style="margin:4px 0 6px;">当前主文推荐批次</div>' + renderRun(preferred)
+        : "";
+      const pendingCard = visibleRuns.length
+        ? '<div class="muted" style="margin:10px 0 6px;">待处理批次</div>' + visibleRuns.map(renderRun).join("")
+        : "";
+      const duplicateCount = duplicateRuns.length;
+      list.innerHTML = preferredCard + pendingCard + (duplicateCount
+        ? '<details class="review-scope-history"><summary>历史重复执行（' + duplicateCount + ' 条）</summary>' + duplicateRuns.map(renderRun).join("") + '</details>'
+        : "") + (historyRuns.length
+        ? '<details class="review-scope-history"><summary>更多历史批次（' + historyRuns.length + '）</summary>' + historyRuns.map(renderRun).join("") + '</details>'
+        : "");
+    }
+
+    async function loadReviewScopeCandidates() {
+      const list = document.getElementById("reviewScopeRunList");
+      try {
+        const paperId = String(manualReviewContext.paperId || (new URLSearchParams(window.location.search).get("paper_id") || "")).trim();
+        const runs = paperId
+          ? await fetchJSON("/api/papers/" + encodeURIComponent(paperId) + "/chart-review-scopes")
+          : { chart_runs: [] };
+        state.scopeRuns = runs && Array.isArray(runs.chart_runs) ? runs.chart_runs : [];
+        if (activeEvidenceScope() && manualReviewContext.runId && !state.scopeRuns.some(function(run) {
+          return String(run.chart_run_id || run.id || "") === String(manualReviewContext.runId);
+        })) {
+          const paperCode = manualReviewContext.paperCode || "当前主文献";
+          resetManualReviewContext();
+          state.scopeRuns = [];
+          manualScopeMismatchMessage = "当前范围所属批次已失效，已清除；请从 " + paperCode + " 重新选择批次。";
+          try { window.sessionStorage.removeItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY); } catch (_) {}
+          renderManualReviewScope();
+        }
+        renderReviewScopeChooser();
+      } catch (error) {
+        state.scopeRuns = [];
+        if (list) list.innerHTML = '<div class="error">AI 批次读取失败：' + esc(error.message) + '</div>';
+      }
+    }
+
+    function selectRunScope(runId) {
+      const run = (state.scopeRuns || []).find(function(item) { return String(item.chart_run_id || item.id) === String(runId); });
+      const row = run ? scopeRunPaper(run) : null;
+      if (!run || !row) {
+        showToast("当前批次没有对应的主文献行，无法固定审核范围。");
+        return;
+      }
+      const counts = scopeTargetCounts(run);
+      resetManualReviewContext();
+      Object.assign(manualReviewContext, {
+        paperId: String(run.paper_id),
+        paperCode: String(row.paper_code || ""),
+        runId: String(run.chart_run_id || run.id),
+        mode: "evidence",
+        confirmed: true,
+        scopeType: "external_analysis_run",
+        figureCount: counts.figures,
+        tableCount: counts.tables
+      });
+      manualScopeMismatchMessage = "";
+      selectedPaperIds.clear();
+      selectedPaperIds.add(String(run.paper_id));
+      persistManualReviewContext();
+      updateManualReviewUrl();
+      renderRows();
+      renderManualReviewScope();
+      renderReviewScopeChooser();
+      refreshManualReviewScope();
+    }
+
+    async function selectWholePaperScope() {
+      const target = selectedWebAiReturnTarget();
+      if (!target) {
+        showToast("请先选择一篇主文献，再明确选择整篇论文审核。");
+        return;
+      }
+      if (!window.confirm("确认切换为整篇论文审核？这会审核该论文全部图表，不是某个 AI 批次。")) return;
+      resetManualReviewContext();
+      Object.assign(manualReviewContext, {
+        paperId: String(target.paper_id),
+        paperCode: String(target.paper_code || ""),
+        mode: "evidence",
+        confirmed: true,
+        scopeType: "paper"
+      });
+      manualScopeMismatchMessage = "";
+      persistManualReviewContext();
+      updateManualReviewUrl();
+      renderManualReviewScope();
+      renderReviewScopeChooser();
+      await refreshManualReviewScope();
+    }
+
+    async function refreshManualReviewScope() {
+      if (!activeEvidenceScope()) return;
+      const contextKey = manualReviewContext.paperId + ":" + manualReviewContext.runId;
+      const params = new URLSearchParams();
+      if (manualReviewContext.runId) params.set("run_id", manualReviewContext.runId);
+      try {
+        const task = await fetchJSON("/api/papers/" + encodeURIComponent(manualReviewContext.paperId) + "/chart-review-task" + (params.toString() ? "?" + params.toString() : ""));
+        if (contextKey !== manualReviewContext.paperId + ":" + manualReviewContext.runId) return;
+        manualReviewContext.scopeType = String(task.scope_type || (manualReviewContext.runId ? "external_analysis_run" : "paper"));
+        manualReviewContext.figureCount = Number(task.counts && task.counts.figures || 0);
+        manualReviewContext.tableCount = Number(task.counts && task.counts.tables || 0);
+        if (task.paper_code) manualReviewContext.paperCode = String(task.paper_code);
+        persistManualReviewContext();
+        renderManualReviewScope();
+      } catch (error) {
+        console.error("Unable to read fixed chart review scope", error);
+        renderManualReviewScope();
+      }
+    }
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, function (char) {
@@ -1796,9 +2256,40 @@
     }
 
     function webAiModeLabel(mode) {
-      return mode === "evidence" ? "图表证据整理" : "DFT 终审";
+      if (mode === "evidence") return "图表证据整理";
+      const reviewMode = String(
+        (webAiReturnState.validationResponse && webAiReturnState.validationResponse.review_mode) ||
+        (dftReviewPreview && dftReviewPreview.review_mode) || ""
+      );
+      return reviewMode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
     }
 
+    async function refreshDftReviewPreview() {
+      const target = selectedWebAiReturnTarget();
+      const box = document.getElementById("dftEvidenceSummary");
+      if (!box) return;
+      if (!target || !target.paper_id) {
+        dftReviewPreview = null;
+        box.querySelector(".manual-review-scope-details").textContent = "请选择一篇主文献；DFT 导出会自动聚合全部已完成且未过期的图表审核结果。";
+        return;
+      }
+      try {
+        dftReviewPreview = await fetchJSON("/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-state");
+        const summary = dftReviewPreview.summary || {};
+        const modeLabel = dftReviewPreview.review_mode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
+        const exportOption = document.getElementById("exportDftWorkflowOption");
+        const returnOption = document.getElementById("returnDftWorkflowOption");
+        if (exportOption) exportOption.textContent = "3 导出 " + modeLabel + "包";
+        if (returnOption) returnOption.textContent = "4 回传 " + modeLabel + " JSON";
+        box.querySelector(".manual-review-scope-details").textContent =
+          modeLabel + "；DFT证据：已审核" + Number(summary.reviewed_figures || 0) + "图、" +
+          Number(summary.reviewed_tables || 0) + "表；另有" + Number(summary.pending_main_figures || 0) +
+          "图待补充；SI原始线索" + Number(summary.unreviewed_supporting_context || 0) + "。";
+      } catch (error) {
+        dftReviewPreview = null;
+        box.querySelector(".manual-review-scope-details").textContent = "DFT 证据摘要读取失败：" + error.message;
+      }
+    }
     function apiErrorMessageFromPayload(data, status) {
       const detail = data && data.detail;
       if (typeof detail === "string") return detail;
@@ -1816,7 +2307,10 @@
           return String(item);
         }).join("; ");
       }
-        if (detail && typeof detail === "object") {
+      if (detail && typeof detail === "object") {
+        if (detail.code === "chart_review_scope_selection_required") {
+          return detail.message || "请选择图表审核批次；系统不会自动选择或退回整篇论文。";
+        }
         if (detail.code === "figure_table_review_not_completed") {
           const gate = detail.figure_table_review || {};
           const stage = gate.stage_status || "unknown";
@@ -1860,21 +2354,22 @@
 
     function buildWebAiDftPrompt() {
       return [
-        "请解压并阅读这个 DFT 终审包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
+        "请解压并阅读这个 DFT 审核包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
         "",
         "请先检查 parsed/curated_figure_table_evidence_snapshot.json：",
         "- 如果 stage_status 不是 completed/not_required，或 completed_snapshot_fingerprint 与当前快照不一致，图表证据还没有完成第一阶段闭环；不要产出 DFT 终审 JSON。",
         "- 如果 rag_quality_status=blocked 或 rag_quality.figures.blocked > 0，图表仍不满足 RAG 要求；不要产出 DFT 终审 JSON，应先回到图表证据整理补齐图类型、content_summary、key_elements 和裁图问题。",
-        "- 如果已经 completed/not_required，请保留 return_template.json 中的 figure_table_completed_snapshot_fingerprint，再结合 text_snippets、tables、figures 和系统原有 DFT candidates 做终审。",
+        "- 如果已经 completed/not_required，请保留 return_template.json 中的聚合 fingerprint，并先读取 existing_terminal_context 去重。",
         "",
         "请逐条核验 DFT 数据：",
         "- 必须覆盖 return_template.coverage_acknowledgement.expected_target_ids / manifest.target_dft_result_ids 里的每一个已有 target_id；证据不足也要为该 target_id 返回 NEEDS_HUMAN；",
         "- 正确填 PASS；",
         "- 需要修正填 REVISE；",
         "- 错误或重复填 REJECT；",
-        "- 发现漏提数据填 new_candidate；",
+        "- gap_discovery 表示查漏，不代表完成了现有 DFT 数据终审；发现真正未收录且有 reviewed evidence 的数据才填 new_candidate；",
+        "- new_candidate 必须对 existing_terminal_context 提供 dedupe_analysis（compared_target_ids、conclusion=distinct、reason）；",
         "- 无法确认填 NEEDS_HUMAN。",
-        "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。正文、SI、表格或图片对同一计算结果的重复证据应合并，不要重复创建 DFT 结果。",
+        "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。unreviewed_supporting_context 只能返回 NEEDS_HUMAN，不能支持自动写回。正文、SI、表格或图片对同一计算结果的重复证据应与 existing_terminal_context 合并判断，不要重复创建 DFT 结果。",
         "",
         "最终只输出一份严格符合 return_schema.json 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
       ].join("\n");
@@ -1942,9 +2437,11 @@
       const target = selectedWebAiSingleMainPaper();
       if (!target) return;
       const paperId = String(target.paper_id || "");
+      if (normalizedMode === "evidence" && !requireSelectedMainEvidenceScope(target)) return;
+      const runId = manualReviewContext.runId;
       const paperCode = String(target.paper_code || paperId.slice(0, 8) || "paper");
       const endpoint = normalizedMode === "evidence"
-        ? "/api/papers/" + encodeURIComponent(paperId) + "/evidence-review-bundle?include_pdf_files=true&include_figure_files=true"
+        ? "/api/papers/" + encodeURIComponent(paperId) + "/evidence-review-bundle?include_pdf_files=true&include_figure_files=true" + (runId ? "&run_id=" + encodeURIComponent(runId) : "")
         : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true";
       const selector = document.getElementById("webAiWorkflowSelect");
       const previousTitle = selector ? selector.title : "";
@@ -1963,6 +2460,33 @@
           } catch (_) {}
           throw new Error(message);
         }
+        if (normalizedMode === "evidence") {
+          const metadata = {
+            scopeType: String(response.headers.get("X-LitAI-Review-Scope") || ""),
+            runId: String(response.headers.get("X-LitAI-Review-Run-Id") || ""),
+            figureCount: Number(response.headers.get("X-LitAI-Review-Figure-Count")),
+            tableCount: Number(response.headers.get("X-LitAI-Review-Table-Count")),
+            bundleId: String(response.headers.get("X-LitAI-Bundle-Id") || ""),
+            bundleFingerprint: String(response.headers.get("X-LitAI-Bundle-Fingerprint") || "")
+          };
+          const expectedScope = manualReviewContext.runId ? "external_analysis_run" : "paper";
+          if (
+            metadata.scopeType !== expectedScope ||
+            metadata.runId !== manualReviewContext.runId ||
+            !metadata.bundleId || !metadata.bundleFingerprint ||
+            !Number.isFinite(metadata.figureCount) || !Number.isFinite(metadata.tableCount)
+          ) {
+            throw new Error("后端返回的图表审核范围与当前固定范围不一致，已阻止下载；不会保存错误审核包。");
+          }
+          manualReviewContext.scopeType = metadata.scopeType;
+          manualReviewContext.figureCount = metadata.figureCount;
+          manualReviewContext.tableCount = metadata.tableCount;
+          manualReviewContext.bundleId = metadata.bundleId;
+          manualReviewContext.bundleFingerprint = metadata.bundleFingerprint;
+          manualReviewContext.paperCode = paperCode;
+          persistManualReviewContext();
+          renderManualReviewScope();
+        }
         const blob = await response.blob();
         const fallback = paperCode + (normalizedMode === "evidence" ? "_figure_table_evidence_review_bundle.zip" : "_dft_review_bundle.zip");
         const filename = contentDispositionFilename(response.headers.get("Content-Disposition"), fallback);
@@ -1974,7 +2498,16 @@
         link.click();
         link.remove();
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-        showToast(webAiModeLabel(normalizedMode) + "包已开始下载：" + filename);
+        if (normalizedMode === "dft") {
+          const modeLabel = response.headers.get("X-LitAI-DFT-Review-Mode") === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
+          showToast(modeLabel + "包已开始下载：已审核" +
+            Number(response.headers.get("X-LitAI-Reviewed-Figures") || 0) + "图、" +
+            Number(response.headers.get("X-LitAI-Reviewed-Tables") || 0) + "表；另有" +
+            Number(response.headers.get("X-LitAI-Pending-Main-Figures") || 0) + "图待补充。"
+          );
+        } else {
+          showToast(webAiModeLabel(normalizedMode) + "包已开始下载：" + filename);
+        }
       } catch (error) {
         console.error(error);
         showToast("导出失败：" + error.message);
@@ -2422,9 +2955,11 @@
 
     function selectedWebAiReturnTarget() {
       const rows = selectedPromptRows();
-      if (rows.length === 1 && !isSupportingInformationRow(rows[0])) return rows[0];
-      if (rows.length !== 1) return focusedSingleMainPaperRow();
-      return null;
+      const target = rows.length === 1 && !isSupportingInformationRow(rows[0])
+        ? rows[0]
+        : (rows.length !== 1 ? focusedSingleMainPaperRow() : null);
+      if (target) clearMismatchedManualReviewContext(target);
+      return target;
     }
 
     function setWebAiValidationBox(html, stateClass) {
@@ -2437,6 +2972,7 @@
     function syncWebAiReturnModeButtons() {
       const isEvidenceMode = webAiReturnState.mode === "evidence";
       const applyButton = document.getElementById("webAiApplyEvidenceBtn");
+      const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
       const copyButton = document.getElementById("webAiCopyInstructionBtn");
       if (applyButton) {
         applyButton.style.display = isEvidenceMode ? "" : "none";
@@ -2446,6 +2982,10 @@
         copyButton.style.display = "";
         copyButton.textContent = isEvidenceMode ? "复制本地 AI 图表复核指令" : "复制本地 AI 处理指令";
         copyButton.disabled = true;
+      }
+      if (finalizeButton) {
+        finalizeButton.style.display = isEvidenceMode ? "" : "none";
+        finalizeButton.disabled = true;
       }
     }
 
@@ -2493,10 +3033,8 @@
     function openWebAiReturnDialog(mode) {
       const normalizedMode = mode === "evidence" ? "evidence" : "dft";
       const target = selectedWebAiReturnTarget();
-      if (!target) {
-        showToast("请先只选择一篇主文献，再回传网页 AI " + webAiModeLabel(normalizedMode) + "结果。");
-        return;
-      }
+      if (!target) return;
+      if (normalizedMode === "evidence" && !requireSelectedMainEvidenceScope(target)) return;
       const targetId = String(target.paper_id || "");
       if (
         (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) ||
@@ -2507,12 +3045,17 @@
       webAiReturnState.mode = normalizedMode;
       webAiReturnState.paperId = targetId;
       webAiReturnState.paperCode = String(target.paper_code || "");
+      if (normalizedMode === "evidence" && (!manualReviewContext.bundleId || !manualReviewContext.bundleFingerprint)) {
+        showToast("请先导出当前固定范围的图表证据包，再回传 JSON。");
+        return;
+      }
       document.getElementById("webAiReturnTitle").textContent =
         "回传网页 AI " + webAiModeLabel(normalizedMode) + " JSON";
       document.getElementById("webAiReturnSubtitle").textContent =
-        "当前论文号：" + (webAiReturnState.paperCode || "-") +
-        " | paper_id：" + targetId +
-        " | 模式：" + webAiModeLabel(normalizedMode);
+        normalizedMode === "evidence"
+          ? evidenceScopeLabel()
+          : "当前论文号：" + (webAiReturnState.paperCode || "-") +
+            " | 模式：" + webAiModeLabel(normalizedMode);
       syncWebAiReturnModeButtons();
       setWebAiValidationBox(
         normalizedMode === "evidence"
@@ -2618,9 +3161,15 @@
       paper_id_mismatch: "paper_id 与当前选中文献不一致",
       paper_code_mismatch: "论文号与当前选中文献不一致",
       stale_or_mismatched_bundle: "核验包已过期或不属于当前文献，请重新导出核验包",
+      run_scope_mismatch: "审核范围与当前固定 AI 批次不一致",
       field_out_of_scope: "包含超出 DFT 核验范围的字段",
       unknown_target_id: "目标 DFT 记录不存在或不属于当前主文献",
       unknown_evidence_id: "引用的 evidence_id 不存在于当前核验包",
+      new_candidate_requires_reviewed_evidence: "新增 DFT 候选只能引用已完成且未过期的图表证据",
+      unreviewed_supporting_evidence_requires_human: "未审核 SI 线索只能返回 NEEDS_HUMAN",
+      duplicate_existing_terminal_candidate: "新增候选与现有终态 DFT 数据重复",
+      terminal_context_dedupe_analysis_required: "新增候选必须提供终态上下文去重分析",
+      review_mode_mismatch: "DFT 审核模式与当前目标集合不一致",
       unknown_figure_id: "目标图片不存在或不属于当前核验包",
       unknown_table_id: "目标表格不存在或不属于当前核验包",
       unknown_source_paper_id: "source_paper_id 不属于当前主文/SI 材料包",
@@ -2644,6 +3193,41 @@
       apply_request_failed: "应用请求失败"
     };
 
+    function evidenceScopeMismatchIssues(payloadOrResponse) {
+      const value = payloadOrResponse || {};
+      if (!activeEvidenceScope()) {
+        return [{ code: "run_scope_mismatch", message: "当前没有已确认的图表审核范围" }];
+      }
+      const expectedScope = manualReviewContext.runId ? "external_analysis_run" : "paper";
+      const issues = [];
+      if (String(value.scope_type || "") !== expectedScope) {
+        issues.push({ code: "run_scope_mismatch", message: "scope_type 与当前固定审核范围不一致" });
+      }
+      if (String(value.run_id || "") !== manualReviewContext.runId) {
+        issues.push({ code: "run_scope_mismatch", message: "run_id 与当前固定审核范围不一致" });
+      }
+      if (manualReviewContext.bundleFingerprint && String(value.bundle_fingerprint || "") !== manualReviewContext.bundleFingerprint) {
+        issues.push({ code: "stale_or_mismatched_bundle", message: "bundle_fingerprint 与已导出的当前审核包不一致" });
+      }
+      return issues;
+    }
+
+    function dedupeValidationIssues(issues) {
+      const grouped = new Map();
+      (Array.isArray(issues) ? issues : []).forEach(function(issue) {
+        const code = String(issue && issue.code || "validation_error");
+        const message = String(issue && issue.message || "");
+        const key = code + "\u0000" + message;
+        const refs = ["action_ref", "target_id", "figure_id", "table_id"].map(function(field) {
+          return issue && issue[field] ? field + "=" + issue[field] : "";
+        }).filter(Boolean);
+        if (!grouped.has(key)) grouped.set(key, { code: code, message: message, refs: [] });
+        const entry = grouped.get(key);
+        refs.forEach(function(ref) { if (!entry.refs.includes(ref)) entry.refs.push(ref); });
+      });
+      return Array.from(grouped.values());
+    }
+
     function webAiValidationIssueText(issue) {
       const code = String(issue && issue.code || "validation_error");
       const label = WEB_AI_VALIDATION_ERROR_LABELS[code] || "校验未通过";
@@ -2652,8 +3236,9 @@
     }
 
     function renderWebAiValidationFailure(errors, warnings) {
-      const errorItems = (errors || []).map(function (item) {
-        return "<li>" + esc(webAiValidationIssueText(item)) + "</li>";
+      const errorItems = dedupeValidationIssues(errors).map(function (item) {
+        return "<li>" + esc(webAiValidationIssueText(item)) +
+          (item.refs.length ? " <span class=\"muted\">（相关 " + esc(item.refs.join("，")) + "）</span>" : "") + "</li>";
       }).join("");
       const warningItems = (warnings || []).map(function (item) {
         return "<li>[" + esc(item && item.code || "warning") + "] " + esc(item && item.message || "需要本地 AI 复核") + "</li>";
@@ -2819,10 +3404,12 @@
       const coverage = data && data.coverage ? data.coverage : {};
       const coverageText = String(coverage.reviewed_existing_count || 0) + "/" + String(coverage.expected_count || 0);
       const missingTargets = Array.isArray(coverage.missing_target_ids) ? coverage.missing_target_ids : [];
+      const isGapDiscovery = data.review_mode === "gap_discovery";
       setWebAiValidationBox(
-        "<strong>校验通过，但尚未入库。</strong>" +
+        "<strong>" + (isGapDiscovery ? "DFT 数据查漏结果校验通过，但尚未入库。" : "DFT 终审结果校验通过，但尚未入库。") + "</strong>" +
         '<div class="web-ai-validation-summary">' +
           '<div class="web-ai-validation-item"><strong>paper_code</strong>' + esc(data.paper_code || "-") + "</div>" +
+          '<div class="web-ai-validation-item"><strong>review_mode</strong>' + esc(String(data.review_mode || "-")) + "</div>" +
           '<div class="web-ai-validation-item"><strong>validated_audit_count</strong>' + esc(String(data.validated_audit_count || 0)) + "</div>" +
           '<div class="web-ai-validation-item"><strong>coverage</strong>' + esc(coverageText) + "</div>" +
           '<div class="web-ai-validation-item"><strong>coverage_complete</strong>' + esc(String(Boolean(coverage.coverage_complete))) + "</div>" +
@@ -2837,6 +3424,7 @@
 
     async function validateWebAiReturnJson() {
       const target = selectedWebAiReturnTarget();
+      if (!requireSelectedMainEvidenceScope(target)) return;
       if (!target || String(target.paper_id || "") !== webAiReturnState.paperId) {
         clearWebAiReturnTransientState("当前文献选择已变化，请重新打开回传入口。");
         renderWebAiValidationFailure([{ code: "paper_id_mismatch", message: "当前选择与弹窗目标不一致" }], []);
@@ -2860,6 +3448,13 @@
         renderWebAiValidationFailure([{ code: "invalid_json", message: error.message }], []);
         return;
       }
+      if (webAiReturnState.mode === "evidence") {
+        const scopeIssues = evidenceScopeMismatchIssues(parsed);
+        if (scopeIssues.length) {
+          renderWebAiValidationFailure(scopeIssues, []);
+          return;
+        }
+      }
       const validateButton = document.getElementById("webAiValidateBtn");
       validateButton.disabled = true;
       validateButton.textContent = "校验中...";
@@ -2868,7 +3463,7 @@
       if (applyButton) applyButton.disabled = true;
       try {
         const endpoint = webAiReturnState.mode === "evidence"
-          ? "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/validate"
+          ? "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/validate" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : "")
           : "/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-result/validate";
         const data = await fetchJSON(
           endpoint,
@@ -2886,6 +3481,15 @@
           webAiReturnState.validationResponse = null;
           renderWebAiValidationFailure(data && data.errors || [], data && data.warnings || []);
           return;
+        }
+        if (webAiReturnState.mode === "evidence") {
+          const scopeIssues = evidenceScopeMismatchIssues(data);
+          if (scopeIssues.length) {
+            webAiReturnState.validatedRawText = "";
+            webAiReturnState.validationResponse = null;
+            renderWebAiValidationFailure(scopeIssues, []);
+            return;
+          }
         }
         webAiReturnState.validatedRawText = rawText;
         webAiReturnState.validationResponse = data;
@@ -2907,12 +3511,12 @@
       const textarea = document.getElementById("webAiReturnJson");
       const rawText = String(textarea && textarea.value || "").trim();
       if (webAiReturnState.mode === "evidence") {
-        if (!webAiReturnState.paperId) {
-          throw new Error("请先选择一篇主文献。");
+        if (!webAiReturnState.paperId || !activeEvidenceScope()) {
+          throw new Error("请先确认固定图表审核范围。");
         }
         if (!response || response.valid !== true) {
           response = await fetchJSON(
-            "/api/papers/" + encodeURIComponent(webAiReturnState.paperId) + "/chart-review-task"
+            "/api/papers/" + encodeURIComponent(webAiReturnState.paperId) + "/chart-review-task" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : "")
           );
         }
         const unresolvedActions = Array.isArray(response.unresolved_actions) ? response.unresolved_actions : [];
@@ -2941,6 +3545,8 @@
           "",
           "当前论文号：" + (webAiReturnState.paperCode || "-"),
           "paper_id：" + webAiReturnState.paperId,
+          "兼容协议名称：get_chart_review_task(paper_id)；run-scoped 调用附带 run_id。",
+          evidenceScopeLabel(),
           "stage_status：" + String(response.stage_status || "-"),
           "unresolved_count：" + String(response.unresolved_count || unresolvedActions.length || 0),
           "bundle_fingerprint：" + String(response.bundle_fingerprint || "-"),
@@ -2951,13 +3557,14 @@
           "",
           "执行要求：",
           "1. 只使用当前会话已认证的 Literature AI MCP；不要改 MCP 配置，不要发不带认证头的裸请求。",
-          "2. 调用 get_chart_review_task(paper_id) 读取当前任务和 PDF/页面信息。",
+          "2. 调用 get_chart_review_task(paper_id, run_id) 读取当前 run 任务和 PDF/页面信息；run_id=" + (new URLSearchParams(window.location.search).get("run_id") || "-") + "。",
           "3. 只核对 unresolved_actions 中的问题项；可用 read_paper_page、get_codex_context、get_codex_item 核对证据。",
           "4. 没问题的当前 figures/tables 由本地 AI 从 get_chart_review_task 读取后原样 KEEP，用户剪贴板不提供整包 JSON。",
           "5. 对已解决的问题项附 local_ai_verification={verified_against_pdf:true,used_tools:['get_codex_item','read_paper_page'],verification_note:'核验说明'}。",
           "6. 使用当前 get_chart_review_task 返回的 bundle_fingerprint 构造完整 review_result；不要沿用旧网页 JSON 的 bundle_fingerprint。",
-          "7. 构造完整 review_result 后调用 resolve_chart_review_actions(paper_id, review_result)。",
-          "8. 若 unresolved_count=0，再调用 finalize_chart_review(paper_id, review_result)。",
+          "7. 构造完整 review_result 后调用 resolve_chart_review_actions(paper_id, review_result, run_id)。",
+          "8. 若 unresolved_count=0，再调用 finalize_chart_review(paper_id, review_result, run_id)。",
+          "兼容协议名称：resolve_chart_review_actions(paper_id, review_result)；finalize_chart_review(paper_id, review_result)；run-scoped 时必须附带 run_id。",
           "9. 最后只报告 stage_status、completed_snapshot_fingerprint、unresolved_count。"
         ].join("\n");
       }
@@ -3018,6 +3625,7 @@
         return;
       }
       const target = selectedWebAiReturnTarget();
+      if (!requireSelectedMainEvidenceScope(target)) return;
       const textarea = document.getElementById("webAiReturnJson");
       const rawText = String(textarea && textarea.value || "").trim();
       if (!target || String(target.paper_id || "") !== webAiReturnState.paperId) {
@@ -3035,15 +3643,20 @@
         renderWebAiValidationFailure([{ code: "invalid_json", message: error.message }], []);
         return;
       }
+      const scopeIssues = evidenceScopeMismatchIssues(parsed).concat(evidenceScopeMismatchIssues(webAiReturnState.validationResponse));
+      if (scopeIssues.length) {
+        renderWebAiValidationFailure(scopeIssues, []);
+        return;
+      }
       const applyButton = document.getElementById("webAiApplyEvidenceBtn");
-      if (!window.confirm("确认应用这份图表审核 JSON？系统只会自动处理高置信度图表修复；MERGE/DELETE/REJECT/NEEDS_HUMAN 会跳过。")) {
+      if (!window.confirm("确认应用图表审核 JSON？\n" + evidenceScopeLabel() + "\n系统只会处理当前范围内的图/表；不会自动替你切换为整篇论文。")) {
         return;
       }
       applyButton.disabled = true;
       applyButton.textContent = "应用中...";
       try {
         const data = await fetchJSON(
-          "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/apply",
+            "/api/papers/" + encodeURIComponent(target.paper_id) + "/evidence-review-result/apply" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : ""),
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -3058,11 +3671,18 @@
           renderWebAiValidationFailure(data && data.errors || [{ code: "apply_request_failed", message: "系统未返回有效应用结果" }], data && data.warnings || []);
           return;
         }
+        const returnedScopeIssues = evidenceScopeMismatchIssues(data);
+        if (returnedScopeIssues.length) {
+          renderWebAiValidationFailure(returnedScopeIssues, []);
+          return;
+        }
         const skipped = Array.isArray(data.skipped) ? data.skipped.length : 0;
         const applied = Array.isArray(data.applied) ? data.applied.length : Number(data.applied_count || 0);
         const completed = Boolean(data && data.chart_review_completed);
         const copyButton = document.getElementById("webAiCopyInstructionBtn");
+        const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
         if (copyButton) copyButton.disabled = completed;
+        if (finalizeButton) finalizeButton.disabled = !completed;
         setWebAiValidationBox(
           "<strong>" + (completed ? "图表阶段已完成。" : "图表安全操作已处理，仍有未解决项。") + "</strong>" +
           '<div class="web-ai-validation-summary">' +
@@ -3073,7 +3693,7 @@
             '<div class="web-ai-validation-item"><strong>completed_snapshot</strong>' + esc(String(data.completed_snapshot_fingerprint || "-").slice(0, 16)) + "</div>" +
           "</div>" +
           renderWebAiUnresolvedActions(data.unresolved_actions || []) +
-          '<div style="margin-top:10px;">' + (completed ? '下一步：导出 DFT 终审包；包内会包含 completed 图表证据快照。' : '下一步：复制本地 AI 图表复核指令，批量 resolve 后 finalize。') + '</div>',
+          '<div style="margin-top:10px;">' + (completed ? '安全应用已完成；请点击“完成图表审核”进行独立 finalize，之后才能继续 DFT。' : '下一步：复制本地 AI 图表复核指令，批量 resolve 后再 finalize。') + '</div>',
           completed ? "is-success" : ""
         );
         webAiReturnState.validationResponse = data;
@@ -3084,6 +3704,36 @@
       } finally {
         applyButton.textContent = "应用图表结果";
         applyButton.disabled = true;
+      }
+    }
+
+    async function finalizeWebAiEvidenceReview() {
+      if (!activeEvidenceScope() || webAiReturnState.mode !== "evidence" || !webAiReturnState.validationResponse) {
+        showToast("没有可 finalize 的当前固定图表审核范围。");
+        return;
+      }
+      const button = document.getElementById("webAiFinalizeEvidenceBtn");
+      if (!window.confirm("确认完成图表审核？\n" + evidenceScopeLabel() + "\n这一步只 finalize 已应用的当前范围，不会重新 apply JSON。")) return;
+      button.disabled = true;
+      button.textContent = "完成中...";
+      try {
+        const data = await fetchJSON(
+          "/api/papers/" + encodeURIComponent(manualReviewContext.paperId) + "/chart-review-result/finalize" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : ""),
+          { method: "POST" }
+        );
+        const scopeIssues = evidenceScopeMismatchIssues(data);
+        if (scopeIssues.length || !data.chart_review_completed) {
+          renderWebAiValidationFailure(scopeIssues.length ? scopeIssues : (data.finalize_blocking_errors || data.unresolved_actions || []), []);
+          return;
+        }
+        setWebAiValidationBox("<strong>图表审核已 finalize。</strong><div style=\"margin-top:8px;\">" + esc(evidenceScopeLabel()) + "</div>", "is-success");
+        showToast("图表审核已完成；现在可以继续 DFT 终审。");
+        await loadReviewCenter();
+      } catch (error) {
+        renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
+      } finally {
+        button.textContent = "完成图表审核";
+        button.disabled = false;
       }
     }
     // WEB_AI_RETURN_FEATURE_END
@@ -5185,6 +5835,10 @@
         renderStatusFilterOptions();
         ensureValidPage(state.rows.length);
         renderRows();
+        updateManualReviewContextFromRows();
+        await refreshManualReviewScope();
+        await loadReviewScopeCandidates();
+        await refreshDftReviewPreview();
       } catch (error) {
         document.getElementById("queueMeta").textContent = "读取失败";
         document.getElementById("rows").innerHTML = '<tr><td colspan="6"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
@@ -5357,6 +6011,7 @@
 
     document.addEventListener("DOMContentLoaded", function () {
       restoreReviewCenterFilterState();
+      restoreManualReviewContext();
       TopNav.init({ currentPage: "review-center", mountId: "topnav-mount" });
       document.getElementById("rows").addEventListener("click", handleRowAction);
       document.getElementById("tableWrap").addEventListener("scroll", syncExternalTableHead, { passive: true });

@@ -175,9 +175,21 @@ async function exportSelectedDftReviewBundle() {
         return;
     }
     try {
+        const chartStatus = state.selectedPaper.chart_review_status || {};
+        const selectedChartRunId = chartStatus.selected_chart_run_id ||
+            (chartStatus.primary_completed_run && chartStatus.primary_completed_run.chart_run_id) || (
+            Number(chartStatus.chart_run_count || 0) === 1 ? chartStatus.chart_run_id : ""
+        );
+        if (!selectedChartRunId && Number(chartStatus.chart_run_count || 0) > 1) {
+            showToast("当前论文有多个图表审核批次，请先在审核中心选择批次后再导出 DFT 包。", "error");
+            return;
+        }
         showProgress("正在生成离线 AI 核验包...");
+        const chartScopeQuery = selectedChartRunId
+            ? "&chart_run_id=" + encodeURIComponent(selectedChartRunId)
+            : "&chart_scope=paper";
         const response = await fetch(
-            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/dft-review-bundle",
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/dft-review-bundle?include_figure_files=true" + chartScopeQuery,
             { method: "POST" }
         );
         if (!response.ok) {

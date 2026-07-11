@@ -353,6 +353,9 @@ class OfflineEvidenceReviewResult(BaseModel):
     bundle_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     paper_id: str = Field(min_length=1, max_length=64)
     paper_code: str = Field(min_length=1, max_length=64)
+    scope_type: Literal["paper", "external_analysis_run"] = "paper"
+    run_id: str | None = Field(default=None, max_length=64)
+    chart_run_id: str | None = Field(default=None, max_length=64)
     review_source: OfflineReviewSource
     overall_status: OverallReviewStatus
     figure_actions: list[OfflineEvidenceFigureAction] = Field(default_factory=list)
@@ -378,6 +381,10 @@ class OfflineEvidenceReviewResult(BaseModel):
     def dedupe_exact_duplicate_actions(self) -> "OfflineEvidenceReviewResult":
         self.figure_actions = _dedupe_exact_actions(self.figure_actions)
         self.table_actions = _dedupe_exact_actions(self.table_actions)
+        if self.chart_run_id and self.run_id and self.chart_run_id != self.run_id:
+            raise ValueError("chart_run_id and run_id must match")
+        if self.chart_run_id and not self.run_id:
+            self.run_id = self.chart_run_id
         return self
 
 

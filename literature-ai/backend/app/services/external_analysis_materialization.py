@@ -570,7 +570,7 @@ class ExternalAnalysisMaterializationMixin:
         self._validate_dft_import_json(run, dft_candidates)
         expected_snapshot = self._dft_import_expected_completed_snapshot(run, dft_candidates)
         bundle_service = DFTReviewBundleService(self.session, self.settings)
-        state = bundle_service.get_figure_table_review_state(run.paper_id)
+        state = bundle_service.get_review_state(run.paper_id)["review_gate"]
         if not expected_snapshot:
             raise ValueError("figure_table_review_not_completed:missing_completed_snapshot_fingerprint")
         bundle_service.ensure_figure_table_review_ready(
@@ -621,6 +621,7 @@ class ExternalAnalysisMaterializationMixin:
                 {
                     "target_type": "dft_results",
                     "target_id": payload.get("target_id"),
+                    "temporary_id": payload.get("temporary_id"),
                     "field_name": payload.get("field_name") or "dft_results",
                     "decision": payload.get("decision"),
                     "evidence_checked": payload.get("evidence_checked") is True,
@@ -630,6 +631,7 @@ class ExternalAnalysisMaterializationMixin:
                     "reason": payload.get("reason"),
                     "blocking_errors": payload.get("blocking_errors") or [],
                     "recommended_action": payload.get("recommended_action"),
+                    "dedupe_analysis": payload.get("dedupe_analysis"),
                 }
             )
         if unsupported_candidate_ids:
@@ -645,6 +647,9 @@ class ExternalAnalysisMaterializationMixin:
             ),
             "paper_id": str(run.paper_id),
             "paper_code": metadata.get("paper_code"),
+            "chart_scope_type": metadata.get("chart_scope_type") or "paper_reviewed_aggregate",
+            "chart_run_id": metadata.get("chart_run_id"),
+            "review_mode": metadata.get("review_mode"),
             "review_source": review_source,
             "overall_status": metadata.get("overall_status"),
             "object_review_audits": audits,
@@ -684,6 +689,34 @@ class ExternalAnalysisMaterializationMixin:
         if len(fingerprints) > 1:
             raise ValueError("conflicting_figure_table_completed_snapshot_fingerprint")
         return next(iter(fingerprints), None)
+
+    @staticmethod
+    def _dft_import_chart_run_id(
+        run: ExternalAnalysisRun,
+        candidates: list[ExternalAnalysisCandidate],
+    ) -> UUID | None:
+        values: set[str] = set()
+        raw_payload = run.raw_payload if isinstance(run.raw_payload, dict) else {}
+        metadata = raw_payload.get("review_metadata") if isinstance(raw_payload.get("review_metadata"), dict) else {}
+        for source in (raw_payload, metadata):
+            value = source.get("chart_run_id") if isinstance(source, dict) else None
+            if value:
+                values.add(str(value).strip())
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            for source in (payload, payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}):
+                value = source.get("chart_run_id") if isinstance(source, dict) else None
+                if value:
+                    values.add(str(value).strip())
+        values.discard("")
+        if len(values) > 1:
+            raise ValueError("conflicting_chart_run_id")
+        if not values:
+            return None
+        try:
+            return UUID(next(iter(values)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid_chart_run_id") from exc
 
     @staticmethod
     def _payload_has_local_ai_verification(payload: dict[str, Any]) -> bool:

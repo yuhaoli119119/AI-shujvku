@@ -1171,24 +1171,25 @@ def merge_table(
     name="get_chart_review_task",
     description="Read the current figure/table chart-review task, including unresolved_actions from the latest web-AI return.",
 )
-def get_chart_review_task(paper_id: str) -> dict[str, Any]:
+def get_chart_review_task(paper_id: str, run_id: str | None = None) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        return EvidenceReviewBundleService(session, settings).get_review_task(UUID(paper_id))
+        return EvidenceReviewBundleService(session, settings).get_review_task(UUID(paper_id), run_id=UUID(run_id) if run_id else None)
 
 
 @mcp_server.tool(
     name="resolve_chart_review_actions",
     description="Batch-resolve chart review actions using the guarded evidence-review result schema. Returns unresolved_actions if anything remains.",
 )
-def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], dry_run: bool = False) -> dict[str, Any]:
+def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], run_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
     require_mcp_capability("review_corrections")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return EvidenceReviewBundleService(session, settings).resolve_review_actions(
             UUID(paper_id),
             review_result,
+            run_id=UUID(run_id) if run_id else None,
             dry_run=dry_run,
         )
 
@@ -1197,13 +1198,14 @@ def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], d
     name="finalize_chart_review",
     description="Finalize chart review after re-reading current figures/tables. The stage completes only when no unresolved actions remain.",
 )
-def finalize_chart_review(paper_id: str, review_result: dict[str, Any] | None = None, dry_run: bool = False) -> dict[str, Any]:
+def finalize_chart_review(paper_id: str, review_result: dict[str, Any] | None = None, run_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
     require_mcp_capability("review_corrections")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return EvidenceReviewBundleService(session, settings).finalize_review(
             UUID(paper_id),
             review_result,
+            run_id=UUID(run_id) if run_id else None,
             dry_run=dry_run,
         )
 

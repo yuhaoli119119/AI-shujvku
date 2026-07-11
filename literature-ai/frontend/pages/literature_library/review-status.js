@@ -86,6 +86,27 @@ function chartReviewCompleted(detail) {
     return (stage === "completed" || stage === "not_required") && unresolved === 0 && (!ragStatus || ragStatus === "ready");
 }
 
+function chartReviewScopeSummary(detail) {
+    const chartStatus = detail && detail.chart_review_status;
+    if (!chartStatus || typeof chartStatus !== "object") return "";
+    const primary = chartStatus.primary_completed_run && typeof chartStatus.primary_completed_run === "object"
+        ? chartStatus.primary_completed_run
+        : null;
+    const selected = primary || (chartStatus.scope_type === "external_analysis_run" ? chartStatus : null);
+    const selectedStage = String(selected && selected.stage_status || "").trim();
+    const selectedCounts = selected && selected.counts ? selected.counts : (selected && selected.counts || {});
+    const lines = [];
+    if (selected && selectedStage === "completed") {
+        lines.push("AI 批次图表审核已完成：" + Number(selectedCounts.figures || 0) + " 图、" + Number(selectedCounts.tables || 0) + " 表");
+    }
+    const paper = chartStatus.paper_scope && typeof chartStatus.paper_scope === "object" ? chartStatus.paper_scope : null;
+    if (paper) {
+        lines.push("整篇论文审核（" + (String(paper.stage_status || "not_started") === "not_started" ? "未开始" : String(paper.stage_status || "未知")) + "）：" +
+            Number(paper.counts && paper.counts.figures || 0) + " 图、" + Number(paper.counts && paper.counts.tables || 0) + " 表");
+    }
+    return lines.length ? '<div class="subtle" style="margin-top:8px;white-space:pre-line;">' + esc(lines.join("\n")) + '</div>' : "";
+}
+
 function figureReviewCompletionBlocked(detail) {
     const chartStatus = detail && detail.chart_review_status;
     if (chartStatus && typeof chartStatus === "object") {
@@ -155,6 +176,7 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
                   '</button>') +
         '</div>' +
         '<div class="subtle">' + esc(message) + '</div>' +
+        chartReviewScopeSummary(detail) +
         (module === "figures" ? figureReviewBlockingNote(detail) : "") +
         inheritedNote +
     '</div>';
@@ -198,7 +220,10 @@ async function setManualReviewProgress(module, completed) {
                 body: JSON.stringify({
                     module: module,
                     completed: !!completed,
-                    reviewer: "literature_library"
+                    reviewer: "literature_library",
+                    chart_run_id: module === "figures" && state.selectedPaper && state.selectedPaper.chart_review_status
+                        ? (state.selectedPaper.chart_review_status.chart_run_id || null)
+                        : null
                 })
             }
         );

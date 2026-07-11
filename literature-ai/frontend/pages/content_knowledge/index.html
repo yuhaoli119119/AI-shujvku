@@ -425,6 +425,8 @@
           ? '<a href="../paper_detail/index.html?id=' + encodeURIComponent(item.paper_id) + '&page=' + encodeURIComponent(item.page_start) + '">跳转 PDF 证据</a>' : '';
         const runId = (item.metadata || {}).external_analysis_run_id || (item.metadata || {}).run_id;
         const runLink = runId ? '<a href="../literature_library/index.html?run_id=' + encodeURIComponent(runId) + '">查看任务</a>' : '';
+        const chartLink = runId && item.category === "figure_table_evidence" && item.paper_id
+          ? '<a href="../review_center/index.html?paper_id=' + encodeURIComponent(item.paper_id) + '&run_id=' + encodeURIComponent(runId) + '&mode=evidence">转到图表审核</a>' : '';
         return (
           '<article class="knowledge-item">' +
             '<div class="item-head">' +
@@ -443,7 +445,7 @@
               (item.candidate_status ? '<span class="count-chip">' + esc(item.candidate_status) + '</span>' : '') +
               '<span class="count-chip">来源 ' + esc(item.source_identity_verified ? '已认证' : '声明来源；未认证') + '</span>' +
               risks +
-              pdfLink + runLink +
+              pdfLink + runLink + chartLink +
             '</div>' +
           '</article>'
         );
@@ -498,6 +500,13 @@
       try {
         const paperId = currentPaperId(); if (!paperId) throw new Error("请先按论文号或 UUID 筛选一篇文献");
         const runId = currentRunId();
+        const hasFigureEvidence = (lastKnowledge && lastKnowledge.items || []).some(function(item) {
+          const itemRunId = (item.metadata || {}).external_analysis_run_id || (item.metadata || {}).run_id;
+          return item.category === "figure_table_evidence" && itemRunId === runId;
+        });
+        if (runId && hasFigureEvidence) {
+          throw new Error("当前是图表字段审核任务，请使用“转到图表审核”，不要生成内容审核包。");
+        }
         const response = await fetch("/api/content-knowledge/review-bundles", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({paper_id:paperId, run_id:runId || undefined, created_by:"web_ui"})});
         const result = await response.json(); if (!response.ok) throw new Error(result.detail || response.status);
         lastBundle = result; reviewReadyToFinalize = false; document.getElementById("finalizeReviewButton").hidden = true;

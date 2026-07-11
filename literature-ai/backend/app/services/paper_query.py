@@ -53,9 +53,18 @@ __all__ = ["PaperQueryService", "_cached_pdf_size_for_storage"]
 DFT_DETAIL_PAGE_SIZE = 28
 
 
-def _chart_review_status_for_detail(session: Session, paper_id: UUID) -> dict[str, Any]:
+def _chart_review_status_for_detail(
+    session: Session,
+    paper_id: UUID,
+    *,
+    chart_run_id: UUID | None = None,
+) -> dict[str, Any]:
     try:
-        task = EvidenceReviewBundleService(session, get_settings()).get_review_task(paper_id)
+        service = EvidenceReviewBundleService(session, get_settings())
+        scopes = service.get_review_scope_options(paper_id, selected_run_id=chart_run_id)
+        task = service.get_review_task(paper_id, run_id=chart_run_id) if chart_run_id else (
+            scopes.get("primary_completed_run") or scopes.get("paper_scope") or {}
+        )
     except Exception as exc:
         return {
             "stage_status": "unavailable",
@@ -65,7 +74,7 @@ def _chart_review_status_for_detail(session: Session, paper_id: UUID) -> dict[st
             "error": str(exc),
         }
     unresolved_actions = list(task.get("unresolved_actions") or [])
-    return {
+    result = {
         "stage_status": task.get("stage_status"),
         "apply_ready": bool(task.get("apply_ready")),
         "rag_quality_status": task.get("rag_quality_status"),
@@ -74,7 +83,15 @@ def _chart_review_status_for_detail(session: Session, paper_id: UUID) -> dict[st
         "blocking_errors": task.get("blocking_errors") or [],
         "completed_snapshot_fingerprint": task.get("completed_snapshot_fingerprint"),
         "current_snapshot_fingerprint": task.get("current_snapshot_fingerprint"),
+        "scope_type": task.get("scope_type") or ("external_analysis_run" if task.get("chart_run_id") else "paper"),
+        "chart_run_id": task.get("chart_run_id") or task.get("run_id"),
     }
+    result["paper_scope"] = scopes.get("paper_scope")
+    result["chart_runs"] = scopes.get("chart_runs", [])
+    result["chart_run_count"] = scopes.get("chart_run_count", 0)
+    result["selected_chart_run_id"] = scopes.get("selected_chart_run_id")
+    result["primary_completed_run"] = scopes.get("primary_completed_run")
+    return result
 
 
 def _direct_table_review_audits_by_target(session: Session, target_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
@@ -547,14 +564,20 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             created_order,
         )
 
-    def get_paper_detail(self, paper_id: UUID, *, compact: bool = False) -> PaperDetailResponse | None:
+    def get_paper_detail(
+        self,
+        paper_id: UUID,
+        *,
+        compact: bool = False,
+        chart_run_id: UUID | None = None,
+    ) -> PaperDetailResponse | None:
         paper = self.session.get(Paper, paper_id)
         if not paper:
             return None
         if ensure_paper_codes(self.session, [paper]):
             self.session.commit()
         if compact:
-            return self._get_light_paper_detail(paper)
+            return self._get_light_paper_detail(paper, chart_run_id=chart_run_id)
 
         all_sections = self.session.scalars(
             select(PaperSection)
@@ -874,11 +897,11 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                 writing_cards=writing_cards,
                 dft_gate_by_id=dft_gate_by_id,
             ),
-            chart_review_status=_chart_review_status_for_detail(self.session, paper_id),
+            chart_review_status=_chart_review_status_for_detail(self.session, paper_id, chart_run_id=chart_run_id),
             **review_status,
         )
 
-    def _get_light_paper_detail(self, paper: Paper) -> PaperDetailResponse:
+    def _get_light_paper_detail(self, paper: Paper, *, chart_run_id: UUID | None = None) -> PaperDetailResponse:
         paper_id = paper.id
         count_models = (
             ("sections", PaperSection),
@@ -958,7 +981,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             **base.model_dump(),
             artifact_status=build_paper_artifact_status(paper),
             dft_review_status=dft_review_status,
-            chart_review_status=_chart_review_status_for_detail(self.session, paper_id),
+            chart_review_status=_chart_review_status_for_detail(self.session, paper_id, chart_run_id=chart_run_id),
             dft_results_page={
                 "offset": 0,
                 "limit": DFT_DETAIL_PAGE_SIZE,

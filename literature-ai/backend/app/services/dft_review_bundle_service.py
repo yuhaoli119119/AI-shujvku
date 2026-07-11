@@ -98,6 +98,23 @@ class FigureTableReviewNotCompletedError(ValueError):
         }
 
 
+class ChartReviewScopeSelectionRequiredError(ValueError):
+    code = "chart_review_scope_selection_required"
+
+    def __init__(self, paper_id: UUID, runs: list[dict[str, Any]]) -> None:
+        self.state = {
+            "code": self.code,
+            "paper_id": str(paper_id),
+            "message": "请选择图表审核批次；当前论文存在多个图表审核批次，系统不会自动选择或退回整篇论文。",
+            "chart_runs": runs,
+        }
+        super().__init__(self.code)
+
+    @property
+    def detail(self) -> dict[str, Any]:
+        return self.state
+
+
 def _json_bytes(payload: Any) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n").encode("utf-8")
 
@@ -121,6 +138,15 @@ def _safe_name(value: str, fallback: str) -> str:
     return normalized or fallback
 
 
+def _optional_uuid(value: Any) -> UUID | None:
+    if not value:
+        return None
+    try:
+        return UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        raise ValueError("invalid_chart_run_id")
+
+
 class DFTReviewBundleService:
     """Build and validate small, temporary, offline DFT review packages."""
 
@@ -128,9 +154,71 @@ class DFTReviewBundleService:
         self.session = session
         self.settings = settings
 
-    def get_figure_table_review_state(self, paper_id: UUID) -> dict[str, Any]:
+    @staticmethod
+    def _optional_uuid(value: Any) -> UUID | None:
+        return _optional_uuid(value)
+
+    def get_figure_table_review_state(self, paper_id: UUID, *, chart_run_id: UUID | None = None) -> dict[str, Any]:
+        task = EvidenceReviewBundleService(self.session, self.settings).get_review_task(
+            paper_id,
+            run_id=chart_run_id,
+        )
+        return {
+            "stage_status": task.get("stage_status"),
+            "allowed_statuses": sorted(FIGURE_TABLE_REVIEW_READY_STATUSES),
+            "rag_quality_status": task.get("rag_quality_status"),
+            "rag_quality": task.get("rag_quality") or {},
+            "blocking_errors": task.get("blocking_errors") or [],
+            "current_snapshot_fingerprint": task.get("current_snapshot_fingerprint"),
+            "completed_snapshot_fingerprint": task.get("completed_snapshot_fingerprint"),
+            "review_run_id": task.get("latest_review_run_id"),
+            "reviewed_at": task.get("reviewed_at"),
+        }
+
+    def get_review_state(self, paper_id: UUID) -> dict[str, Any]:
         materials = self._build_materials(paper_id, enforce_figure_table_gate=False)
-        return dict(materials["curated_evidence_snapshot"]["review_gate"])
+        return {
+            "paper_id": materials["paper_metadata"]["paper_id"],
+            "paper_code": materials["paper_metadata"]["paper_code"],
+            "review_mode": materials["review_mode"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "summary": materials["evidence_summary"],
+            "review_gate": materials["curated_evidence_snapshot"]["review_gate"],
+            "existing_terminal_context_count": len(
+                materials["initial_dft_candidates"]["existing_terminal_context"]
+            ),
+            "target_count": len(materials["target_dft_result_ids"]),
+            "review_runs": materials["curated_evidence_snapshot"].get("review_runs") or [],
+        }
+
+    def _resolve_chart_run_id(
+        self,
+        paper_id: UUID,
+        chart_run_id: UUID | None,
+        *,
+        explicit_paper_scope: bool = False,
+    ) -> UUID | None:
+        if chart_run_id is not None:
+            EvidenceReviewBundleService(self.session, self.settings).get_review_task(paper_id, run_id=chart_run_id)
+            return chart_run_id
+        if explicit_paper_scope:
+            return None
+        options = EvidenceReviewBundleService(self.session, self.settings).get_review_scope_options(paper_id)
+        primary_completed = options.get("primary_completed_run")
+        if isinstance(primary_completed, dict) and primary_completed.get("chart_run_id"):
+            # A stable completed main-paper review is the safe default.  It must
+            # win over unrelated unfinished or duplicated historical attempts;
+            # callers can still pass chart_run_id to select another scope.
+            return UUID(str(primary_completed["chart_run_id"]))
+        runs = options.get("chart_runs") if isinstance(options.get("chart_runs"), list) else []
+        representatives = [
+            run for run in runs
+            if run.get("is_duplicate_representative", True)
+        ]
+        if len(representatives) > 1:
+            raise ChartReviewScopeSelectionRequiredError(paper_id, representatives)
+        return UUID(str(representatives[0]["chart_run_id"])) if representatives else None
 
     @classmethod
     def ensure_figure_table_review_ready(
@@ -167,8 +255,18 @@ class DFTReviewBundleService:
                 }
             )
 
-    def build_zip(self, paper_id: UUID, *, include_figure_files: bool = True) -> dict[str, Any]:
-        materials = self._build_materials(paper_id)
+    def build_zip(
+        self,
+        paper_id: UUID,
+        *,
+        chart_run_id: UUID | None = None,
+        explicit_paper_scope: bool = False,
+        include_figure_files: bool = True,
+    ) -> dict[str, Any]:
+        materials = self._build_materials(
+            paper_id,
+            chart_run_id=chart_run_id,
+        )
         files: dict[str, bytes] = {
             "parsed/paper_metadata.json": _json_bytes(materials["paper_metadata"]),
             "parsed/initial_dft_candidates.json": _json_bytes(materials["initial_dft_candidates"]),
@@ -223,6 +321,9 @@ class DFTReviewBundleService:
             "schema_version": OFFLINE_REVIEW_BUNDLE_SCHEMA_VERSION,
             "generated_at": datetime.now(UTC).isoformat(),
             "bundle_fingerprint": materials["bundle_fingerprint"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "review_mode": materials["review_mode"],
             "paper": {
                 "paper_id": materials["paper_metadata"]["paper_id"],
                 "paper_code": materials["paper_metadata"]["paper_code"],
@@ -239,6 +340,7 @@ class DFTReviewBundleService:
             "evidence_ids": sorted(materials["evidence_map"]),
             "target_dft_result_ids": sorted(materials["target_dft_result_ids"]),
             "expected_dft_review_coverage": {
+                "mode": materials["review_mode"],
                 "target_ids": sorted(materials["target_dft_result_ids"]),
                 "required_decisions_for_existing_targets": ["PASS", "REVISE", "REJECT", "NEEDS_HUMAN"],
                 "completion_rule": (
@@ -252,6 +354,14 @@ class DFTReviewBundleService:
                     materials["initial_dft_candidates"]["supporting_si_candidates"]
                 ),
                 "excluded_terminal_main_dft_candidates": materials["excluded_terminal_main_dft_candidates"],
+                "existing_terminal_context": len(materials["initial_dft_candidates"]["existing_terminal_context"]),
+                "reviewed_figures": materials["evidence_summary"]["reviewed_figures"],
+                "reviewed_tables": materials["evidence_summary"]["reviewed_tables"],
+                "reviewed_main_figures": materials["evidence_summary"]["reviewed_main_figures"],
+                "reviewed_main_tables": materials["evidence_summary"]["reviewed_main_tables"],
+                "pending_main_figures": materials["evidence_summary"]["pending_main_figures"],
+                "pending_main_tables": materials["evidence_summary"]["pending_main_tables"],
+                "unreviewed_supporting_context": materials["evidence_summary"]["unreviewed_supporting_context"],
                 "text_snippets": len(materials["text_snippets"]),
                 "tables": len(materials["extracted_tables"]),
                 "figures": len(materials["extracted_figures"]),
@@ -275,8 +385,30 @@ class DFTReviewBundleService:
             "manifest": manifest,
         }
 
-    def validate_result(self, paper_id: UUID, raw_payload: dict[str, Any]) -> dict[str, Any]:
+    def validate_result(
+        self,
+        paper_id: UUID,
+        raw_payload: dict[str, Any],
+        *,
+        chart_run_id: UUID | None = None,
+        explicit_paper_scope: bool = False,
+    ) -> dict[str, Any]:
         raw_payload, normalization_warnings = self._normalize_common_web_ai_result_json(raw_payload)
+        payload_chart_run_id = self._optional_uuid(raw_payload.get("chart_run_id"))
+        if chart_run_id is not None and payload_chart_run_id != chart_run_id:
+            return {
+                "valid": False,
+                "errors": [{"code": "chart_run_mismatch", "message": "chart_run_id does not match the selected DFT review scope"}],
+                "warnings": normalization_warnings,
+                "import_analysis_request": None,
+            }
+        if payload_chart_run_id is not None:
+            return {
+                "valid": False,
+                "errors": [{"code": "chart_run_mismatch", "message": "DFT review now uses the paper-level reviewed-evidence aggregate; chart_run_id must be null"}],
+                "warnings": normalization_warnings,
+                "import_analysis_request": None,
+            }
         try:
             result = OfflineDFTReviewResult.model_validate(raw_payload)
         except ValidationError as exc:
@@ -309,6 +441,12 @@ class DFTReviewBundleService:
             add_error("paper_id_mismatch", "review_result paper_id does not match the selected paper")
         if result.paper_code != metadata["paper_code"]:
             add_error("paper_code_mismatch", "review_result paper_code does not match the selected paper")
+        expected_chart_scope = "paper_reviewed_aggregate"
+        expected_chart_run_id = None
+        if result.chart_scope_type != expected_chart_scope or (result.chart_run_id or None) != expected_chart_run_id:
+            add_error("chart_run_mismatch", "chart_run_id/chart_scope_type does not match the selected DFT review scope")
+        if result.review_mode != materials["review_mode"]:
+            add_error("review_mode_mismatch", "review_mode does not match the current DFT target set")
         if result.bundle_fingerprint != materials["bundle_fingerprint"]:
             add_error(
                 "stale_or_mismatched_bundle",
@@ -420,6 +558,7 @@ class DFTReviewBundleService:
                     "supporting_evidence": [self._compact_evidence(item) for item in evidence_items[1:]],
                     "blocking_errors": audit.blocking_errors,
                     "recommended_action": audit.recommended_action,
+                    "dedupe_analysis": audit.dedupe_analysis,
                     "corrected_value": audit.corrected_value,
                     "confidence": audit.confidence,
                     "source": result.review_source.review_source_type,
@@ -513,6 +652,9 @@ class DFTReviewBundleService:
                     "review_metadata": {
                         "schema_version": result.schema_version,
                         "bundle_fingerprint": result.bundle_fingerprint,
+                        "chart_scope_type": result.chart_scope_type,
+                        "chart_run_id": result.chart_run_id,
+                        "review_mode": result.review_mode,
                         "figure_table_completed_snapshot_fingerprint": (
                             result.figure_table_completed_snapshot_fingerprint
                         ),
@@ -532,6 +674,9 @@ class DFTReviewBundleService:
             "valid": not errors,
             "paper_id": metadata["paper_id"],
             "paper_code": metadata["paper_code"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "review_mode": materials["review_mode"],
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "errors": errors,
             "warnings": warnings,
@@ -550,13 +695,26 @@ class DFTReviewBundleService:
             "local_ai_writeback_contract": self._local_ai_writeback_contract(),
         }
 
-    def _build_materials(self, paper_id: UUID, *, enforce_figure_table_gate: bool = True) -> dict[str, Any]:
+    def _build_materials(
+        self,
+        paper_id: UUID,
+        *,
+        chart_run_id: UUID | None = None,
+        explicit_paper_scope: bool = False,
+        enforce_figure_table_gate: bool = True,
+    ) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             raise LookupError("Paper not found")
         if not str(paper.paper_code or "").strip():
             raise ValueError("paper_code_required_before_offline_review_export")
-
+        if chart_run_id is not None:
+            # Compatibility-only validation: a supplied legacy run must belong to
+            # this paper, but it never narrows the new paper-level DFT aggregate.
+            EvidenceReviewBundleService(self.session, self.settings).get_review_task(
+                paper_id,
+                run_id=chart_run_id,
+            )
         source_papers = self._source_papers(paper)
         source_ids = [item["paper"].id for item in source_papers]
         sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id.in_(source_ids))).all()
@@ -569,9 +727,10 @@ class DFTReviewBundleService:
         source_by_id = {item["paper"].id: item for item in source_papers}
         sample_by_id = {row.id: row for row in samples}
         dft_rows = sorted(dft_rows, key=lambda row: (row.paper_id != paper.id, str(row.id)))
-        review_dft_rows, excluded_terminal_main_count = self._dft_rows_for_review_bundle(dft_rows, main_paper_id=paper.id)
-        locator_by_target = self._dft_locator_payloads_by_target(review_dft_rows)
+        review_dft_rows, terminal_main_rows = self._dft_rows_for_review_bundle(dft_rows, main_paper_id=paper.id)
+        locator_by_target = self._dft_locator_payloads_by_target(dft_rows)
         anchors = self._collect_anchors(review_dft_rows)
+        reviewed_aggregate = self._reviewed_evidence_aggregate(paper, source_by_id=source_by_id)
 
         text_snippets, text_map = self._text_snippets(
             source_by_id=source_by_id,
@@ -583,29 +742,42 @@ class DFTReviewBundleService:
             source_by_id=source_by_id,
             tables=tables,
             anchors=anchors,
+            reviewed_objects=reviewed_aggregate["objects"],
         )
         extracted_figures, figure_map = self._figures(
             source_by_id=source_by_id,
             figures=figures,
             anchors=anchors,
+            reviewed_objects=reviewed_aggregate["objects"],
+        )
+        reviewed_aggregate["summary"]["unreviewed_supporting_context"] = sum(
+            1
+            for item in [*extracted_tables, *extracted_figures]
+            if item.get("evidence_tier") == "unreviewed_supporting_context"
         )
         figure_by_id = {str(row.id): row for row in figures}
         evidence_figure_ids = {
             str(item.get("source_record_id"))
             for item in extracted_figures
-            if item.get("source_record_id")
+            if item.get("source_record_id") and item.get("eligible_for_auto_apply")
         }
         figure_rag_quality = build_figure_rag_quality_summary(
             self.session,
             [row for figure_id, row in figure_by_id.items() if figure_id in evidence_figure_ids],
         )
+        for item in text_snippets:
+            is_support = item.get("source_document_type") == "supplementary_information"
+            item["review_status"] = "unreviewed_context"
+            item["eligible_for_auto_apply"] = False
+            item["evidence_tier"] = "unreviewed_supporting_context" if is_support else "text_context"
         evidence_map = {**text_map, **table_map, **figure_map}
 
-        curated_evidence_snapshot = self._curated_evidence_snapshot(
+        curated_evidence_snapshot = self._aggregated_curated_evidence_snapshot(
             paper=paper,
             extracted_tables=extracted_tables,
             extracted_figures=extracted_figures,
             figure_rag_quality=figure_rag_quality,
+            reviewed_aggregate=reviewed_aggregate,
         )
         if enforce_figure_table_gate:
             self.ensure_figure_table_review_ready(curated_evidence_snapshot["review_gate"])
@@ -632,8 +804,13 @@ class DFTReviewBundleService:
                 for item in source_papers
             ],
         }
+        terminal_gate_by_id = bulk_export_gate_results(
+            self.session,
+            terminal_main_rows,
+            target_type="dft_results",
+        ) if terminal_main_rows else {}
         initial_dft_candidates = {
-            "schema_version": "offline_initial_dft_candidates_v1",
+            "schema_version": "offline_initial_dft_candidates_v2",
             "writeback_paper_id": str(paper.id),
             "existing_candidates": [
                 self._dft_row_payload(
@@ -644,6 +821,27 @@ class DFTReviewBundleService:
                 )
                 for row in review_dft_rows
                 if row.paper_id == paper.id
+            ],
+            "existing_terminal_context": [
+                {
+                    **self._dft_row_payload(
+                        row,
+                        sample_by_id=sample_by_id,
+                        source_by_id=source_by_id,
+                        locator_by_target=locator_by_target,
+                    ),
+                    "readonly": True,
+                    "eligible_as_write_target": False,
+                    "is_ml_ready": str(row.candidate_status or "").strip().lower() == "ml_ready",
+                    "is_rejected": (
+                        str(row.candidate_status or "").strip().lower() == "rejected"
+                        or "rejected" in str(getattr(terminal_gate_by_id.get(str(row.id)), "review_status", "") or "").lower()
+                    ),
+                    "review_status": str(
+                        getattr(terminal_gate_by_id.get(str(row.id)), "review_status", "") or ""
+                    ) or None,
+                }
+                for row in terminal_main_rows
             ],
             "supporting_si_candidates": [
                 {
@@ -670,6 +868,7 @@ class DFTReviewBundleService:
             item["target_id"]: item
             for item in initial_dft_candidates["existing_candidates"]
         }
+        review_mode = "target_review" if dft_row_payloads_by_id else "gap_discovery"
 
         fingerprint_payload = {
             "schema_version": OFFLINE_REVIEW_BUNDLE_SCHEMA_VERSION,
@@ -682,13 +881,14 @@ class DFTReviewBundleService:
                 for item in extracted_figures
             ],
             "curated_evidence_snapshot": curated_evidence_snapshot,
+            "review_mode": review_mode,
         }
         bundle_fingerprint = _sha256(_canonical_json_bytes(fingerprint_payload))
         warnings = []
         if not evidence_map:
             warnings.append("no_dft_relevant_evidence_found")
         if not initial_dft_candidates["existing_candidates"]:
-            warnings.append("no_main_paper_dft_candidates")
+            warnings.append("gap_discovery_no_writable_main_dft_targets")
         if curated_evidence_snapshot["evidence_review_status"] != "applied":
             warnings.append("figure_table_evidence_not_yet_reviewed")
 
@@ -706,7 +906,9 @@ class DFTReviewBundleService:
             "dft_row_payloads_by_id": dft_row_payloads_by_id,
             "bundle_fingerprint": bundle_fingerprint,
             "warnings": warnings,
-            "excluded_terminal_main_dft_candidates": excluded_terminal_main_count,
+            "excluded_terminal_main_dft_candidates": len(terminal_main_rows),
+            "review_mode": review_mode,
+            "evidence_summary": reviewed_aggregate["summary"],
         }
 
     def _dft_rows_for_review_bundle(
@@ -714,12 +916,12 @@ class DFTReviewBundleService:
         rows: list[DFTResult],
         *,
         main_paper_id: UUID,
-    ) -> tuple[list[DFTResult], int]:
+    ) -> tuple[list[DFTResult], list[DFTResult]]:
         if not rows:
-            return [], 0
+            return [], []
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="dft_results")
         selected: list[DFTResult] = []
-        excluded_terminal_main = 0
+        terminal_main: list[DFTResult] = []
         for row in rows:
             status = str(row.candidate_status or "").strip().lower()
             gate = gate_by_id.get(str(row.id))
@@ -728,12 +930,12 @@ class DFTReviewBundleService:
             is_currently_exportable_ml_ready = status == "ml_ready" and bool(getattr(gate, "eligible", False))
             should_skip = is_rejected or is_currently_exportable_ml_ready
             if row.paper_id == main_paper_id and should_skip:
-                excluded_terminal_main += 1
+                terminal_main.append(row)
                 continue
             if row.paper_id != main_paper_id and should_skip:
                 continue
             selected.append(row)
-        return selected, excluded_terminal_main
+        return selected, terminal_main
 
     def _source_papers(self, paper: Paper) -> list[dict[str, Any]]:
         relationships = self.session.scalars(
@@ -765,6 +967,147 @@ class DFTReviewBundleService:
                 }
             )
         return sources
+
+    def _reviewed_evidence_aggregate(
+        self,
+        paper: Paper,
+        *,
+        source_by_id: dict[UUID, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Collect every current completed chart-review scope for one main paper."""
+
+        service = EvidenceReviewBundleService(self.session, self.settings)
+        completed_scopes: list[tuple[str | None, dict[str, Any]]] = []
+        blocked_completed_scopes: list[dict[str, Any]] = []
+        pending: dict[str, dict[str, Any]] = {}
+
+        # A DFT package is selected by the main paper, but its evidence can
+        # legitimately be in a linked SI record.  Aggregate every completed,
+        # current scope for every source document; never let the main paper's
+        # completed run certify an unreviewed SI object.
+        source_entries = sorted(
+            source_by_id.values(),
+            key=lambda item: (item["paper"].id != paper.id, str(item["paper"].id)),
+        )
+        for source in source_entries:
+            source_paper = source["paper"]
+            is_main = source_paper.id == paper.id
+            options = service.get_review_scope_options(source_paper.id)
+            paper_audit = service._latest_review_audit(
+                source_paper.id,
+                run_id=None,
+                actions={"offline_evidence_review_applied"},
+            )
+            if paper_audit is not None:
+                paper_task = options.get("paper_scope") if isinstance(options.get("paper_scope"), dict) else {}
+                if paper_task.get("stage_status") in FIGURE_TABLE_REVIEW_READY_STATUSES:
+                    completed_scopes.append((None, paper_task))
+                elif paper_task.get("completed_snapshot_fingerprint"):
+                    blocked_completed_scopes.append(paper_task)
+
+            run_options = options.get("chart_runs") if isinstance(options.get("chart_runs"), list) else []
+            for option in run_options:
+                run_id = self._optional_uuid(option.get("chart_run_id"))
+                if run_id is None:
+                    continue
+                if option.get("stage_status") not in FIGURE_TABLE_REVIEW_READY_STATUSES:
+                    if option.get("completed_snapshot_fingerprint"):
+                        blocked_completed_scopes.append(service.get_review_task(source_paper.id, run_id=run_id))
+                    # Pending main-paper coverage is user-visible.  Unreviewed
+                    # SI is context only and must not block main-paper DFT gap
+                    # discovery or get promoted to reviewed evidence.
+                    if is_main and option.get("is_duplicate_representative", True):
+                        task = service.get_review_task(source_paper.id, run_id=run_id)
+                        for kind, items in (("figure", task.get("figures")), ("table", task.get("tables"))):
+                            for item in items if isinstance(items, list) else []:
+                                record_id = str(item.get("source_record_id") or item.get("id") or "").strip()
+                                key = f"{kind}:{record_id}"
+                                if record_id:
+                                    pending[key] = {
+                                        "object_type": kind,
+                                        "source_record_id": record_id,
+                                        "chart_run_id": str(run_id),
+                                        "review_status": task.get("stage_status"),
+                                    }
+                    continue
+                task = service.get_review_task(source_paper.id, run_id=run_id)
+                if (
+                    task.get("stage_status") in FIGURE_TABLE_REVIEW_READY_STATUSES
+                    and task.get("completed_snapshot_fingerprint") == task.get("current_snapshot_fingerprint")
+                ):
+                    completed_scopes.append((str(run_id), task))
+
+        objects: dict[str, dict[str, Any]] = {}
+        review_runs: list[dict[str, Any]] = []
+        for run_id, task in completed_scopes:
+            run_entry = {
+                "chart_run_id": run_id,
+                "scope_type": task.get("scope_type") or ("external_analysis_run" if run_id else "paper"),
+                "review_status": task.get("stage_status"),
+                "completed_snapshot_fingerprint": task.get("completed_snapshot_fingerprint"),
+                "reviewed_at": task.get("reviewed_at"),
+                "counts": task.get("counts") or {},
+                "source_paper_id": task.get("paper_id"),
+                "source_paper_code": task.get("paper_code"),
+            }
+            review_runs.append(run_entry)
+            for kind, items in (("figure", task.get("figures")), ("table", task.get("tables"))):
+                for item in items if isinstance(items, list) else []:
+                    record_id = str(item.get("source_record_id") or item.get("id") or "").strip()
+                    if not record_id:
+                        continue
+                    source_paper_id = str(item.get("source_paper_id") or "").strip()
+                    key = f"{kind}:{record_id}"
+                    entry = objects.setdefault(
+                        key,
+                        {
+                            "object_type": kind,
+                            "source_record_id": record_id,
+                            "source_paper_id": source_paper_id,
+                            "source_paper_code": item.get("source_paper_code"),
+                            "review_runs": [],
+                        },
+                    )
+                    if run_entry not in entry["review_runs"]:
+                        entry["review_runs"].append(run_entry)
+
+        for key in set(objects):
+            pending.pop(key, None)
+
+        reviewed_payload = sorted(objects.values(), key=lambda item: (item["object_type"], item["source_record_id"]))
+        completed_fingerprint = _sha256(_canonical_json_bytes({
+            "schema_version": "paper_reviewed_evidence_aggregate_v1",
+            "paper_id": str(paper.id),
+            "objects": reviewed_payload,
+        })) if reviewed_payload else None
+        reviewed_main_figures = sum(
+            1 for item in reviewed_payload
+            if item["object_type"] == "figure" and item["source_paper_id"] == str(paper.id)
+        )
+        reviewed_main_tables = sum(
+            1 for item in reviewed_payload
+            if item["object_type"] == "table" and item["source_paper_id"] == str(paper.id)
+        )
+        return {
+            "schema_version": "paper_reviewed_evidence_aggregate_v1",
+            "objects": objects,
+            "review_runs": review_runs,
+            "pending_objects": sorted(pending.values(), key=lambda item: (item["object_type"], item["source_record_id"])),
+            "completed_snapshot_fingerprint": completed_fingerprint,
+            "blocked_completed_scopes": blocked_completed_scopes,
+            "summary": {
+                "reviewed_figures": sum(1 for item in reviewed_payload if item["object_type"] == "figure"),
+                "reviewed_tables": sum(1 for item in reviewed_payload if item["object_type"] == "table"),
+                "reviewed_main_figures": reviewed_main_figures,
+                "reviewed_main_tables": reviewed_main_tables,
+                "pending_main_figures": sum(1 for item in pending.values() if item["object_type"] == "figure"),
+                "pending_main_tables": sum(1 for item in pending.values() if item["object_type"] == "table"),
+                "reviewed_supporting_evidence": sum(
+                    1 for item in reviewed_payload if item["source_paper_id"] != str(paper.id)
+                ),
+                "unreviewed_supporting_context": 0,
+            },
+        }
 
     def _text_snippets(
         self,
@@ -859,6 +1202,7 @@ class DFTReviewBundleService:
         source_by_id: dict[UUID, dict[str, Any]],
         tables: list[PaperTable],
         anchors: dict[str, set[str]],
+        reviewed_objects: dict[str, dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         items: list[dict[str, Any]] = []
         counters = {"main": 0, "si": 0}
@@ -873,9 +1217,12 @@ class DFTReviewBundleService:
         )
         for row in ordered:
             haystack = f"{row.caption or ''}\n{row.markdown_content or ''}"
-            if not self._is_relevant(haystack, anchors["table"]):
-                continue
+            reviewed = reviewed_objects.get(f"table:{row.id}")
             source = source_by_id[row.paper_id]
+            if source["prefix"] == "main" and reviewed is None:
+                continue
+            if reviewed is None and not self._is_relevant(haystack, anchors["table"]):
+                continue
             counters[source["prefix"]] += 1
             evidence_id = f"{source['prefix']}:table:{counters[source['prefix']]:03d}"
             item = {
@@ -889,6 +1236,19 @@ class DFTReviewBundleService:
                 "page": row.page,
                 "markdown_content": row.markdown_content,
                 "content_sha256": _sha256(haystack.encode("utf-8")),
+                "review_status": "completed" if reviewed else "unreviewed_context",
+                "completed_snapshot_fingerprint": (
+                    reviewed["review_runs"][0].get("completed_snapshot_fingerprint") if reviewed else None
+                ),
+                "review_runs": reviewed.get("review_runs", []) if reviewed else [],
+                "eligible_for_auto_apply": bool(reviewed),
+                "evidence_tier": (
+                    "reviewed_supporting_evidence"
+                    if reviewed and source["prefix"] == "si"
+                    else "reviewed_main_evidence"
+                    if reviewed
+                    else "unreviewed_supporting_context"
+                ),
             }
             items.append(item)
         return items, {item["evidence_id"]: item for item in items}
@@ -899,6 +1259,7 @@ class DFTReviewBundleService:
         source_by_id: dict[UUID, dict[str, Any]],
         figures: list[PaperFigure],
         anchors: dict[str, set[str]],
+        reviewed_objects: dict[str, dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
         items: list[dict[str, Any]] = []
         counters = {"main": 0, "si": 0}
@@ -913,9 +1274,12 @@ class DFTReviewBundleService:
         )
         for row in ordered:
             haystack = f"{row.figure_label or ''}\n{row.caption or ''}\n{row.content_summary or ''}"
-            if not self._is_relevant(haystack, anchors["figure"]):
-                continue
+            reviewed = reviewed_objects.get(f"figure:{row.id}")
             source = source_by_id[row.paper_id]
+            if source["prefix"] == "main" and reviewed is None:
+                continue
+            if reviewed is None and not self._is_relevant(haystack, anchors["figure"]):
+                continue
             counters[source["prefix"]] += 1
             evidence_id = f"{source['prefix']}:fig:{counters[source['prefix']]:03d}"
             artifact = self._resolve_figure(row.image_path)
@@ -942,6 +1306,19 @@ class DFTReviewBundleService:
                 "image_size_bytes": artifact_size,
                 "crop_status": row.crop_status,
                 "content_sha256": _sha256(haystack.encode("utf-8")),
+                "review_status": "completed" if reviewed else "unreviewed_context",
+                "completed_snapshot_fingerprint": (
+                    reviewed["review_runs"][0].get("completed_snapshot_fingerprint") if reviewed else None
+                ),
+                "review_runs": reviewed.get("review_runs", []) if reviewed else [],
+                "eligible_for_auto_apply": bool(reviewed),
+                "evidence_tier": (
+                    "reviewed_supporting_evidence"
+                    if reviewed and source["prefix"] == "si"
+                    else "reviewed_main_evidence"
+                    if reviewed
+                    else "unreviewed_supporting_context"
+                ),
             }
             items.append(item)
         return items, {item["evidence_id"]: item for item in items}
@@ -1122,6 +1499,106 @@ class DFTReviewBundleService:
 
 
 
+    def _aggregated_curated_evidence_snapshot(
+        self,
+        *,
+        paper: Paper,
+        extracted_tables: list[dict[str, Any]],
+        extracted_figures: list[dict[str, Any]],
+        figure_rag_quality: dict[str, Any],
+        reviewed_aggregate: dict[str, Any],
+    ) -> dict[str, Any]:
+        reviewed_tables = [item for item in extracted_tables if item.get("eligible_for_auto_apply")]
+        reviewed_figures = [item for item in extracted_figures if item.get("eligible_for_auto_apply")]
+        unreviewed_context = [
+            item for item in [*extracted_tables, *self._public_figures(extracted_figures)]
+            if item.get("evidence_tier") == "unreviewed_supporting_context"
+        ]
+        aggregate_fingerprint = reviewed_aggregate.get("completed_snapshot_fingerprint")
+        blocked_completed_scopes = reviewed_aggregate.get("blocked_completed_scopes") or []
+        has_any_chart_objects = bool(
+            self.session.scalar(select(PaperFigure.id).where(PaperFigure.paper_id == paper.id).limit(1))
+            or self.session.scalar(select(PaperTable.id).where(PaperTable.paper_id == paper.id).limit(1))
+        )
+        if blocked_completed_scopes:
+            stage_status = (
+                "stale"
+                if any(task.get("stage_status") == "stale" for task in blocked_completed_scopes)
+                else "needs_local_ai"
+            )
+        elif reviewed_tables or reviewed_figures:
+            stage_status = "completed"
+        elif not has_any_chart_objects:
+            stage_status = "not_required"
+            aggregate_fingerprint = aggregate_fingerprint or _sha256(
+                _canonical_json_bytes({"paper_id": str(paper.id), "reviewed_objects": []})
+            )
+        else:
+            stage_status = "not_started"
+        rag_quality_status = str(figure_rag_quality.get("status") or "ready")
+        blocked_rag = next(
+            (
+                task.get("rag_quality")
+                for task in blocked_completed_scopes
+                if task.get("rag_quality_status") == "blocked" and isinstance(task.get("rag_quality"), dict)
+            ),
+            None,
+        )
+        if isinstance(blocked_rag, dict):
+            figure_rag_quality = blocked_rag.get("figures") if isinstance(blocked_rag.get("figures"), dict) else figure_rag_quality
+            rag_quality_status = "blocked"
+        blocking_errors: list[dict[str, Any]] = []
+        if stage_status in {"completed", "needs_local_ai"} and rag_quality_status != "ready":
+            stage_status = "needs_local_ai"
+            blocking_errors.append({
+                "code": "figure_rag_quality_incomplete",
+                "message": "One or more reviewed figures are no longer RAG-ready.",
+                "blocked_count": figure_rag_quality.get("blocked"),
+            })
+        snapshot = {
+            "schema_version": "curated_figure_table_evidence_snapshot_v2",
+            "scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "evidence_review_status": "applied" if stage_status in FIGURE_TABLE_REVIEW_READY_STATUSES else "not_recorded",
+            "stage_status": stage_status,
+            "rag_quality_status": rag_quality_status,
+            "rag_quality": {"figures": figure_rag_quality},
+            "blocking_errors": blocking_errors,
+            "current_snapshot_fingerprint": aggregate_fingerprint,
+            "completed_snapshot_fingerprint": aggregate_fingerprint if stage_status in FIGURE_TABLE_REVIEW_READY_STATUSES else None,
+            "snapshot_fingerprint": aggregate_fingerprint,
+            "review_runs": reviewed_aggregate.get("review_runs") or [],
+            "reviewed_main_evidence": {
+                "tables": [item for item in reviewed_tables if item.get("source_paper_id") == str(paper.id)],
+                "figures": [item for item in self._public_figures(reviewed_figures) if item.get("source_paper_id") == str(paper.id)],
+            },
+            "reviewed_supporting_evidence": [
+                item for item in [*reviewed_tables, *self._public_figures(reviewed_figures)]
+                if item.get("source_paper_id") != str(paper.id)
+            ],
+            "unreviewed_supporting_context": unreviewed_context,
+            "pending_main_evidence": reviewed_aggregate.get("pending_objects") or [],
+            "summary": reviewed_aggregate.get("summary") or {},
+            # Compatibility aliases contain only reviewed evidence, never unreviewed SI context.
+            "tables": reviewed_tables,
+            "figures": self._public_figures(reviewed_figures),
+        }
+        snapshot["review_gate"] = {
+            "stage_status": stage_status,
+            "allowed_statuses": sorted(FIGURE_TABLE_REVIEW_READY_STATUSES),
+            "rag_quality_status": rag_quality_status,
+            "rag_quality": {"figures": figure_rag_quality},
+            "blocking_errors": blocking_errors,
+            "current_snapshot_fingerprint": snapshot["current_snapshot_fingerprint"],
+            "completed_snapshot_fingerprint": snapshot["completed_snapshot_fingerprint"],
+            "review_run_id": None,
+            "reviewed_at": max(
+                (str(item.get("reviewed_at") or "") for item in snapshot["review_runs"]),
+                default="",
+            ) or None,
+        }
+        return snapshot
+
     def _curated_evidence_snapshot(
         self,
         *,
@@ -1129,20 +1606,20 @@ class DFTReviewBundleService:
         extracted_tables: list[dict[str, Any]],
         extracted_figures: list[dict[str, Any]],
         figure_rag_quality: dict[str, Any],
+        chart_run_id: UUID | None = None,
     ) -> dict[str, Any]:
         public_figures = self._public_figures(extracted_figures)
         content_snapshot = compute_figure_table_snapshot(self.session, paper.id)
-        chart_task = EvidenceReviewBundleService(self.session, self.settings).get_review_task(paper.id)
+        evidence_service = EvidenceReviewBundleService(self.session, self.settings)
+        chart_task = evidence_service.get_review_task(paper.id, run_id=chart_run_id)
         current_snapshot_fingerprint = str(
             chart_task.get("current_snapshot_fingerprint") or content_snapshot["fingerprint"]
         )
-        latest = self.session.scalars(
-            select(AuditLog)
-            .where(AuditLog.paper_id == paper.id)
-            .where(AuditLog.action == "offline_evidence_review_applied")
-            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
-            .limit(1)
-        ).first()
+        latest = evidence_service._latest_review_audit(
+            paper.id,
+            run_id=chart_run_id,
+            actions={"offline_evidence_review_applied"},
+        )
         payload = latest.payload if latest is not None and isinstance(latest.payload, dict) else {}
         completed_snapshot_fingerprint = (
             str(chart_task.get("completed_snapshot_fingerprint") or payload.get("completed_snapshot_fingerprint") or "").strip()
@@ -1201,6 +1678,8 @@ class DFTReviewBundleService:
             )
         snapshot = {
             "schema_version": "curated_figure_table_evidence_snapshot_v1",
+            "scope_type": "external_analysis_run" if chart_run_id else "paper",
+            "chart_run_id": str(chart_run_id) if chart_run_id else None,
             "evidence_review_status": (
                 "applied" if stage_status in FIGURE_TABLE_REVIEW_READY_STATUSES else "not_recorded"
             ),
@@ -1471,14 +1950,104 @@ class DFTReviewBundleService:
             )
         if decision in {"REVISE", "new_candidate"}:
             errors.extend(self._validate_structured_dft_value(audit))
-        if decision == "new_candidate" and not has_pdf_evidence_anchor(evidence_items):
-            errors.append(
-                {
-                    "code": "missing_pdf_evidence_anchor",
-                    "message": "new_candidate requires at least one cited evidence_id with a PDF page anchor.",
-                }
+        unreviewed_si = [
+            item for item in evidence_items
+            if item.get("evidence_tier") == "unreviewed_supporting_context"
+        ]
+        if unreviewed_si and decision != "NEEDS_HUMAN":
+            errors.append({
+                "code": "unreviewed_supporting_evidence_requires_human",
+                "message": "Unreviewed SI context may only support NEEDS_HUMAN and is never eligible for automatic writeback.",
+            })
+        if decision == "new_candidate":
+            if not evidence_items or any(not item.get("eligible_for_auto_apply") for item in evidence_items):
+                errors.append({
+                    "code": "new_candidate_requires_reviewed_evidence",
+                    "message": "new_candidate may cite only completed, non-stale reviewed figure/table evidence.",
+                })
+            if not has_pdf_evidence_anchor(evidence_items):
+                errors.append(
+                    {
+                        "code": "missing_pdf_evidence_anchor",
+                        "message": "new_candidate requires at least one cited evidence_id with a PDF page anchor.",
+                    }
+                )
+            duplicate = self._matching_terminal_candidate(
+                audit.get("corrected_value"),
+                materials["initial_dft_candidates"].get("existing_terminal_context") or [],
             )
+            if duplicate is not None:
+                errors.append({
+                    "code": "duplicate_existing_terminal_candidate",
+                    "message": (
+                        "new_candidate duplicates readonly terminal DFT context target_id="
+                        + str(duplicate.get("target_id"))
+                        + "; return an explicit human dedupe analysis instead of creating another row."
+                    ),
+                })
+            terminal_context = materials["initial_dft_candidates"].get("existing_terminal_context") or []
+            dedupe_analysis = audit.get("dedupe_analysis") if isinstance(audit.get("dedupe_analysis"), dict) else {}
+            compared_ids = {
+                str(item).strip()
+                for item in dedupe_analysis.get("compared_target_ids", [])
+                if str(item).strip()
+            }
+            if terminal_context and (
+                str(dedupe_analysis.get("conclusion") or "").strip().lower() != "distinct"
+                or not str(dedupe_analysis.get("reason") or "").strip()
+                or not compared_ids
+            ):
+                errors.append({
+                    "code": "terminal_context_dedupe_analysis_required",
+                    "message": "new_candidate must explicitly compare existing_terminal_context and provide conclusion='distinct', reason, and compared_target_ids.",
+                })
         return errors
+
+    @classmethod
+    def _matching_terminal_candidate(
+        cls,
+        corrected: Any,
+        terminal_rows: list[dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        if not isinstance(corrected, dict):
+            return None
+
+        def norm(value: Any) -> str:
+            return " ".join(str(value or "").strip().lower().split())
+
+        def number(value: Any) -> float | None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+
+        corrected_property = norm(corrected.get("property_type") or corrected.get("property") or corrected.get("energy_type"))
+        corrected_value = number(corrected.get("value"))
+        corrected_unit = norm(corrected.get("unit"))
+        if not corrected_property or corrected_value is None or not corrected_unit:
+            return None
+        for row in terminal_rows:
+            if norm(row.get("property_type")) != corrected_property:
+                continue
+            row_value = number(row.get("value"))
+            if row_value is None or abs(row_value - corrected_value) > 1e-9:
+                continue
+            if norm(row.get("unit")) != corrected_unit:
+                continue
+            conflicting_identity = False
+            for corrected_key, row_key in (
+                ("material_identity", "material_identity"),
+                ("adsorbate", "adsorbate"),
+                ("reaction_step", "reaction_step"),
+                ("reaction_type", "reaction_type"),
+            ):
+                left, right = norm(corrected.get(corrected_key)), norm(row.get(row_key))
+                if left and right and left != right:
+                    conflicting_identity = True
+                    break
+            if not conflicting_identity:
+                return row
+        return None
 
     @staticmethod
     def _evidence_relevant_to_dft_target(
@@ -1644,6 +2213,9 @@ class DFTReviewBundleService:
         return {
             "schema_version": "offline_dft_review_result_v1",
             "bundle_fingerprint": materials["bundle_fingerprint"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "review_mode": materials["review_mode"],
             "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"][
                 "completed_snapshot_fingerprint"
             ],
@@ -1703,11 +2275,12 @@ class DFTReviewBundleService:
             )
         return {
             "schema_version": "offline_dft_review_checklist_v1",
+            "mode": materials["review_mode"],
             "target_ids": sorted(materials["target_dft_result_ids"]),
             "expected_count": len(materials["target_dft_result_ids"]),
             "completion_rule": (
-                "Return exactly one object_review_audits item for every target_id in this checklist. "
-                "Use NEEDS_HUMAN when evidence is insufficient."
+                "In target_review, return exactly one object_review_audits item for every target_id in this checklist. "
+                "In gap_discovery, an empty target list is valid and the task is to find only genuinely missing DFT data."
             ),
             "targets": targets,
             "new_candidate_rule": {
@@ -1716,7 +2289,7 @@ class DFTReviewBundleService:
                 "temporary_id": "new-dft-001",
                 "field_name": "dft_results",
                 "decision": "new_candidate",
-                "when_to_use": "Only when the package evidence contains a DFT result missing from existing candidates.",
+                "when_to_use": "Only when reviewed evidence contains a DFT result missing from both writable targets and existing_terminal_context.",
                 "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
                 "multiple_new_candidates": "Use target_id='new' for each new candidate and give each one a unique temporary_id.",
             },
@@ -1797,6 +2370,11 @@ class DFTReviewBundleService:
                                 "unit": "eV",
                                 "reaction_step": "Li2S2 to Li2S",
                             },
+                            "dedupe_analysis": {
+                                "compared_target_ids": ["<terminal target_id when present>"],
+                                "conclusion": "distinct",
+                                "reason": "Material/property/value/reaction identity differs from the listed terminal rows.",
+                            },
                             "reason": "The cited package evidence contains a DFT result missing from existing candidates.",
                         }
                     ]
@@ -1807,9 +2385,13 @@ class DFTReviewBundleService:
     @staticmethod
     def _instructions(materials: dict[str, Any]) -> str:
         metadata = materials["paper_metadata"]
+        mode = materials["review_mode"]
+        summary = materials["evidence_summary"]
         return f"""# Literature AI 离线 DFT 核验任务
 
 目标文献：`{metadata['paper_code']}`（paper_id=`{metadata['paper_id']}`）
+
+审核模式：`{mode}`。已审核证据：图 {summary['reviewed_figures']}、表 {summary['reviewed_tables']}；待补充主文图 {summary['pending_main_figures']}、主文表 {summary['pending_main_tables']}；SI 原始线索 {summary['unreviewed_supporting_context']}。
 
 你是审核建议来源，不是数据库执行者。你没有 MCP、数据库、服务器或外部检索工具，只能使用本压缩包中的材料。
 
@@ -1818,10 +2400,10 @@ class DFTReviewBundleService:
 1. 只核验当前这一篇主文献及包内相关支撑信息（SI）的 DFT 数据、计算参数、图表和文字证据。
 2. 不得猜测。证据不足、材料身份不清或来源冲突时，使用 `NEEDS_HUMAN`，并写入 `uncertainties`。
 3. 每条 `object_review_audits` 都必须引用一个或多个真实 `evidence_ids`。证据编号来自 `manifest.json` 和 `evidence/`，且必须和该 DFT 目标直接相关。
-4. 已有主文献 DFT candidate 使用 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`。
-5. 必须为 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交 1 条审核结果；同一个 `target_id + field_name` 不要复制多条，多个证据合并到同一条的 `evidence_ids`。证据不足也要提交 `NEEDS_HUMAN`，不能漏掉该 target_id。只有全部覆盖时才能使用 `overall_status="completed"`；未覆盖全部已有候选时服务器不会生成导入请求。
-6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`（例如 `new-dft-001`、`new-dft-002`）；`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`；`value` 必须是 JSON number，不要写成 `"−1.20 eV"`，单位只写入 `unit`。
-7. SI 是主文献的证据来源，不是独立审核任务。SI 中发现的漏项仍写回当前主文献，使用 `new_candidate`。
+4. `target_review` 模式下，已有主文献 DFT candidate 使用 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`。`gap_discovery` 模式不是“完成现有 DFT 数据终审”，而是“核对是否存在未收录 DFT 数据”。
+5. `target_review` 必须为 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交 1 条审核结果；`gap_discovery` 的 expected_target_ids 可以为空。两种模式都必须先读取 `existing_terminal_context` 做去重。
+6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`；若存在终态上下文，还必须填写 `dedupe_analysis={{compared_target_ids:[...], conclusion:"distinct", reason:"..."}}`。`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`。
+7. `reviewed_supporting_evidence` 中的 SI 可作为已审核支撑；`unreviewed_supporting_context` 只能用于发现线索或返回 `NEEDS_HUMAN`，其 `eligible_for_auto_apply=false`，不能单独支持 PASS、REVISE 或 new_candidate。
 8. 不得声称已写数据库、已入库、已确认、已 verified 或已成为 ML_Ready。
 9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要修改 schema，不要用自由散文替代 JSON，也不要包 Markdown 代码块。
 10. 保留 `return_template.json` 中的 `bundle_fingerprint`、`figure_table_completed_snapshot_fingerprint`、`paper_id`、`paper_code` 原值。
@@ -1832,7 +2414,7 @@ class DFTReviewBundleService:
 
 先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/dft_review_checklist.json`、`format_examples.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
 
-如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `rag_quality_status=blocked`，或 `completed_snapshot_fingerprint` 与当前快照不一致，说明图表证据还没有完成第一阶段闭环；此时不要继续产出 DFT 终审 JSON，应先完成图表证据整理。
+如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `rag_quality_status=blocked`，说明已审核证据聚合尚不可用；此时不要继续产出 DFT JSON。不得用某一个已完成 run 为其他未审核图表放行。
 
 最终只输出符合 `return_schema.json` 的 JSON。
 """

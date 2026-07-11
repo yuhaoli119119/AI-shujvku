@@ -16,6 +16,7 @@ from app.db.models import (
     DFTResult,
     DFTSetting,
     EvidenceLocator,
+    ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     ExtractionFieldReview,
     Paper,
@@ -167,6 +168,79 @@ def _mark_figure_table_review_completed(engine, paper_id):
         return state["current_snapshot_fingerprint"]
 
 
+def _create_chart_run(engine, paper_id, *, figure_ids=(), table_ids=(), completed=False, source_label="chart run"):
+    with Session(engine) as session:
+        run = ExternalAnalysisRun(
+            paper_id=paper_id,
+            source="web_ai",
+            source_label=source_label,
+            mapping_status="mapped",
+        )
+        session.add(run)
+        session.flush()
+        for figure_id in figure_ids:
+            session.add(ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper_id,
+                candidate_type="figure_review",
+                normalized_payload={"target_type": "figure", "figure_id": str(figure_id)},
+                status="materialized",
+            ))
+        for table_id in table_ids:
+            session.add(ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper_id,
+                candidate_type="table_review",
+                normalized_payload={"target_type": "table", "table_id": str(table_id)},
+                status="materialized",
+            ))
+        session.commit()
+        run_id = run.id
+    if completed:
+        with Session(engine) as session:
+            task = DFTReviewBundleService(session, get_settings()).get_figure_table_review_state(
+                paper_id,
+                chart_run_id=run_id,
+            )
+            session.add(AuditLog(
+                paper_id=paper_id,
+                action="offline_evidence_review_applied",
+                source="test_chart_review",
+                target_type="offline_evidence_review",
+                target_id=task["current_snapshot_fingerprint"][:32],
+                payload={
+                    "run_id": str(run_id),
+                    "chart_run_id": str(run_id),
+                    "stage_status": "completed",
+                    "completed_snapshot_fingerprint": task["current_snapshot_fingerprint"],
+                    "review_source": {"review_source_type": "local_ai", "reviewer_label": "test"},
+                    "applied": [],
+                    "skipped": [],
+                    "dft_evidence_candidates": [],
+                },
+            ))
+            for figure_id in figure_ids:
+                session.add(AuditLog(
+                    paper_id=paper_id,
+                    action="KEEP",
+                    source="test_chart_review",
+                    target_type="paper_figure",
+                    target_id=str(figure_id),
+                    payload={"run_id": str(run_id), "chart_run_id": str(run_id), "action": "KEEP"},
+                ))
+            for table_id in table_ids:
+                session.add(AuditLog(
+                    paper_id=paper_id,
+                    action="KEEP",
+                    source="test_chart_review",
+                    target_type="paper_table",
+                    target_id=str(table_id),
+                    payload={"run_id": str(run_id), "chart_run_id": str(run_id), "action": "KEEP"},
+                ))
+            session.commit()
+    return run_id
+
+
 def test_offline_dft_review_bundle_requires_completed_figure_table_review(setup_test_db):
     paper_id, _ = _seed_review_materials(setup_test_db)
 
@@ -260,12 +334,13 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
 
     assert manifest["paper"]["paper_code"] == "B0078"
     assert manifest["figure_table_review_status"] == "completed"
-    assert manifest["figure_table_completed_snapshot_fingerprint"] == completed_snapshot
+    assert len(manifest["figure_table_completed_snapshot_fingerprint"]) == 64
+    assert manifest["chart_scope_type"] == "paper_reviewed_aggregate"
     assert manifest["retention_policy"] == "generated_in_memory_not_persisted_on_server"
     assert candidates["existing_candidates"][0]["material_identity"] == "Fe-N-C"
     assert candidates["supporting_si_candidates"][0]["source_document_type"] == "supplementary_information"
     assert {doc["role"] for doc in metadata["source_documents"]} == {"main", "si"}
-    assert "every current main-paper DFT candidate" in return_schema["properties"]["overall_status"]["description"]
+    assert "gap_discovery" in return_schema["properties"]["overall_status"]["description"]
     assert return_template["coverage_acknowledgement"]["expected_target_ids"] == manifest["target_dft_result_ids"]
     assert checklist["target_ids"] == manifest["target_dft_result_ids"]
     assert checklist["targets"][0]["required_once"] is True
@@ -276,11 +351,11 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     assert revise_example["corrected_value"]["unit"] == "eV"
     assert "format only" in examples["usage"][0]
     assert manifest["expected_dft_review_coverage"]["target_ids"] == manifest["target_dft_result_ids"]
-    assert '`overall_status="completed"`' in instructions
+    assert "gap_discovery" in instructions
     assert "format_examples.json" in instructions
     assert "dft_review_checklist.json" in instructions
     assert "不要照抄示例 ID" in instructions
-    assert "未覆盖全部已有候选" in instructions
+    assert "existing_terminal_context" in instructions
     assert "不得声称已写数据库" in instructions
 
 
@@ -375,7 +450,7 @@ def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(s
                         "field_name": "dft_results",
                         "decision": "new_candidate",
                         "evidence_checked": True,
-                        "evidence_ids": [text_evidence["evidence_id"], figure_evidence["evidence_id"]],
+                            "evidence_ids": [figure_evidence["evidence_id"]],
                         "corrected_value": {
                             "material_identity": "Fe-N-C",
                             "property_type": "pdos_overlap_energy_window",
@@ -409,10 +484,7 @@ def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(s
     assert result["valid"] is True
     assert audit["evidence_location"]["page"] == figure_evidence["page"]
     assert audit["evidence_location"]["figure"] == figure_evidence["figure_label"]
-    assert audit["evidence_location"]["evidence_ids"] == [
-        text_evidence["evidence_id"],
-        figure_evidence["evidence_id"],
-    ]
+    assert audit["evidence_location"]["evidence_ids"] == [figure_evidence["evidence_id"]]
 
 
 def test_offline_review_validation_allows_multiple_new_dft_candidates_with_temporary_ids(setup_test_db):
@@ -426,6 +498,10 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
             item for item in materials["evidence_map"].values()
             if item.get("evidence_kind") == "text"
         )
+        figure_evidence = next(
+            item for item in materials["evidence_map"].values()
+            if item.get("evidence_kind") == "figure" and item.get("eligible_for_auto_apply")
+        )
         template.update(
             {
                 "overall_status": "uncertain",
@@ -436,7 +512,7 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
                         "field_name": "dft_results",
                         "decision": "PASS",
                         "evidence_checked": True,
-                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "evidence_ids": [figure_evidence["evidence_id"]],
                         "confidence": 0.9,
                         "reason": "Existing candidate covered.",
                         "recommended_action": "ready_for_ml_export",
@@ -448,7 +524,7 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
                         "field_name": "dft_results",
                         "decision": "new_candidate",
                         "evidence_checked": True,
-                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "evidence_ids": [figure_evidence["evidence_id"]],
                         "corrected_value": {
                             "material_identity": "Fe-N-C",
                             "property_type": "work_function",
@@ -466,7 +542,7 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
                         "field_name": "dft_results",
                         "decision": "new_candidate",
                         "evidence_checked": True,
-                        "evidence_ids": [text_evidence["evidence_id"]],
+                        "evidence_ids": [figure_evidence["evidence_id"]],
                         "corrected_value": {
                             "material_identity": "Fe-N-C",
                             "property_type": "magnetic_moment",
@@ -902,7 +978,213 @@ def test_dft_candidate_filter_skips_only_currently_eligible_ml_ready(setup_test_
         )
 
     assert [row.id for row in selected] == [stale.id]
-    assert excluded == 2
+    assert len(excluded) == 2
+
+
+def test_dft_bundle_aggregates_completed_runs_and_keeps_pending_and_unreviewed_si_separate(setup_test_db):
+    figure_root = get_settings().storage_paths["figures"]
+    figure_root.mkdir(parents=True, exist_ok=True)
+    (figure_root / "aggregate-reviewed.png").write_bytes(b"\x89PNG\r\n\x1a\naggregate")
+    with Session(setup_test_db) as session:
+        main = Paper(title="Aggregate review", paper_code="B-AGG", authors=[], pdf_path="agg.pdf")
+        si = Paper(title="Aggregate SI", paper_code="S-AGG", authors=[], pdf_path="agg-si.pdf")
+        session.add_all([main, si])
+        session.flush()
+        session.add(PaperRelationship(
+            source_paper_id=main.id,
+            target_paper_id=si.id,
+            relationship_type="supplementary",
+            created_by="test",
+        ))
+        figures = [
+            PaperFigure(
+                paper_id=main.id,
+                figure_label=f"Figure {index}",
+                caption=f"Reviewed DFT figure {index}",
+                page=index,
+                figure_role="dft_calculation",
+                content_summary=f"DFT result figure {index}",
+                    key_elements=["energy", "DFT"],
+                    image_path="aggregate-reviewed.png",
+                crop_status="approved",
+            )
+            for index in range(1, 6)
+        ]
+        tables = [
+            PaperTable(
+                paper_id=main.id,
+                caption=f"Table {index}",
+                markdown_content=f"| DFT energy |\n| {index}.0 eV |",
+                page=10 + index,
+            )
+            for index in range(1, 6)
+        ]
+        si_figure = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S1",
+            caption="Reviewed SI figure with DFT energy 0.3 eV",
+            page=2,
+            figure_role="dft_calculation",
+            content_summary="Reviewed supplementary DFT energy evidence.",
+            key_elements=["DFT energy", "0.3 eV"],
+            image_path="aggregate-reviewed.png",
+            crop_status="approved",
+        )
+        si_table = PaperTable(
+            paper_id=si.id,
+            caption="Table S1 DFT energies",
+            markdown_content="| energy |\n| 0.3 eV |",
+            page=3,
+        )
+        session.add_all([*figures, *tables, si_figure, si_table])
+        session.commit()
+        paper_id = main.id
+        si_id = si.id
+        figure_ids = [row.id for row in figures]
+        table_ids = [row.id for row in tables]
+        si_figure_id = si_figure.id
+
+    _create_chart_run(setup_test_db, paper_id, figure_ids=figure_ids[:4], completed=True, source_label="figures")
+    _create_chart_run(setup_test_db, paper_id, figure_ids=figure_ids[:4], completed=True, source_label="figures duplicate")
+    _create_chart_run(setup_test_db, paper_id, table_ids=table_ids, completed=True, source_label="tables")
+    _create_chart_run(setup_test_db, paper_id, figure_ids=figure_ids[4:], completed=False, source_label="pending figure")
+    _create_chart_run(setup_test_db, si_id, figure_ids=[si_figure_id], completed=True, source_label="reviewed SI figure")
+
+    client = TestClient(app)
+    state = client.get(f"/api/papers/{paper_id}/dft-review-state")
+    assert state.status_code == 200
+    summary = state.json()["summary"]
+    assert summary["reviewed_figures"] == 5
+    assert summary["reviewed_tables"] == 5
+    assert summary["reviewed_main_figures"] == 4
+    assert summary["reviewed_main_tables"] == 5
+    assert summary["pending_main_figures"] == 1
+    assert summary["pending_main_tables"] == 0
+    assert summary["reviewed_supporting_evidence"] == 1
+    assert summary["unreviewed_supporting_context"] == 1
+
+    response = client.post(f"/api/papers/{paper_id}/dft-review-bundle")
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        snapshot = json.loads(archive.read("parsed/curated_figure_table_evidence_snapshot.json"))
+        old_template = json.loads(archive.read("return_template.json"))
+    assert manifest["review_mode"] == "gap_discovery"
+    assert manifest["counts"]["reviewed_main_figures"] == 4
+    assert manifest["counts"]["reviewed_main_tables"] == 5
+    assert manifest["counts"]["pending_main_figures"] == 1
+    assert len(snapshot["reviewed_main_evidence"]["figures"]) == 4
+    assert len(snapshot["reviewed_main_evidence"]["tables"]) == 5
+    assert len(snapshot["reviewed_supporting_evidence"]) == 1
+    assert snapshot["reviewed_supporting_evidence"][0]["source_record_id"] == str(si_figure_id)
+    assert len(snapshot["unreviewed_supporting_context"]) == 1
+    assert all(item["eligible_for_auto_apply"] is False for item in snapshot["unreviewed_supporting_context"])
+
+    with Session(setup_test_db) as session:
+        changed = session.get(PaperFigure, figure_ids[0])
+        changed.caption = "Changed after completed review"
+        session.add(changed)
+        session.commit()
+    old_template["overall_status"] = "completed"
+    stale = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=old_template)
+    assert stale.status_code == 200
+    assert stale.json()["valid"] is False
+    assert any(item["code"] == "stale_or_mismatched_bundle" for item in stale.json()["errors"])
+
+
+def test_gap_discovery_exports_terminal_context_and_rejects_duplicate_or_unreviewed_si_new_candidate(setup_test_db):
+    figure_root = get_settings().storage_paths["figures"]
+    figure_root.mkdir(parents=True, exist_ok=True)
+    (figure_root / "gap-reviewed.png").write_bytes(b"\x89PNG\r\n\x1a\ngap")
+    with Session(setup_test_db) as session:
+        main = Paper(title="Gap discovery", paper_code="B-GAP", authors=[], pdf_path="gap.pdf")
+        si = Paper(title="Gap SI", paper_code="S-GAP", authors=[], pdf_path="gap-si.pdf")
+        session.add_all([main, si])
+        session.flush()
+        session.add(PaperRelationship(
+            source_paper_id=main.id,
+            target_paper_id=si.id,
+            relationship_type="supplementary",
+            created_by="test",
+        ))
+        sample = CatalystSample(paper_id=main.id, name="Fe-N-C")
+        session.add(sample)
+        session.flush()
+        rejected_rows = [
+            DFTResult(
+                paper_id=main.id,
+                catalyst_sample_id=sample.id,
+                property_type="adsorption_energy",
+                value=-1.0 - index,
+                unit="eV",
+                adsorbate=f"Li2S{index}",
+                candidate_status="Rejected",
+                evidence_text=f"Rejected value {-1.0-index} eV",
+            )
+            for index in range(7)
+        ]
+        main_figure = PaperFigure(
+            paper_id=main.id,
+            figure_label="Figure 1",
+            caption="DFT adsorption energy -1.0 eV",
+            page=4,
+            figure_role="dft_calculation",
+            content_summary="Adsorption energy result",
+            key_elements=["-1.0 eV"],
+            image_path="gap-reviewed.png",
+            crop_status="approved",
+        )
+        si_table = PaperTable(
+            paper_id=si.id,
+            caption="Table S1 DFT adsorption energy",
+            markdown_content="| adsorbate | energy |\n| Li2S0 | -1.0 eV |",
+            page=8,
+        )
+        session.add_all([*rejected_rows, main_figure, si_table])
+        session.commit()
+        paper_id = main.id
+        figure_id = main_figure.id
+    _create_chart_run(setup_test_db, paper_id, figure_ids=[figure_id], completed=True)
+
+    client = TestClient(app)
+    response = client.post(f"/api/papers/{paper_id}/dft-review-bundle")
+    assert response.status_code == 200
+    with ZipFile(BytesIO(response.content)) as archive:
+        template = json.loads(archive.read("return_template.json"))
+        candidates = json.loads(archive.read("parsed/initial_dft_candidates.json"))
+        figures = json.loads(archive.read("parsed/extracted_figures.json"))
+        tables = json.loads(archive.read("parsed/extracted_tables.json"))
+    assert template["review_mode"] == "gap_discovery"
+    assert template["coverage_acknowledgement"]["expected_target_ids"] == []
+    assert len(candidates["existing_terminal_context"]) == 7
+    assert all(item["readonly"] and not item["eligible_as_write_target"] for item in candidates["existing_terminal_context"])
+    reviewed_id = next(item["evidence_id"] for item in figures if item["eligible_for_auto_apply"])
+    unreviewed_si_id = next(item["evidence_id"] for item in tables if not item["eligible_for_auto_apply"])
+
+    duplicate = dict(template)
+    duplicate.update({"overall_status": "completed", "object_review_audits": [{
+        "target_type": "dft_results", "target_id": "new", "temporary_id": "new-dft-001",
+        "field_name": "dft_results", "decision": "new_candidate", "evidence_checked": True,
+        "evidence_ids": [reviewed_id],
+        "corrected_value": {"material_identity": "Fe-N-C", "property_type": "adsorption_energy", "value": -1.0, "unit": "eV", "adsorbate": "Li2S0"},
+        "reason": "Duplicate proposal", "blocking_errors": [],
+    }]})
+    duplicate_response = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=duplicate)
+    assert duplicate_response.status_code == 200
+    assert any(item["code"] == "duplicate_existing_terminal_candidate" for item in duplicate_response.json()["errors"])
+
+    unreviewed = dict(template)
+    unreviewed.update({"overall_status": "completed", "object_review_audits": [{
+        "target_type": "dft_results", "target_id": "new", "temporary_id": "new-dft-002",
+        "field_name": "dft_results", "decision": "new_candidate", "evidence_checked": True,
+        "evidence_ids": [unreviewed_si_id],
+        "corrected_value": {"material_identity": "Co-N-C", "property_type": "adsorption_energy", "value": -0.2, "unit": "eV", "adsorbate": "Li2S"},
+        "reason": "Unreviewed SI-only proposal", "blocking_errors": [],
+    }]})
+    unreviewed_response = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=unreviewed)
+    error_codes = {item["code"] for item in unreviewed_response.json()["errors"]}
+    assert "unreviewed_supporting_evidence_requires_human" in error_codes
+    assert "new_candidate_requires_reviewed_evidence" in error_codes
 
 
 def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup_test_db):

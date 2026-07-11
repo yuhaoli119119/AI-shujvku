@@ -21,13 +21,13 @@ const EVIDENCE_INSTRUCTION_SCOPE = FEATURE_SCOPE.slice(
 );
 
 test('review center exposes a selected-paper web AI result return entry', () => {
-  expect(REVIEW_CENTER).toContain('<option value="return_dft">4 回传 DFT JSON</option>');
+  expect(REVIEW_CENTER).toContain('id="returnDftWorkflowOption" value="return_dft"');
   expect(REVIEW_CENTER).toContain('回传网页 AI 结果');
   expect(REVIEW_CENTER).toContain('openWebAiReturnDialog("dft")');
   expect(FEATURE_SCOPE).toContain('回传 DFT JSON（" + (nextPaperCode');
   expect(FEATURE_SCOPE).toContain('rows.length !== 1');
   expect(FEATURE_SCOPE).toContain('function focusedSingleMainPaperRow()');
-  expect(FEATURE_SCOPE).toContain('return focusedSingleMainPaperRow();');
+  expect(FEATURE_SCOPE).toContain('rows.length !== 1 ? focusedSingleMainPaperRow() : null');
 });
 
 test('validation uses the selected paper id and copy stays disabled until success', () => {
@@ -95,6 +95,10 @@ test('DFT web AI prompt and validation summary make full target coverage visible
   expect(REVIEW_CENTER).toContain('返回 NEEDS_HUMAN');
   expect(FEATURE_SCOPE).toContain('<strong>coverage</strong>');
   expect(FEATURE_SCOPE).toContain('missing_target_ids');
+  expect(REVIEW_CENTER).toContain('existing_terminal_context');
+  expect(REVIEW_CENTER).toContain('unreviewed_supporting_context');
+  expect(REVIEW_CENTER).toContain('DFT 数据查漏');
+  expect(REVIEW_CENTER).toContain('/dft-review-state');
 });
 
 test('chart-review local AI instruction only includes unresolved item summaries', () => {

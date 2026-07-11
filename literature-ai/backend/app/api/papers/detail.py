@@ -81,6 +81,7 @@ class ManualReviewProgressRequest(BaseModel):
     module: str
     completed: bool
     reviewer: str | None = None
+    chart_run_id: UUID | None = None
 
 
 class DFTAIReviewResetRequest(BaseModel):
@@ -274,9 +275,14 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
 def get_paper(
     paper_id: UUID,
     mode: str = Query("full", pattern="^(light|full)$"),
+    chart_run_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ) -> PaperDetailResponse:
-    detail = PaperQueryService(session).get_paper_detail(paper_id, compact=(mode == "light"))
+    detail = PaperQueryService(session).get_paper_detail(
+        paper_id,
+        compact=(mode == "light"),
+        chart_run_id=chart_run_id,
+    )
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
     if mode == "light":
@@ -499,6 +505,7 @@ async def reset_dft_ai_reviews(
 async def set_manual_review_progress(
     paper_id: UUID,
     payload: ManualReviewProgressRequest,
+    chart_run_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
@@ -509,8 +516,26 @@ async def set_manual_review_progress(
     if module not in {"content", "figures", "dft"}:
         raise HTTPException(status_code=400, detail="module must be one of: content, figures, dft")
     if module == "figures" and payload.completed:
+        selected_chart_run_id = payload.chart_run_id or chart_run_id
+        if payload.chart_run_id and chart_run_id and payload.chart_run_id != chart_run_id:
+            raise HTTPException(status_code=400, detail="chart_run_id values must match")
+        if selected_chart_run_id is None:
+            options = EvidenceReviewBundleService(session, settings).get_review_scope_options(paper_id)
+            chart_runs = options.get("chart_runs") if isinstance(options.get("chart_runs"), list) else []
+            if len(chart_runs) > 1:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "chart_review_scope_selection_required",
+                        "message": "请选择图表审核批次后再标记完成。",
+                        "chart_runs": chart_runs,
+                    },
+                )
         try:
-            chart_task = EvidenceReviewBundleService(session, settings).get_review_task(paper_id)
+            chart_task = EvidenceReviewBundleService(session, settings).get_review_task(
+                paper_id,
+                run_id=selected_chart_run_id,
+            )
         except (LookupError, ValueError) as exc:
             raise HTTPException(
                 status_code=409,
@@ -553,6 +578,7 @@ async def set_manual_review_progress(
             payload={
                 "module": module,
                 "completed": bool(payload.completed),
+                "chart_run_id": str(selected_chart_run_id) if module == "figures" and selected_chart_run_id else None,
             },
         )
     )
