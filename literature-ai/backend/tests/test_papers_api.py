@@ -288,8 +288,30 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
         assert light_payload["catalyst_samples_items"] == []
         assert light_payload["sections"] == []
         assert light_payload["figures"] == []
+        assert light_payload["chart_review_status"] == {}
+        assert light_payload["rag_quality"] == {}
         assert len(light.content) < 200_000
         assert len(statements) < 25
+
+        statements.clear()
+        dft_detail = client.get(f"/api/papers/{paper_id}", params={"mode": "dft"})
+        assert dft_detail.status_code == 200
+        dft_detail_payload = dft_detail.json()
+        assert dft_detail_payload["dft_results_items"] == []
+        assert dft_detail_payload["dft_results_page"]["total"] == 120
+        assert dft_detail_payload["chart_review_status"] == {}
+        assert dft_detail_payload["rag_quality"] == {}
+        assert len(statements) < 35
+
+        statements.clear()
+        content = client.get(f"/api/papers/{paper_id}", params={"mode": "content"})
+        assert content.status_code == 200
+        content_payload = content.json()
+        assert content_payload["dft_results_items"] == []
+        assert content_payload["dft_results_page"]["total"] == 120
+        assert content_payload["chart_review_status"] == {}
+        assert content_payload["rag_quality"] == {}
+        assert len(statements) < 100
 
         statements.clear()
         full = client.get(f"/api/papers/{paper_id}", params={"mode": "full"})
@@ -304,6 +326,7 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
         assert page.status_code == 200
         assert len(page.json()["items"]) == 50
         assert page.json()["has_more"] is True
+        assert all("export_safety" in item and "is_exportable" in item for item in page.json()["items"])
     finally:
         event.remove(engine, "before_cursor_execute", record_statement)
 

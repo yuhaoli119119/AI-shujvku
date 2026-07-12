@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
+from PIL import Image
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,10 +28,35 @@ from app.db.models import (
 )
 from app.main import app
 from app.services.dft_review_bundle_service import DFTReviewBundleService
+from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+import app.services.dft_review_bundle_service as dft_bundle_module
+
+
+def test_bundle_figure_artifact_compacts_ai_copy_without_changing_source(tmp_path):
+    artifact = tmp_path / "chart.bmp"
+    Image.new("RGB", (1200, 900), "white").save(artifact, format="BMP")
+    original = artifact.read_bytes()
+
+    compact, suffix, compacted = DFTReviewBundleService._bundle_figure_artifact(artifact)
+
+    assert compacted is True
+    assert suffix == ".webp"
+    assert len(compact) < len(original)
+    assert artifact.read_bytes() == original
 
 
 def _seed_review_materials(engine):
     settings = get_settings()
+    import fitz
+
+    pdf_root = settings.storage_paths["pdf"]
+    pdf_root.mkdir(parents=True, exist_ok=True)
+    for name in ("main.pdf", "main-si.pdf"):
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), f"Test source PDF: {name}")
+        document.save(str(pdf_root / name))
+        document.close()
     figure_root = settings.storage_paths["figures"]
     figure_root.mkdir(parents=True, exist_ok=True)
     (figure_root / "dft-profile.png").write_bytes(b"\x89PNG\r\n\x1a\nreview-image")
@@ -147,6 +173,40 @@ def _mark_figure_table_review_completed(engine, paper_id):
     settings = get_settings()
     with Session(engine) as session:
         state = DFTReviewBundleService(session, settings).get_figure_table_review_state(paper_id)
+        service = EvidenceReviewBundleService(session, settings)
+        materials = service._build_materials(paper_id)
+        for figure_id in materials["figure_id_map"]:
+            session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="offline_evidence_review_op",
+                    source="test_local_ai",
+                    target_type="paper_figure",
+                    target_id=str(figure_id),
+                    payload={
+                        "actor_type": "local_ai",
+                        "action": {
+                            "action": "KEEP",
+                            "local_ai_verification": {
+                                "verified_against_pdf": True,
+                                "used_tools": ["get_codex_item", "read_paper_page"],
+                                "verification_note": "Test fixture verified this figure against its source PDF.",
+                            },
+                        },
+                    },
+                )
+            )
+        for table_id in materials["table_id_map"]:
+            session.add(
+                AuditLog(
+                    paper_id=paper_id,
+                    action="KEEP",
+                    source="test_chart_review",
+                    target_type="paper_table",
+                    target_id=str(table_id),
+                    payload={"action": "KEEP"},
+                )
+            )
         session.add(
             AuditLog(
                 paper_id=paper_id,
@@ -226,7 +286,19 @@ def _create_chart_run(engine, paper_id, *, figure_ids=(), table_ids=(), complete
                     source="test_chart_review",
                     target_type="paper_figure",
                     target_id=str(figure_id),
-                    payload={"run_id": str(run_id), "chart_run_id": str(run_id), "action": "KEEP"},
+                    payload={
+                        "run_id": str(run_id),
+                        "chart_run_id": str(run_id),
+                        "actor_type": "local_ai",
+                        "action": {
+                            "action": "KEEP",
+                            "local_ai_verification": {
+                                "verified_against_pdf": True,
+                                "used_tools": ["get_codex_item", "read_paper_page"],
+                                "verification_note": "Test fixture verified this figure against its source PDF.",
+                            },
+                        },
+                    },
                 ))
             for table_id in table_ids:
                 session.add(AuditLog(
@@ -239,6 +311,84 @@ def _create_chart_run(engine, paper_id, *, figure_ids=(), table_ids=(), complete
                 ))
             session.commit()
     return run_id
+
+
+def test_dft_bundle_and_si_detail_share_parent_duplicate_exclusions(setup_test_db):
+    """A duplicate SI extraction cannot stale a completed whole-paper review."""
+    paper_id, _ = _seed_review_materials(setup_test_db)
+    figure_root = get_settings().storage_paths["figures"]
+    figure_root.mkdir(parents=True, exist_ok=True)
+    (figure_root / "si-duplicate-scope.png").write_bytes(b"\x89PNG\r\n\x1a\nduplicate-scope")
+
+    with Session(setup_test_db) as session:
+        si = session.scalars(select(Paper).where(Paper.paper_code == "B0078-SI1")).one()
+        canonical = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S1",
+            caption="Figure S1. DFT adsorption energy profile.",
+            figure_role="dft_calculation",
+            content_summary="DFT adsorption energy profile.",
+            key_elements=["adsorption energy", "DFT profile"],
+            crop_status="approved",
+            page=4,
+            image_path="si-duplicate-scope.png",
+        )
+        duplicate = PaperFigure(
+            paper_id=si.id,
+            figure_label="fig_candidate_1",
+            caption="Figure S1. DFT adsorption energy profile.",
+            page=4,
+            image_path="si-duplicate-scope.png",
+        )
+        session.add_all([canonical, duplicate])
+        session.commit()
+        si_id = si.id
+        canonical_id = str(canonical.id)
+        duplicate_id = str(duplicate.id)
+
+    completed_fingerprint = _mark_figure_table_review_completed(setup_test_db, paper_id)
+    client = TestClient(app)
+
+    detail = client.get(f"/api/papers/{si_id}")
+    assert detail.status_code == 200
+    exclusions = detail.json()["chart_review_status"]["excluded_duplicate_figures"]
+    assert [item["excluded_figure_id"] for item in exclusions] == [duplicate_id]
+    assert exclusions[0]["canonical_figure_id"] == canonical_id
+
+    content_detail = client.get(f"/api/papers/{si_id}?mode=content")
+    assert content_detail.status_code == 200
+    assert [item["excluded_figure_id"] for item in content_detail.json()["chart_review_status"]["excluded_duplicate_figures"]] == [duplicate_id]
+
+    exported = client.post(f"/api/papers/{paper_id}/dft-review-bundle?chart_scope=paper")
+    assert exported.status_code == 200, exported.text
+    with ZipFile(BytesIO(exported.content)) as archive:
+        figures = json.loads(archive.read("parsed/extracted_figures.json"))
+        manifest = json.loads(archive.read("manifest.json"))
+    exported_figure_ids = {item["source_record_id"] for item in figures}
+    assert canonical_id in exported_figure_ids
+    assert duplicate_id not in exported_figure_ids
+    chart_scope = client.get(f"/api/papers/{paper_id}/chart-review-scopes").json()["paper_scope"]
+    assert chart_scope["completed_snapshot_fingerprint"] == completed_fingerprint
+
+    # A new, non-duplicate SI figure changes the parent whole-paper scope and
+    # must still block DFT export; completed main review never masks it.
+    with Session(setup_test_db) as session:
+        session.add(PaperFigure(
+            paper_id=si_id,
+            figure_label="Figure S2",
+            caption="Figure S2. Distinct DFT free-energy profile.",
+            figure_role="dft_calculation",
+            content_summary="Distinct DFT free-energy profile.",
+            page=5,
+            image_path="si-duplicate-scope.png",
+        ))
+        session.commit()
+
+    blocked = client.post(f"/api/papers/{paper_id}/dft-review-bundle?chart_scope=paper")
+    assert blocked.status_code == 409
+    state = client.get(f"/api/papers/{paper_id}/dft-review-state").json()
+    assert state["review_gate"]["stage_status"] in {"needs_local_ai", "stale"}
+    assert state["review_gate"]["current_snapshot_fingerprint"] != completed_fingerprint
 
 
 def test_offline_dft_review_bundle_requires_completed_figure_table_review(setup_test_db):
@@ -308,6 +458,9 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
         names = set(archive.namelist())
         assert {
             "manifest.json",
+            "START_HERE.md",
+            "WEB_AI_FILL_THIS.json",
+            "OUTPUT_RULES.json",
             "format_examples.json",
             "instructions_for_web_ai.md",
             "return_schema.json",
@@ -319,7 +472,7 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
             "parsed/extracted_figures.json",
             "evidence/text_snippets.jsonl",
         } <= names
-        assert not any(name.lower().endswith(".pdf") for name in names)
+        assert {"source/main.pdf", "source/si/B0078-SI1.pdf"} <= names
         assert any(name.startswith("evidence/tables/si_table_") for name in names)
         assert any(name.startswith("evidence/figures/main_fig_") for name in names)
 
@@ -328,6 +481,9 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
         metadata = json.loads(archive.read("parsed/paper_metadata.json"))
         return_schema = json.loads(archive.read("return_schema.json"))
         return_template = json.loads(archive.read("return_template.json"))
+        fill_template = json.loads(archive.read("WEB_AI_FILL_THIS.json"))
+        output_rules = json.loads(archive.read("OUTPUT_RULES.json"))
+        start_here = archive.read("START_HERE.md").decode("utf-8")
         checklist = json.loads(archive.read("parsed/dft_review_checklist.json"))
         examples = json.loads(archive.read("format_examples.json"))
         instructions = archive.read("instructions_for_web_ai.md").decode("utf-8")
@@ -337,11 +493,23 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     assert len(manifest["figure_table_completed_snapshot_fingerprint"]) == 64
     assert manifest["chart_scope_type"] == "paper_reviewed_aggregate"
     assert manifest["retention_policy"] == "generated_in_memory_not_persisted_on_server"
+    assert manifest["pdf_files"]["count"] == 2
     assert candidates["existing_candidates"][0]["material_identity"] == "Fe-N-C"
     assert candidates["supporting_si_candidates"][0]["source_document_type"] == "supplementary_information"
     assert {doc["role"] for doc in metadata["source_documents"]} == {"main", "si"}
-    assert "gap_discovery" in return_schema["properties"]["overall_status"]["description"]
+    assert "comprehensive_review" in return_schema["properties"]["overall_status"]["description"]
+    assert manifest["review_mode"] == "comprehensive_review"
     assert return_template["coverage_acknowledgement"]["expected_target_ids"] == manifest["target_dft_result_ids"]
+    assert fill_template == return_template
+    assert output_rules["output_workflow"]["input_template"] == "WEB_AI_FILL_THIS.json"
+    assert output_rules["output_workflow"]["output_filename"] == "B0078_web_ai_result.json"
+    assert output_rules["output_workflow"]["reply_as_file_attachment"] is True
+    assert "target_id='new' if and only if decision='new_candidate'" in output_rules["hard_invariants"]
+    assert "WEB_AI_FILL_THIS.json" in start_here
+    assert "B0078_web_ai_result.json" in start_here
+    assert "reply by attaching" in start_here
+    assert "target_id=\"new\"" in instructions
+    assert "PASS/REVISE/REJECT/NEEDS_HUMAN" in instructions
     assert checklist["target_ids"] == manifest["target_dft_result_ids"]
     assert checklist["targets"][0]["required_once"] is True
     assert checklist["targets"][0]["field_name"] == "dft_results"
@@ -351,7 +519,9 @@ def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):
     assert revise_example["corrected_value"]["unit"] == "eV"
     assert "format only" in examples["usage"][0]
     assert manifest["expected_dft_review_coverage"]["target_ids"] == manifest["target_dft_result_ids"]
-    assert "gap_discovery" in instructions
+    assert "comprehensive_review" in instructions
+    assert return_template["coverage_acknowledgement"]["missing_data_search_complete"] is False
+    assert checklist["mandatory_discovery_pass"]["required"] is True
     assert "format_examples.json" in instructions
     assert "dft_review_checklist.json" in instructions
     assert "不要照抄示例 ID" in instructions
@@ -374,6 +544,7 @@ def test_offline_review_validation_returns_import_request_without_writing(setup_
             if line.strip()
         ]
 
+    template["coverage_acknowledgement"]["missing_data_search_complete"] = True
     template.update(
         {
             "overall_status": "completed",
@@ -417,11 +588,88 @@ def test_offline_review_validation_returns_import_request_without_writing(setup_
     with Session(setup_test_db) as session:
         assert session.query(ExternalAnalysisRun).count() == 0
 
+    template["coverage_acknowledgement"]["missing_data_search_complete"] = False
+    incomplete_search = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=template)
+    assert incomplete_search.status_code == 200
+    assert any(
+        error["code"] == "incomplete_missing_data_search"
+        for error in incomplete_search.json()["errors"]
+    )
+    template["coverage_acknowledgement"]["missing_data_search_complete"] = True
     template["object_review_audits"][0]["evidence_ids"] = ["main:text:999"]
     invalid = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=template)
     assert invalid.status_code == 200
     assert invalid.json()["valid"] is False
     assert invalid.json()["errors"][0]["code"] == "unknown_evidence_id"
+
+
+def _completed_dft_template(service, paper_id, row_id):
+    materials = service._build_materials(paper_id, enforce_figure_table_gate=False)
+    template = service._return_template(materials)
+    evidence = next(item for item in materials["evidence_map"].values() if item.get("evidence_kind") == "text")
+    template.update({
+        "overall_status": "completed",
+        "coverage_acknowledgement": {
+            "expected_target_ids": [str(row_id)],
+            "reviewed_target_ids": [str(row_id)],
+            "coverage_complete": True,
+            "missing_data_search_complete": True,
+        },
+        "object_review_audits": [{
+            "target_type": "dft_results",
+            "target_id": str(row_id),
+            "field_name": "dft_results",
+            "decision": "PASS",
+            "evidence_checked": True,
+            "evidence_ids": [evidence["evidence_id"]],
+            "confidence": 0.95,
+            "reason": "Test PDF inventory gate.",
+            "recommended_action": "ready_for_ml_export",
+        }],
+    })
+    return template
+
+
+def test_comprehensive_review_rejects_missing_main_or_si_pdf_and_accepts_full_inventory(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    settings = get_settings()
+    pdf_root = settings.storage_paths["pdf"]
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, settings)
+        assert service.validate_result(paper_id, _completed_dft_template(service, paper_id, row_id))["valid"] is True
+    for missing_name in ("main.pdf", "main-si.pdf"):
+        path = pdf_root / missing_name
+        original = path.read_bytes()
+        path.unlink()
+        try:
+            with Session(setup_test_db) as session:
+                service = DFTReviewBundleService(session, settings)
+                result = service.validate_result(paper_id, _completed_dft_template(service, paper_id, row_id))
+            assert any(error["code"] == "source_pdf_missing_for_comprehensive_review" for error in result["errors"])
+        finally:
+            path.write_bytes(original)
+
+
+def test_comprehensive_review_rejects_pdf_inventory_limit_omissions_and_manifest_matches_zip(setup_test_db, monkeypatch):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    settings = get_settings()
+    for constant, value in (("MAX_SOURCE_PDF_COUNT", 1), ("MAX_TOTAL_SOURCE_PDF_BYTES", 1)):
+        monkeypatch.setattr(dft_bundle_module, constant, value)
+        with Session(setup_test_db) as session:
+            service = DFTReviewBundleService(session, settings)
+            result = service.validate_result(paper_id, _completed_dft_template(service, paper_id, row_id))
+        assert any(error["code"] == "source_pdf_not_in_bundle" for error in result["errors"])
+        monkeypatch.undo()
+    with Session(setup_test_db) as session:
+        bundle = DFTReviewBundleService(session, settings).build_zip(paper_id)
+    with ZipFile(BytesIO(bundle["content"])) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        metadata = json.loads(archive.read("parsed/paper_metadata.json"))
+        inventory = manifest["source_pdf_inventory"]
+        assert inventory == metadata["source_pdf_inventory"]
+        assert all(item["included_in_bundle"] == (item["bundle_file"] in archive.namelist()) for item in inventory)
 
 
 def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(setup_test_db):
@@ -439,9 +687,10 @@ def test_offline_review_new_candidate_uses_best_pdf_anchor_from_cited_evidence(s
             item for item in materials["evidence_map"].values()
             if item.get("evidence_kind") == "figure" and item.get("page") is not None
         )
+        template["coverage_acknowledgement"]["missing_data_search_complete"] = True
         template.update(
             {
-                "overall_status": "uncertain",
+                "overall_status": "completed",
                 "object_review_audits": [
                     {
                         "target_type": "dft_results",
@@ -566,6 +815,9 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
 
 
 def test_offline_review_existing_dft_uses_locator_pdf_anchor_when_payload_has_no_page(setup_test_db):
+    pdf_path = get_settings().storage_paths["pdf"] / "locator-only.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\nlocator-only test source\n")
     with Session(setup_test_db) as session:
         paper = Paper(
             title="Locator-only DFT paper",
@@ -617,6 +869,7 @@ def test_offline_review_existing_dft_uses_locator_pdf_anchor_when_payload_has_no
             if item.get("source_record_id") == str(row_id)
         )
         template = service._return_template(materials)
+        template["coverage_acknowledgement"]["missing_data_search_complete"] = True
         template.update(
             {
                 "overall_status": "completed",
@@ -774,6 +1027,7 @@ def test_offline_review_validation_normalizes_common_web_ai_json_noise(setup_tes
         "reason": "Evidence checked against the quoted sentence.",
         "recommended_action": "ready_for_ml_export",
     }
+    template["coverage_acknowledgement"]["missing_data_search_complete"] = True
     template.update(
         {
             "overall_status": "completed",
@@ -879,7 +1133,11 @@ def test_offline_review_validation_rejects_unrelated_or_missing_evidence_ids(set
     unrelated_response = client.post(f"/api/papers/{paper_id}/dft-review-result/validate", json=template)
     assert unrelated_response.status_code == 200
     assert unrelated_response.json()["valid"] is False
-    assert any(error["code"] == "unrelated_evidence_id" for error in unrelated_response.json()["errors"])
+    unrelated_errors = [error for error in unrelated_response.json()["errors"] if error["code"] == "unrelated_evidence_id"]
+    assert unrelated_errors
+    assert str(row_id) in unrelated_errors[0]["message"]
+    assert "package evidence_id" in unrelated_errors[0]["message"]
+    assert "main:text:" in unrelated_errors[0]["message"]
 
     audit_without_evidence = dict(audit)
     audit_without_evidence.pop("evidence_ids")
@@ -950,6 +1208,13 @@ def test_dft_candidate_filter_skips_only_currently_eligible_ml_ready(setup_test_
             unit="eV",
             candidate_status="ML_Ready",
         )
+        ai_verified = DFTResult(
+            paper_id=paper.id,
+            property_type="band_gap",
+            value=1.5,
+            unit="eV",
+            candidate_status="ai_verified_ml_ready",
+        )
         rejected = DFTResult(
             paper_id=paper.id,
             property_type="band_gap",
@@ -957,11 +1222,12 @@ def test_dft_candidate_filter_skips_only_currently_eligible_ml_ready(setup_test_
             unit="eV",
             candidate_status="Rejected",
         )
-        session.add_all([eligible, stale, rejected])
+        session.add_all([eligible, stale, ai_verified, rejected])
         session.flush()
         gates = {
             str(eligible.id): SimpleNamespace(eligible=True, review_status="verified"),
             str(stale.id): SimpleNamespace(eligible=False, review_status="verified"),
+            str(ai_verified.id): SimpleNamespace(eligible=True, review_status="verified"),
             str(rejected.id): SimpleNamespace(eligible=False, review_status="rejected"),
         }
         monkeypatch.setattr(
@@ -973,12 +1239,47 @@ def test_dft_candidate_filter_skips_only_currently_eligible_ml_ready(setup_test_
             session,
             get_settings(),
         )._dft_rows_for_review_bundle(
-            [eligible, stale, rejected],
+            [eligible, stale, ai_verified, rejected],
             main_paper_id=paper.id,
         )
 
     assert [row.id for row in selected] == [stale.id]
-    assert len(excluded) == 2
+    assert {row.id for row in excluded} == {eligible.id, ai_verified.id, rejected.id}
+
+
+def test_dft_state_reports_pending_paper_scope_before_any_chart_run(setup_test_db):
+    figure_root = get_settings().storage_paths["figures"]
+    figure_root.mkdir(parents=True, exist_ok=True)
+    (figure_root / "pending-paper-scope.png").write_bytes(b"\x89PNG\r\n\x1a\npending")
+    with Session(setup_test_db) as session:
+        paper = Paper(title="Pending paper scope", paper_code="B-PENDING", authors=[], pdf_path="pending.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all([
+            PaperFigure(
+                paper_id=paper.id,
+                figure_label="Figure 1",
+                caption="Pending DFT figure",
+                page=1,
+                image_path="pending-paper-scope.png",
+            ),
+            PaperTable(
+                paper_id=paper.id,
+                caption="Pending DFT table",
+                markdown_content="| Value |\\n|---|\\n| 1 |",
+                page=2,
+            ),
+        ])
+        session.commit()
+        paper_id = paper.id
+
+    response = TestClient(app).get(f"/api/papers/{paper_id}/dft-review-state")
+
+    assert response.status_code == 200
+    state = response.json()
+    assert state["review_gate"]["stage_status"] == "not_started"
+    assert state["summary"]["pending_main_figures"] == 1
+    assert state["summary"]["pending_main_tables"] == 1
 
 
 def test_dft_bundle_aggregates_completed_runs_and_keeps_pending_and_unreviewed_si_separate(setup_test_db):
@@ -1069,7 +1370,7 @@ def test_dft_bundle_aggregates_completed_runs_and_keeps_pending_and_unreviewed_s
         manifest = json.loads(archive.read("manifest.json"))
         snapshot = json.loads(archive.read("parsed/curated_figure_table_evidence_snapshot.json"))
         old_template = json.loads(archive.read("return_template.json"))
-    assert manifest["review_mode"] == "gap_discovery"
+    assert manifest["review_mode"] == "comprehensive_review"
     assert manifest["counts"]["reviewed_main_figures"] == 4
     assert manifest["counts"]["reviewed_main_tables"] == 5
     assert manifest["counts"]["pending_main_figures"] == 1
@@ -1154,7 +1455,7 @@ def test_gap_discovery_exports_terminal_context_and_rejects_duplicate_or_unrevie
         candidates = json.loads(archive.read("parsed/initial_dft_candidates.json"))
         figures = json.loads(archive.read("parsed/extracted_figures.json"))
         tables = json.loads(archive.read("parsed/extracted_tables.json"))
-    assert template["review_mode"] == "gap_discovery"
+    assert template["review_mode"] == "comprehensive_review"
     assert template["coverage_acknowledgement"]["expected_target_ids"] == []
     assert len(candidates["existing_terminal_context"]) == 7
     assert all(item["readonly"] and not item["eligible_as_write_target"] for item in candidates["existing_terminal_context"])
@@ -1197,6 +1498,7 @@ def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup
         evidence_id = json.loads(archive.read("evidence/text_snippets.jsonl").decode("utf-8").splitlines()[0])[
             "evidence_id"
         ]
+    template["coverage_acknowledgement"]["missing_data_search_complete"] = True
     template.update(
         {
             "overall_status": "completed",
@@ -1226,7 +1528,7 @@ def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup
     request = validation.json()["import_analysis_request"]
 
     blocked = client.post("/api/external-analysis/import", json=request)
-    assert blocked.status_code == 409
+    assert blocked.status_code == 409, blocked.text
     assert "local_ai_pdf_verification_required" in blocked.json()["detail"]
 
     audit = request["raw_payload"]["object_review_audits"][0]

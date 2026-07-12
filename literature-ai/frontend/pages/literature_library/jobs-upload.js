@@ -147,7 +147,7 @@ async function reparseSelectedPaper() {
                 '<div class="section-card"><h3>最近一次重新解析结果</h3><div class="subtle">状态：' + esc(data.status || "completed") + (data.workflow_status ? " | workflow=" + esc(data.workflow_status) : "") + (data.workspace_path ? " | workspace=" + esc(data.workspace_path) : "") + "</div></div>"
             );
         }
-        await refreshSelectedPaperDetail({ reason: "reparse_completed", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "reparse_completed", mode: detailModeForTab(state.currentTab) });
     } catch (error) {
         showToast("重新解析失败：" + error.message, "error");
     }

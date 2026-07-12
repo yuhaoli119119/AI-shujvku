@@ -121,7 +121,7 @@ function renderDetail(detail, audit) {
         }
 
         const sortedFigures = detail.figures.slice().sort(compareFigureItems);
-        const figureBlockedMap = figureRagBlockedMap(detail);
+        const reviewCoverage = chartReviewCoverage(detail);
         const roles = new Set();
         sortedFigures.forEach(f => {
             if (f.figure_role) roles.add(f.figure_role);
@@ -134,8 +134,8 @@ function renderDetail(detail, audit) {
         if (roles.size > 0) {
             filterHtml += '<div style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">';
             filterHtml += '<button class="btn small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display=\'block\')">全部</button>';
-            filterHtml += '<button class="btn ghost small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display = el.dataset.ragBlocked === \'true\' ? \'block\' : \'none\')">只看 RAG 不合格</button>';
-            filterHtml += '<button class="btn ghost small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display = el.dataset.ragBlocked === \'false\' ? \'block\' : \'none\')">只看 RAG 可用</button>';
+            filterHtml += '<button class="btn ghost small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display = el.dataset.reviewStatus === \'pending\' ? \'block\' : \'none\')">只看待审核</button>';
+            filterHtml += '<button class="btn ghost small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display = el.dataset.reviewStatus === \'reviewed\' ? \'block\' : \'none\')">只看已审核</button>';
             roles.forEach(role => {
                 filterHtml += '<button class="btn ghost small" onclick="document.querySelectorAll(\'.figure-card\').forEach(el => el.style.display = el.dataset.role === \'' + esc(role) + '\' ? \'block\' : \'none\')">' + esc(figureRoleLabel(role)) + '</button>';
             });
@@ -144,11 +144,9 @@ function renderDetail(detail, audit) {
 
         const noisyCount = sortedFigures.filter(isLikelyNoisyFigure).length;
         const cardsHtml = sortedFigures.map(function(item, index) {
-            const ragBlocked = figureBlockedMap[String(item.id || "")] || null;
-            const ragReasons = ragBlocked && Array.isArray(ragBlocked.reasons) ? ragBlocked.reasons : [];
-            const ragStatusHtml = ragBlocked
-                ? '<span class="status-chip danger" title="' + escAttr(ragReasons.map(ragReasonLabel).join("；")) + '">RAG 不合格：' + esc(ragReasons.map(ragReasonLabel).join("；") || "未通过") + '</span>'
-                : '<span class="status-chip ok">RAG 可用</span>';
+            const excludedDuplicate = chartReviewExcludedFigure(detail, item);
+            const isReviewed = reviewCoverage.reviewedMainFigureIds.has(String(item.id || ""));
+            const reviewCardStatus = excludedDuplicate ? "excluded" : (isReviewed ? "reviewed" : "pending");
             let imgHtml = "";
             const noisyFigure = isLikelyNoisyFigure(item);
             if (item.image_path && !noisyFigure) {
@@ -214,8 +212,23 @@ function renderDetail(detail, audit) {
             }
 
             var figNum = figureSortNumber(item);
-            var figLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
-            var codexAction = codexItemActionHtml("figure", item);
+            var baseFigLabel = figNum !== null ? '图片 ' + figNum : '图片 ' + (index + 1);
+            var canonicalFigureLabel = String(excludedDuplicate && (
+                excludedDuplicate.canonical_figure_label || excludedDuplicate.canonical_figure_id
+            ) || "正规图");
+            var figLabel = excludedDuplicate
+                ? baseFigLabel + '（重复候选，映射到 ' + canonicalFigureLabel + '）'
+                : baseFigLabel;
+            var figureMetadataAction = codexItemActionHtml("figure", item);
+            var chartReviewStatusHtml = figureChartReviewStatusHtml(detail, item, reviewCoverage);
+            var duplicateExclusionNote = excludedDuplicate
+                ? '<div class="figure-warning" style="margin-top:12px;">' +
+                    '<strong>重复候选，已从审核范围排除。</strong>' +
+                    '<div>重复原因：' + esc(chartReviewDuplicateReasonLabel(excludedDuplicate)) +
+                    '；正规图映射：' + esc(canonicalFigureLabel) +
+                    '（' + esc(String(excludedDuplicate.canonical_figure_id || "-")) + '）。</div>' +
+                  '</div>'
+                : '';
             var directDeleteAction = item.direct_delete_eligible
                 ? '<button type="button" class="btn danger small" onclick="event.stopPropagation(); directDeleteFigure(\'' + escAttr(detail.id) + '\', \'' + escAttr(item.id) + '\', this)">直接删除</button>'
                 : '';
@@ -223,13 +236,16 @@ function renderDetail(detail, audit) {
                 ? '<div class="subtle">Legacy delete proposals still pending (' + Number(item.pending_delete_proposal_count || 0) + ')</div>'
                 : '';
             var reviewSummary = figureReviewSummaryHtml(item);
+            var advancedFigureMetadata = figureMetadataAction
+                ? '<details style="margin-top:12px;"><summary class="subtle">高级：修正图片说明</summary><div style="margin-top:8px;">' + figureMetadataAction + '<div class="subtle" style="margin-top:6px;">仅用于修正标题、摘要、分图说明或 OCR；不会完成图表审核。</div></div></details>'
+                : '';
 
-            return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '" data-rag-blocked="' + (ragBlocked ? "true" : "false") + '" ontoggle="if(this.open){loadFigureCardImage(this.querySelector(\'.figure-image-placeholder\'));}">' +
-                   '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + figLabel + '</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + ragStatusHtml + directDeleteAction + codexAction + '</div></div></summary>' +
+            return '<details class="section-card figure-card" data-role="' + esc(item.figure_role || 'unknown') + '" data-review-status="' + reviewCardStatus + '" ontoggle="if(this.open){loadFigureCardImage(this.querySelector(\'.figure-image-placeholder\'));}">' +
+                   '<summary><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;flex:1;width:100%;"><h3 style="margin:0;">' + esc(figLabel) + '</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' + chartReviewStatusHtml + directDeleteAction + '</div></div></summary>' +
                    '<div style="margin-top:10px;">' +
                    imgHtml +
                    '<div class="prewrap" style="margin-top:12px;">' + esc(item.caption || "无 caption") + "</div>" +
-                   summaryHtml + metaHtml + legacyDeleteNote + renderFigureParseDetailHtml(item) + reviewSummary + '</div></details>';
+                   summaryHtml + metaHtml + duplicateExclusionNote + legacyDeleteNote + renderFigureParseDetailHtml(item) + reviewSummary + advancedFigureMetadata + '</div></details>';
         }).join("");
 
         const figureNotice = noisyCount
@@ -327,13 +343,12 @@ function renderDetail(detail, audit) {
         reviewTabEl.insertAdjacentHTML("afterbegin", renderTaskLogPanel(detail, audit));
     }
 
-    if (summaryEl) {
+    if (summaryEl && activeTab === "summary") {
         summaryEl.innerHTML =
             missingPdfBanner +
             auditBanner +
             summaryCards +
-            renderDetailTrustStrip(detail) +
-            renderRagQualityPanel(detail) +
+            renderDetailReviewStatusPanel(detail) +
             baseInfo +
             pdfEvidenceEntry +
             localizedSummaryCard +
@@ -394,11 +409,6 @@ function renderDetail(detail, audit) {
         } else {
             writingEl.innerHTML = renderPendingReviewCard("写作卡片", "\u5f53\u524d\u8fd8\u6ca1\u6709\u5199\u4f5c\u5361\u5185\u5bb9\u3002");
         }
-    }
-    if (false && writingEl && activeTab === "writing") {
-        writingEl.innerHTML = isAiVerifiedStatus(writingCardsReviewStatus)
-            ? renderJSONCards("写作卡片", detail.writing_cards_items || [])
-            : renderPendingReviewCard("写作卡片", "写作卡待 AI 核验，不在详情页展示。");
     }
     if (translationEl && activeTab === "translation") {
         translationEl.innerHTML = (isAiVerifiedStatus(translationReviewStatus) || translationReviewStatus === "final_trusted")

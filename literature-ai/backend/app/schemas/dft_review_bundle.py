@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 ReviewSourceType = Literal["web_ai", "local_ai", "human", "other"]
 ReviewDecision = Literal["PASS", "REVISE", "REJECT", "NEEDS_HUMAN", "new_candidate"]
 OverallReviewStatus = Literal["completed", "needs_human", "uncertain"]
-DFTReviewMode = Literal["target_review", "gap_discovery"]
+DFTReviewMode = Literal["comprehensive_review", "target_review", "gap_discovery"]
 
 
 class OfflineReviewSource(BaseModel):
@@ -126,6 +126,13 @@ class OfflineDFTReviewCoverageAck(BaseModel):
     expected_target_ids: list[str] = Field(default_factory=list)
     reviewed_target_ids: list[str] = Field(default_factory=list)
     coverage_complete: bool = False
+    missing_data_search_complete: bool = Field(
+        default=False,
+        description=(
+            "True only after reviewing every packaged eligible evidence item for DFT values that are not already "
+            "represented by writable targets or existing_terminal_context."
+        ),
+    )
 
     @field_validator("expected_target_ids", "reviewed_target_ids")
     @classmethod
@@ -154,8 +161,9 @@ class OfflineDFTReviewResult(BaseModel):
     review_source: OfflineReviewSource
     overall_status: OverallReviewStatus = Field(
         description=(
-            "In target_review, use completed only after reviewing every current writable main-paper DFT target. "
-            "In gap_discovery, completed means the missing-data search is complete, not that terminal rows were re-reviewed."
+            "In comprehensive_review, use completed only after reviewing every current writable main-paper DFT "
+            "target and completing the missing-data search across all packaged eligible evidence. Legacy "
+            "target_review and gap_discovery values remain schema-readable but are not emitted by new packages."
         )
     )
     coverage_acknowledgement: OfflineDFTReviewCoverageAck | None = Field(

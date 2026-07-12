@@ -26,6 +26,7 @@ from app.services.pdf_image_extractor import PdfImageExtractor
 from app.services.embedding import EmbeddingUnavailableError, get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_pipeline import ExtractionPipelineService
+from app.services.journal_impact_enrichment_service import JournalImpactEnrichmentService
 from app.services.paper_identity import PaperIdentityService
 from app.services.paper_codes import ensure_paper_codes, next_supplementary_paper_code
 from app.services.paper_serials import renumber_library_papers_by_year
@@ -84,6 +85,11 @@ class PaperIngestionService:
         )
         self.locators = EvidenceLocatorService(session)
         self.workbench = PaperWorkbenchService(session=session, settings=settings)
+        self.impact_enrichment = JournalImpactEnrichmentService(
+            session,
+            enabled=settings.auto_enrich_impact_factor,
+            timeout_seconds=settings.impact_factor_lookup_timeout_seconds,
+        )
 
     async def ingest_upload(
         self,
@@ -175,6 +181,7 @@ class PaperIngestionService:
                     doi=self.identity.normalize_doi(ext.get("doi")),
                     title=ext.get("title") or original_filename,
                     year=ext.get("year"),
+                    journal=ext.get("journal"),
                     pdf_path=self._artifact_ref(stored_pdf, category="pdf") or str(stored_pdf),
                     source_path=source_reference,
                     oa_status="parse_failed",
@@ -185,6 +192,7 @@ class PaperIngestionService:
                 )
                 self.session.add(paper)
                 self.session.flush()
+                self._enrich_impact_metadata(paper)
                 ensure_paper_codes(self.session, [paper])
                 self.session.commit()
                 self.session.refresh(paper)
@@ -454,6 +462,7 @@ class PaperIngestionService:
             source_reference=source_reference,
             classify_callback=self.extraction_pipeline._rule_based_classify,
         )
+        self._enrich_impact_metadata(paper)
         ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
@@ -780,6 +789,7 @@ class PaperIngestionService:
         )
         self.session.add(paper)
         self.session.flush()
+        self._enrich_impact_metadata(paper)
         if quality_report:
             self.workbench.apply_quality_report(paper, quality_report)
         if quality_report and quality_report.get("needs_human_confirmation"):
@@ -855,6 +865,7 @@ class PaperIngestionService:
         )
         self.session.add(paper)
         self.session.flush()
+        self._enrich_impact_metadata(paper)
         if quality_report:
             self.workbench.apply_quality_report(paper, quality_report)
         paper.paper_code = next_supplementary_paper_code(
@@ -937,6 +948,7 @@ class PaperIngestionService:
             self.workbench.apply_quality_report(paper, quality_report)
         self.session.add(paper)
         self.session.flush()
+        self._enrich_impact_metadata(paper)
 
         if quality_report and quality_report.get("needs_human_confirmation"):
             ensure_paper_codes(self.session, [paper])
@@ -1029,6 +1041,7 @@ class PaperIngestionService:
         )
         self.session.add(paper)
         self.session.flush()
+        self._enrich_impact_metadata(paper)
         ensure_paper_codes(self.session, [paper])
         renumber_library_papers_by_year(self.session, paper.library_name)
         self.session.commit()
@@ -1038,6 +1051,19 @@ class PaperIngestionService:
         except Exception:
             logger.exception("Failed to prepare quality-blocked Codex workspace for paper %s", paper.id)
         return paper
+
+    def _enrich_impact_metadata(self, paper: Paper) -> None:
+        try:
+            result = self.impact_enrichment.enrich_paper(paper)
+            if result.status in {"ablesci_lookup", "lookup_unavailable", "lookup_unmatched"}:
+                logger.info(
+                    "Journal impact enrichment for paper %s: %s",
+                    paper.id,
+                    result.status,
+                )
+        except Exception:
+            # Journal metadata is supplemental. It must never roll back a successful paper ingest.
+            logger.exception("Journal impact enrichment failed for paper %s", paper.id)
 
     @staticmethod
     def _stage2_candidate_count(summary: Any) -> int:

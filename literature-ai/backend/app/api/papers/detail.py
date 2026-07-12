@@ -274,15 +274,21 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
 @router.get("/{paper_id}", response_model=PaperDetailResponse)
 def get_paper(
     paper_id: UUID,
-    mode: str = Query("full", pattern="^(light|full)$"),
+    mode: str = Query("full", pattern="^(light|content|dft|full)$"),
     chart_run_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ) -> PaperDetailResponse:
-    detail = PaperQueryService(session).get_paper_detail(
-        paper_id,
-        compact=(mode == "light"),
-        chart_run_id=chart_run_id,
-    )
+    service = PaperQueryService(session)
+    if mode == "dft":
+        detail = service.get_paper_dft_detail(paper_id)
+    else:
+        detail = service.get_paper_detail(
+            paper_id,
+            compact=(mode == "light"),
+            chart_run_id=chart_run_id,
+            include_expensive_status=(mode == "full"),
+            include_dft_payload=(mode == "full"),
+        )
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
     if mode == "light":

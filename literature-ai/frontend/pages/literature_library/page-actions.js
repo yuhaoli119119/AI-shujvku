@@ -153,7 +153,7 @@ function reviewBundleErrorMessage(data, status) {
             const ragStatus = gate.rag_quality_status || (gate.rag_quality && gate.rag_quality.figures && gate.rag_quality.figures.status) || "";
             const blocked = gate.rag_quality && gate.rag_quality.figures ? Number(gate.rag_quality.figures.blocked || 0) : 0;
             if (ragStatus === "blocked" || blocked > 0) {
-                return "图表证据阶段不能进入 DFT：仍有 " + blocked + " 个图表 RAG 不合格。请先补齐图类型、图摘要、关键元素或修复裁图，再重新回传图表 JSON。";
+                return "图表证据阶段不能进入 DFT：仍有 " + blocked + " 个图表审核质量项未通过。请先补齐图类型、图摘要、关键元素或修复裁图，再重新回传图表 JSON。";
             }
             return "图表证据阶段尚未完成或已过期（stage_status=" + stage + "）。请先到审核中心执行“1 导出图表证据包”和“2 回传图表 JSON”。";
         }
@@ -175,7 +175,9 @@ async function exportSelectedDftReviewBundle() {
         return;
     }
     try {
-        const chartStatus = state.selectedPaper.chart_review_status || {};
+        const chartStatus = typeof ensureSelectedChartReviewScopes === "function"
+            ? await ensureSelectedChartReviewScopes()
+            : (state.selectedPaper.chart_review_status || {});
         const selectedChartRunId = chartStatus.selected_chart_run_id ||
             (chartStatus.primary_completed_run && chartStatus.primary_completed_run.chart_run_id) || (
             Number(chartStatus.chart_run_count || 0) === 1 ? chartStatus.chart_run_id : ""

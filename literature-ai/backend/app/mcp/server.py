@@ -1180,7 +1180,7 @@ def get_chart_review_task(paper_id: str, run_id: str | None = None) -> dict[str,
 
 @mcp_server.tool(
     name="resolve_chart_review_actions",
-    description="Batch-resolve chart review actions using the guarded evidence-review result schema. Returns unresolved_actions if anything remains.",
+    description="Locally verify every in-scope figure against the source PDF, then batch-resolve chart review actions. Returns unresolved_actions if anything remains.",
 )
 def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], run_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
     require_mcp_capability("review_corrections")
@@ -1191,12 +1191,13 @@ def resolve_chart_review_actions(paper_id: str, review_result: dict[str, Any], r
             review_result,
             run_id=UUID(run_id) if run_id else None,
             dry_run=dry_run,
+            local_ai_authorized=True,
         )
 
 
 @mcp_server.tool(
     name="finalize_chart_review",
-    description="Finalize chart review after re-reading current figures/tables. The stage completes only when no unresolved actions remain.",
+    description="Finalize chart review only after authenticated local AI has verified every in-scope figure against its source PDF.",
 )
 def finalize_chart_review(paper_id: str, review_result: dict[str, Any] | None = None, run_id: str | None = None, dry_run: bool = False) -> dict[str, Any]:
     require_mcp_capability("review_corrections")
@@ -1207,6 +1208,7 @@ def finalize_chart_review(paper_id: str, review_result: dict[str, Any] | None = 
             review_result,
             run_id=UUID(run_id) if run_id else None,
             dry_run=dry_run,
+            local_ai_authorized=True,
         )
 
 

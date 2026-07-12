@@ -557,10 +557,15 @@ class VerificationSessionReviewApplicationMixin:
                 row = None
         mapped_field = self.DFT_FIELD_ALIASES.get(str(field_name or "").strip(), str(field_name or "").strip())
         corrected_value = opinion.get("corrected_value")
+        corrected_payload = corrected_value if isinstance(corrected_value, dict) else {}
 
         def pick(field: str, *keys: str, fallback: Any = None) -> Any:
             if mapped_field == field and corrected_value not in (None, ""):
                 return corrected_value
+            for key in keys:
+                value = corrected_payload.get(key)
+                if value not in (None, "", []):
+                    return value
             for key in keys:
                 value = payload.get(key)
                 if value not in (None, "", []):
@@ -576,6 +581,7 @@ class VerificationSessionReviewApplicationMixin:
             "catalyst_sample_id",
             "normalized_material",
             "normalized_material_or_catalyst",
+            "material_identity",
             "material",
             "catalyst",
             fallback=row_material,

@@ -304,12 +304,9 @@ function switchTab(tab) {
     syncQueryParams();
     if (state.selectedPaper && typeof rerenderSelectedDetail === "function") {
         rerenderSelectedDetail(state.selectedPaperId);
-        if (tab === "dft" && typeof decorateDftReadinessPanel === "function") {
-            decorateDftReadinessPanel(state.selectedPaper);
-        }
     }
-    if (state.selectedPaperId && typeof ensureFullPaperDetailForTab === "function") {
-        ensureFullPaperDetailForTab(tab);
+    if (state.selectedPaperId && typeof ensurePaperDetailForTab === "function") {
+        ensurePaperDetailForTab(tab);
     }
     if (tab === "writing") {
         ensureWriterStatus();
@@ -318,7 +315,7 @@ function switchTab(tab) {
         }
     }
     if (tab === "review" && state.selectedPaperId) loadExternalRuns();
-    if ((tab === "review" || tab === "dft") && state.selectedPaperId && typeof loadPaperDetailEnrichment === "function") {
+    if (tab === "review" && state.selectedPaperId && typeof loadPaperDetailEnrichment === "function") {
         loadPaperDetailEnrichment(state.selectedPaperId, state.detailLoadToken);
     }
     if (tab === "review" && !state.selectedPaperId) loadAgentGuide();

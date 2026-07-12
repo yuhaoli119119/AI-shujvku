@@ -106,7 +106,7 @@ async function saveCatalystBasicInfo(editorKey) {
             }
         );
         showToast(createMode ? "催化剂基础信息已创建并关联。" : "催化剂基础信息已保存并标准化。", "success");
-        await refreshSelectedPaperDetail({ reason: "update_catalyst_basic_info", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "update_catalyst_basic_info", mode: "dft" });
     } catch (error) {
         showToast("保存催化剂基础信息失败：" + error.message, "error");
     }

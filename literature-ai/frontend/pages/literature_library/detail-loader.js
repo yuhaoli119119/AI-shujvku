@@ -60,6 +60,7 @@ function buildPreviewDetail(paper) {
         pdf_quality_report: source.pdf_quality_report,
         workspace_path: source.workspace_path,
         comprehensive_analysis: source.comprehensive_analysis || {},
+        manual_review_progress: source.manual_review_progress || {},
         created_at: source.created_at,
         counts: source.counts || {},
         relationship_summary: source.relationship_summary || {},
@@ -83,9 +84,10 @@ function buildPreviewDetail(paper) {
 
 const DETAIL_LIGHT_VARIANT = "mode=light";
 const DETAIL_FULL_VARIANT = "mode=full";
+const DETAIL_CONTENT_VARIANT = "mode=content";
+const DETAIL_DFT_VARIANT = "mode=dft";
 const AUDIT_VARIANT = "reviews/audit";
 const LOCATORS_VARIANT = "evidence/locators";
-const CODEX_CONTEXT_VARIANT = "max_sections=1&max_chars_per_section=300&max_figures=0&max_tables=0&max_candidates=500";
 const KNOWLEDGE_CONTEXT_VARIANT = "max_candidates=24&max_chars_per_candidate=600";
 const PAPER_RESOURCE_CACHE_LIMIT = 60;
 const DFT_RESULTS_PAGE_SIZE = 100;
@@ -196,11 +198,7 @@ function fetchPaperResource(paperId, resourceType, variant, url, options) {
 function mergeCachedPaperResources(detail, paperId) {
     if (!detail) return detail;
     const id = String(paperId || detail.id || "");
-    const codexBundle = getPaperResourceCachedValue(id, "codex-context", CODEX_CONTEXT_VARIANT);
     const knowledgeContext = getPaperResourceCachedValue(id, "knowledge-context", KNOWLEDGE_CONTEXT_VARIANT);
-    if (codexBundle && codexBundle.context && !detail.codex_context) {
-        detail.codex_context = codexBundle.context;
-    }
     if (knowledgeContext && !detail.knowledge_context) {
         detail.knowledge_context = knowledgeContext;
     }
@@ -208,11 +206,19 @@ function mergeCachedPaperResources(detail, paperId) {
 }
 
 function cachedDetailForMode(paperId, detailMode) {
-    const exactVariant = detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT;
+    const variants = {
+        light: DETAIL_LIGHT_VARIANT,
+        content: DETAIL_CONTENT_VARIANT,
+        dft: DETAIL_DFT_VARIANT,
+        full: DETAIL_FULL_VARIANT,
+    };
+    const exactVariant = variants[detailMode] || DETAIL_LIGHT_VARIANT;
     const exact = getPaperResourceCacheEntry(paperId, "detail", exactVariant);
     if (exact) return exact;
-    if (detailMode !== "full") {
-        return getPaperResourceCacheEntry(paperId, "detail", DETAIL_FULL_VARIANT);
+    const full = getPaperResourceCacheEntry(paperId, "detail", DETAIL_FULL_VARIANT);
+    if (full) return full;
+    if (detailMode === "light") {
+        return getPaperResourceCacheEntry(paperId, "detail", DETAIL_CONTENT_VARIANT);
     }
     return null;
 }
@@ -242,24 +248,23 @@ function applySelectedPaperDetail(detail, options) {
     renderPaperList();
     renderWorkspaceHeader(detail);
     renderDetail(detail, state.selectedPaperAudit || null);
-    if (state.currentTab === "dft") {
-        decorateDftReadinessPanel(detail);
-    }
     showWorkspace();
 }
 
 function cachePaperDetail(detail) {
     if (!detail || !detail.id) return;
     state.paperDetailCache = state.paperDetailCache || {};
-    const existing = state.paperDetailCache[detail.id];
-    if (existing && existing._detailMode === "full" && detail._detailMode !== "full") {
-        return;
-    }
     state.paperDetailCache[detail.id] = detail;
+    const variants = {
+        light: DETAIL_LIGHT_VARIANT,
+        content: DETAIL_CONTENT_VARIANT,
+        dft: DETAIL_DFT_VARIANT,
+        full: DETAIL_FULL_VARIANT,
+    };
     setPaperResourceCacheEntry(
         detail.id,
         "detail",
-        detail._detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+        variants[detail._detailMode] || DETAIL_LIGHT_VARIANT,
         detail
     );
     const keys = Object.keys(state.paperDetailCache);
@@ -269,7 +274,9 @@ function cachePaperDetail(detail) {
 }
 
 function detailModeForTab(tab) {
-    return tab === "summary" ? "light" : "full";
+    if (tab === "summary") return "light";
+    if (tab === "dft") return "dft";
+    return "content";
 }
 
 function renderImmediatePaperDetail(paperId) {
@@ -281,7 +288,11 @@ function renderImmediatePaperDetail(paperId) {
         return false;
     }
     syncSelectedPaperSupplementalFromCache(paperId);
-    const variant = immediate._detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT;
+    const variant = {
+        full: DETAIL_FULL_VARIANT,
+        content: DETAIL_CONTENT_VARIANT,
+        dft: DETAIL_DFT_VARIANT,
+    }[immediate._detailMode] || DETAIL_LIGHT_VARIANT;
     const entry = immediate.id ? getPaperResourceCacheEntry(immediate.id, "detail", variant) : null;
     if (entry) {
         applySelectedPaperDetail(immediate, {
@@ -377,7 +388,11 @@ async function loadPaperDetail(paperId, options) {
             let detailResult = await fetchPaperResource(
                 resolvedPaperId,
                 "detail",
-                detailMode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+                {
+                    full: DETAIL_FULL_VARIANT,
+                    content: DETAIL_CONTENT_VARIANT,
+                    dft: DETAIL_DFT_VARIANT,
+                }[detailMode] || DETAIL_LIGHT_VARIANT,
                 API_BASE + "/" + encodeURIComponent(resolvedPaperId) + "?mode=" + encodeURIComponent(detailMode),
                 { forceRefresh: opts.forceRefresh === true }
             );
@@ -387,12 +402,7 @@ async function loadPaperDetail(paperId, options) {
             if (detailStableId) {
                 state.selectedPaperId = detailStableId;
             }
-            const cachedFullDetail = state.paperDetailCache && state.paperDetailCache[state.selectedPaperId];
-            if (cachedFullDetail && cachedFullDetail._detailMode === "full" && detailMode !== "full") {
-                detail = cachedFullDetail;
-            } else {
-                detail._detailMode = detailMode;
-            }
+            detail._detailMode = detailMode;
             applySelectedPaperDetail(detail, {
                 updatedAt: detailResult.updatedAt,
                 fromCache: detailResult.fromCache,
@@ -403,7 +413,7 @@ async function loadPaperDetail(paperId, options) {
         if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) === "full") {
             window.setTimeout(function() {
                 if (state.selectedPaperId === resolvedPaperId) {
-                    ensureFullPaperDetailForTab(state.currentTab);
+                    ensurePaperDetailForTab(state.currentTab);
                 }
             }, 0);
         }
@@ -495,16 +505,19 @@ async function ensureCompleteSelectedDftResults() {
     }
 }
 
-function ensureFullPaperDetailForTab(tab) {
-    if (!state.selectedPaperId || detailModeForTab(tab) !== "full") return;
-    if (state.selectedPaper && state.selectedPaper._detailMode === "full") {
+function ensurePaperDetailForTab(tab) {
+    if (!state.selectedPaperId) return;
+    const requiredMode = detailModeForTab(tab);
+    const currentMode = state.selectedPaper && state.selectedPaper._detailMode;
+    if (currentMode === requiredMode || currentMode === "full") {
         if (tab === "dft") ensureCompleteSelectedDftResults();
         return;
     }
-    if (state.fullDetailLoadingFor === state.selectedPaperId) return;
+    const loadingKey = state.selectedPaperId + ":" + requiredMode;
+    if (state.detailViewLoadingFor === loadingKey) return;
     const paperId = state.selectedPaperId;
-    state.fullDetailLoadingFor = paperId;
-    loadPaperDetail(paperId, { mode: "full" })
+    state.detailViewLoadingFor = loadingKey;
+    loadPaperDetail(paperId, { mode: requiredMode })
         .then(function() {
             if (tab === "dft" && state.selectedPaperId === paperId) {
                 return ensureCompleteSelectedDftResults();
@@ -512,8 +525,8 @@ function ensureFullPaperDetailForTab(tab) {
             return null;
         })
         .finally(function() {
-            if (state.fullDetailLoadingFor === paperId) {
-                state.fullDetailLoadingFor = null;
+            if (state.detailViewLoadingFor === loadingKey) {
+                state.detailViewLoadingFor = null;
             }
         });
 }
@@ -521,16 +534,13 @@ function ensureFullPaperDetailForTab(tab) {
 function rerenderSelectedDetail(paperId) {
     if (state.selectedPaperId !== paperId || !state.selectedPaper) return;
     renderDetail(state.selectedPaper, state.selectedPaperAudit || null);
-    if (state.currentTab === "dft") {
-        decorateDftReadinessPanel(state.selectedPaper);
-    }
 }
 
 async function refreshSelectedPaperDetail(options) {
     if (!state.selectedPaperId) return null;
     const opts = options || {};
     const paperId = state.selectedPaperId;
-    const shouldForce = opts.forceRefresh === true || opts.invalidateCache === true || opts.mode === "full";
+    const shouldForce = opts.forceRefresh === true || opts.invalidateCache === true || Boolean(opts.mode);
     if (shouldForce) {
         clearPaperResourceCaches(paperId);
     }
@@ -540,7 +550,11 @@ async function refreshSelectedPaperDetail(options) {
     const detailResult = await fetchPaperResource(
         paperId,
         "detail",
-        mode === "full" ? DETAIL_FULL_VARIANT : DETAIL_LIGHT_VARIANT,
+        {
+            full: DETAIL_FULL_VARIANT,
+            content: DETAIL_CONTENT_VARIANT,
+            dft: DETAIL_DFT_VARIANT,
+        }[mode] || DETAIL_LIGHT_VARIANT,
         API_BASE + "/" + encodeURIComponent(paperId) + "?mode=" + encodeURIComponent(mode),
         { forceRefresh: shouldForce }
     );
@@ -553,7 +567,7 @@ async function refreshSelectedPaperDetail(options) {
         updatedAt: detailResult.updatedAt,
         fromCache: detailResult.fromCache,
     });
-    if (state.currentTab === "dft" && mode === "full") {
+    if (state.currentTab === "dft" && (mode === "dft" || mode === "full")) {
         await ensureCompleteSelectedDftResults();
     }
     await Promise.all([
@@ -599,40 +613,22 @@ async function refreshSelectedPaperDetailFromHeader() {
 function loadPaperDetailEnrichment(paperId, loadToken, options) {
     const opts = options || {};
     const tasks = [];
-    tasks.push(
-        fetchPaperResource(
-            paperId,
-            "reviews/audit",
-            AUDIT_VARIANT,
-            "/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit",
-            { forceRefresh: opts.forceRefresh === true }
-        )
-            .then(function(result) {
-                if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
-                    state.selectedPaperAudit = result.value;
-                }
-            })
-            .catch(function(e) {
-                if (!opts.silent) console.warn("Audit API is not available or failed:", e);
-            })
-    );
-
-    if ((state.currentTab === "dft" || state.currentTab === "review") && (opts.forceRefresh === true || !(state.selectedPaper && state.selectedPaper.codex_context))) {
+    if (state.currentTab === "summary" || state.currentTab === "review") {
         tasks.push(
             fetchPaperResource(
                 paperId,
-                "codex-context",
-                CODEX_CONTEXT_VARIANT,
-                API_BASE + "/" + encodeURIComponent(paperId) + "/codex-context?" + CODEX_CONTEXT_VARIANT,
+                "reviews/audit",
+                AUDIT_VARIANT,
+                "/api/extraction/results/" + encodeURIComponent(paperId) + "/reviews/audit",
                 { forceRefresh: opts.forceRefresh === true }
             )
                 .then(function(result) {
-                    if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId && state.selectedPaper && result.value && result.value.context) {
-                        state.selectedPaper.codex_context = result.value.context;
+                    if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
+                        state.selectedPaperAudit = result.value;
                     }
                 })
-                .catch(function(error) {
-                    if (!opts.silent) console.warn("Codex context summary is not available:", error);
+                .catch(function(e) {
+                    if (!opts.silent) console.warn("Audit API is not available or failed:", e);
                 })
         );
     }
@@ -641,6 +637,7 @@ function loadPaperDetailEnrichment(paperId, loadToken, options) {
         tasks.push(loadPaperKnowledgeContext(paperId, opts));
     }
 
+    if (!tasks.length) return Promise.resolve([]);
     return Promise.all(tasks).then(function() {
         if (state.detailLoadToken === loadToken && state.selectedPaperId === paperId) {
             rerenderSelectedDetail(paperId);

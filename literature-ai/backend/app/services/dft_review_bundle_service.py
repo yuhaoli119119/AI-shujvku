@@ -33,6 +33,7 @@ from app.services.evidence_review_bundle_service import EvidenceReviewBundleServ
 from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
+from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_pdf_evidence_anchor
 from app.utils.review_safety import bulk_export_gate_results
@@ -43,6 +44,8 @@ MAX_TEXT_SNIPPETS = 100
 MAX_TEXT_SNIPPET_CHARS = 6000
 MAX_FIGURE_FILES = 24
 MAX_TOTAL_FIGURE_BYTES = 24 * 1024 * 1024
+MAX_SOURCE_PDF_COUNT = 8
+MAX_TOTAL_SOURCE_PDF_BYTES = 160 * 1024 * 1024
 SINGLE_NUMBER_RE = re.compile(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?")
 
 DFT_SIGNAL_RE = re.compile(
@@ -279,6 +282,20 @@ class DFTReviewBundleService:
             "return_schema.json": _json_bytes(OfflineDFTReviewResult.model_json_schema()),
         }
 
+        source_pdf_inventory = materials["source_pdf_inventory"]
+        pdf_warnings = [
+            f"{item['omitted_reason']}:{item.get('paper_code') or item.get('paper_id')}"
+            for item in source_pdf_inventory
+            if item.get("omitted_reason")
+        ]
+        for item in source_pdf_inventory:
+            if item.get("included_in_bundle"):
+                files[str(item["bundle_file"])] = Path(str(item["_pdf_abs_path"])).read_bytes()
+        pdf_count = sum(1 for item in source_pdf_inventory if item.get("included_in_bundle"))
+        pdf_bytes_total = sum(int(item.get("size_bytes") or 0) for item in source_pdf_inventory if item.get("included_in_bundle"))
+        materials["paper_metadata"]["source_pdf_inventory"] = public_source_pdf_inventory(source_pdf_inventory)
+        files["parsed/paper_metadata.json"] = _json_bytes(materials["paper_metadata"])
+
         for table in materials["extracted_tables"]:
             filename = _safe_name(table["evidence_id"].replace(":", "_"), "table") + ".md"
             files[f"evidence/tables/{filename}"] = self._table_markdown(table).encode("utf-8")
@@ -294,15 +311,16 @@ class DFTReviewBundleService:
                 if figure_file_count >= MAX_FIGURE_FILES:
                     figure_warnings.append("figure_file_limit_reached")
                     break
-                size = artifact.stat().st_size
-                if figure_bytes_total + size > MAX_TOTAL_FIGURE_BYTES:
+                data, suffix, compacted = self._bundle_figure_artifact(artifact)
+                if figure_bytes_total + len(data) > MAX_TOTAL_FIGURE_BYTES:
                     figure_warnings.append("figure_byte_limit_reached")
                     continue
-                suffix = artifact.suffix.lower() or ".png"
                 filename = _safe_name(figure["evidence_id"].replace(":", "_"), "figure") + suffix
-                data = artifact.read_bytes()
                 files[f"evidence/figures/{filename}"] = data
                 figure["bundle_file"] = f"evidence/figures/{filename}"
+                figure["bundle_image_format"] = suffix.lstrip(".")
+                figure["bundle_image_compacted"] = compacted
+                figure["bundle_image_size_bytes"] = len(data)
                 figure_file_count += 1
                 figure_bytes_total += len(data)
 
@@ -311,6 +329,9 @@ class DFTReviewBundleService:
 
         template = self._return_template(materials)
         files["return_template.json"] = _json_bytes(template)
+        files["WEB_AI_FILL_THIS.json"] = _json_bytes(template)
+        files["OUTPUT_RULES.json"] = _json_bytes(self._output_rules(materials))
+        files["START_HERE.md"] = self._start_here(materials).encode("utf-8")
         files["instructions_for_web_ai.md"] = self._instructions(materials).encode("utf-8")
 
         inventory = [
@@ -330,6 +351,8 @@ class DFTReviewBundleService:
                 "title": materials["paper_metadata"]["title"],
             },
             "review_scope": "single_paper_main_plus_relevant_supplementary_dft_evidence",
+            "source_documents": materials["paper_metadata"]["source_documents"],
+            "source_pdf_inventory": materials["paper_metadata"]["source_pdf_inventory"],
             "figure_table_evidence_review_status": materials["curated_evidence_snapshot"]["evidence_review_status"],
             "figure_table_review_status": materials["curated_evidence_snapshot"]["stage_status"],
             "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"][
@@ -344,8 +367,9 @@ class DFTReviewBundleService:
                 "target_ids": sorted(materials["target_dft_result_ids"]),
                 "required_decisions_for_existing_targets": ["PASS", "REVISE", "REJECT", "NEEDS_HUMAN"],
                 "completion_rule": (
-                    "Every target_dft_result_id must appear exactly once in object_review_audits before "
-                    "the server will generate an import_analysis_request."
+                    "In this single comprehensive pass, every target_dft_result_id must appear exactly once and "
+                    "coverage_acknowledgement.missing_data_search_complete must be true after all eligible packaged "
+                    "evidence has been scanned for genuinely missing DFT results."
                 ),
             },
             "counts": {
@@ -361,13 +385,20 @@ class DFTReviewBundleService:
                 "reviewed_main_tables": materials["evidence_summary"]["reviewed_main_tables"],
                 "pending_main_figures": materials["evidence_summary"]["pending_main_figures"],
                 "pending_main_tables": materials["evidence_summary"]["pending_main_tables"],
+                "pending_supporting_figures": materials["evidence_summary"].get("pending_supporting_figures", 0),
+                "pending_supporting_tables": materials["evidence_summary"].get("pending_supporting_tables", 0),
                 "unreviewed_supporting_context": materials["evidence_summary"]["unreviewed_supporting_context"],
                 "text_snippets": len(materials["text_snippets"]),
                 "tables": len(materials["extracted_tables"]),
                 "figures": len(materials["extracted_figures"]),
                 "included_figure_files": figure_file_count,
+                "included_figure_bytes": figure_bytes_total,
+                "source_documents": len(materials["source_documents"]),
+                "included_source_pdfs": pdf_count,
+                "source_pdf_bytes": pdf_bytes_total,
             },
-            "warnings": sorted(set(materials["warnings"] + figure_warnings)),
+            "warnings": sorted(set(materials["warnings"] + figure_warnings + pdf_warnings)),
+            "pdf_files": {"count": pdf_count, "bytes": pdf_bytes_total},
             "retention_policy": "generated_in_memory_not_persisted_on_server",
             "files": inventory,
         }
@@ -426,7 +457,13 @@ class DFTReviewBundleService:
                 "import_analysis_request": None,
             }
 
-        materials = self._build_materials(paper_id)
+        materials = self._build_materials(paper_id, enforce_figure_table_gate=False)
+        source_pdf_inventory_complete = all(
+            item.get("pdf_available") and item.get("included_in_bundle")
+            for item in materials["source_pdf_inventory"]
+        )
+        if source_pdf_inventory_complete:
+            self.ensure_figure_table_review_ready(materials["curated_evidence_snapshot"]["review_gate"])
         errors: list[dict[str, Any]] = []
         warnings: list[dict[str, Any]] = list(normalization_warnings)
         metadata = materials["paper_metadata"]
@@ -453,6 +490,11 @@ class DFTReviewBundleService:
                 "bundle_fingerprint differs from the current evidence snapshot; export a new package and review again",
             )
         figure_table_gate = materials["curated_evidence_snapshot"]["review_gate"]
+        if figure_table_gate.get("stage_status") not in FIGURE_TABLE_REVIEW_READY_STATUSES:
+            add_error(
+                "figure_table_review_not_completed",
+                "Figure/table review must be completed or not_required before DFT review.",
+            )
         expected_completed_snapshot = figure_table_gate.get("completed_snapshot_fingerprint")
         if result.figure_table_completed_snapshot_fingerprint != expected_completed_snapshot:
             add_error(
@@ -624,6 +666,33 @@ class DFTReviewBundleService:
                         ),
                     }
                 )
+        if result.review_mode == "comprehensive_review" and result.overall_status == "completed":
+            if coverage_ack is None or not coverage_ack.missing_data_search_complete:
+                add_error(
+                    "incomplete_missing_data_search",
+                    "Comprehensive DFT review requires coverage_acknowledgement."
+                    "missing_data_search_complete=true after scanning all packaged eligible evidence for missing DFT data.",
+                )
+            missing_source_pdfs = [item for item in materials["source_pdf_inventory"] if not item.get("pdf_available")]
+            omitted_source_pdfs = [
+                item for item in materials["source_pdf_inventory"]
+                if item.get("pdf_available") and not item.get("included_in_bundle")
+            ]
+            if missing_source_pdfs:
+                add_error(
+                    "source_pdf_missing_for_comprehensive_review",
+                    "Comprehensive DFT review cannot claim full-text gap discovery while a main/SI source PDF is missing: "
+                    + ", ".join(str(item.get("paper_code") or item.get("paper_id")) for item in missing_source_pdfs),
+                )
+            if omitted_source_pdfs:
+                add_error(
+                    "source_pdf_not_in_bundle",
+                    "Comprehensive DFT review cannot claim full-text gap discovery while a main/SI source PDF is absent from this bundle: "
+                    + ", ".join(
+                        f"{item.get('paper_code') or item.get('paper_id')} ({item.get('omitted_reason') or 'not_included'})"
+                        for item in omitted_source_pdfs
+                    ),
+                )
         if result.overall_status == "completed" and result.uncertainties:
             warnings.append(
                 {
@@ -665,6 +734,11 @@ class DFTReviewBundleService:
                         "required_local_ai_tools": list(LOCAL_AI_REQUIRED_TOOLS),
                         "review_source": result.review_source.model_dump(mode="json"),
                     },
+                    "coverage_acknowledgement": (
+                        result.coverage_acknowledgement.model_dump(mode="json")
+                        if result.coverage_acknowledgement is not None
+                        else None
+                    ),
                     "object_review_audits": normalized_audits,
                     "review_notes": review_notes,
                 },
@@ -716,6 +790,26 @@ class DFTReviewBundleService:
                 run_id=chart_run_id,
             )
         source_papers = self._source_papers(paper)
+        source_documents = []
+        for item in source_papers:
+            source = item["paper"]
+            pdf_path = self._resolve_pdf(source.pdf_path)
+            source_documents.append({
+                "source_document_type": item["source_document_type"],
+                "paper_id": str(source.id),
+                "paper_code": source.paper_code,
+                "title": source.title,
+                "relationship_id": item.get("relationship_id"),
+                "role": item["prefix"],
+                "pdf_available": pdf_path is not None,
+                "pdf_size_bytes": pdf_path.stat().st_size if pdf_path is not None else None,
+                "_pdf_abs_path": str(pdf_path) if pdf_path is not None else None,
+            })
+        source_pdf_inventory = build_source_pdf_inventory(
+            source_documents,
+            max_count=MAX_SOURCE_PDF_COUNT,
+            max_total_bytes=MAX_TOTAL_SOURCE_PDF_BYTES,
+        )
         source_ids = [item["paper"].id for item in source_papers]
         sections = self.session.scalars(select(PaperSection).where(PaperSection.paper_id.in_(source_ids))).all()
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id.in_(source_ids))).all()
@@ -725,6 +819,14 @@ class DFTReviewBundleService:
         samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(source_ids))).all()
 
         source_by_id = {item["paper"].id: item for item in source_papers}
+        # Keep the DFT gate on exactly the same normalized whole-paper figure
+        # scope as chart review.  In particular, an SI extraction candidate
+        # explicitly excluded as a duplicate must not invalidate a completed
+        # chart snapshot or be exported as unreviewed evidence.
+        figures, _excluded_duplicate_figures = EvidenceReviewBundleService._deduplicate_scope_figures(
+            figures,
+            source_by_id=source_by_id,
+        )
         sample_by_id = {row.id: row for row in samples}
         dft_rows = sorted(dft_rows, key=lambda row: (row.paper_id != paper.id, str(row.id)))
         review_dft_rows, terminal_main_rows = self._dft_rows_for_review_bundle(dft_rows, main_paper_id=paper.id)
@@ -779,6 +881,24 @@ class DFTReviewBundleService:
             figure_rag_quality=figure_rag_quality,
             reviewed_aggregate=reviewed_aggregate,
         )
+        unreviewed_figure_ids = sorted(
+            str(item.get("source_record_id"))
+            for item in extracted_figures
+            if item.get("source_record_id") and not item.get("eligible_for_auto_apply")
+        )
+        if unreviewed_figure_ids:
+            review_gate = dict(curated_evidence_snapshot.get("review_gate") or {})
+            review_gate["stage_status"] = "needs_local_ai"
+            review_gate["completed_snapshot_fingerprint"] = None
+            review_gate["blocking_errors"] = [
+                *(review_gate.get("blocking_errors") or []),
+                {
+                    "code": "dft_bundle_contains_unreviewed_figures",
+                    "message": "Every figure exported in a DFT review bundle must first complete web-AI review and authenticated local-AI PDF verification.",
+                    "figure_ids": unreviewed_figure_ids,
+                },
+            ]
+            curated_evidence_snapshot["review_gate"] = review_gate
         if enforce_figure_table_gate:
             self.ensure_figure_table_review_ready(curated_evidence_snapshot["review_gate"])
 
@@ -793,16 +913,10 @@ class DFTReviewBundleService:
             "abstract": paper.abstract,
             "paper_type": paper.paper_type,
             "source_documents": [
-                {
-                    "source_document_type": item["source_document_type"],
-                    "paper_id": str(item["paper"].id),
-                    "paper_code": item["paper"].paper_code,
-                    "title": item["paper"].title,
-                    "relationship_id": item.get("relationship_id"),
-                    "role": item["prefix"],
-                }
-                for item in source_papers
+                {key: value for key, value in item.items() if not key.startswith("_")}
+                for item in source_documents
             ],
+            "source_pdf_inventory": public_source_pdf_inventory(source_pdf_inventory),
         }
         terminal_gate_by_id = bulk_export_gate_results(
             self.session,
@@ -832,7 +946,10 @@ class DFTReviewBundleService:
                     ),
                     "readonly": True,
                     "eligible_as_write_target": False,
-                    "is_ml_ready": str(row.candidate_status or "").strip().lower() == "ml_ready",
+                    "is_ml_ready": str(row.candidate_status or "").strip().lower() in {
+                        "ml_ready",
+                        "ai_verified_ml_ready",
+                    },
                     "is_rejected": (
                         str(row.candidate_status or "").strip().lower() == "rejected"
                         or "rejected" in str(getattr(terminal_gate_by_id.get(str(row.id)), "review_status", "") or "").lower()
@@ -868,11 +985,16 @@ class DFTReviewBundleService:
             item["target_id"]: item
             for item in initial_dft_candidates["existing_candidates"]
         }
-        review_mode = "target_review" if dft_row_payloads_by_id else "gap_discovery"
+        # One package now covers both existing-target review and missing-data discovery.
+        # Keeping a single mode prevents users from exporting a second large package after
+        # existing candidates reach a terminal state.
+        review_mode = "comprehensive_review"
 
         fingerprint_payload = {
             "schema_version": OFFLINE_REVIEW_BUNDLE_SCHEMA_VERSION,
             "paper_metadata": paper_metadata,
+            "source_pdf_inventory": public_source_pdf_inventory(source_pdf_inventory),
+            "source_documents": source_documents,
             "initial_dft_candidates": initial_dft_candidates,
             "text_snippets": text_snippets,
             "extracted_tables": extracted_tables,
@@ -888,12 +1010,14 @@ class DFTReviewBundleService:
         if not evidence_map:
             warnings.append("no_dft_relevant_evidence_found")
         if not initial_dft_candidates["existing_candidates"]:
-            warnings.append("gap_discovery_no_writable_main_dft_targets")
+            warnings.append("comprehensive_review_no_writable_main_dft_targets")
         if curated_evidence_snapshot["evidence_review_status"] != "applied":
             warnings.append("figure_table_evidence_not_yet_reviewed")
 
         return {
             "paper_metadata": paper_metadata,
+            "source_documents": source_documents,
+            "source_pdf_inventory": source_pdf_inventory,
             "initial_dft_candidates": initial_dft_candidates,
             "text_snippets": text_snippets,
             "extracted_tables": extracted_tables,
@@ -927,7 +1051,9 @@ class DFTReviewBundleService:
             gate = gate_by_id.get(str(row.id))
             review_status = str(getattr(gate, "review_status", "") or "").strip().lower()
             is_rejected = status == "rejected" or "rejected" in review_status
-            is_currently_exportable_ml_ready = status == "ml_ready" and bool(getattr(gate, "eligible", False))
+            is_currently_exportable_ml_ready = status in {"ml_ready", "ai_verified_ml_ready"} and bool(
+                getattr(gate, "eligible", False)
+            )
             should_skip = is_rejected or is_currently_exportable_ml_ready
             if row.paper_id == main_paper_id and should_skip:
                 terminal_main.append(row)
@@ -981,6 +1107,21 @@ class DFTReviewBundleService:
         blocked_completed_scopes: list[dict[str, Any]] = []
         pending: dict[str, dict[str, Any]] = {}
 
+        def note_pending_main_scope(task: dict[str, Any], chart_run_id: str | None) -> None:
+            for kind, items in (("figure", task.get("figures")), ("table", task.get("tables"))):
+                for item in items if isinstance(items, list) else []:
+                    record_id = str(item.get("source_record_id") or item.get("id") or "").strip()
+                    if not record_id:
+                        continue
+                    pending[f"{kind}:{record_id}"] = {
+                        "object_type": kind,
+                        "source_record_id": record_id,
+                        "source_paper_id": str(item.get("source_paper_id") or task.get("paper_id") or ""),
+                        "source_paper_code": item.get("source_paper_code"),
+                        "chart_run_id": chart_run_id,
+                        "review_status": task.get("stage_status"),
+                    }
+
         # A DFT package is selected by the main paper, but its evidence can
         # legitimately be in a linked SI record.  Aggregate every completed,
         # current scope for every source document; never let the main paper's
@@ -993,19 +1134,29 @@ class DFTReviewBundleService:
             source_paper = source["paper"]
             is_main = source_paper.id == paper.id
             options = service.get_review_scope_options(source_paper.id)
+            run_options = options.get("chart_runs") if isinstance(options.get("chart_runs"), list) else []
             paper_audit = service._latest_review_audit(
                 source_paper.id,
                 run_id=None,
                 actions={"offline_evidence_review_applied"},
             )
-            if paper_audit is not None:
-                paper_task = options.get("paper_scope") if isinstance(options.get("paper_scope"), dict) else {}
+            paper_task = options.get("paper_scope") if isinstance(options.get("paper_scope"), dict) else {}
+            if paper_task:
                 if paper_task.get("stage_status") in FIGURE_TABLE_REVIEW_READY_STATUSES:
-                    completed_scopes.append((None, paper_task))
+                    if paper_audit is not None:
+                        completed_scopes.append((None, paper_task))
                 elif paper_task.get("completed_snapshot_fingerprint"):
                     blocked_completed_scopes.append(paper_task)
+                if (
+                    is_main
+                    and not run_options
+                    and paper_task.get("stage_status") not in FIGURE_TABLE_REVIEW_READY_STATUSES
+                ):
+                    # The paper scope is the ordinary user flow.  It must be
+                    # visible as pending even when there is no historical AI
+                    # run, otherwise the DFT summary can misleadingly show 0.
+                    note_pending_main_scope(paper_task, None)
 
-            run_options = options.get("chart_runs") if isinstance(options.get("chart_runs"), list) else []
             for option in run_options:
                 run_id = self._optional_uuid(option.get("chart_run_id"))
                 if run_id is None:
@@ -1018,17 +1169,7 @@ class DFTReviewBundleService:
                     # discovery or get promoted to reviewed evidence.
                     if is_main and option.get("is_duplicate_representative", True):
                         task = service.get_review_task(source_paper.id, run_id=run_id)
-                        for kind, items in (("figure", task.get("figures")), ("table", task.get("tables"))):
-                            for item in items if isinstance(items, list) else []:
-                                record_id = str(item.get("source_record_id") or item.get("id") or "").strip()
-                                key = f"{kind}:{record_id}"
-                                if record_id:
-                                    pending[key] = {
-                                        "object_type": kind,
-                                        "source_record_id": record_id,
-                                        "chart_run_id": str(run_id),
-                                        "review_status": task.get("stage_status"),
-                                    }
+                        note_pending_main_scope(task, str(run_id))
                     continue
                 task = service.get_review_task(source_paper.id, run_id=run_id)
                 if (
@@ -1100,8 +1241,22 @@ class DFTReviewBundleService:
                 "reviewed_tables": sum(1 for item in reviewed_payload if item["object_type"] == "table"),
                 "reviewed_main_figures": reviewed_main_figures,
                 "reviewed_main_tables": reviewed_main_tables,
-                "pending_main_figures": sum(1 for item in pending.values() if item["object_type"] == "figure"),
-                "pending_main_tables": sum(1 for item in pending.values() if item["object_type"] == "table"),
+                "pending_main_figures": sum(
+                    1 for item in pending.values()
+                    if item["object_type"] == "figure" and item.get("source_paper_id") == str(paper.id)
+                ),
+                "pending_main_tables": sum(
+                    1 for item in pending.values()
+                    if item["object_type"] == "table" and item.get("source_paper_id") == str(paper.id)
+                ),
+                "pending_supporting_figures": sum(
+                    1 for item in pending.values()
+                    if item["object_type"] == "figure" and item.get("source_paper_id") != str(paper.id)
+                ),
+                "pending_supporting_tables": sum(
+                    1 for item in pending.values()
+                    if item["object_type"] == "table" and item.get("source_paper_id") != str(paper.id)
+                ),
                 "reviewed_supporting_evidence": sum(
                     1 for item in reviewed_payload if item["source_paper_id"] != str(paper.id)
                 ),
@@ -1368,6 +1523,17 @@ class DFTReviewBundleService:
         return resolve_persisted_artifact_path(
             str(image_path),
             category="figures",
+            settings=self.settings,
+            trusted_persisted_reference=True,
+            must_exist=True,
+        )
+
+    def _resolve_pdf(self, pdf_path: Any) -> Path | None:
+        if not pdf_path:
+            return None
+        return resolve_persisted_artifact_path(
+            str(pdf_path),
+            category="pdf",
             settings=self.settings,
             trusted_persisted_reference=True,
             must_exist=True,
@@ -1942,10 +2108,23 @@ class DFTReviewBundleService:
             self._evidence_relevant_to_dft_target(item, target_id, materials)
             for item in evidence_items
         ):
+            matching_ids = [
+                str(item.get("evidence_id") or "").strip()
+                for item in materials.get("evidence_map", {}).values()
+                if self._evidence_relevant_to_dft_target(item, target_id, materials)
+            ]
+            matching_summary = ", ".join(dict.fromkeys(item for item in matching_ids if item))
+            if not matching_summary:
+                matching_summary = "none in this package"
             errors.append(
                 {
                     "code": "unrelated_evidence_id",
-                    "message": "At least one evidence_id must directly support the reviewed DFT target.",
+                    "message": (
+                        f"target_id '{target_id}' is not supported by the submitted evidence_ids. "
+                        "Use a directly matching package evidence_id "
+                        f"({matching_summary}); candidate-text evidence still requires local PDF verification before writeback. "
+                        "Otherwise do not invent a replacement or request automatic writeback."
+                    ),
                 }
             )
         if decision in {"REVISE", "new_candidate"}:
@@ -2183,6 +2362,36 @@ class DFTReviewBundleService:
         )
 
     @staticmethod
+    def _bundle_figure_artifact(artifact: Path) -> tuple[bytes, str, bool]:
+        """Create a compact AI-reading copy without changing the persisted source image."""
+
+        original = artifact.read_bytes()
+        original_suffix = artifact.suffix.lower() or ".png"
+        try:
+            from PIL import Image
+
+            with Image.open(BytesIO(original)) as source:
+                source.load()
+                if source.mode == "RGBA":
+                    image = Image.new("RGB", source.size, "white")
+                    image.paste(source, mask=source.getchannel("A"))
+                elif source.mode not in {"RGB", "L"}:
+                    image = source.convert("RGB")
+                else:
+                    image = source.copy()
+                if image.mode == "L":
+                    image = image.convert("RGB")
+                output = BytesIO()
+                image.save(output, format="WEBP", quality=92, method=6)
+                compact = output.getvalue()
+            if compact and len(compact) < len(original):
+                return compact, ".webp", True
+        except Exception:
+            # Invalid/unsupported legacy assets stay readable in their original form.
+            pass
+        return original, original_suffix, False
+
+    @staticmethod
     def _local_ai_writeback_contract() -> dict[str, Any]:
         return {
             "dft_web_ai_is_suggestion_only": True,
@@ -2232,6 +2441,7 @@ class DFTReviewBundleService:
                 "expected_target_ids": sorted(materials["target_dft_result_ids"]),
                 "reviewed_target_ids": [],
                 "coverage_complete": False,
+                "missing_data_search_complete": False,
             },
             "object_review_audits": [],
             "uncertainties": [],
@@ -2279,10 +2489,20 @@ class DFTReviewBundleService:
             "target_ids": sorted(materials["target_dft_result_ids"]),
             "expected_count": len(materials["target_dft_result_ids"]),
             "completion_rule": (
-                "In target_review, return exactly one object_review_audits item for every target_id in this checklist. "
-                "In gap_discovery, an empty target list is valid and the task is to find only genuinely missing DFT data."
+                "Complete both tasks in this one package: return exactly one audit for every existing target_id, then "
+                "scan every eligible packaged evidence item and append every genuinely missing DFT result as new_candidate. "
+                "An empty target list still requires the missing-data scan."
             ),
             "targets": targets,
+            "mandatory_discovery_pass": {
+                "required": True,
+                "scope": "all packaged evidence with eligible_for_auto_apply=true",
+                "completion_field": "coverage_acknowledgement.missing_data_search_complete",
+                "instruction": (
+                    "After reviewing existing targets, inspect all eligible text, table, and figure evidence for DFT "
+                    "results absent from both writable targets and existing_terminal_context."
+                ),
+            },
             "new_candidate_rule": {
                 "target_type": "dft_results",
                 "target_id": "new",
@@ -2294,6 +2514,82 @@ class DFTReviewBundleService:
                 "multiple_new_candidates": "Use target_id='new' for each new candidate and give each one a unique temporary_id.",
             },
         }
+
+    @staticmethod
+    def _output_rules(materials: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schema_version": "offline_dft_review_output_rules_v1",
+            "output_workflow": {
+                "input_template": "WEB_AI_FILL_THIS.json",
+                "schema": "return_schema.json",
+                "output_filename": f"{materials['paper_metadata']['paper_code']}_web_ai_result.json",
+                "output_type": "single_json_file_attachment",
+                "reply_as_file_attachment": True,
+                "do_not_generate_from_scratch": True,
+                "do_not_wrap_in_markdown": True,
+            },
+            "immutable_fields": [
+                "schema_version",
+                "bundle_fingerprint",
+                "chart_scope_type",
+                "chart_run_id",
+                "review_mode",
+                "figure_table_completed_snapshot_fingerprint",
+                "paper_id",
+                "paper_code",
+            ],
+            "audit_variants": {
+                "existing_target": {
+                    "target_id": "must be a real ID from parsed/dft_review_checklist.json",
+                    "decision_allowed": ["PASS", "REVISE", "REJECT", "NEEDS_HUMAN"],
+                    "decision_forbidden": ["new_candidate"],
+                },
+                "new_candidate": {
+                    "target_id": "new",
+                    "decision_required": "new_candidate",
+                    "field_name_required": "dft_results",
+                    "temporary_id_required": True,
+                    "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
+                },
+            },
+            "hard_invariants": [
+                "target_id='new' if and only if decision='new_candidate'",
+                "decision='REVISE' requires corrected_value",
+                "every object_review_audits item must cite real package evidence_ids",
+                "unreviewed_supporting_context cannot alone support PASS, REVISE, REJECT, or new_candidate",
+                "overall_status='completed' requires coverage_acknowledgement.missing_data_search_complete=true",
+                "do not change immutable fields copied from WEB_AI_FILL_THIS.json",
+            ],
+            "final_self_check": [
+                "Parse the output as JSON after writing it",
+                "Validate it against return_schema.json",
+                "Search every target_id='new' item and confirm decision='new_candidate'",
+                "Search every PASS/REVISE/REJECT/NEEDS_HUMAN item and confirm target_id is a real existing target ID",
+                "Confirm every eligible packaged evidence item was checked for missing DFT data before setting missing_data_search_complete=true",
+                "Return only the completed JSON file",
+            ],
+        }
+
+    @staticmethod
+    def _start_here(materials: dict[str, Any]) -> str:
+        paper_code = materials["paper_metadata"]["paper_code"]
+        return f"""# START HERE — fill the supplied JSON file
+
+Do not create a new response structure from memory.
+
+1. Open `WEB_AI_FILL_THIS.json`.
+2. Keep its fingerprint, paper, scope, mode, and schema fields unchanged.
+3. Fill only the review values and `object_review_audits` array.
+4. Review every existing target, then scan every eligible text/table/figure item for missing DFT data and append each distinct result as `new_candidate`.
+5. Only after both passes finish, set `coverage_acknowledgement.missing_data_search_complete=true`.
+6. Read `OUTPUT_RULES.json` before adding any audit item and validate the completed object against `return_schema.json`.
+7. Save it as `{paper_code}_web_ai_result.json` and reply by attaching that one JSON file.
+
+Critical relation: `target_id="new"` is valid only with `decision="new_candidate"`.
+For `PASS`, `REVISE`, `REJECT`, or `NEEDS_HUMAN`, use a real existing target ID from `parsed/dft_review_checklist.json`.
+
+Do not paste the JSON body into the chat. Do not return Markdown, prose, a code fence, `format_examples.json`, or an outer wrapper.
+"""
 
     @staticmethod
     def _format_examples() -> dict[str, Any]:
@@ -2397,26 +2693,28 @@ class DFTReviewBundleService:
 
 ## 必须遵守
 
+0. 从 `WEB_AI_FILL_THIS.json` 开始，直接在该对象中填写；禁止脱离模板重新生成结构。先读 `OUTPUT_RULES.json`，完成后按 `return_schema.json` 自检。把结果保存为 `{metadata['paper_code']}_web_ai_result.json`，并以文件附件回复；不要把长 JSON 正文粘贴到聊天消息中。
 1. 只核验当前这一篇主文献及包内相关支撑信息（SI）的 DFT 数据、计算参数、图表和文字证据。
 2. 不得猜测。证据不足、材料身份不清或来源冲突时，使用 `NEEDS_HUMAN`，并写入 `uncertainties`。
 3. 每条 `object_review_audits` 都必须引用一个或多个真实 `evidence_ids`。证据编号来自 `manifest.json` 和 `evidence/`，且必须和该 DFT 目标直接相关。
-4. `target_review` 模式下，已有主文献 DFT candidate 使用 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`。`gap_discovery` 模式不是“完成现有 DFT 数据终审”，而是“核对是否存在未收录 DFT 数据”。
-5. `target_review` 必须为 `manifest.json` 的 `target_dft_result_ids` 中每个已有候选都提交 1 条审核结果；`gap_discovery` 的 expected_target_ids 可以为空。两种模式都必须先读取 `existing_terminal_context` 做去重。
-6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`；若存在终态上下文，还必须填写 `dedupe_analysis={{compared_target_ids:[...], conclusion:"distinct", reason:"..."}}`。`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`。
+4. 本包是一次性 `comprehensive_review`：先对每个已有主文献 DFT candidate 提交 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`，再扫描包内全部 `eligible_for_auto_apply=true` 的正文、图、表证据，追加所有确认漏提且不重复的 `new_candidate`。
+5. 必须为 `manifest.json` 的每个 `target_dft_result_id` 提交 1 条审核结果；即使 expected_target_ids 为空，也必须执行全证据查漏。两步都完成后才可设置 `coverage_acknowledgement.missing_data_search_complete=true` 和 `overall_status=completed`。查漏前必须读取 `existing_terminal_context` 做去重。
+6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`；若存在终态上下文，还必须填写 `dedupe_analysis={{compared_target_ids:[...], conclusion:"distinct", reason:"..."}}`。`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`。反向同样成立：`target_id="new"` 时 `decision` 必须是 `new_candidate`；PASS/REVISE/REJECT/NEEDS_HUMAN 必须使用 checklist 中的真实已有 target_id。
 7. `reviewed_supporting_evidence` 中的 SI 可作为已审核支撑；`unreviewed_supporting_context` 只能用于发现线索或返回 `NEEDS_HUMAN`，其 `eligible_for_auto_apply=false`，不能单独支持 PASS、REVISE 或 new_candidate。
 8. 不得声称已写数据库、已入库、已确认、已 verified 或已成为 ML_Ready。
 9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要修改 schema，不要用自由散文替代 JSON，也不要包 Markdown 代码块。
 10. 保留 `return_template.json` 中的 `bundle_fingerprint`、`figure_table_completed_snapshot_fingerprint`、`paper_id`、`paper_code` 原值。
-11. 更新 `coverage_acknowledgement.reviewed_target_ids` 和 `coverage_acknowledgement.coverage_complete`；服务器最终仍会按 `object_review_audits` 重新计算覆盖率，缺一个 target_id 就不会生成导入请求。
+11. 更新 `coverage_acknowledgement.reviewed_target_ids`、`coverage_acknowledgement.coverage_complete` 和 `coverage_acknowledgement.missing_data_search_complete`；服务器会重新计算已有目标覆盖率，并要求明确确认全证据查漏已完成，任一步未完成都不会生成导入请求。
 12. `format_examples.json` 只是格式示例；不要照抄示例 ID，也不要输出示例文件外层 wrapper。最终只输出 `return_template.json` 的对象结构。
 
 ## 材料顺序
 
-先读 `manifest.json`、`parsed/initial_dft_candidates.json`、`parsed/dft_review_checklist.json`、`format_examples.json`、`parsed/curated_figure_table_evidence_snapshot.json`，再读 `evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
+先读 `START_HERE.md`、`WEB_AI_FILL_THIS.json`、`OUTPUT_RULES.json`、`manifest.json`、`parsed/paper_metadata.json`，然后逐份读取 `source/main.pdf` 和 `source/si/*.pdf` 原始 PDF；再读 `parsed/initial_dft_candidates.json`、`parsed/dft_review_checklist.json`、`format_examples.json`、`parsed/curated_figure_table_evidence_snapshot.json`、`evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
 
 如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `rag_quality_status=blocked`，说明已审核证据聚合尚不可用；此时不要继续产出 DFT JSON。不得用某一个已完成 run 为其他未审核图表放行。
+必须先核验原始主文和全部 SI PDF，再逐条核验已有候选，最后扫描正文、SI、全部已审核图表寻找漏项；每个 `new_candidate` 必须绑定真实 PDF 页码和 evidence_id。不得从曲线估读，不得把实验数据当成 DFT 结果。
 
-最终只输出符合 `return_schema.json` 的 JSON。
+最终只回复一个符合 `return_schema.json` 的 JSON 文件附件，不要在聊天正文粘贴 JSON。
 """
 
     @staticmethod

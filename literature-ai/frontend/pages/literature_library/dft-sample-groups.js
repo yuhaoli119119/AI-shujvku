@@ -34,6 +34,43 @@ function firstGroupReadableValue(group, paths) {
     return "";
 }
 
+function normalizedDftSampleLabel(value) {
+    return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_\-\/|()[\]{}.,;:]+/g, "");
+}
+
+function dftSampleGroupCatalystLabel(group, catalystSample) {
+    const sampleLabel = firstNestedReadableValue(catalystSample || {}, [
+        "name",
+        "material_identity",
+        "catalyst",
+        "normalized_material",
+        "structure_name"
+    ]);
+    const rawLabel = (group && group.meta && group.meta.catalystLabel) || "";
+    const catalystSampleId = group && group.meta && group.meta.catalystSampleId;
+    const isIdentifierFallback = catalystSampleId && rawLabel === ("CatalystSample " + catalystSampleId);
+    if (sampleLabel) return sampleLabel;
+    if (rawLabel && !isIdentifierFallback) return rawLabel;
+    return catalystSampleId ? "已关联催化剂（名称待补）" : "未绑定催化剂";
+}
+
+function dftSampleGroupActiveSiteLabel(group, catalystLabel) {
+    const rawLabel = group && group.meta ? String(group.meta.activeSiteLabel || "").trim() : "";
+    if (!rawLabel || rawLabel === "活性位点待补") return rawLabel || "活性位点待补";
+
+    const keyParts = rawLabel.split("|").map(function(part) { return part.trim(); }).filter(Boolean);
+    const firstPart = keyParts[0] || rawLabel;
+    const firstNormalized = normalizedDftSampleLabel(firstPart);
+    const isRepeatedKey = keyParts.length > 1 && keyParts.every(function(part) {
+        return normalizedDftSampleLabel(part) === firstNormalized;
+    });
+    const displayLabel = isRepeatedKey ? firstPart : rawLabel;
+    return normalizedDftSampleLabel(displayLabel) === normalizedDftSampleLabel(catalystLabel) ? "" : displayLabel;
+}
+
 function renderDftCatalystInfoField(label, value, missingText) {
     const text = value || missingText || "待补";
     const missing = !value;
@@ -121,13 +158,16 @@ function renderDftCatalystBasicInfoForm(sample, group) {
     const supportValue = sample.support_normalized || sample.support || "";
     const catalystType = sample.catalyst_type || "unknown";
     const metalCenters = Array.isArray(sample.metal_centers) ? sample.metal_centers.join(", ") : "";
+    const rawGroupLabel = group && group.meta ? String(group.meta.catalystLabel || "") : "";
+    const fallbackSampleLabel = sampleId ? ("CatalystSample " + sampleId) : "";
+    const sampleName = sample.name || (rawGroupLabel === fallbackSampleLabel ? "" : rawGroupLabel);
     return '<div class="dft-basic-info-form" data-editor-key="' + escAttr(editorKey) + '"' +
         ' data-mode="' + (sampleId ? "update" : "create") + '"' +
         ' data-catalyst-sample-id="' + escAttr(sampleId) + '"' +
         ' data-dft-result-ids="' + escAttr(dftResultIds.join(",")) + '" hidden>' +
         (!sampleId ? '<div class="subtle dft-basic-info-edit-note">保存后系统会自动创建基础信息记录，并关联本框内的 DFT 数据；无需先去其他页面绑定。</div>' : '') +
         '<div class="dft-basic-info-grid">' +
-            '<label class="dft-basic-info-field"><span>名称</span><input type="text" data-field="name" value="' + escAttr(sample.name || group.meta.catalystLabel || "") + '"></label>' +
+            '<label class="dft-basic-info-field"><span>名称</span><input type="text" data-field="name" value="' + escAttr(sampleName) + '"></label>' +
             '<label class="dft-basic-info-field"><span>催化剂类型</span><select data-field="catalyst_type">' + CATALYST_BASIC_INFO_TYPES.map(function(value) { return renderCatalystBasicInfoOption(value, catalystType, CATALYST_BASIC_INFO_TYPE_LABELS); }).join("") + '</select></label>' +
             '<label class="dft-basic-info-field"><span>金属中心</span><input type="text" data-field="metal_centers" placeholder="例如：Fe, Co" autocomplete="off" spellcheck="false" value="' + escAttr(metalCenters) + '"><small>请填元素符号；多个推荐用逗号分隔</small></label>' +
             '<label class="dft-basic-info-field"><span>载体/基底</span><select data-field="support">' + CATALYST_BASIC_INFO_SUPPORTS.map(function(value) { return renderCatalystBasicInfoOption(value, supportValue, CATALYST_BASIC_INFO_SUPPORT_LABELS); }).join("") + '</select></label>' +
@@ -145,6 +185,8 @@ function renderDftCatalystBasicInfoForm(sample, group) {
 
 function renderDftCatalystBaseInfo(group, catalystSample) {
     const sample = catalystSample || {};
+    const catalystLabel = dftSampleGroupCatalystLabel(group, sample);
+    const activeSiteLabel = dftSampleGroupActiveSiteLabel(group, catalystLabel);
     const metalCenters = readableValue(sample.metal_centers || firstGroupReadableValue(group, [
         "metal_centers",
         "evidence_payload.metal_centers",
@@ -152,8 +194,8 @@ function renderDftCatalystBaseInfo(group, catalystSample) {
         "evidence_payload.active_site_ref.metal_centers"
     ]));
     const fields = [
-        renderDftCatalystInfoField("催化剂/材料", group.meta.catalystLabel),
-        renderDftCatalystInfoField("活性位点", group.meta.activeSiteLabel === "活性位点待补" ? "" : group.meta.activeSiteLabel, "活性位点待补"),
+        renderDftCatalystInfoField("催化剂/材料", catalystLabel),
+        renderDftCatalystInfoField("活性位点", activeSiteLabel, "活性位点待补"),
         renderDftCatalystInfoField("金属中心", metalCenters && metalCenters !== "-" ? metalCenters : ""),
         renderDftCatalystInfoField("催化剂类型", readableValue(sample.catalyst_type)),
         renderDftCatalystInfoField("配位环境", readableValue(sample.coordination) || firstGroupReadableValue(group, [
@@ -283,7 +325,11 @@ function renderDftSampleGroups(items, renderItem, options) {
             return renderItem(entry.item, currentDisplayIndex);
         }).join("");
         const groupTitle = groups.length > 1 ? ("催化剂样本 " + (groupIndex + 1)) : "催化剂样本";
-        const catalystSample = group.meta.catalystSampleId ? catalystSamplesById[String(group.meta.catalystSampleId)] : null;
+        const linkedCatalystSample = group.meta.catalystSampleId ? catalystSamplesById[String(group.meta.catalystSampleId)] : null;
+        const catalystSample = linkedCatalystSample || (group.meta.catalystSampleId ? { id: group.meta.catalystSampleId } : null);
+        const catalystLabel = dftSampleGroupCatalystLabel(group, catalystSample);
+        const activeSiteLabel = dftSampleGroupActiveSiteLabel(group, catalystLabel);
+        const summaryLabels = [catalystLabel, activeSiteLabel].filter(Boolean);
         const catalystNavigationAttrs = group.meta.catalystSampleId
             ? ' data-codex-item-type="catalyst_sample" data-target-id="' + escAttr(String(group.meta.catalystSampleId)) + '"'
             : "";
@@ -293,7 +339,7 @@ function renderDftSampleGroups(items, renderItem, options) {
         ) ? " open" : "";
         return '<details class="section-card dft-sample-group" data-role="dft-sample-group" data-dft-sample-key="' + escAttr(group.key) + '"' + catalystNavigationAttrs + groupOpenAttr + '>' +
             '<summary><div class="dft-sample-summary">' +
-                '<div><h3>' + esc(groupTitle) + '</h3><div class="subtle">' + esc(group.meta.catalystLabel) + ' / ' + esc(group.meta.activeSiteLabel) + '</div></div>' +
+                '<div><h3>' + esc(groupTitle) + '</h3><div class="subtle">' + esc(summaryLabels.join(" / ")) + '</div></div>' +
                 '<div class="dft-sample-meta">' +
                     '<span class="status-chip">DFT ' + group.entries.length + ' 条</span>' +
                     '<span class="status-chip ' + (readyCount ? 'ok' : 'meta') + '">可导出 ' + readyCount + '</span>' +

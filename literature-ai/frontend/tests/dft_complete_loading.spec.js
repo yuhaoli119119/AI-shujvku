@@ -20,7 +20,8 @@ function dftItem(index) {
       catalyst_type: 'unknown',
       metal_centers: [],
     },
-    catalyst: 'Sc-BP',
+    catalyst: 'Parsed Sc-BP label',
+    active_site_instance_key: 'Sc-BP|Sc-BP',
     adsorbate: index % 2 ? 'Li2S' : 'S8/LiPSs',
     property_type: 'adsorption_energy',
     value: -index / 10,
@@ -71,13 +72,15 @@ test('literature library waits for all DFT pages before rendering material group
     dft_results_items: [],
     dft_results_page: { offset: 0, limit: 28, returned: 0, total: 30, has_more: true },
   };
-  const fullDetail = {
+  const dftDetail = {
     ...commonDetail,
-    dft_results_items: allItems.slice(0, 28),
-    dft_results_page: { offset: 0, limit: 28, returned: 28, total: 30, has_more: true },
+    dft_results_items: [],
+    dft_results_page: { offset: 0, limit: 28, returned: 0, total: 30, has_more: true },
   };
   let remainingPageRequests = 0;
   let requestedDftLimit = null;
+  const detailModes = [];
+  let codexContextRequests = 0;
 
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/api/**', async route => {
@@ -104,18 +107,21 @@ test('literature library waits for all DFT pages before rendering material group
       await new Promise(resolve => setTimeout(resolve, 1500));
       return jsonResponse(route, {
         paper_id: 'paper-1',
-        items: allItems.slice(28),
-        offset: 28,
-        limit: 50,
-        returned: 2,
+        items: allItems,
+        offset: 0,
+        limit: 100,
+        returned: 30,
         total: 30,
         has_more: false,
       });
     }
     if (pathname === '/api/papers/paper-1') {
-      return jsonResponse(route, url.searchParams.get('mode') === 'light' ? lightDetail : fullDetail);
+      const mode = url.searchParams.get('mode');
+      detailModes.push(mode);
+      return jsonResponse(route, mode === 'dft' ? dftDetail : lightDetail);
     }
     if (pathname === '/api/papers/paper-1/codex-context') {
+      codexContextRequests += 1;
       return jsonResponse(route, {
         context: {
           dft_export_readiness: {
@@ -145,20 +151,33 @@ test('literature library waits for all DFT pages before rendering material group
   );
 
   await expect(page.locator('[data-role="dft-pagination"]')).toContainText(
-    '正在加载完整 DFT 数据 28 / 30 条'
+    '正在加载完整 DFT 数据 0 / 30 条'
   );
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toHaveCount(0);
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toHaveCount(1);
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toContainText('DFT 30 条');
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toContainText('Sc-BP');
+  const groupHeader = page.locator('#dftContent [data-role="dft-sample-group"] > summary');
+  await expect(groupHeader).toContainText('Sc-BP');
+  await expect(groupHeader).not.toContainText('Parsed Sc-BP label');
+  await expect(groupHeader).not.toContainText('|');
   await expect(page.locator('[data-role="dft-pagination"]')).toHaveCount(0);
   await expect(page.locator('[data-role="load-more-dft"]')).toHaveCount(0);
+  await expect(page.locator('[data-role="dft-status-panel"]')).toContainText('已审核 30');
+  await expect(page.locator('text=RAG 可用状态')).toHaveCount(0);
   expect(remainingPageRequests).toBe(1);
   expect(requestedDftLimit).toBe('100');
+  expect(detailModes).toEqual(['dft']);
+  expect(detailModes).not.toContain('full');
+  expect(codexContextRequests).toBe(0);
 });
 
 test('literature library falls back to 50 item DFT pages when backend rejects larger pages', async ({ page }) => {
   const allItems = Array.from({ length: 60 }, (_, index) => dftItem(index + 1));
+  allItems.forEach(item => {
+    item.catalyst = null;
+    item.bound_catalyst_sample = null;
+  });
   const paper = {
     id: 'paper-compat',
     paper_id: 'paper-compat',
@@ -180,7 +199,7 @@ test('literature library falls back to 50 item DFT pages when backend rejects la
     dft_settings_items: [],
     catalyst_samples_items: [{
       id: 'sample-sc',
-      name: 'Sc-BP',
+      name: '',
       catalyst_type: 'unknown',
       metal_centers: [],
     }],
@@ -196,10 +215,10 @@ test('literature library falls back to 50 item DFT pages when backend rejects la
     dft_results_items: [],
     dft_results_page: { offset: 0, limit: 28, returned: 0, total: 60, has_more: true },
   };
-  const fullDetail = {
+  const dftDetail = {
     ...commonDetail,
-    dft_results_items: allItems.slice(0, 28),
-    dft_results_page: { offset: 0, limit: 28, returned: 28, total: 60, has_more: true },
+    dft_results_items: [],
+    dft_results_page: { offset: 0, limit: 28, returned: 0, total: 60, has_more: true },
   };
   const requestedLimits = [];
 
@@ -234,16 +253,16 @@ test('literature library falls back to 50 item DFT pages when backend rejects la
       }
       return jsonResponse(route, {
         paper_id: 'paper-compat',
-        items: allItems.slice(28),
-        offset: 28,
+        items: limit === '50' && requestedLimits.length === 2 ? allItems.slice(0, 50) : allItems.slice(50),
+        offset: limit === '50' && requestedLimits.length === 2 ? 0 : 50,
         limit: 50,
-        returned: 32,
+        returned: limit === '50' && requestedLimits.length === 2 ? 50 : 10,
         total: 60,
-        has_more: false,
+        has_more: limit === '50' && requestedLimits.length === 2,
       });
     }
     if (pathname === '/api/papers/paper-compat') {
-      return jsonResponse(route, url.searchParams.get('mode') === 'light' ? lightDetail : fullDetail);
+      return jsonResponse(route, url.searchParams.get('mode') === 'dft' ? dftDetail : lightDetail);
     }
     if (pathname === '/api/papers/paper-compat/codex-context') {
       return jsonResponse(route, {
@@ -269,5 +288,8 @@ test('literature library falls back to 50 item DFT pages when backend rejects la
 
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toHaveCount(1);
   await expect(page.locator('#dftContent [data-role="dft-sample-group"]')).toContainText('DFT 60 条');
-  expect(requestedLimits).toEqual(['100', '50']);
+  const groupHeader = page.locator('#dftContent [data-role="dft-sample-group"] > summary');
+  await expect(groupHeader).toContainText('已关联催化剂（名称待补）');
+  await expect(groupHeader).not.toContainText('CatalystSample sample-sc');
+  expect(requestedLimits).toEqual(['100', '50', '50']);
 });

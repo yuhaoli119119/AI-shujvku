@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 import hashlib
 from io import BytesIO
 import json
@@ -16,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import AuditLog, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
+from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
 from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewFigureAction,
     OfflineEvidenceReviewResult,
@@ -25,9 +26,9 @@ from app.schemas.evidence_review_bundle import (
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.figure_review_scope import (
     include_figure_in_chart_review_scope,
-    is_dft_related_support_figure,
 )
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
+from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.services.review_service import ReviewService
 from app.services.table_curation_service import TableCurationService
 from app.services.task_log_service import TaskLogService
@@ -157,6 +158,8 @@ class EvidenceReviewBundleService:
         include_pdf_files: bool = True,
         include_figure_files: bool = True,
     ) -> dict[str, Any]:
+        if not include_pdf_files:
+            raise ValueError("source_pdfs_required_for_comprehensive_review")
         materials = self._build_materials(paper_id, run_id=run_id)
         files: dict[str, bytes] = {
             "parsed/paper_metadata.json": _json_bytes(materials["paper_metadata"]),
@@ -171,57 +174,63 @@ class EvidenceReviewBundleService:
             filename = _safe_name(table["evidence_id"].replace(":", "_"), "table") + ".md"
             files[f"evidence/tables/{filename}"] = self._table_markdown(table).encode("utf-8")
 
-        pdf_warnings: list[str] = []
-        pdf_count = 0
-        pdf_bytes_total = 0
-        if include_pdf_files:
-            for source_doc in materials["source_documents"]:
-                pdf_path = self._private_path(source_doc.get("_pdf_abs_path"))
-                if pdf_path is None:
-                    continue
-                if pdf_count >= MAX_SOURCE_PDF_COUNT:
-                    pdf_warnings.append("source_pdf_file_limit_reached")
-                    break
-                size = pdf_path.stat().st_size
-                if pdf_bytes_total + size > MAX_TOTAL_SOURCE_PDF_BYTES:
-                    pdf_warnings.append("source_pdf_byte_limit_reached")
-                    continue
-                role = source_doc.get("role") or "source"
-                code = _safe_name(str(source_doc.get("paper_code") or source_doc.get("paper_id") or role), role)
-                filename = "main.pdf" if role == "main" else f"{code}.pdf"
-                bundle_path = f"source/{role}/{filename}" if role != "main" else f"source/{filename}"
-                data = pdf_path.read_bytes()
-                files[bundle_path] = data
-                source_doc["bundle_file"] = bundle_path
-                pdf_count += 1
-                pdf_bytes_total += len(data)
+        effective_pdf_inventory = materials["source_pdf_inventory"]
+        pdf_warnings = [
+            f"{item['omitted_reason']}:{item.get('paper_code') or item.get('paper_id')}"
+            for item in effective_pdf_inventory
+            if item.get("omitted_reason")
+        ]
+        for item in effective_pdf_inventory:
+            if item.get("included_in_bundle"):
+                files[str(item["bundle_file"])] = Path(str(item["_pdf_abs_path"])).read_bytes()
+        pdf_count = sum(1 for item in effective_pdf_inventory if item.get("included_in_bundle"))
+        pdf_bytes_total = sum(int(item.get("size_bytes") or 0) for item in effective_pdf_inventory if item.get("included_in_bundle"))
+        materials["paper_metadata"]["source_pdf_inventory"] = public_source_pdf_inventory(effective_pdf_inventory)
 
         figure_warnings: list[str] = []
         figure_file_count = 0
         figure_bytes_total = 0
+        figure_original_bytes_total = 0
+        omitted_files: list[dict[str, Any]] = []
         if include_figure_files:
             for figure in materials["extracted_figures"]:
                 artifact = self._private_path(figure.get("_image_abs_path"))
                 if artifact is None:
+                    omitted_files.append({"kind": "image", "source_record_id": figure.get("source_record_id"), "reason": "missing_image"})
                     continue
                 if figure_file_count >= MAX_FIGURE_FILES:
                     figure_warnings.append("figure_file_limit_reached")
+                    omitted_files.append({"kind": "image", "source_record_id": figure.get("source_record_id"), "reason": "figure_file_limit_reached"})
                     break
-                size = artifact.stat().st_size
-                if figure_bytes_total + size > MAX_TOTAL_FIGURE_BYTES:
+                original_size = artifact.stat().st_size
+                data, suffix, compacted = self._bundle_figure_artifact(artifact)
+                if figure_bytes_total + len(data) > MAX_TOTAL_FIGURE_BYTES:
                     figure_warnings.append("figure_byte_limit_reached")
+                    omitted_files.append({"kind": "image", "source_record_id": figure.get("source_record_id"), "reason": "figure_byte_limit_reached"})
                     continue
-                suffix = artifact.suffix.lower() or ".png"
                 filename = _safe_name(figure["evidence_id"].replace(":", "_"), "figure") + suffix
-                data = artifact.read_bytes()
                 files[f"evidence/figures/{filename}"] = data
                 figure["bundle_file"] = f"evidence/figures/{filename}"
+                figure["bundle_image_format"] = suffix.lstrip(".")
+                figure["bundle_image_compacted"] = compacted
+                figure["bundle_image_original_size_bytes"] = original_size
+                figure["bundle_image_size_bytes"] = len(data)
                 figure_file_count += 1
                 figure_bytes_total += len(data)
+                figure_original_bytes_total += original_size
+
+        for item in effective_pdf_inventory:
+            if not item.get("included_in_bundle"):
+                omitted_files.append({"kind": "pdf", "source_paper_id": item.get("paper_id"), "reason": item.get("omitted_reason") or "pdf_not_included"})
 
         files["parsed/source_documents.json"] = _json_bytes(self._public_source_documents(materials["source_documents"]))
+        files["parsed/paper_metadata.json"] = _json_bytes(materials["paper_metadata"])
         files["parsed/extracted_figures.json"] = _json_bytes(self._public_records(materials["extracted_figures"]))
-        files["return_template.json"] = _json_bytes(self._return_template(materials))
+        template = self._return_template(materials)
+        files["return_template.json"] = _json_bytes(template)
+        files["WEB_AI_FILL_THIS.json"] = _json_bytes(template)
+        files["OUTPUT_RULES.json"] = _json_bytes(self._output_rules(materials))
+        files["START_HERE.md"] = self._start_here(materials).encode("utf-8")
         files["instructions_for_web_ai.md"] = self._instructions(materials).encode("utf-8")
 
         inventory = [
@@ -243,7 +252,9 @@ class EvidenceReviewBundleService:
                 "paper_code": materials["paper_metadata"]["paper_code"],
                 "title": materials["paper_metadata"].get("title"),
             },
-            "review_scope": "single_paper_main_plus_supplementary_figures_and_tables",
+            "review_scope": "single_paper_main_all_plus_dft_related_supplementary_figures_and_all_tables",
+            "source_pdf_inventory": materials["paper_metadata"]["source_pdf_inventory"],
+            "excluded_duplicate_figures": materials["excluded_duplicate_figures"],
             "field_writeback": ["key_elements", "content_summary", "figure_role", "caption", "page", "crop_status"],
             "expected_coverage": {
                 "figure_ids": sorted(materials["figure_id_map"]),
@@ -269,7 +280,20 @@ class EvidenceReviewBundleService:
                 "tables": len(materials["extracted_tables"]),
                 "included_source_pdfs": pdf_count,
                 "included_figure_files": figure_file_count,
+                "original_figure_bytes": figure_original_bytes_total,
+                "compressed_figure_bytes": figure_bytes_total,
+                "excluded_duplicate_figures": len(materials["excluded_duplicate_figures"]),
             },
+            "source_document_count": len(materials["source_documents"]),
+            "chart_counts": {
+                "main_figures": sum(1 for item in materials["extracted_figures"] if item.get("source_document_type") == "main_text"),
+                "main_tables": sum(1 for item in materials["extracted_tables"] if item.get("source_document_type") == "main_text"),
+                "si_figures": sum(1 for item in materials["extracted_figures"] if item.get("source_document_type") == "supplementary_information"),
+                "si_tables": sum(1 for item in materials["extracted_tables"] if item.get("source_document_type") == "supplementary_information"),
+            },
+            "pdf_files": {"count": pdf_count, "bytes": pdf_bytes_total},
+            "image_files": {"count": figure_file_count, "original_bytes": figure_original_bytes_total, "compressed_bytes": figure_bytes_total},
+            "omitted_files": omitted_files,
             "warnings": sorted(set(materials["warnings"] + pdf_warnings + figure_warnings)),
             "retention_policy": "generated_in_memory_not_persisted_on_server",
             "files": inventory,
@@ -307,7 +331,14 @@ class EvidenceReviewBundleService:
             "bundle_id": bundle_id,
         }
 
-    def validate_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None) -> dict[str, Any]:
+    def validate_result(
+        self,
+        paper_id: UUID,
+        raw_payload: dict[str, Any],
+        *,
+        run_id: UUID | None = None,
+        local_ai_authorized: bool = False,
+    ) -> dict[str, Any]:
         try:
             result = OfflineEvidenceReviewResult.model_validate(raw_payload)
         except ValidationError as exc:
@@ -362,6 +393,32 @@ class EvidenceReviewBundleService:
                 "stale_or_mismatched_bundle",
                 "bundle_fingerprint differs from the current figure/table evidence snapshot; export a new package and review again",
             )
+        if local_ai_authorized and result.review_source.review_source_type != "local_ai":
+            add_error(
+                "local_ai_review_source_required",
+                "Authenticated local-AI chart verification must identify review_source_type='local_ai'.",
+            )
+        if result.overall_status == "completed":
+            missing_source_pdfs = [item for item in materials["source_pdf_inventory"] if not item.get("pdf_available")]
+            omitted_source_pdfs = [
+                item for item in materials["source_pdf_inventory"]
+                if item.get("pdf_available") and not item.get("included_in_bundle")
+            ]
+            if missing_source_pdfs:
+                add_error(
+                    "source_pdf_missing_for_comprehensive_review",
+                    "A completed main/SI chart review requires every source PDF: "
+                    + ", ".join(str(item.get("paper_code") or item.get("paper_id")) for item in missing_source_pdfs),
+                )
+            if omitted_source_pdfs:
+                add_error(
+                    "source_pdf_not_in_bundle",
+                    "A completed main/SI chart review requires every source PDF in the bundle: "
+                    + ", ".join(
+                        f"{item.get('paper_code') or item.get('paper_id')} ({item.get('omitted_reason') or 'not_included'})"
+                        for item in omitted_source_pdfs
+                    ),
+                )
 
         figure_ids_seen: set[str] = set()
         table_ids_seen: set[str] = set()
@@ -375,7 +432,13 @@ class EvidenceReviewBundleService:
 
         for index, action in enumerate(result.figure_actions):
             action_ref = f"figure_actions[{index}]"
-            plan = self._validate_figure_action(action, materials, action_ref, evidence_ids)
+            plan = self._validate_figure_action(
+                action,
+                materials,
+                action_ref,
+                evidence_ids,
+                local_ai_authorized=local_ai_authorized,
+            )
             execution_plan.append(plan)
             for error in plan.pop("_errors", []):
                 add_error(error["code"], error["message"], action_ref=action_ref)
@@ -493,12 +556,22 @@ class EvidenceReviewBundleService:
             "safety": {
                 "validate_writes_database": False,
                 "apply_endpoint_writes_database": True,
-                "local_ai_role": "use authenticated MCP chart-review tools to read unresolved_actions, check PDF evidence, batch resolve, and finalize",
+                "local_ai_role": "use authenticated MCP chart-review tools to verify every in-scope figure against its PDF, batch resolve, and finalize",
                 "web_ai_writes_database": False,
+                "all_figures_require_local_ai_verification": True,
+                "local_ai_verification_authorized": local_ai_authorized,
             },
         }
 
-    def apply_result(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
+    def apply_result(
+        self,
+        paper_id: UUID,
+        raw_payload: dict[str, Any],
+        *,
+        run_id: UUID | None = None,
+        dry_run: bool = False,
+        local_ai_authorized: bool = False,
+    ) -> dict[str, Any]:
         payload_hash = _payload_sha256(raw_payload)
         payload_run_id = self._payload_run_id(raw_payload)
         run_id = run_id or payload_run_id
@@ -507,7 +580,12 @@ class EvidenceReviewBundleService:
             if existing is not None:
                 return existing
 
-        validation = self.validate_result(paper_id, raw_payload, run_id=run_id)
+        validation = self.validate_result(
+            paper_id,
+            raw_payload,
+            run_id=run_id,
+            local_ai_authorized=local_ai_authorized,
+        )
         result = OfflineEvidenceReviewResult.model_validate(raw_payload) if validation["valid"] else None
         if not validation["valid"] or dry_run:
             return {
@@ -537,7 +615,16 @@ class EvidenceReviewBundleService:
                 op_id = f"figure:{index}:{action.action}"
                 if op_id not in auto_op_ids:
                     continue
-                applied.append(self._apply_figure_action(action, materials, op_id, result.bundle_fingerprint, reviewer))
+                applied.append(
+                    self._apply_figure_action(
+                        action,
+                        materials,
+                        op_id,
+                        result.bundle_fingerprint,
+                        reviewer,
+                        local_ai_authorized=local_ai_authorized,
+                    )
+                )
 
             for index, action in enumerate(result.table_actions):
                 op_id = f"table:{index}:{action.action}"
@@ -643,6 +730,31 @@ class EvidenceReviewBundleService:
             reviewed_after=latest.created_at if latest is not None and stage_status == "stale" else None,
             changed_ids=stale_changed_ids,
         )
+        if stage_status == "completed" and not scope_completion["complete"]:
+            stage_status = "needs_local_ai"
+            completed_snapshot_fingerprint = None
+            existing_targets = {
+                str(item.get("target_id") or "")
+                for item in unresolved_actions
+                if isinstance(item, dict)
+            }
+            for figure_id in scope_completion["missing_figure_ids"]:
+                if figure_id in existing_targets:
+                    continue
+                figure_record = materials.get("figure_record_by_id", {}).get(figure_id) or {}
+                unresolved_actions.append(
+                    {
+                        "code": "local_ai_full_figure_verification_required",
+                        "category": "figure",
+                        "action": "VERIFY_AGAINST_PDF",
+                        "target_id": figure_id,
+                        "source_paper_id": figure_record.get("source_paper_id"),
+                        "evidence_ids": [figure_record.get("evidence_id")] if figure_record.get("evidence_id") else [],
+                        "blocked_reasons": ["local_ai_full_figure_verification_required"],
+                        "reason": "Every in-scope figure must be verified by local AI against its source PDF after the web-AI result is applied.",
+                        "requires_local_ai": True,
+                    }
+                )
         if (
             stage_status in {"stale", "not_started", "needs_local_ai"}
             and rag_quality_status == "ready"
@@ -685,20 +797,53 @@ class EvidenceReviewBundleService:
                 "source_documents": len(materials["source_documents"]),
                 "figures": len(materials["extracted_figures"]),
                 "tables": len(materials["extracted_tables"]),
+                "main_figures": sum(1 for item in materials["extracted_figures"] if item.get("source_document_type") == "main_text"),
+                "main_tables": sum(1 for item in materials["extracted_tables"] if item.get("source_document_type") == "main_text"),
+                "si_figures": sum(1 for item in materials["extracted_figures"] if item.get("source_document_type") == "supplementary_information"),
+                "si_tables": sum(1 for item in materials["extracted_tables"] if item.get("source_document_type") == "supplementary_information"),
             },
             "paper_metadata": materials["paper_metadata"],
             "source_documents": self._public_source_documents(materials["source_documents"]),
             "page_geometry": materials["page_geometry"],
             "figures": self._public_records(materials["extracted_figures"]),
             "tables": self._public_records(materials["extracted_tables"]),
+            "excluded_duplicate_figures": materials["excluded_duplicate_figures"],
         }
 
-    def resolve_review_actions(self, paper_id: UUID, raw_payload: dict[str, Any], *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
-        return self.apply_result(paper_id, raw_payload, run_id=run_id, dry_run=dry_run)
+    def resolve_review_actions(
+        self,
+        paper_id: UUID,
+        raw_payload: dict[str, Any],
+        *,
+        run_id: UUID | None = None,
+        dry_run: bool = False,
+        local_ai_authorized: bool = False,
+    ) -> dict[str, Any]:
+        return self.apply_result(
+            paper_id,
+            raw_payload,
+            run_id=run_id,
+            dry_run=dry_run,
+            local_ai_authorized=local_ai_authorized,
+        )
 
-    def finalize_review(self, paper_id: UUID, raw_payload: dict[str, Any] | None = None, *, run_id: UUID | None = None, dry_run: bool = False) -> dict[str, Any]:
+    def finalize_review(
+        self,
+        paper_id: UUID,
+        raw_payload: dict[str, Any] | None = None,
+        *,
+        run_id: UUID | None = None,
+        dry_run: bool = False,
+        local_ai_authorized: bool = False,
+    ) -> dict[str, Any]:
         if raw_payload is not None:
-            response = self.apply_result(paper_id, raw_payload, run_id=run_id, dry_run=dry_run)
+            response = self.apply_result(
+                paper_id,
+                raw_payload,
+                run_id=run_id,
+                dry_run=dry_run,
+                local_ai_authorized=local_ai_authorized,
+            )
             if dry_run or response.get("chart_review_completed"):
                 return response
             return {
@@ -770,6 +915,8 @@ class EvidenceReviewBundleService:
         materials: dict[str, Any],
         action_ref: str,
         evidence_ids: set[str],
+        *,
+        local_ai_authorized: bool = False,
     ) -> dict[str, Any]:
         errors: list[dict[str, str]] = []
         blocked: list[str] = []
@@ -800,14 +947,17 @@ class EvidenceReviewBundleService:
             blocked.append("needs_human")
             blocked.append("local_ai_review_required")
             blocked.append("confirmation_required")
+        trusted_local_verification = local_ai_authorized and self._has_local_ai_verification(
+            action.local_ai_verification
+        )
         if action.action == "REJECT":
-            if not self._has_local_ai_verification(action.local_ai_verification):
+            if not trusted_local_verification:
                 blocked.append("reject_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
         if (
             action.action != "NEEDS_HUMAN"
             and (action.confidence is None or action.confidence < FIGURE_AUTO_CONFIDENCE)
-        ) and not self._has_local_ai_verification(action.local_ai_verification):
+        ) and not trusted_local_verification:
             blocked.append("confidence_below_auto_apply_threshold")
         quality_reasons = self._projected_figure_action_quality_reasons(action, materials)
         if quality_reasons:
@@ -826,6 +976,12 @@ class EvidenceReviewBundleService:
             "source_paper_id": action.source_paper_id,
             "auto_apply": auto,
             "blocked_reasons": list(dict.fromkeys(blocked)),
+            "completion_blockers": (
+                []
+                if trusted_local_verification or action.action == "NEEDS_HUMAN"
+                else ["local_ai_full_figure_verification_required"]
+            ),
+            "local_ai_verified": trusted_local_verification,
             "tool_hint": "system_deterministic_pdf_crop" if action.action in {"RECROP", "CREATE"} else "system_metadata_update_or_final_status",
             "payload": action.model_dump(mode="json"),
             "_errors": errors,
@@ -971,6 +1127,8 @@ class EvidenceReviewBundleService:
         op_id: str,
         bundle_fingerprint: str,
         reviewer: str,
+        *,
+        local_ai_authorized: bool = False,
     ) -> dict[str, Any]:
         preexisting = self._already_applied(
             op_id,
@@ -1105,7 +1263,11 @@ class EvidenceReviewBundleService:
                 "chart_run_id": materials.get("run_id"),
                 "action": action.model_dump(mode="json"),
                 "applied_updates": applied_updates,
-                "actor_type": "ai" if action.local_ai_verification is not None else "review_source",
+                "actor_type": (
+                    "local_ai"
+                    if local_ai_authorized and self._has_local_ai_verification(action.local_ai_verification)
+                    else "web_ai_review_source"
+                ),
             },
             created_at=utcnow(),
         )
@@ -1474,6 +1636,9 @@ class EvidenceReviewBundleService:
         unresolved: list[dict[str, Any]] = []
         for plan in execution_plan:
             blocked = list(plan.get("blocked_reasons") or [])
+            for item in plan.get("completion_blockers") or []:
+                if item not in blocked:
+                    blocked.append(item)
             if plan.get("auto_apply") and not blocked:
                 continue
             payload = plan.get("payload") if isinstance(plan.get("payload"), dict) else {}
@@ -1545,6 +1710,7 @@ class EvidenceReviewBundleService:
             positive_actions=FIGURE_REVIEWED_ACTIONS,
             external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
             run_id=run_id,
+            require_local_ai_verification=True,
         )
         reviewed_tables = self._reviewed_object_ids(
             object_ids=table_ids,
@@ -1564,6 +1730,7 @@ class EvidenceReviewBundleService:
                 external_target_types={"figure", "figures", "paper_figure", "paper_figures"},
                 created_after=reviewed_after,
                 run_id=run_id,
+                require_local_ai_verification=True,
             )
             if reviewed_after is not None and changed_figure_ids
             else changed_figure_ids
@@ -1609,6 +1776,7 @@ class EvidenceReviewBundleService:
         external_target_types: set[str],
         created_after: datetime | None = None,
         run_id: UUID | None = None,
+        require_local_ai_verification: bool = False,
     ) -> set[str]:
         if not object_ids:
             return set()
@@ -1623,19 +1791,35 @@ class EvidenceReviewBundleService:
         seen: set[str] = set()
         for row in rows:
             payload = row.payload if isinstance(row.payload, dict) else {}
-            if run_id is not None and self._optional_uuid(payload.get("run_id") or payload.get("chart_run_id")) != run_id:
+            payload_run_id = self._optional_uuid(payload.get("run_id") or payload.get("chart_run_id"))
+            if run_id is not None and payload_run_id != run_id:
+                continue
+            if run_id is None and payload_run_id is not None:
                 continue
             target_id = str(row.target_id or "")
             if not target_id or target_id in seen:
                 continue
             seen.add(target_id)
             action = self._audit_review_action(row)
-            if action in positive_actions:
+            payload = row.payload if isinstance(row.payload, dict) else {}
+            action_payload = payload.get("action") if isinstance(payload.get("action"), dict) else {}
+            trusted_local_verification = (
+                payload.get("actor_type") == "local_ai"
+                and self._has_local_ai_verification(action_payload.get("local_ai_verification"))
+            )
+            if action in positive_actions and (
+                not require_local_ai_verification or trusted_local_verification
+            ):
                 reviewed.add(target_id)
-        external_reviewed = self._external_reviewed_object_ids(
-            object_ids=object_ids,
-            external_target_types=external_target_types,
-            created_after=created_after,
+        external_reviewed = (
+            set()
+            if require_local_ai_verification
+            else self._external_reviewed_object_ids(
+                object_ids=object_ids,
+                external_target_types=external_target_types,
+                created_after=created_after,
+                run_id=run_id,
+            )
         )
         return reviewed | external_reviewed
 
@@ -1673,6 +1857,8 @@ class EvidenceReviewBundleService:
         ).all()
         for candidate in candidates:
             if run_id is not None and candidate.run_id != run_id:
+                continue
+            if run_id is None:
                 continue
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_id = str(payload.get("target_id") or candidate.materialized_target_id or "").strip()
@@ -2024,24 +2210,49 @@ class EvidenceReviewBundleService:
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id.in_(source_ids))).all()
         all_figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(source_ids))).all()
         source_by_id = {item["paper"].id: item for item in source_papers}
-        figures = [
+        dft_referenced_figure_ids = self._dft_referenced_figure_ids(source_ids, all_figures)
+        excluded_duplicate_figures: list[dict[str, Any]] = []
+        scope_candidate_figures = all_figures
+        if run_id is None:
+            scope_candidate_figures, excluded_duplicate_figures = self._deduplicate_scope_figures(
+                all_figures,
+                source_by_id=source_by_id,
+            )
+            for exclusion in excluded_duplicate_figures:
+                if exclusion["excluded_figure_id"] in dft_referenced_figure_ids:
+                    dft_referenced_figure_ids.add(exclusion["canonical_figure_id"])
+        relevant_figures = [
             row
-            for row in all_figures
-            if self._include_figure_in_bundle(row, source_by_id=source_by_id)
+            for row in scope_candidate_figures
+            if self._include_figure_in_bundle(
+                row,
+                source_by_id=source_by_id,
+                referenced_by_dft=str(row.id) in dft_referenced_figure_ids,
+            )
         ]
+        figures = relevant_figures
         if run_id is not None:
             figure_ids, table_ids = self._run_target_ids(paper_id, run_id)
             figures = [row for row in figures if str(row.id) in figure_ids]
             tables = [row for row in tables if str(row.id) in table_ids]
             if not figures and not tables:
                 raise ValueError("chart_review_no_targets_for_run")
-        excluded_support_figure_count = len(all_figures) - len(figures)
+        excluded_support_figure_count = sum(
+            1
+            for row in scope_candidate_figures
+            if source_by_id[row.paper_id]["prefix"] == "si" and row not in relevant_figures
+        )
         warnings: list[str] = []
         source_documents = []
         for item in source_papers:
             source_doc = self._source_document_payload(item)
             warnings.extend(source_doc.pop("_warnings", []))
             source_documents.append(source_doc)
+        source_pdf_inventory = build_source_pdf_inventory(
+            source_documents,
+            max_count=MAX_SOURCE_PDF_COUNT,
+            max_total_bytes=MAX_TOTAL_SOURCE_PDF_BYTES,
+        )
         page_geometry = {
             "schema_version": "offline_source_page_geometry_v1",
             "source_documents": [
@@ -2074,11 +2285,15 @@ class EvidenceReviewBundleService:
             "journal": paper.journal,
             "abstract": paper.abstract,
             "paper_type": paper.paper_type,
+            "source_pdf_inventory": public_source_pdf_inventory(source_pdf_inventory),
+            "excluded_duplicate_figures": excluded_duplicate_figures,
         }
         fingerprint_payload = {
             "schema_version": OFFLINE_EVIDENCE_REVIEW_BUNDLE_SCHEMA_VERSION,
             "paper_metadata": paper_metadata,
             "source_documents": self._public_source_documents(source_documents, include_bundle_file=False),
+            "source_pdf_inventory": public_source_pdf_inventory(source_pdf_inventory),
+            "excluded_duplicate_figures": excluded_duplicate_figures,
             "page_geometry": page_geometry,
             "extracted_tables": self._public_records(extracted_tables, include_bundle_file=False),
             "extracted_figures": self._public_records(extracted_figures, include_bundle_file=False),
@@ -2090,10 +2305,14 @@ class EvidenceReviewBundleService:
             warnings.append("no_figures_in_scope")
         if excluded_support_figure_count:
             warnings.append(f"excluded_non_dft_supplementary_figures:{excluded_support_figure_count}")
+        if excluded_duplicate_figures:
+            warnings.append(f"excluded_duplicate_figures:{len(excluded_duplicate_figures)}")
 
         return {
             "paper_metadata": paper_metadata,
             "source_documents": source_documents,
+            "source_pdf_inventory": source_pdf_inventory,
+            "excluded_duplicate_figures": excluded_duplicate_figures,
             "page_geometry": page_geometry,
             "extracted_tables": extracted_tables,
             "extracted_figures": extracted_figures,
@@ -2134,13 +2353,164 @@ class EvidenceReviewBundleService:
         row: PaperFigure,
         *,
         source_by_id: dict[UUID, dict[str, Any]],
+        referenced_by_dft: bool = False,
     ) -> bool:
         source = source_by_id[row.paper_id]
-        return include_figure_in_chart_review_scope(row, source_prefix=source["prefix"])
+        return include_figure_in_chart_review_scope(
+            row,
+            source_prefix=source["prefix"],
+            referenced_by_dft=referenced_by_dft,
+        )
+
+    def _dft_referenced_figure_ids(
+        self,
+        source_ids: list[UUID],
+        figures: list[PaperFigure],
+    ) -> set[str]:
+        figure_ids = {row.id for row in figures}
+        if not figure_ids:
+            return set()
+        referenced = {
+            str(figure_id)
+            for figure_id in self.session.scalars(
+                select(EvidenceLocator.figure_id).where(
+                    EvidenceLocator.figure_id.in_(figure_ids),
+                    EvidenceLocator.target_type.in_(("dft_result", "dft_results")),
+                )
+            ).all()
+            if figure_id is not None
+        }
+        dft_rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id.in_(source_ids))).all()
+        figure_id_strings = {str(row.id) for row in figures}
+        source_figure_tokens = {
+            self._normalized_figure_text(row.source_figure)
+            for row in dft_rows
+            if self._normalized_figure_text(row.source_figure)
+        }
+
+        def collect_figure_ids(value: Any) -> None:
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if str(key).lower() in {"figure_id", "figure_uuid"} and str(item) in figure_id_strings:
+                        referenced.add(str(item))
+                    collect_figure_ids(item)
+            elif isinstance(value, list):
+                for item in value:
+                    collect_figure_ids(item)
+
+        for row in dft_rows:
+            collect_figure_ids(row.evidence_payload)
+        completed_chart_audits = self.session.scalars(
+            select(AuditLog).where(
+                AuditLog.paper_id.in_(source_ids),
+                AuditLog.action == "offline_evidence_review_applied",
+            )
+        ).all()
+        for audit in completed_chart_audits:
+            payload = audit.payload if isinstance(audit.payload, dict) else {}
+            for candidate in payload.get("dft_evidence_candidates") or []:
+                if not isinstance(candidate, dict) or str(candidate.get("source_kind") or "").lower() != "figure":
+                    continue
+                source_record_id = str(candidate.get("source_record_id") or "")
+                if source_record_id in figure_id_strings:
+                    referenced.add(source_record_id)
+        for figure in figures:
+            normalized_figure = self._normalized_figure_text(f"{figure.figure_label or ''} {figure.caption or ''}")
+            if any(
+                token and f" {token} " in f" {normalized_figure} "
+                for token in source_figure_tokens
+            ):
+                referenced.add(str(figure.id))
+        return referenced
+
+    @staticmethod
+    def _normalized_figure_text(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
 
     @classmethod
-    def _is_dft_related_support_figure(cls, row: PaperFigure) -> bool:
-        return is_dft_related_support_figure(row)
+    def _duplicate_figure_reason(cls, left: PaperFigure, right: PaperFigure) -> str | None:
+        if left.paper_id != right.paper_id or left.page != right.page:
+            return None
+        left_caption = cls._normalized_figure_text(left.caption)
+        right_caption = cls._normalized_figure_text(right.caption)
+        if left.image_path and right.image_path and str(left.image_path) == str(right.image_path):
+            return "same_page_same_image_reference"
+        if len(left_caption) >= 20 and left_caption == right_caption:
+            return "same_page_same_normalized_caption"
+        if (
+            len(left_caption) >= 40
+            and len(right_caption) >= 40
+            and SequenceMatcher(None, left_caption, right_caption).ratio() >= 0.97
+        ):
+            return "same_page_highly_similar_caption"
+        return None
+
+    @classmethod
+    def _canonical_figure_score(cls, row: PaperFigure) -> tuple[int, int, int, int, int]:
+        label = str(row.figure_label or "").strip()
+        role = str(row.figure_role or "").strip().lower()
+        formal_label = bool(re.match(r"^(?:figure|fig\.?)\s*s?\d+\b", label, re.IGNORECASE))
+        meaningful_role = role not in {"", "unknown", "unclassified", "other"}
+        return (
+            int(formal_label),
+            int(meaningful_role),
+            int(bool(str(row.content_summary or "").strip())),
+            len(row.key_elements or []),
+            int(bool(row.image_path)),
+        )
+
+    @classmethod
+    def _deduplicate_scope_figures(
+        cls,
+        figures: list[PaperFigure],
+        *,
+        source_by_id: dict[UUID, dict[str, Any]],
+    ) -> tuple[list[PaperFigure], list[dict[str, Any]]]:
+        si_figures = [row for row in figures if source_by_id[row.paper_id]["prefix"] == "si"]
+        parent = {str(row.id): str(row.id) for row in si_figures}
+
+        def find(value: str) -> str:
+            while parent[value] != value:
+                parent[value] = parent[parent[value]]
+                value = parent[value]
+            return value
+
+        for index, left in enumerate(si_figures):
+            for right in si_figures[index + 1:]:
+                reason = cls._duplicate_figure_reason(left, right)
+                if not reason:
+                    continue
+                left_root = find(str(left.id))
+                right_root = find(str(right.id))
+                if left_root != right_root:
+                    parent[right_root] = left_root
+        groups: dict[str, list[PaperFigure]] = {}
+        for row in si_figures:
+            groups.setdefault(find(str(row.id)), []).append(row)
+        excluded_ids: set[str] = set()
+        exclusions: list[dict[str, Any]] = []
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            canonical = sorted(
+                group,
+                key=lambda row: tuple(-value for value in cls._canonical_figure_score(row)) + (str(row.id),),
+            )[0]
+            for row in sorted(group, key=lambda item: str(item.id)):
+                if row.id == canonical.id:
+                    continue
+                excluded_ids.add(str(row.id))
+                reason = cls._duplicate_figure_reason(row, canonical) or cls._duplicate_figure_reason(canonical, row) or "duplicate_scope_object"
+                exclusions.append({
+                    "source_paper_id": str(row.paper_id),
+                    "page": row.page,
+                    "excluded_figure_id": str(row.id),
+                    "excluded_figure_label": row.figure_label,
+                    "canonical_figure_id": str(canonical.id),
+                    "canonical_figure_label": canonical.figure_label,
+                    "reason": reason,
+                })
+        return [row for row in figures if str(row.id) not in excluded_ids], exclusions
 
     def _source_papers(self, paper: Paper) -> list[dict[str, Any]]:
         relationships = self.session.scalars(
@@ -2456,9 +2826,15 @@ class EvidenceReviewBundleService:
 
     @staticmethod
     def _has_local_ai_verification(verification: Any) -> bool:
-        if verification is None or verification.verified_against_pdf is not True:
+        if isinstance(verification, dict):
+            verified_against_pdf = verification.get("verified_against_pdf")
+            raw_used_tools = verification.get("used_tools") or []
+        else:
+            verified_against_pdf = getattr(verification, "verified_against_pdf", None)
+            raw_used_tools = getattr(verification, "used_tools", []) or []
+        if verified_against_pdf is not True:
             return False
-        used_tools = {str(item).strip() for item in verification.used_tools if str(item).strip()}
+        used_tools = {str(item).strip() for item in raw_used_tools if str(item).strip()}
         return {"get_codex_item", "read_paper_page"} <= used_tools
 
     def _already_applied(
@@ -2515,6 +2891,33 @@ class EvidenceReviewBundleService:
             settings=self.settings,
             trusted_persisted_reference=True,
         )
+
+    @staticmethod
+    def _bundle_figure_artifact(artifact: Path) -> tuple[bytes, str, bool]:
+        original = artifact.read_bytes()
+        original_suffix = artifact.suffix.lower() or ".png"
+        try:
+            from PIL import Image
+
+            with Image.open(BytesIO(original)) as source:
+                source.load()
+                if source.mode == "RGBA":
+                    image = Image.new("RGB", source.size, "white")
+                    image.paste(source, mask=source.getchannel("A"))
+                elif source.mode not in {"RGB", "L"}:
+                    image = source.convert("RGB")
+                else:
+                    image = source.copy()
+                if image.mode == "L":
+                    image = image.convert("RGB")
+                output = BytesIO()
+                image.save(output, format="WEBP", quality=92, method=6)
+                compact = output.getvalue()
+            if compact and len(compact) < len(original):
+                return compact, ".webp", True
+        except Exception:
+            pass
+        return original, original_suffix, False
 
     @staticmethod
     def _private_path(value: Any) -> Path | None:
@@ -2700,6 +3103,61 @@ class EvidenceReviewBundleService:
         }
 
     @staticmethod
+    def _output_rules(materials: dict[str, Any]) -> dict[str, Any]:
+        paper_code = materials["paper_metadata"]["paper_code"]
+        return {
+            "schema_version": "offline_figure_table_output_rules_v1",
+            "output_workflow": {
+                "input_template": "WEB_AI_FILL_THIS.json",
+                "schema": "return_schema.json",
+                "output_filename": f"{paper_code}_chart_review_result.json",
+                "output_type": "single_json_file_attachment",
+                "reply_as_file_attachment": True,
+                "do_not_generate_from_scratch": True,
+                "do_not_wrap_in_markdown": True,
+            },
+            "immutable_fields": [
+                "schema_version", "bundle_fingerprint", "paper_id", "paper_code",
+                "scope_type", "run_id", "chart_run_id",
+            ],
+            "hard_invariants": [
+                "Every figure_actions and table_actions item must cite one or more real evidence_ids from this package.",
+                "Never invent evidence_ids; copy them from parsed/extracted_figures.json, parsed/extracted_tables.json, or manifest.json.",
+                "CREATE figure requires source_paper_id, page, bbox_norm, evidence_checked=true, and real evidence_ids.",
+                "RECROP figure requires figure_id, page, bbox_norm, evidence_checked=true, and real evidence_ids.",
+                "CREATE or UPDATE table requires source_paper_id or table_id as appropriate, complete_markdown, evidence_checked=true, and real evidence_ids.",
+                "If a proposed new figure/table has no package evidence_id, remove that unsupported CREATE action instead of inventing an ID.",
+                "Web AI must leave local_ai_verification null; authenticated local AI performs a separate full-figure PDF verification after this result is applied.",
+                "Do not change immutable fields copied from WEB_AI_FILL_THIS.json.",
+            ],
+            "final_self_check": [
+                "Parse the completed output as JSON.",
+                "Validate it against return_schema.json.",
+                "For every CREATE/RECROP/UPDATE/MERGE/DELETE/REJECT action, confirm evidence_ids is non-empty and every ID occurs in this package.",
+                "For every CREATE figure, confirm source_paper_id, page, and bbox_norm are present.",
+                "Return only the completed JSON file.",
+            ],
+        }
+
+    @staticmethod
+    def _start_here(materials: dict[str, Any]) -> str:
+        paper_code = materials["paper_metadata"]["paper_code"]
+        return f"""# START HERE — fill the supplied JSON file
+
+Do not create a new response structure from memory.
+
+1. Open `WEB_AI_FILL_THIS.json`.
+2. Keep its paper, scope, run, fingerprint, and schema fields unchanged.
+3. Before adding any action, find its real `evidence_id` in `parsed/extracted_figures.json`, `parsed/extracted_tables.json`, or `manifest.json`.
+4. Every action must include one or more real `evidence_ids`; do not leave the array empty and do not invent IDs.
+5. For a new figure (`CREATE`), also include `source_paper_id`, `page`, and `bbox_norm`.
+6. Read `OUTPUT_RULES.json`, then validate the completed object against `return_schema.json`.
+7. Save it as `{paper_code}_chart_review_result.json` and reply by attaching that one JSON file.
+
+If a possible new figure/table cannot be tied to a package evidence_id, omit that CREATE action. Do not paste the JSON body into the chat. Do not return Markdown, prose, a code fence, or an outer wrapper.
+"""
+
+    @staticmethod
     def _instructions(materials: dict[str, Any]) -> str:
         metadata = materials["paper_metadata"]
         return f"""# Literature AI 离线图表证据整理任务
@@ -2723,17 +3181,18 @@ class EvidenceReviewBundleService:
 2. 每个当前 figure/table 都要有一个 action；如果无法判断，用 `NEEDS_HUMAN`，但它会被服务器视为待复核项，不能完成图表阶段。
 3. 图片 action：`KEEP`、`RECROP`、`CREATE`、`REJECT`、`NEEDS_HUMAN`。
 4. 表格 action：`KEEP`、`UPDATE`、`CREATE`、`MERGE`、`DELETE`、`NEEDS_HUMAN`。
-5. `RECROP` 和 `CREATE` 必须返回 `page` 与 `bbox_norm=[x0,y0,x1,y1]`；坐标是该 PDF 页面的归一化 top-left 坐标，范围 0 到 1。
+5. 从 `WEB_AI_FILL_THIS.json` 开始填写，禁止脱离模板重建 JSON。每一条 figure/table action 都必须带至少一个包内真实 `evidence_ids`；从 `parsed/extracted_figures.json`、`parsed/extracted_tables.json` 或 `manifest.json` 复制，禁止编造或留空。`RECROP` 和 `CREATE` 还必须返回 `page` 与 `bbox_norm=[x0,y0,x1,y1]`；坐标是该 PDF 页面的归一化 top-left 坐标，范围 0 到 1。
 6. 对每张保留的科学图片，`KEEP` 或 `RECROP` 后必须具备具体 `figure_role`、非图注复读的 `content_summary` 和具体 `key_elements`；缺任一项时在 action 中补齐。不要使用 unknown/unclassified/other 或 verified/reviewed/ok 这类占位词。
    在 run-scoped 图表审核中，`content_summary` 与 `key_elements` 是实际字段回填建议；只能填写 manifest 中当前 target figure/table，不能生成内容知识 claim。
 7. `dft_relevance` 只能填写 `none`、`possible`、`explicit_dft`、`unknown` 四者之一；不要写 true/false/yes/no/dft_relevant。
 8. `UPDATE` 和 `CREATE` 表格必须返回完整 `complete_markdown`，包含列名、单位、脚注相关信息；不要只返回差异片段。
 9. `MERGE` 只用于两个已有表格对象合并，必须填写 `source_table_id` 和 `target_table_id`，且二者不能相同；不要同时给同一表格输出 KEEP/UPDATE/MERGE 多个 action。没有把握时用 `NEEDS_HUMAN`。
 10. 不要估读曲线、不要从柱状图/曲线图目测数值；只有图中文字、表格单元格、图注/脚注明确给出的 DFT 数值才可进入 `dft_evidence_candidates`。
-11. 不得声称已经写库、已经确认、已经 verified 或已经 ML_Ready。
-12. 严格按 `return_schema.json` 输出一个 JSON 对象；不要输出 Markdown 代码块。
-13. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
-14. `figure_table_evidence` 的缺失字段提醒不是可引用科学论断；不要把它提交到纸级内容审核包或用它升级 `citable`。
+ 11. 网页 AI 必须把所有 `local_ai_verification` 保持为 null；该字段只能由后续通过已认证 MCP 工作流运行的本地 AI 逐图核验后填写。
+ 12. 不得声称已经写库、已经确认、已经 verified、图表阶段已经完成或已经 ML_Ready；网页 AI 结果应用后仍必须经过本地 AI 全量图片复核。
+ 13. 先读 `START_HERE.md` 和 `OUTPUT_RULES.json`，严格按 `return_schema.json` 填写 JSON，保存为 `{metadata['paper_code']}_chart_review_result.json` 并以文件附件回复；不要把长 JSON 粘贴在聊天正文中，也不要输出 Markdown 代码块。
+ 14. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
+ 15. `figure_table_evidence` 的缺失字段提醒不是可引用科学论断；不要把它提交到纸级内容审核包或用它升级 `citable`。
 
 ## 建议阅读顺序
 

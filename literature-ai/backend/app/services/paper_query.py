@@ -94,6 +94,34 @@ def _chart_review_status_for_detail(
     return result
 
 
+def _supplementary_duplicate_exclusions_for_detail(
+    session: Session,
+    paper_id: UUID,
+    incoming_supplementary_relationships: list[PaperRelationship],
+) -> list[dict[str, Any]]:
+    """Expose the parent whole-paper scope exclusions on an SI detail page.
+
+    A supplementary record is displayed independently in the library, while
+    chart review is deliberately scoped from its linked main paper.  Reuse the
+    parent scope's explicit exclusions instead of re-inferring duplicate state
+    in the browser or treating an excluded candidate as pending work.
+    """
+    if not incoming_supplementary_relationships:
+        return []
+    parent_id = incoming_supplementary_relationships[0].source_paper_id
+    try:
+        parent_scopes = EvidenceReviewBundleService(session, get_settings()).get_review_scope_options(parent_id)
+        paper_scope = parent_scopes.get("paper_scope") if isinstance(parent_scopes, dict) else {}
+        metadata = paper_scope.get("paper_metadata") if isinstance(paper_scope, dict) else {}
+        exclusions = metadata.get("excluded_duplicate_figures") if isinstance(metadata, dict) else []
+    except Exception:
+        return []
+    return [
+        item
+        for item in exclusions if isinstance(item, dict) and str(item.get("source_paper_id") or "") == str(paper_id)
+    ]
+
+
 def _direct_table_review_audits_by_target(session: Session, target_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
     if not target_ids:
         return {}
@@ -153,6 +181,34 @@ def _direct_table_review_audits_by_target(session: Session, target_ids: set[str]
     for target_id, audits in audits_by_target.items():
         audits_by_target[target_id] = audits[:5]
     return audits_by_target
+
+
+def _direct_figure_reviews_by_target(
+    session: Session,
+    paper_id: UUID,
+    target_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    if not target_ids:
+        return {}
+    rows = session.scalars(
+        select(AuditLog)
+        .where(AuditLog.paper_id == paper_id)
+        .where(AuditLog.target_type.in_(["figure", "paper_figure"]))
+        .where(AuditLog.target_id.in_(target_ids))
+        .where(AuditLog.action.in_(["offline_evidence_review_op", "review_figure"]))
+        .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+    ).all()
+    reviews: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        target_id = str(row.target_id or "")
+        if not target_id or target_id in reviews:
+            continue
+        reviews[target_id] = {
+            "review_status": "reviewed",
+            "reviewed_at": row.created_at,
+            "reviewed_by": row.source,
+        }
+    return reviews
 
 
 def _escape_like(value: str) -> str:
@@ -570,6 +626,8 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         *,
         compact: bool = False,
         chart_run_id: UUID | None = None,
+        include_expensive_status: bool = True,
+        include_dft_payload: bool = True,
     ) -> PaperDetailResponse | None:
         paper = self.session.get(Paper, paper_id)
         if not paper:
@@ -610,21 +668,52 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             .order_by(PaperFigure.page.asc().nulls_last())
         ).all()
         figures = sorted(figures, key=self._figure_display_sort_key)
-        dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
-        catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
+        dft_settings = (
+            self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
+            if include_dft_payload
+            else []
+        )
+        catalyst_samples = (
+            self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
+            if include_dft_payload
+            else []
+        )
         dft_result_count = int(
             self.session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper_id)) or 0
         )
-        dft_results = self.session.scalars(
-            select(DFTResult)
-            .where(DFTResult.paper_id == paper_id)
-            .order_by(DFTResult.id.asc())
-            .limit(DFT_DETAIL_PAGE_SIZE)
-        ).all()
-        electrochemical_items = self.session.scalars(
-            select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)
-        ).all()
-        mechanism_claims = self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()
+        dft_results = (
+            self.session.scalars(
+                select(DFTResult)
+                .where(DFTResult.paper_id == paper_id)
+                .order_by(DFTResult.id.asc())
+                .limit(DFT_DETAIL_PAGE_SIZE)
+            ).all()
+            if include_dft_payload
+            else []
+        )
+        electrochemical_items = (
+            self.session.scalars(
+                select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)
+            ).all()
+            if include_dft_payload
+            else []
+        )
+        mechanism_claims = (
+            self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()
+            if include_dft_payload
+            else []
+        )
+        skipped_dft_counts: dict[str, int] = {}
+        if not include_dft_payload:
+            count_query = union_all(
+                select(literal("dft_settings"), func.count(DFTSetting.id)).where(DFTSetting.paper_id == paper_id),
+                select(literal("catalyst_samples"), func.count(CatalystSample.id)).where(CatalystSample.paper_id == paper_id),
+                select(literal("electrochemical_performance"), func.count(ElectrochemicalPerformance.id)).where(
+                    ElectrochemicalPerformance.paper_id == paper_id
+                ),
+                select(literal("mechanism_claims"), func.count(MechanismClaim.id)).where(MechanismClaim.paper_id == paper_id),
+            )
+            skipped_dft_counts = {str(name): int(count or 0) for name, count in self.session.execute(count_query).all()}
         writing_cards = self.session.scalars(select(WritingCard).where(WritingCard.paper_id == paper_id)).all()
         figure_data_points = self.session.scalars(select(FigureDataPoint).where(FigureDataPoint.paper_id == paper_id)).all()
         outgoing_relationships = self.session.scalars(
@@ -691,6 +780,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             table_audits: dict[str, list[dict[str, Any]]] = {}
             table_corrections: dict[str, list[dict[str, Any]]] = {}
             figure_audits: dict[str, list[dict[str, Any]]] = {}
+            direct_figure_reviews: dict[str, dict[str, Any]] = {}
             figure_approved_corrections: dict[str, list[dict[str, Any]]] = {}
             figure_pending_corrections: dict[str, list[dict[str, Any]]] = {}
             figure_conflicts: dict[str, list[dict[str, Any]]] = {}
@@ -734,6 +824,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                     )[:5]
             table_corrections = self._table_corrections_by_target(table_correction_paper_ids, table_ids)
             figure_audits = self._figure_object_review_audits(paper_id, figure_ids)
+            direct_figure_reviews = _direct_figure_reviews_by_target(self.session, paper_id, figure_ids)
             figure_approved_corrections = self._figure_approved_corrections(paper_id, figure_ids)
             figure_pending_corrections = self._figure_pending_corrections(paper_id, figure_ids)
             figure_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
@@ -781,11 +872,17 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             "sections": len(sections),
             "tables": len(tables),
             "figures": len(figures),
-            "dft_settings": len(dft_settings),
-            "catalyst_samples": len(catalyst_samples),
+            "dft_settings": len(dft_settings) if include_dft_payload else skipped_dft_counts.get("dft_settings", 0),
+            "catalyst_samples": len(catalyst_samples) if include_dft_payload else skipped_dft_counts.get("catalyst_samples", 0),
             "dft_results": dft_result_count,
-            "electrochemical_performance": len(electrochemical_items),
-            "mechanism_claims": len(mechanism_claims),
+            "electrochemical_performance": (
+                len(electrochemical_items)
+                if include_dft_payload
+                else skipped_dft_counts.get("electrochemical_performance", 0)
+            ),
+            "mechanism_claims": (
+                len(mechanism_claims) if include_dft_payload else skipped_dft_counts.get("mechanism_claims", 0)
+            ),
             "writing_cards": len(writing_cards),
             "comprehensive_analysis": 1 if paper.comprehensive_analysis else 0,
             "figure_data_points": len(figure_data_points),
@@ -817,6 +914,21 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             dft_result_audits=dft_result_audits,
             dft_result_conflicts=dft_result_conflicts,
         )
+        chart_review_status = (
+            _chart_review_status_for_detail(self.session, paper_id, chart_run_id=chart_run_id)
+            if include_expensive_status
+            else {}
+        )
+        # The figures tab uses the lightweight content payload.  It still
+        # needs the parent scope's explicit SI exclusions to render review
+        # coverage correctly, but does not need the rest of the expensive
+        # chart-review status calculation.
+        if include_expensive_status or incoming_supplementary_relationships:
+            chart_review_status["excluded_duplicate_figures"] = _supplementary_duplicate_exclusions_for_detail(
+                self.session,
+                paper_id,
+                incoming_supplementary_relationships,
+            )
         return PaperDetailResponse(
             **base_payload,
             sections=[self._serialize_section(item) for item in sections],
@@ -835,6 +947,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                     approved_corrections=figure_approved_corrections.get(str(item.id), []),
                     pending_corrections=figure_pending_corrections.get(str(item.id), []),
                     object_review_audits=figure_audits.get(str(item.id), []),
+                    direct_review=direct_figure_reviews.get(str(item.id)),
                     field_conflicts=figure_conflicts.get(str(item.id), []),
                     duplicate_group_size=self._figure_duplicate_group_size(figures, item),
                 )
@@ -890,14 +1003,18 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             references=[ReferenceEntryResponse.model_validate(item) for item in references],
             figure_data_points_items=[FigureDataPointResponse.model_validate(item) for item in figure_data_points],
             artifact_status=build_paper_artifact_status(paper),
-            rag_quality=build_rag_quality_summary(
-                self.session,
-                figures=figures,
-                dft_results=dft_results,
-                writing_cards=writing_cards,
-                dft_gate_by_id=dft_gate_by_id,
+            rag_quality=(
+                build_rag_quality_summary(
+                    self.session,
+                    figures=figures,
+                    dft_results=dft_results,
+                    writing_cards=writing_cards,
+                    dft_gate_by_id=dft_gate_by_id,
+                )
+                if include_expensive_status
+                else {}
             ),
-            chart_review_status=_chart_review_status_for_detail(self.session, paper_id, chart_run_id=chart_run_id),
+            chart_review_status=chart_review_status,
             **review_status,
         )
 
@@ -951,8 +1068,18 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             dft_review_status = "missing"
         elif "needs_human_confirmation" in normalized_dft_statuses:
             dft_review_status = "conflict"
-        elif normalized_dft_statuses.intersection(
-            {"ml_ready", "human_reviewed_needs_evidence", "gemini_verified", "rejected", "verified", "human_verified"}
+        elif normalized_dft_statuses.issubset(
+            {
+                "ml_ready",
+                "ai_verified_ml_ready",
+                "human_reviewed_needs_evidence",
+                "gemini_verified",
+                "rejected",
+                "verified",
+                "human_verified",
+                "human_confirmed",
+                "citation_ready",
+            }
         ):
             dft_review_status = "reviewed"
         else:
@@ -969,6 +1096,9 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             "has_active_dft_candidates": active_dft_count > 0,
             "active_dft_candidate_count": active_dft_count,
         }
+        manual_progress = review_status["manual_review_progress"]
+        content_completed = bool((manual_progress.get("content") or {}).get("completed"))
+        figures_completed = bool((manual_progress.get("figures") or {}).get("completed"))
         base = self._build_list_item_with_counts(
             paper,
             counts,
@@ -980,8 +1110,22 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         return PaperDetailResponse(
             **base.model_dump(),
             artifact_status=build_paper_artifact_status(paper),
+            abstract_review_status=(
+                "reviewed" if content_completed and paper.abstract else ("raw_only" if paper.abstract else "missing")
+            ),
+            sections_review_status=(
+                "reviewed"
+                if content_completed and counts.get("sections")
+                else ("raw_only" if counts.get("sections") else "missing")
+            ),
+            figures_review_status=(
+                "reviewed"
+                if figures_completed and counts.get("figures")
+                else ("raw_only" if counts.get("figures") else "missing")
+            ),
             dft_review_status=dft_review_status,
-            chart_review_status=_chart_review_status_for_detail(self.session, paper_id, chart_run_id=chart_run_id),
+            writing_cards_review_status=("raw_only" if counts.get("writing_cards") else "missing"),
+            chart_review_status={},
             dft_results_page={
                 "offset": 0,
                 "limit": DFT_DETAIL_PAGE_SIZE,
@@ -989,6 +1133,48 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                 "total": counts.get("dft_results", 0),
                 "has_more": bool(counts.get("dft_results")),
             },
+        )
+
+    def get_paper_dft_detail(self, paper_id: UUID) -> PaperDetailResponse | None:
+        paper = self.session.get(Paper, paper_id)
+        if paper is None:
+            return None
+        if ensure_paper_codes(self.session, [paper]):
+            self.session.commit()
+        detail = self._get_light_paper_detail(paper)
+        dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
+        catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()
+        electrochemical_items = self.session.scalars(
+            select(ElectrochemicalPerformance).where(ElectrochemicalPerformance.paper_id == paper_id)
+        ).all()
+        mechanism_claims = self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)).all()
+        mechanism_claim_ids = {str(item.id) for item in mechanism_claims}
+        mechanism_claim_audits = self._object_review_audits_by_target(
+            paper_id,
+            mechanism_claim_ids,
+            target_types={"mechanism_claim", "mechanism_claims"},
+        )
+        mechanism_claim_conflicts = ReviewConflictAggregationService(self.session).conflicts_by_target(
+            paper_ids={paper_id},
+            target_type="mechanism_claims",
+            target_ids=mechanism_claim_ids,
+        )
+        return detail.model_copy(
+            update={
+                "dft_settings_items": [DFTSettingResponse.model_validate(item) for item in dft_settings],
+                "catalyst_samples_items": [self._serialize_catalyst_sample(item) for item in catalyst_samples],
+                "electrochemical_performance_items": [
+                    ElectrochemicalPerformanceResponse.model_validate(item) for item in electrochemical_items
+                ],
+                "mechanism_claims_items": [
+                    self._serialize_mechanism_claim(
+                        item,
+                        object_review_audits=mechanism_claim_audits.get(str(item.id), []),
+                        field_conflicts=mechanism_claim_conflicts.get(str(item.id), []),
+                    )
+                    for item in mechanism_claims
+                ],
+            }
         )
 
     def get_dft_results_page(

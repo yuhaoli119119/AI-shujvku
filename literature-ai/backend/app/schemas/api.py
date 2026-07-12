@@ -198,6 +198,9 @@ class PaperFigureResponse(BaseModel):
     object_review_audit_count: int = 0
     object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
     latest_object_review_audit: dict[str, Any] | None = None
+    review_status: str = "unreviewed"
+    reviewed_at: datetime | None = None
+    reviewed_by: str | None = None
     conflict_count: int = 0
     field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -277,6 +280,8 @@ class DFTResultResponse(BaseModel):
     ai_review_display_label: str | None = None
     ai_review_display_reason: str | None = None
     ai_review_display_class: str | None = None
+    is_exportable: bool = False
+    export_safety: dict[str, Any] | None = None
     dft_workflow_state: str | None = None
     dft_workflow_label: str | None = None
     dft_workflow_reason: str | None = None

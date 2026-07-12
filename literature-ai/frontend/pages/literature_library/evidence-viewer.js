@@ -81,17 +81,6 @@ function figureTermLabel(value) {
     return raw;
 }
 
-function figureRagBlockedMap(detail) {
-    const blockedItems = detail && detail.rag_quality && detail.rag_quality.figures && Array.isArray(detail.rag_quality.figures.blocked_items)
-        ? detail.rag_quality.figures.blocked_items
-        : [];
-    const map = {};
-    blockedItems.forEach(function(item) {
-        if (item && item.source_id) map[item.source_id] = item;
-    });
-    return map;
-}
-
 function renderFigureParseDetailHtml(item) {
     item = item || {};
     const keyElements = Array.isArray(item.key_elements) ? item.key_elements : [];
@@ -238,6 +227,9 @@ function buildPdfJumpButtonHtml(options) {
         '<button class="btn ghost small" type="button" onclick="' + stopPrefix + 'triggerDetailLocatorAction(\'' + uid + '\')">' + esc(label) + '</button>';
 }
 
+const EVIDENCE_LOCATOR_INITIAL_LIMIT = 12;
+const EVIDENCE_LOCATOR_PAGE_SIZE = 24;
+
 function renderEvidenceLocators(locators) {
     const panel = $("evidenceLocatorsPanel");
     if (!panel) return;
@@ -256,9 +248,19 @@ function renderEvidenceLocators(locators) {
         return;
     }
 
-    var html = '';
-    locators.forEach(function(loc, idx) {
-        html += '<div class="section-card" style="margin-bottom:8px;padding:10px;">' +
+    const paperId = String(state.selectedPaperId || "");
+    state.evidenceLocatorVisibleCount = state.evidenceLocatorVisibleCount || {};
+    const visibleCount = Number(state.evidenceLocatorVisibleCount[paperId] || EVIDENCE_LOCATOR_INITIAL_LIMIT);
+    const ordered = locators.slice().sort(function(left, right) {
+        const leftExact = left && left.locator_status === "exact_page" ? 1 : 0;
+        const rightExact = right && right.locator_status === "exact_page" ? 1 : 0;
+        if (leftExact !== rightExact) return rightExact - leftExact;
+        return Number(right && right.locator_confidence || 0) - Number(left && left.locator_confidence || 0);
+    });
+    const visible = ordered.slice(0, visibleCount);
+    var html = '<div class="subtle" style="margin-bottom:8px;">优先显示可跳转的高置信度证据，共 ' + ordered.length + ' 条。</div>';
+    visible.forEach(function(loc) {
+        html += '<div class="evidence-locator-row" style="padding:10px 0;border-bottom:1px solid var(--color-border);">' +
             '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">' +
                 '<span style="font-size:12px;font-weight:700;color:var(--color-primary);">' + esc(ellipsis(loc.evidence_text || "无证据文本", 80)) + '</span>' +
                 locatorStatusBadge(loc.locator_status) +
@@ -275,7 +277,22 @@ function renderEvidenceLocators(locators) {
             '<div>' + locatorActionHtml(loc) + '</div>' +
         '</div>';
     });
+    if (visible.length < ordered.length) {
+        html += '<div style="margin-top:10px;">' +
+            '<button class="btn ghost small" type="button" onclick="showMoreEvidenceLocators()">显示更多证据（剩余 ' + (ordered.length - visible.length) + ' 条）</button>' +
+        '</div>';
+    }
     panel.innerHTML = html;
+}
+
+function showMoreEvidenceLocators() {
+    const paperId = String(state.selectedPaperId || "");
+    if (!paperId || !Array.isArray(state.selectedPaperEvidenceLocators)) return;
+    state.evidenceLocatorVisibleCount = state.evidenceLocatorVisibleCount || {};
+    state.evidenceLocatorVisibleCount[paperId] = Number(
+        state.evidenceLocatorVisibleCount[paperId] || EVIDENCE_LOCATOR_INITIAL_LIMIT
+    ) + EVIDENCE_LOCATOR_PAGE_SIZE;
+    renderEvidenceLocators(state.selectedPaperEvidenceLocators);
 }
 
 async function loadEvidenceLocators(paperId, options) {

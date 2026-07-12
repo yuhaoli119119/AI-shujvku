@@ -652,6 +652,7 @@ class ExternalAnalysisMaterializationMixin:
             "review_mode": metadata.get("review_mode"),
             "review_source": review_source,
             "overall_status": metadata.get("overall_status"),
+            "coverage_acknowledgement": raw_payload.get("coverage_acknowledgement"),
             "object_review_audits": audits,
             "uncertainties": raw_payload.get("uncertainties") or [],
             "notes": raw_payload.get("notes") or [],

@@ -151,7 +151,7 @@ def apply_evidence_review_result(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    """Apply auto-eligible figure/table evidence actions after local AI confirmation."""
+    """Apply safe web-AI figure/table suggestions; this endpoint cannot satisfy local-AI verification."""
 
     try:
         return EvidenceReviewBundleService(session, settings).apply_result(paper_id, payload, run_id=run_id, dry_run=dry_run)
@@ -206,7 +206,8 @@ def resolve_chart_review_actions(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
-    # Batch-resolve figure/table review actions through the same guarded apply path.
+    # HTTP callers may resolve safe actions, but only the authenticated MCP tool
+    # grants local-AI verification authority for chart-stage completion.
 
     try:
         return EvidenceReviewBundleService(session, settings).resolve_review_actions(paper_id, payload, run_id=run_id, dry_run=dry_run)

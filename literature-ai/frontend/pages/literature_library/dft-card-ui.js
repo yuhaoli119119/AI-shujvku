@@ -125,7 +125,7 @@ function isFinalizedDftResult(item, exportable) {
     const safety = item.export_safety || {};
     if (exportable || safety.is_exportable === true || safety.eligible === true) return true;
     const candidateStatus = String(item.candidate_status || "").trim().toLowerCase();
-    if (["ml_ready", "rejected", "human_confirmed", "citation_ready", "verified", "human_verified"].includes(candidateStatus)) {
+    if (["ml_ready", "ai_verified_ml_ready", "rejected", "human_confirmed", "citation_ready", "verified", "human_verified"].includes(candidateStatus)) {
         return true;
     }
     const workflowState = String(item.dft_workflow_state || "").trim().toLowerCase();

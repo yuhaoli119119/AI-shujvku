@@ -391,6 +391,10 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .paper-si-inline {
+      color: var(--color-success, #16a34a);
+      white-space: nowrap;
+    }
     .muted {
       color: var(--color-text-secondary);
       font-size: 12px;
@@ -1345,12 +1349,12 @@
         <select class="btn btn-ghost" id="webAiWorkflowSelect" title="网页 AI 图表/DFT 离线审核流程" onchange="handleWebAiWorkflowSelect()">
           <option value="">网页 AI 流程</option>
           <option id="exportEvidenceWorkflowOption" value="export_evidence">1 导出图表证据包</option>
-          <option value="copy_evidence_prompt">复制图表提示词</option>
+          <option value="copy_evidence_prompt">复制整篇图表提示词</option>
           <option id="returnEvidenceWorkflowOption" value="return_evidence">2 回传图表 JSON</option>
-          <option value="copy_evidence_local_ai">复制本地 AI 图表复核指令</option>
-          <option id="exportDftWorkflowOption" value="export_dft">3 导出 DFT 审核包</option>
+          <option value="copy_evidence_local_ai">3 复制本地 AI 全量图片复核指令</option>
+          <option id="exportDftWorkflowOption" value="export_dft">4 导出 DFT 审核包</option>
           <option value="copy_dft_prompt">复制 DFT 提示词</option>
-          <option id="returnDftWorkflowOption" value="return_dft">4 回传 DFT JSON</option>
+          <option id="returnDftWorkflowOption" value="return_dft">5 回传 DFT JSON</option>
         </select>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
@@ -1360,31 +1364,30 @@
         </select>
         <select class="btn btn-ghost" id="promptCopySelect" title="复制单篇 AI 审核提示词" onchange="handlePromptCopySelect()">
           <option value="">复制单篇任务提示词</option>
-          <option value="main_figure">主文图片审核提示词</option>
-          <option value="support_figure">支撑文献图片审核提示词</option>
-          <option value="table">表格审核提示词</option>
+          <option value="figure_table">整篇主文+DFT相关SI图表审核提示词</option>
           <option value="dft">DFT 数据审核与入库提示词</option>
         </select>
       </div>
     </div>
-    <section class="manual-review-scope-card is-unconfirmed" id="manualReviewScopeCard" aria-live="polite">
-      <span class="manual-review-scope-title">当前图表审核范围</span>
-      <span class="manual-review-scope-details" id="manualReviewScopeDetails">请先选择 AI 批次或明确选择整篇论文审核；已禁用导出图表证据包和回传图表 JSON。</span>
-    </section>
     <section class="manual-review-scope-card" id="dftEvidenceSummary" aria-live="polite">
       <span class="manual-review-scope-title">DFT 论文级证据</span>
       <span class="manual-review-scope-details">请选择一篇主文献；DFT 导出会自动聚合全部已完成且未过期的图表审核结果。</span>
     </section>
-    <section class="review-scope-chooser" id="reviewScopeChooser" aria-live="polite">
+    <details class="review-scope-chooser" id="reviewScopeChooser" aria-live="polite">
+      <summary><strong>高级：处理待补充图表或查看审核历史</strong> <span class="muted">DFT 数据查漏不需要选择 AI 批次。</span></summary>
+      <section class="manual-review-scope-card is-unconfirmed" id="manualReviewScopeCard">
+        <span class="manual-review-scope-title">当前图表审核范围</span>
+        <span class="manual-review-scope-details" id="manualReviewScopeDetails">请先选择 AI 批次或明确选择整篇论文审核；已禁用导出图表证据包和回传图表 JSON。</span>
+      </section>
       <div class="review-scope-chooser-head">
         <div>
-          <strong>选择审核范围</strong>
-          <div class="muted">默认只列出已有图表证据候选的 AI 批次；点击批次后才会固定审核范围。</div>
+          <strong>图表审核范围（高级）</strong>
+          <div class="muted">这里只在处理待补充图表时使用；已完成记录不会被列为待处理。</div>
         </div>
         <button class="btn btn-tinted btn-sm" id="wholePaperScopeButton" type="button" onclick="selectWholePaperScope()" disabled>整篇论文审核</button>
       </div>
       <div class="review-scope-run-list" id="reviewScopeRunList"><div class="muted">正在读取关联 AI 批次...</div></div>
-    </section>
+    </details>
 
     <section class="panel">
       <div class="panel-head">
@@ -1481,9 +1484,9 @@
       <div class="modal-body">
         <div class="web-ai-return-layout">
           <label class="web-ai-return-label" for="webAiReturnJson">
-            粘贴网页 AI 返回 JSON，或直接拖入 JSON 文件
-            <textarea class="web-ai-return-textarea" id="webAiReturnJson" spellcheck="false" placeholder="粘贴严格符合 return_schema.json 的 JSON，或把 .json 文件直接拖到这里；内容只保留在当前页面内存中。" oninput="handleWebAiReturnInput()" ondragenter="handleWebAiFileDrag(event)" ondragover="handleWebAiFileDrag(event)" ondragleave="handleWebAiFileDragLeave(event)" ondrop="handleWebAiFileDrop(event)"></textarea>
-            <span class="web-ai-return-file-hint"><strong>支持桌面拖放：</strong>文件只在当前页面内存中读取，不会上传保存；读取后仍需点击“校验结果”。</span>
+            拖入网页 AI 回复的 JSON 文件（也支持粘贴）
+            <textarea class="web-ai-return-textarea" id="webAiReturnJson" spellcheck="false" placeholder="优先把网页 AI 回复的 .json 文件拖到这里；仅在无法生成文件时才粘贴 JSON。内容只保留在当前页面内存中。" oninput="handleWebAiReturnInput()" ondragenter="handleWebAiFileDrag(event)" ondragover="handleWebAiFileDrag(event)" ondragleave="handleWebAiFileDragLeave(event)" ondrop="handleWebAiFileDrop(event)"></textarea>
+            <span class="web-ai-return-file-hint"><strong>优先文件回复：</strong>网页 AI 应返回一个 .json 文件；拖入后只在当前页面内存中读取，不会上传保存，随后点击“校验结果”。</span>
           </label>
           <div class="web-ai-validation-box" id="webAiValidationResult">尚未校验。校验成功也不会自动入库。</div>
         </div>
@@ -1536,11 +1539,23 @@
       paperId: "",
       paperCode: "",
       validatedRawText: "",
-      validationResponse: null
+      validationResponse: null,
+      lastValidationIssues: []
     };
     let dftReviewPreview = null;
     let manualScopeMismatchMessage = "";
     const PROMPT_COPY_ACTIONS = {
+      figure_table: {
+        kind: "figure_table",
+        sourceKind: "figure_table",
+        label: "整篇主文+DFT相关SI图表审核提示词",
+        targetScope: "main",
+        scopeNote: [
+          "目标：只选择一篇主文献；一次审核该主文全部图表、与 DFT 明确相关或可能相关的 SI 图片，以及 SI 表格。纯实验或与 DFT 无关的 SI 图片不进入本次范围。",
+          "包内每个对象必须保留真实 source_paper_id、source_paper_code、source_document_type、page 和对象 ID；不得按 DFT 关键词跳过 SI 图表。",
+          "只输出一份覆盖整包所有 figure/table 的 JSON；服务器按对象真实所属 paper_id 受控写回。"
+        ].join("\\n")
+      },
       main_figure: {
         kind: "figure",
         sourceKind: "main_figure",
@@ -1647,6 +1662,7 @@
       webAiReturnState.paperCode = "";
       webAiReturnState.validatedRawText = "";
       webAiReturnState.validationResponse = null;
+      webAiReturnState.lastValidationIssues = [];
       try { window.sessionStorage.removeItem(REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY); } catch (_) {}
       replaceReviewCenterTargetUrl(selectedPaperId);
       clearWebAiReturnTransientState(manualScopeMismatchMessage);
@@ -1659,9 +1675,21 @@
         showToast("请先只选择一篇主文献。", "error");
         return false;
       }
-      if (!activeEvidenceScope() || String(manualReviewContext.paperId) !== String(target.paper_id)) {
-        showToast(manualScopeMismatchMessage || "请先从 " + (target.paper_code || "当前主文献") + " 选择图表审核批次。", "error");
-        return false;
+      if (!activeEvidenceScope() || String(manualReviewContext.paperId) !== String(target.paper_id) || manualReviewContext.runId) {
+        // Normal flow is paper-scoped: selecting the main paper implicitly
+        // selects one aggregate scope. Run/history selection remains in the
+        // advanced audit area and cannot narrow the normal export.
+        resetManualReviewContext();
+        Object.assign(manualReviewContext, {
+          paperId: String(target.paper_id),
+          paperCode: String(target.paper_code || ""),
+          mode: "evidence",
+          confirmed: true,
+          scopeType: "paper"
+        });
+        persistManualReviewContext();
+        updateManualReviewUrl();
+        renderManualReviewScope();
       }
       return true;
     }
@@ -1879,17 +1907,20 @@
           if (run !== representative) duplicateRuns.push(run);
         });
       });
-      const preferred = recommendedRuns.find(function(run) { return Boolean(run.is_primary_completed_run); }) ||
-        recommendedRuns.find(function(run) { return String(run.stage_status || "") === "completed"; });
-      const visibleRuns = recommendedRuns.filter(function(run) { return run !== preferred; });
-      const preferredCard = preferred
-        ? '<div class="muted" style="margin:4px 0 6px;">当前主文推荐批次</div>' + renderRun(preferred)
-        : "";
-      const pendingCard = visibleRuns.length
-        ? '<div class="muted" style="margin:10px 0 6px;">待处理批次</div>' + visibleRuns.map(renderRun).join("")
+      const pendingRuns = recommendedRuns.filter(function(run) {
+        return !["completed", "not_required"].includes(String(run.stage_status || ""));
+      });
+      const completedRuns = recommendedRuns.filter(function(run) {
+        return ["completed", "not_required"].includes(String(run.stage_status || ""));
+      });
+      const pendingCard = pendingRuns.length
+        ? '<div class="muted" style="margin:10px 0 6px;">待补充图表（' + pendingRuns.length + ' 条）</div>' + pendingRuns.map(renderRun).join("")
+        : '<div class="muted" style="margin:10px 0 6px;">当前没有待补充图表。</div>';
+      const completedCard = completedRuns.length
+        ? '<details class="review-scope-history"><summary>已完成历史（' + completedRuns.length + ' 条）</summary>' + completedRuns.map(renderRun).join("") + '</details>'
         : "";
       const duplicateCount = duplicateRuns.length;
-      list.innerHTML = preferredCard + pendingCard + (duplicateCount
+      list.innerHTML = pendingCard + completedCard + (duplicateCount
         ? '<details class="review-scope-history"><summary>历史重复执行（' + duplicateCount + ' 条）</summary>' + duplicateRuns.map(renderRun).join("") + '</details>'
         : "") + (historyRuns.length
         ? '<details class="review-scope-history"><summary>更多历史批次（' + historyRuns.length + '）</summary>' + historyRuns.map(renderRun).join("") + '</details>'
@@ -2013,6 +2044,26 @@
     function supplementaryGroup(row) {
       const group = row && row.supplementary_group;
       return group && typeof group === "object" ? group : null;
+    }
+
+    function applyLiveChartStageToSupplementaryGroup(paperId, stage) {
+      const targetPaperId = String(paperId || "");
+      if (!targetPaperId) return false;
+      const targetRow = state.rows.find(function (row) {
+        return String(row && row.paper_id || "") === targetPaperId;
+      });
+      if (!targetRow) return false;
+      const targetGroup = supplementaryGroup(targetRow);
+      const mainPaperId = String(targetGroup && targetGroup.main_paper_id || targetRow.paper_id || "");
+      let updated = false;
+      state.rows.forEach(function (row) {
+        const group = supplementaryGroup(row);
+        const rowMainPaperId = String(group && group.main_paper_id || row && row.paper_id || "");
+        if (rowMainPaperId !== mainPaperId) return;
+        row._live_chart_stage = String(stage || "unknown");
+        updated = true;
+      });
+      return updated;
     }
 
     function supplementaryGroupLabel(row) {
@@ -2261,7 +2312,8 @@
         (webAiReturnState.validationResponse && webAiReturnState.validationResponse.review_mode) ||
         (dftReviewPreview && dftReviewPreview.review_mode) || ""
       );
-      return reviewMode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
+      return reviewMode === "comprehensive_review" ? "DFT 全量核验（已有+查漏）" :
+        (reviewMode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审");
     }
 
     async function refreshDftReviewPreview() {
@@ -2276,15 +2328,30 @@
       try {
         dftReviewPreview = await fetchJSON("/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-state");
         const summary = dftReviewPreview.summary || {};
-        const modeLabel = dftReviewPreview.review_mode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
+        const modeLabel = dftReviewPreview.review_mode === "comprehensive_review" ? "DFT 全量核验（已有+查漏）" :
+          (dftReviewPreview.review_mode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审");
         const exportOption = document.getElementById("exportDftWorkflowOption");
         const returnOption = document.getElementById("returnDftWorkflowOption");
-        if (exportOption) exportOption.textContent = "3 导出 " + modeLabel + "包";
-        if (returnOption) returnOption.textContent = "4 回传 " + modeLabel + " JSON";
-        box.querySelector(".manual-review-scope-details").textContent =
-          modeLabel + "；DFT证据：已审核" + Number(summary.reviewed_figures || 0) + "图、" +
-          Number(summary.reviewed_tables || 0) + "表；另有" + Number(summary.pending_main_figures || 0) +
-          "图待补充；SI原始线索" + Number(summary.unreviewed_supporting_context || 0) + "。";
+        if (exportOption) exportOption.textContent = "4 导出 " + modeLabel + "包（仅已完成两级审核图片）";
+        if (returnOption) returnOption.textContent = "5 回传 " + modeLabel + " JSON";
+        const mainFigures = Number(summary.reviewed_main_figures || 0);
+        const mainTables = Number(summary.reviewed_main_tables || 0);
+        const supportingFigures = Math.max(0, Number(summary.reviewed_figures || 0) - mainFigures);
+        const supportingTables = Math.max(0, Number(summary.reviewed_tables || 0) - mainTables);
+        const pendingMainFigures = Number(summary.pending_main_figures || 0);
+        const pendingSupportingFigures = Number(summary.pending_supporting_figures || 0);
+        const gateStage = String(dftReviewPreview.review_gate && dftReviewPreview.review_gate.stage_status || "unknown");
+        const chartStageUpdated = applyLiveChartStageToSupplementaryGroup(target.paper_id, gateStage);
+        const supportingEvidence = [];
+        if (supportingFigures) supportingEvidence.push("SI " + supportingFigures + " 图");
+        if (supportingTables) supportingEvidence.push("SI " + supportingTables + " 表");
+        box.querySelector(".manual-review-scope-details").textContent = gateStage === "completed" || gateStage === "not_required"
+          ? modeLabel + "：已完成两级审核的证据为主文 " + mainFigures + " 图、" + mainTables + " 表" +
+            (supportingEvidence.length ? "；" + supportingEvidence.join("、") : "") + "。"
+          : modeLabel + "暂不可导出：图表阶段 " + gateStage + "。待完成两级审核：主文 " +
+            pendingMainFigures + " 图、SI " + pendingSupportingFigures +
+            " 图；必须先应用网页 AI 图表结果，再由本地 AI 逐图对照 PDF 核验。";
+        if (chartStageUpdated) renderRows();
       } catch (error) {
         dftReviewPreview = null;
         box.querySelector(".manual-review-scope-details").textContent = "DFT 证据摘要读取失败：" + error.message;
@@ -2319,7 +2386,10 @@
           if (ragStatus === "blocked" || blocked > 0) {
             return "图表证据阶段不能进入 DFT：仍有 " + blocked + " 个图表 RAG 不合格。请先在图表页补齐图类型、图摘要、关键元素或修复裁图，再重新回传图表 JSON。";
           }
-          return "图表证据阶段尚未完成或已过期（stage_status=" + stage + "）。请先执行“1 导出图表证据包”并“2 回传图表 JSON”；完成后再导出 DFT 终审包。";
+          if (stage === "needs_local_ai") {
+            return "图表证据阶段尚未完成：网页 AI 结果之后，仍有图片缺少本地 AI 逐图 PDF 核验。请执行第 3 步“本地 AI 全量图片复核”，完成后再导出 DFT 包。";
+          }
+          return "图表证据阶段尚未完成或已过期（stage_status=" + stage + "）。请依次完成网页 AI 图表审核和本地 AI 全量图片复核，再导出 DFT 包。";
         }
         if (detail.message) return detail.message;
         if (detail.code) return detail.code;
@@ -2334,44 +2404,50 @@
 
     function buildWebAiEvidencePrompt() {
       return [
-        "请解压并阅读这个图表证据整理包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
+        "请解压这个图表证据整理包。第一步打开 START_HERE.md，然后打开 WEB_AI_FILL_THIS.json；禁止脱离该文件重新生成 JSON 结构。",
+        "把 WEB_AI_FILL_THIS.json 作为唯一输出对象直接填写，先读 OUTPUT_RULES.json，再用 return_schema.json 自检。完成后保存为 <paper_code>_chart_review_result.json，并以 JSON 文件附件回复；不要把长 JSON 粘贴在聊天正文中，也不要输出 Markdown、解释文字或外层 wrapper。",
         "",
         "你的任务是把系统当前抽取的图片和表格还原成可信证据：",
-        "- 图片 crop 正确填 KEEP；裁剪不完整或错位填 RECROP，并给出 page 与 bbox_norm；",
+        "- 硬约束：每一条 figure_actions/table_actions 都必须引用一个或多个包内真实 evidence_ids；从 parsed/extracted_figures.json、parsed/extracted_tables.json 或 manifest.json 复制，禁止编造或留空。",
+        "- 图片 crop 正确填 KEEP；裁剪不完整或错位填 RECROP，并给出 page、bbox_norm 与真实 evidence_ids；",
         "- 每张保留的科学图片必须补齐具体 figure_role、content_summary、key_elements；缺任一项时不要只填 KEEP；",
-        "- 漏图填 CREATE，并给出 page、bbox_norm、caption、figure_role、content_summary、key_elements；",
-        "- 表格正确填 KEEP；表格缺行、缺列、跨页断裂或单位/脚注缺失填 UPDATE，并返回完整 complete_markdown；",
-        "- 漏表填 CREATE；删除填 DELETE；无法判断时填 NEEDS_HUMAN，但 NEEDS_HUMAN 会保持待复核，不能完成图表阶段。",
+        "- 漏图填 CREATE，并给出 source_paper_id、page、bbox_norm、caption、figure_role、content_summary、key_elements 与真实 evidence_ids；没有证据编号时不要创建。",
+        "- 表格正确填 KEEP；表格缺行、缺列、跨页断裂或单位/脚注缺失填 UPDATE，并返回完整 complete_markdown 和真实 evidence_ids；",
+        "- 漏表填 CREATE；删除填 DELETE；这两类也必须带真实 evidence_ids。无法判断时填 NEEDS_HUMAN，但 NEEDS_HUMAN 会保持待复核，不能完成图表阶段。",
         "- MERGE 只用于两个已有表格对象合并，必须填写 source_table_id 和 target_table_id，且二者不能相同；不要给同一个 table_id 输出多个 action。",
         "- dft_relevance 只能填写 none / possible / explicit_dft / unknown；不要写 true/false/yes/no/dft_relevant。",
         "",
         "只把图/表里明确写出的 DFT 数值作为 dft_evidence_candidates；不要从曲线、柱状图或颜色图估读数值。",
         "不要声称已经写库、verified、已确认或 ML_Ready。系统会校验 JSON 后从原 PDF 重新裁剪/回写。",
         "",
-        "最终只输出一份严格符合 return_schema.json 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
+        "最终只回复一份严格符合 return_schema.json 的 JSON 文件附件，不要使用 Markdown 代码块、不要粘贴 JSON 正文、不要添加解释性文字。"
       ].join("\n");
     }
 
     function buildWebAiDftPrompt() {
       return [
-        "请解压并阅读这个 DFT 审核包中的 instructions_for_web_ai.md、manifest、返回 schema 和 JSON 模板。",
+        "请解压这个 DFT 审核包。第一步打开 START_HERE.md，然后打开 WEB_AI_FILL_THIS.json；禁止脱离该文件重新生成 JSON 结构。",
+        "把 WEB_AI_FILL_THIS.json 作为唯一输出对象直接填写，先读 OUTPUT_RULES.json，再用 return_schema.json 自检。完成后保存为 <paper_code>_web_ai_result.json，并以 JSON 文件附件回复；不要把长 JSON 粘贴在聊天正文中，也不要输出 Markdown、解释文字或外层 wrapper。",
         "",
         "请先检查 parsed/curated_figure_table_evidence_snapshot.json：",
         "- 如果 stage_status 不是 completed/not_required，或 completed_snapshot_fingerprint 与当前快照不一致，图表证据还没有完成第一阶段闭环；不要产出 DFT 终审 JSON。",
         "- 如果 rag_quality_status=blocked 或 rag_quality.figures.blocked > 0，图表仍不满足 RAG 要求；不要产出 DFT 终审 JSON，应先回到图表证据整理补齐图类型、content_summary、key_elements 和裁图问题。",
         "- 如果已经 completed/not_required，请保留 return_template.json 中的聚合 fingerprint，并先读取 existing_terminal_context 去重。",
         "",
-        "请逐条核验 DFT 数据：",
+        "本包只需审核一次，并且必须在同一次结果中完成两个任务：",
+        "1. 逐条核验已有 DFT 数据；2. 扫描全部 eligible_for_auto_apply=true 的正文、图、表证据并追加漏提数据。",
         "- 必须覆盖 return_template.coverage_acknowledgement.expected_target_ids / manifest.target_dft_result_ids 里的每一个已有 target_id；证据不足也要为该 target_id 返回 NEEDS_HUMAN；",
         "- 正确填 PASS；",
         "- 需要修正填 REVISE；",
         "- 错误或重复填 REJECT；",
-        "- gap_discovery 表示查漏，不代表完成了现有 DFT 数据终审；发现真正未收录且有 reviewed evidence 的数据才填 new_candidate；",
+        "- 处理完已有 target_id 后，必须继续逐项检查包内全部合格证据；发现真正未收录且有 reviewed evidence 的数据填 new_candidate；",
+        "- 只有已有候选核验和全证据查漏都完成后，才把 coverage_acknowledgement.missing_data_search_complete 设为 true，并把 overall_status 设为 completed；",
+        "- 硬约束：target_id=\"new\" 当且仅当 decision=\"new_candidate\"；PASS/REVISE/REJECT/NEEDS_HUMAN 必须使用 dft_review_checklist.json 中真实已有的 target_id；",
         "- new_candidate 必须对 existing_terminal_context 提供 dedupe_analysis（compared_target_ids、conclusion=distinct、reason）；",
         "- 无法确认填 NEEDS_HUMAN。",
         "不得猜测或补造数据，每条意见必须引用包内真实 evidence_id。unreviewed_supporting_context 只能返回 NEEDS_HUMAN，不能支持自动写回。正文、SI、表格或图片对同一计算结果的重复证据应与 existing_terminal_context 合并判断，不要重复创建 DFT 结果。",
         "",
-        "最终只输出一份严格符合 return_schema.json 的完整 JSON，不要使用 Markdown 代码块，不要添加解释性文字。"
+        "输出文件前必须重新解析 JSON，并逐条检查 target_id 与 decision 的组合。最终只回复填写完成的 JSON 文件附件，不要粘贴 JSON 正文。"
       ].join("\n");
     }
 
@@ -2442,7 +2518,7 @@
       const paperCode = String(target.paper_code || paperId.slice(0, 8) || "paper");
       const endpoint = normalizedMode === "evidence"
         ? "/api/papers/" + encodeURIComponent(paperId) + "/evidence-review-bundle?include_pdf_files=true&include_figure_files=true" + (runId ? "&run_id=" + encodeURIComponent(runId) : "")
-        : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true";
+        : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true&chart_scope=paper";
       const selector = document.getElementById("webAiWorkflowSelect");
       const previousTitle = selector ? selector.title : "";
       if (selector) {
@@ -2499,7 +2575,9 @@
         link.remove();
         window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
         if (normalizedMode === "dft") {
-          const modeLabel = response.headers.get("X-LitAI-DFT-Review-Mode") === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审";
+          const responseMode = response.headers.get("X-LitAI-DFT-Review-Mode");
+          const modeLabel = responseMode === "comprehensive_review" ? "DFT 全量核验（已有+查漏）" :
+            (responseMode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审");
           showToast(modeLabel + "包已开始下载：已审核" +
             Number(response.headers.get("X-LitAI-Reviewed-Figures") || 0) + "图、" +
             Number(response.headers.get("X-LitAI-Reviewed-Tables") || 0) + "表；另有" +
@@ -2980,7 +3058,7 @@
       }
       if (copyButton) {
         copyButton.style.display = "";
-        copyButton.textContent = isEvidenceMode ? "复制本地 AI 图表复核指令" : "复制本地 AI 处理指令";
+        copyButton.textContent = isEvidenceMode ? "复制本地 AI 全量图片复核指令" : "复制本地 AI 处理指令";
         copyButton.disabled = true;
       }
       if (finalizeButton) {
@@ -3059,7 +3137,7 @@
       syncWebAiReturnModeButtons();
       setWebAiValidationBox(
         normalizedMode === "evidence"
-          ? "尚未校验。图表 JSON 校验通过后，可应用安全操作；若仍有 unresolved_actions，可复制本地 AI 图表复核指令一次批量闭环。"
+          ? "尚未校验。网页 AI 图表 JSON 校验并应用后，必须复制本地 AI 全量图片复核指令；全部图片复核完成后才能导出 DFT 包。"
           : "尚未校验。DFT JSON 校验成功也不会自动入库。",
         ""
       );
@@ -3176,6 +3254,7 @@
       unknown_dft_candidate_evidence_id: "图表 DFT 候选引用的 evidence_id 不存在",
       evidence_not_checked: "该结论要求 evidence_checked=true",
       incomplete_candidate_coverage: "标记完成时仍有 DFT 候选未逐条审核",
+      incomplete_missing_data_search: "标记完成前必须扫描包内全部合格证据并确认 DFT 查漏已完成",
       coverage_acknowledgement_mismatch: "覆盖清单与当前 DFT 候选集合不一致",
       incomplete_figure_coverage: "标记完成时仍有图片未逐项审核",
       incomplete_table_coverage: "标记完成时仍有表格未逐项审核",
@@ -3236,7 +3315,14 @@
     }
 
     function renderWebAiValidationFailure(errors, warnings) {
-      const errorItems = dedupeValidationIssues(errors).map(function (item) {
+      const normalizedErrors = dedupeValidationIssues(errors);
+      webAiReturnState.lastValidationIssues = normalizedErrors;
+      webAiReturnState.lastValidationWarnings = Array.isArray(warnings) ? warnings : [];
+      const dftEvidenceMismatch = webAiReturnState.mode === "dft" && (
+        normalizedErrors.some(function(item) { return item.code === "unrelated_evidence_id"; }) ||
+        webAiReturnState.lastValidationWarnings.some(function(item) { return item && item.code === "completed_with_uncertainties"; })
+      );
+      const errorItems = normalizedErrors.map(function (item) {
         return "<li>" + esc(webAiValidationIssueText(item)) +
           (item.refs.length ? " <span class=\"muted\">（相关 " + esc(item.refs.join("，")) + "）</span>" : "") + "</li>";
       }).join("");
@@ -3244,18 +3330,136 @@
         return "<li>[" + esc(item && item.code || "warning") + "] " + esc(item && item.message || "需要本地 AI 复核") + "</li>";
       }).join("");
       const copyButton = document.getElementById("webAiCopyInstructionBtn");
-      if (copyButton && webAiReturnState.mode === "evidence" && webAiReturnState.paperId) {
-        copyButton.disabled = false;
-      }
+      if (copyButton) copyButton.disabled = true;
       setWebAiValidationBox(
         "<strong>校验失败，已停止。</strong>" +
         (errorItems ? "<ul>" + errorItems + "</ul>" : "") +
         (warningItems ? "<div><strong>提示</strong><ul>" + warningItems + "</ul></div>" : "") +
-        (webAiReturnState.mode === "evidence" && webAiReturnState.paperId
-          ? '<div style="margin-top:10px;">旧 JSON 不能继续应用，但可以复制本地 AI 图表复核指令；指令会读取当前 chart-review-task，只处理当前未解决项。</div>'
+        (dftEvidenceMismatch
+          ? '<div style="margin-top:10px;"><strong>这是证据语义不匹配，不是 JSON 格式错误。</strong><button class="btn btn-tinted btn-sm" type="button" style="margin-left:8px;" onclick="copyLocalAiDftEvidenceVerificationInstruction()">复制本地 AI 精确核验指令</button><span class="muted" style="margin-left:8px;">不要再把同一份 JSON 反复交回网页 AI；本地 AI 需逐条核对目标和 PDF 证据，不能通过时只报告阻塞项。</span></div>'
+          : webAiReturnState.mode === "dft" && normalizedErrors.length
+          ? '<div style="margin-top:10px;"><button class="btn btn-tinted btn-sm" type="button" onclick="copyWebAiJsonRepairPrompt()">复制 JSON 修复提示</button><span class="muted" style="margin-left:8px;">把原 JSON 和本次错误一起交回网页 AI，只修格式后以 JSON 文件附件回复。</span></div>'
+          : "") +
+        (webAiReturnState.mode === "evidence" && normalizedErrors.length
+          ? '<div style="margin-top:10px;"><button class="btn btn-tinted btn-sm" type="button" onclick="copyWebAiEvidenceJsonRepairPrompt()">复制图表 JSON 修复提示</button><span class="muted" style="margin-left:8px;">这是网页 AI JSON 的格式/证据契约问题；先交回网页 AI修复，不需要发送给本地 AI。</span></div>'
           : ""),
         "is-error"
       );
+    }
+
+    async function copyWebAiEvidenceJsonRepairPrompt() {
+      const textarea = document.getElementById("webAiReturnJson");
+      const rawText = String(textarea && textarea.value || "").trim();
+      const issues = Array.isArray(webAiReturnState.lastValidationIssues)
+        ? webAiReturnState.lastValidationIssues.map(webAiValidationIssueText)
+        : [];
+      if (!rawText || !issues.length) {
+        showToast("当前没有可复制的 JSON 和校验错误。");
+        return;
+      }
+      const outputName = (webAiReturnState.paperCode || "paper") + "_chart_review_result.json";
+      const prompt = [
+        "只修复下面图表审核 JSON 的格式和证据契约错误，不要重新分析论文，不要改变没有被错误点名的科学结论。",
+        "",
+        "本次系统校验错误：",
+        issues.map(function(item, index) { return String(index + 1) + ". " + item; }).join("\n"),
+        "",
+        "强制规则：",
+        "- 每一条 figure_actions/table_actions 都必须有一个或多个真实 evidence_ids；只能从原审核包的 manifest.json、parsed/extracted_figures.json 或 parsed/extracted_tables.json 复制，禁止编造。",
+        "- 每一条 CREATE figure 必须有 source_paper_id、page、bbox_norm、evidence_checked=true 和真实 evidence_ids。",
+        "- 若某个新增图/表无法对应包内 evidence_id，删除该不受支持的 CREATE 动作；不要留空 evidence_ids，也不要把它改成没有 figure_id/table_id 的 NEEDS_HUMAN。",
+        "- 不得修改 schema_version、bundle_fingerprint、paper_id、paper_code、scope_type、run_id、chart_run_id。",
+        "- 修复后重新解析 JSON，并按 return_schema.json 自检。",
+        "- 最终保存为 " + outputName + "，并以 JSON 文件附件回复；不要把 JSON 粘贴到聊天正文，不要 Markdown、解释或代码块。",
+        "",
+        "待修复的原始 JSON：",
+        rawText
+      ].join("\n");
+      try {
+        await copyTextToClipboard(prompt);
+        showToast("图表 JSON 修复提示已复制，请交回网页 AI。", "success");
+      } catch (error) {
+        showToast("复制失败，请检查浏览器剪贴板权限。", "error");
+      }
+    }
+
+    async function copyWebAiJsonRepairPrompt() {
+      const textarea = document.getElementById("webAiReturnJson");
+      const rawText = String(textarea && textarea.value || "").trim();
+      const issues = Array.isArray(webAiReturnState.lastValidationIssues)
+        ? webAiReturnState.lastValidationIssues.map(webAiValidationIssueText)
+        : [];
+      if (!rawText || !issues.length) {
+        showToast("当前没有可复制的 JSON 和校验错误。");
+        return;
+      }
+      const outputName = (webAiReturnState.paperCode || "paper") + "_web_ai_result.json";
+      const prompt = [
+        "只修复下面 JSON 的格式和契约错误，不要重新分析论文，不要改变没有被错误点名的科学结论。",
+        "",
+        "本次系统校验错误：",
+        issues.map(function(item, index) { return String(index + 1) + ". " + item; }).join("\n"),
+        "",
+        "强制规则：",
+        "- target_id=\"new\" 当且仅当 decision=\"new_candidate\"。",
+        "- PASS、REVISE、REJECT、NEEDS_HUMAN 必须使用原模板/checklist 中真实已有的 target_id，不能使用 new。",
+        "- 不得修改 schema_version、bundle_fingerprint、chart_scope_type、chart_run_id、review_mode、figure_table_completed_snapshot_fingerprint、paper_id、paper_code。",
+        "- 修复后重新解析 JSON，并按 return_schema.json 自检。",
+        "- 最终保存为 " + outputName + "，并以 JSON 文件附件回复；不要把 JSON 粘贴到聊天正文，不要 Markdown、解释或代码块。",
+        "",
+        "待修复的原始 JSON：",
+        rawText
+      ].join("\n");
+      try {
+        await copyTextToClipboard(prompt);
+        showToast("JSON 修复提示已复制，请交回网页 AI。", "success");
+      } catch (error) {
+        showToast("复制失败，请检查浏览器剪贴板权限。", "error");
+      }
+    }
+
+    async function copyLocalAiDftEvidenceVerificationInstruction() {
+      const textarea = document.getElementById("webAiReturnJson");
+      const rawText = String(textarea && textarea.value || "").trim();
+      const issues = Array.isArray(webAiReturnState.lastValidationIssues)
+        ? webAiReturnState.lastValidationIssues.map(webAiValidationIssueText)
+        : [];
+      const warnings = Array.isArray(webAiReturnState.lastValidationWarnings)
+        ? webAiReturnState.lastValidationWarnings.map(webAiValidationIssueText)
+        : [];
+      if (!rawText || !issues.length) {
+        showToast("当前没有可交给本地 AI 的 DFT JSON 和校验错误。");
+        return;
+      }
+      const prompt = [
+        "这是一次 DFT 证据语义核验，不是格式修复，也不是导入任务。不要修改项目代码。",
+        "当前网页 AI JSON 未通过校验；禁止 apply、import_analysis 或直接写数据库。",
+        "",
+        "当前论文号：" + (webAiReturnState.paperCode || "-"),
+        "paper_id：" + (webAiReturnState.paperId || "-"),
+        "",
+        "校验错误：",
+        issues.concat(warnings).map(function(item, index) { return String(index + 1) + ". " + item; }).join("\n"),
+        "",
+        "执行要求：",
+        "1. 打开原 DFT 审核包，逐条读取 parsed/dft_review_checklist.json、manifest.json 和 evidence/；同时用 get_codex_item 与 read_paper_page 核对候选的材料、性质、数值、单位及来源页。",
+        "2. 对每条 unrelated_evidence_id：只能保留真正包含该目标数值或明确对应来源图/表/段落的 reviewed evidence_id。不要用同一篇论文里的任意图表凑数，不要编造 evidence_id。",
+        "3. 若审核包中没有任何已审核证据直接支持某个目标：不要伪造 PASS、REVISE、REJECT、NEEDS_HUMAN 或 new_candidate；列出该 target_id 和原因并停止，等待补充合格证据。",
+        "4. overall_status=completed 但 uncertainties 非空时，不得宣称完成；先逐项消除不确定性，或明确报告阻塞项。",
+        "5. 只有所有保留审核意见都与真实证据逐条匹配后，才生成新的 JSON 文件并重新 validate；validate 通过前绝不 apply 或 import。",
+        "6. 最后只报告：可安全重提校验的条目、缺证据的 target_id、是否仍有阻塞项。",
+        "",
+        "网页 AI 的原始 JSON（仅作待核对草稿）：",
+        "-----BEGIN WEB AI REVIEW JSON-----",
+        rawText,
+        "-----END WEB AI REVIEW JSON-----"
+      ].join("\n");
+      try {
+        await copyTextToClipboard(prompt);
+        showToast("已复制本地 AI DFT 精确核验指令；不要再反复提交同一份网页 AI JSON。", "success");
+      } catch (error) {
+        showToast("复制失败，请检查浏览器剪贴板权限。", "error");
+      }
     }
 
     function extractFirstJsonPayload(text) {
@@ -3392,7 +3596,7 @@
           "<div style=\"margin-top:10px;\"><strong>warnings：</strong>" + esc(warningText) + "</div>" +
           renderWebAiUnresolvedActions(data.unresolved_actions || []) +
           renderWebAiExecutionPlan(data.execution_plan || []) +
-          '<div style="margin-top:10px;">下一步：先点击“应用图表结果”；只有应用后仍有未解决项，才复制本地 AI 图表复核指令。</div>',
+          '<div style="margin-top:10px;">下一步：先点击“应用图表结果”，然后无论网页 AI 是否报告问题，都必须执行本地 AI 全量图片复核。</div>',
           "is-success"
         );
         return;
@@ -3404,9 +3608,8 @@
       const coverage = data && data.coverage ? data.coverage : {};
       const coverageText = String(coverage.reviewed_existing_count || 0) + "/" + String(coverage.expected_count || 0);
       const missingTargets = Array.isArray(coverage.missing_target_ids) ? coverage.missing_target_ids : [];
-      const isGapDiscovery = data.review_mode === "gap_discovery";
       setWebAiValidationBox(
-        "<strong>" + (isGapDiscovery ? "DFT 数据查漏结果校验通过，但尚未入库。" : "DFT 终审结果校验通过，但尚未入库。") + "</strong>" +
+        "<strong>DFT 全量核验结果校验通过（已有数据+查漏），但尚未入库。</strong>" +
         '<div class="web-ai-validation-summary">' +
           '<div class="web-ai-validation-item"><strong>paper_code</strong>' + esc(data.paper_code || "-") + "</div>" +
           '<div class="web-ai-validation-item"><strong>review_mode</strong>' + esc(String(data.review_mode || "-")) + "</div>" +
@@ -3539,9 +3742,9 @@
                 "   reason: " + (reason.length > 700 ? reason.slice(0, 700) + "..." : reason)
               ].join("\n");
             }).join("\n\n")
-          : "当前校验结果没有 unresolved_actions；请调用 get_chart_review_task 复核当前状态后直接 finalize。";
+          : "当前没有网页 AI 遗留问题，但本地 AI 仍须逐张核验全部范围内图片，不能直接 finalize。";
         return [
-          "只处理图表证据阶段剩余问题，不修改代码。",
+          "执行图表证据阶段的本地 AI 全量图片复核，不修改代码。",
           "",
           "当前论文号：" + (webAiReturnState.paperCode || "-"),
           "paper_id：" + webAiReturnState.paperId,
@@ -3551,19 +3754,19 @@
           "unresolved_count：" + String(response.unresolved_count || unresolvedActions.length || 0),
           "bundle_fingerprint：" + String(response.bundle_fingerprint || "-"),
           "",
-          "只看下面这些有问题项；没有问题的 figures/tables 不重新判断。",
+          "下面列出网页 AI 遗留问题；此外必须重新核验 get_chart_review_task 返回的每一张范围内图片。",
           "",
           unresolvedSummary,
           "",
           "执行要求：",
           "1. 只使用当前会话已认证的 Literature AI MCP；不要改 MCP 配置，不要发不带认证头的裸请求。",
           "2. 调用 get_chart_review_task(paper_id, run_id) 读取当前 run 任务和 PDF/页面信息；run_id=" + (new URLSearchParams(window.location.search).get("run_id") || "-") + "。",
-          "3. 只核对 unresolved_actions 中的问题项；可用 read_paper_page、get_codex_context、get_codex_item 核对证据。",
-          "4. 没问题的当前 figures/tables 由本地 AI 从 get_chart_review_task 读取后原样 KEEP，用户剪贴板不提供整包 JSON。",
-          "5. 对已解决的问题项附 local_ai_verification={verified_against_pdf:true,used_tools:['get_codex_item','read_paper_page'],verification_note:'核验说明'}。",
-          "6. 使用当前 get_chart_review_task 返回的 bundle_fingerprint 构造完整 review_result；不要沿用旧网页 JSON 的 bundle_fingerprint。",
+          "3. 对 get_chart_review_task 返回的每一张 figure 调用 get_codex_item，并用 read_paper_page 对照其来源 PDF 页；不得只处理 unresolved_actions。",
+          "4. 每张图片都要独立判断 KEEP、RECROP、CREATE、REJECT 或 NEEDS_HUMAN；表格沿用网页 AI 已应用结果，除非表格本身仍有 unresolved_actions。",
+          "5. 每一个非 NEEDS_HUMAN 的 figure_action 都必须附 local_ai_verification={verified_against_pdf:true,used_tools:['get_codex_item','read_paper_page'],verification_note:'逐图核验说明'}。",
+          "6. 使用当前 get_chart_review_task 返回的 bundle_fingerprint 构造完整 review_result；review_source_type 必须为 local_ai，并填写当前本地 AI 身份；不要沿用旧网页 JSON 的 bundle_fingerprint。",
           "7. 构造完整 review_result 后调用 resolve_chart_review_actions(paper_id, review_result, run_id)。",
-          "8. 若 unresolved_count=0，再调用 finalize_chart_review(paper_id, review_result, run_id)。",
+          "8. 只有服务器返回所有范围内图片均已本地核验且 unresolved_count=0，才调用 finalize_chart_review(paper_id, review_result, run_id)。",
           "兼容协议名称：resolve_chart_review_actions(paper_id, review_result)；finalize_chart_review(paper_id, review_result)；run-scoped 时必须附带 run_id。",
           "9. 最后只报告 stage_status、completed_snapshot_fingerprint、unresolved_count。"
         ].join("\n");
@@ -3604,7 +3807,7 @@
         const instruction = await buildLocalAiImportInstruction();
         await copyTextToClipboard(instruction);
         showToast(webAiReturnState.mode === "evidence"
-          ? "已复制本地 AI 图表复核指令；请通过已认证 MCP 批量 resolve 并 finalize。"
+          ? "已复制本地 AI 全量图片复核指令；请通过已认证 MCP 逐图核验、批量 resolve 并 finalize。"
           : "已复制本地 AI 处理指令；仍需由本地 AI 重新校验后受控导入。");
       } catch (error) {
         document.getElementById("webAiCopyInstructionBtn").disabled = true;
@@ -3681,10 +3884,10 @@
         const completed = Boolean(data && data.chart_review_completed);
         const copyButton = document.getElementById("webAiCopyInstructionBtn");
         const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
-        if (copyButton) copyButton.disabled = completed;
-        if (finalizeButton) finalizeButton.disabled = !completed;
+        if (copyButton) copyButton.disabled = false;
+        if (finalizeButton) finalizeButton.disabled = true;
         setWebAiValidationBox(
-          "<strong>" + (completed ? "图表阶段已完成。" : "图表安全操作已处理，仍有未解决项。") + "</strong>" +
+          "<strong>" + (completed ? "图表两级审核已完成。" : "网页 AI 图表结果已应用，等待本地 AI 逐图复核。") + "</strong>" +
           '<div class="web-ai-validation-summary">' +
             '<div class="web-ai-validation-item"><strong>stage_status</strong>' + esc(String(data.stage_status || "-")) + "</div>" +
             '<div class="web-ai-validation-item"><strong>applied_count</strong>' + esc(String(applied)) + "</div>" +
@@ -3693,11 +3896,11 @@
             '<div class="web-ai-validation-item"><strong>completed_snapshot</strong>' + esc(String(data.completed_snapshot_fingerprint || "-").slice(0, 16)) + "</div>" +
           "</div>" +
           renderWebAiUnresolvedActions(data.unresolved_actions || []) +
-          '<div style="margin-top:10px;">' + (completed ? '安全应用已完成；请点击“完成图表审核”进行独立 finalize，之后才能继续 DFT。' : '下一步：复制本地 AI 图表复核指令，批量 resolve 后再 finalize。') + '</div>',
+          '<div style="margin-top:10px;">' + (completed ? '全部图片已有本地 AI 核验记录，可以继续 DFT。' : '下一步：复制本地 AI 全量图片复核指令；每张范围内图片都必须对照 PDF，随后由本地 AI resolve 并 finalize。') + '</div>',
           completed ? "is-success" : ""
         );
         webAiReturnState.validationResponse = data;
-        showToast(completed ? "图表阶段已完成；请导出 DFT 终审包继续。" : "图表安全项已处理；仍需本地 AI 批量闭环。");
+        showToast(completed ? "图表两级审核已完成；可以继续 DFT。" : "网页 AI 结果已应用；现在必须执行本地 AI 全量图片复核。");
         await loadReviewCenter();
       } catch (error) {
         renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
@@ -4274,15 +4477,24 @@
       const source = row && row.manual_review_progress && typeof row.manual_review_progress === "object"
         ? row.manual_review_progress
         : {};
-      const normalize = function (key) {
-        const value = source[key];
+      const normalize = function (progress, key) {
+        const value = progress[key];
         if (value && typeof value === "object") return !!value.completed;
         return !!value;
       };
+      const group = supplementaryGroup(row);
+      const mainPaperId = String(group && group.main_paper_id || row && row.paper_id || "");
+      const mainRow = state.rows.find(function (candidate) {
+        return String(candidate && candidate.paper_id || "") === mainPaperId;
+      }) || row;
+      const mainProgress = mainRow && mainRow.manual_review_progress && typeof mainRow.manual_review_progress === "object"
+        ? mainRow.manual_review_progress
+        : {};
+      const liveChartStage = String(mainRow && mainRow._live_chart_stage || row && row._live_chart_stage || "");
       return {
-        figures: normalize("figures"),
-        dft: normalize("dft"),
-        content: normalize("content")
+        figures: liveChartStage ? ["completed", "not_required"].includes(liveChartStage) : normalize(mainProgress, "figures"),
+        dft: normalize(source, "dft"),
+        content: normalize(source, "content")
       };
     }
 
@@ -5720,11 +5932,10 @@
         const titleText = row.title || "未命名文献";
         const journalText = row.journal || "未知期刊";
         const displayCode = row.paper_code || "";
-        const shortId = displayCode ? '<span class="mono paper-doi-inline" title="文献短号，仅用于人类沟通">' + esc(displayCode) + '</span>' : '';
         const groupLabel = supplementaryGroupLabel(row);
         const groupTip = supplementaryGroupTip(row);
         const groupInline = groupLabel
-          ? '<span>|</span><span class="chip compact subtle" title="' + esc(groupTip || groupLabel) + '">' + esc(groupLabel) + '</span>'
+          ? '<span>|</span><span class="paper-si-inline" title="' + esc(groupTip || groupLabel) + '">' + esc(groupLabel) + '</span>'
           : "";
         const yearText = row.year ? esc(row.year) : '<span class="muted">-</span>';
         const checked = selectedPaperIds.has(String(row.paper_id)) ? " checked" : "";
@@ -5734,7 +5945,7 @@
           '<td class="col-divider" style="text-align:center;"><span style="font-size:13px;">' + yearText + '</span></td>' +
           '<td class="col-divider">' +
             '<div class="paper-title" title="' + esc(titleText) + '">' + esc(titleText) + '</div>' +
-            '<div class="paper-meta-line"><span class="paper-doi-inline" title="' + esc(journalText) + '">' + esc(journalText) + '</span>' + (shortId ? '<span>|</span>' + shortId : '') + groupInline + (doiInline ? '<span>|</span>' + doiInline : '') + '</div>' +
+            '<div class="paper-meta-line"><span class="paper-doi-inline" title="' + esc(journalText) + '">' + esc(journalText) + '</span>' + groupInline + (doiInline ? '<span>|</span>' + doiInline : '') + '</div>' +
           '</td>' +
           '<td class="col-divider status-cell">' +
             '<div class="status-cluster">' +

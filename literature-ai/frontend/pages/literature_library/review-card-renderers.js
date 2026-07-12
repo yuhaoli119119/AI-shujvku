@@ -1,8 +1,10 @@
 // Review cards, DFT readiness, and compact analysis renderers.
 function codexItemActionHtml(itemType, item) {
     if (!itemType || !item || !item.id) return "";
+    const figureMetadataOnly = itemType === "figure";
     return '<button class="btn ghost small" type="button" title="复制此项、证据定位、邻近正文和 AI 审核协议" onclick="event.stopPropagation(); copyCodexItem(\'' +
-        escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">复制审核提示</button>';
+        escAttr(itemType) + '\', \'' + escAttr(item.id) + '\')">' +
+        (figureMetadataOnly ? '复制图片说明核对提示' : '复制审核提示') + '</button>';
 }
 
 function figureReviewSummaryHtml(item) {
@@ -129,31 +131,6 @@ function dftResultId(item) {
     ).trim();
 }
 
-async function refreshDftAutomationSummaryBadges(container, paperId, renderSeq) {
-    const targetPaperId = paperId || state.selectedPaperId;
-    if (!container || !targetPaperId) return;
-    try {
-        const rows = await fetchSelectedDftReviewRows(200, targetPaperId);
-        if (
-            state.selectedPaperId !== targetPaperId ||
-            (renderSeq && state.dftReadinessRenderSeq !== renderSeq) ||
-            !container.isConnected
-        ) {
-            return;
-        }
-        const classified = classifyDftAutomationRows(rows);
-        const setText = function(role, value) {
-            const el = container.querySelector('[data-role="' + role + '"]');
-            if (el) el.textContent = value;
-        };
-        setText("dft-new-review-count", "待审核 / 补证据 " + classified.newReview.length);
-        setText("dft-needs-human-count", "待确认 " + classified.needsHuman.length);
-    } catch (_) {
-        const pending = container.querySelector('[data-role="dft-new-review-count"]');
-        if (pending) pending.textContent = "新数据审核 ?";
-    }
-}
-
 async function settleAiDftReviews() {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
@@ -172,7 +149,7 @@ async function settleAiDftReviews() {
             "；需补字段 " + Number(summary && summary.need_repair_count || 0),
             "success"
         );
-        await refreshSelectedPaperDetail({ reason: "settle_ai_dft_reviews", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "settle_ai_dft_reviews", mode: "dft" });
     } catch (error) {
         showToast("结算现有 AI 审核失败：" + error.message, "error");
     }
@@ -236,34 +213,59 @@ function dftResultsWithSafety(detail) {
     });
 }
 
+function dftReviewSummary(detail) {
+    const items = dftResultsWithSafety(detail || {});
+    const page = detail && detail.dft_results_page || {};
+    const total = Number(page.total || (detail && detail.counts && detail.counts.dft_results) || items.length);
+    let reviewed = 0;
+    let rejected = 0;
+    let needsHuman = 0;
+    items.forEach(function(item) {
+        const candidateStatus = String(item && item.candidate_status || "").trim().toLowerCase();
+        const workflowState = String(item && item.dft_workflow_state || "").trim().toLowerCase();
+        const displayStatus = String(item && item.ai_review_display_status || "").trim().toLowerCase();
+        const safety = item && item.export_safety || {};
+        const reviewStatuses = String(safety.review_status || "").toLowerCase().split(",").map(function(value) {
+            return value.trim();
+        });
+        const isRejected = candidateStatus === "rejected" || workflowState === "rejected" ||
+            displayStatus === "rejected" || reviewStatuses.includes("rejected");
+        const isReviewed = isRejected || item.is_exportable === true || safety.eligible === true ||
+            safety.is_exportable === true || workflowState === "exportable" ||
+            ["ml_ready", "ai_verified_ml_ready", "human_confirmed", "citation_ready", "verified", "human_verified"].includes(candidateStatus);
+        const requiresHuman = displayStatus === "needs_human" || candidateStatus === "needs_human_confirmation" ||
+            workflowState === "needs_human";
+        if (isReviewed) reviewed += 1;
+        if (isRejected) rejected += 1;
+        if (!isReviewed && requiresHuman) needsHuman += 1;
+    });
+    return {
+        loaded: items.length,
+        total: total,
+        complete: hasCompleteDftResults(detail),
+        reviewed: reviewed,
+        rejected: rejected,
+        needsHuman: needsHuman,
+        pending: Math.max(0, total - reviewed),
+    };
+}
+
 function renderDftExportReadiness(detail) {
-    const readiness = detail && detail.codex_context && detail.codex_context.dft_export_readiness;
-    const fallbackTotal = Array.isArray(detail && detail.dft_results_items) ? detail.dft_results_items.length : 0;
-    const hasReadiness = !!readiness;
-    const readinessData = readiness || {};
-    const rejectedCount = Number(readinessData.rejected_count || 0);
-    const blockedCount = Number(readinessData.blocked_count || 0);
-    const pendingCount = Math.max(0, blockedCount);
-    const completionControls = hasReadiness && pendingCount === 0
+    const summary = dftReviewSummary(detail);
+    const completionControls = summary.complete && summary.pending === 0
         ? renderManualReviewCompletionControls(detail, "dft")
         : '<span class="status-chip subtle">未完成</span>';
-    const reasons = Object.keys(readinessData.blocked_reasons || {}).map(function(reason) {
-        return (DFT_BLOCK_REASON_LABELS[reason] || reason) + " " + readinessData.blocked_reasons[reason] + " 条";
-    }).join("、");
     return '<div class="section-card figure-audit-note" data-role="dft-status-panel" data-paper-id="' + escAttr(detail && (detail.paper_id || detail.id) || "") + '">' +
         '<h3>DFT 数据状态</h3>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 10px;">' +
             completionControls +
-            (hasReadiness
-                ? '<span class="status-chip parsed">可导出 ' + Number(readiness.eligible_count || 0) + '</span>' +
-                  '<span class="status-chip meta">待完成 ' + pendingCount + '</span>' +
-                  (rejectedCount ? '<span class="status-chip muted">\u5df2\u62d2\u7edd ' + rejectedCount + '</span>' : '') +
-                  '<span class="status-chip">候选总数 ' + Number(readiness.total_candidates || 0) + '</span>'
-                : '<span class="status-chip meta">安全状态加载中</span>' +
-                  '<span class="status-chip">候选总数 ' + fallbackTotal + '</span>') +
+            '<span class="status-chip parsed">已审核 ' + summary.reviewed + '</span>' +
+            '<span class="status-chip meta">待审核 ' + summary.pending + '</span>' +
+            (summary.needsHuman ? '<span class="status-chip failed">待人工确认 ' + summary.needsHuman + '</span>' : '') +
+            (summary.rejected ? '<span class="status-chip muted">已拒绝 ' + summary.rejected + '</span>' : '') +
+            '<span class="status-chip">候选总数 ' + summary.total + '</span>' +
         '</div>' +
-        '<div class="subtle">处理方式：正式 DFT 任务请回审核中心按单篇文献复制提示词；详情页用于查看候选、导入结果和刷新审核状态。每条有效意见必须提供 evidence_location.page 和 quoted_text；一份证据合格的 AI 意见可通过受控入口直接确认、修正、拒绝或新增，NEEDS_HUMAN 才留给用户判断。</div>' +
-        (reasons ? '<div class="subtle" style="margin-top:6px;">当前阻断：' + esc(reasons) + '</div>' : '') +
+        (!summary.complete ? '<div class="subtle">审核状态正在随 DFT 数据加载更新（' + summary.loaded + ' / ' + summary.total + '）。</div>' : '') +
     '</div>';
 }
 
@@ -298,7 +300,7 @@ async function resetDftAiReviewsForPaper() {
             " 条；候选退回 " + Number(summary && summary.reset_dft_results || 0) + " 条。",
             "success"
         );
-        await refreshSelectedPaperDetail({ reason: "reset_dft_ai_reviews", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "reset_dft_ai_reviews", mode: "dft" });
     } catch (error) {
         showToast("清除 DFT AI 审核失败：" + error.message, "error");
     }

@@ -33,6 +33,12 @@ from app.services.impact_metadata_import_service import (
     parse_impact_metadata_csv,
     parse_impact_metadata_json,
 )
+from app.services.journal_impact_enrichment_service import (
+    AbleSciJournalMetricLookup,
+    JournalImpactEnrichmentService,
+    _journal_search_terms,
+)
+from app.services.paper_ingestion import PaperIngestionService
 
 
 @pytest.fixture
@@ -146,6 +152,128 @@ def test_missing_impact_factor_does_not_delete_or_exclude_paper(impact_client):
         paper = session.get(Paper, seed["missing_if"])
         assert paper is not None
         assert session.get(PaperCitationEligibility, seed["missing_if"]) is None
+
+
+def test_new_paper_uses_cached_journal_metric_without_lookup(impact_client):
+    _, Session, seed = impact_client
+    with Session() as session:
+        journal = Journal(canonical_name="Cached Journal", normalized_name="cached journal")
+        session.add(journal)
+        session.flush()
+        session.add(
+            JournalMetric(
+                journal_id=journal.id,
+                metric_type="JIF",
+                metric_value=8.6,
+                data_year=2025,
+                release_year=2026,
+                source_name="fixture_cached_metric",
+            )
+        )
+        paper = session.get(Paper, seed["missing_if"])
+        paper.journal = "Cached Journal Cached J."
+        session.flush()
+
+        class LookupMustNotRun:
+            def lookup(self, **kwargs):
+                raise AssertionError("cached journal metric should not trigger AbleSci lookup")
+
+        result = JournalImpactEnrichmentService(session, lookup=LookupMustNotRun()).enrich_paper(paper)
+        session.commit()
+
+        assert result.status == "local_cache"
+        stored = session.get(PaperImpactMetadata, paper.id)
+        assert stored.impact_factor == 8.6
+        assert stored.impact_factor_source == "fixture_cached_metric"
+        assert paper.journal_id == journal.id
+
+
+def test_ablesci_parser_accepts_full_journal_name_followed_by_abbreviation():
+    item = AbleSciJournalMetricLookup._parse_detail(
+        '<span>2026最新影响因子</span><span>11.8</span><div>ISSN print: 1234-5678</div>',
+        detail_url="https://www.ablesci.com/journal/detail?id=fixture",
+        requested_journal="Journal of Testing J. Test.",
+        requested_issns=(None, None),
+        result_name="Journal of Testing",
+    )
+
+    assert item is not None
+    assert item.impact_factor == 11.8
+    assert item.impact_factor_year == 2025
+
+
+def test_ablesci_search_parser_keeps_nested_full_journal_title_and_retries_full_name():
+    html = (
+        '<a class="journal-name" href="/journal/detail?id=fixture">'
+        '<span class="journal-fullname"><span class="search-keywords">ACS</span> Applied Materials &amp; Interfaces</span>'
+        '<br><span class="journal-abbrname">ACS Appl. Mater. Interfaces</span></a>'
+    )
+
+    assert AbleSciJournalMetricLookup._search_results(html) == [
+        ("https://www.ablesci.com/journal/detail?id=fixture", "ACS Applied Materials & Interfaces")
+    ]
+    assert _journal_search_terms("ACS Applied Materials & Interfaces ACS Appl. Mater. Interfaces") == [
+        "ACS Applied Materials & Interfaces ACS Appl. Mater. Interfaces",
+        "ACS Applied Materials & Interfaces",
+    ]
+
+
+def test_new_paper_lookup_writes_metric_and_binds_paper(impact_client):
+    _, Session, seed = impact_client
+    with Session() as session:
+        paper = session.get(Paper, seed["missing_if"])
+        paper.journal = "Lookup Journal"
+        session.flush()
+
+        class FakeLookup:
+            def lookup(self, **kwargs):
+                from app.services.impact_metadata_import_service import ImpactMetadataImportItem
+
+                assert kwargs["journal_name"] == "Lookup Journal"
+                return ImpactMetadataImportItem(
+                    journal="Lookup Journal Canonical",
+                    impact_factor=12.3,
+                    impact_factor_year=2025,
+                    impact_factor_source="ablesci_jif_auto",
+                    data_year=2025,
+                    release_year=2026,
+                    source_url="https://www.ablesci.com/journal/detail?id=fixture",
+                    aliases=("Lookup Journal",),
+                )
+
+        result = JournalImpactEnrichmentService(session, lookup=FakeLookup()).enrich_paper(paper)
+        session.commit()
+
+        assert result.status == "ablesci_lookup"
+        stored = session.get(PaperImpactMetadata, paper.id)
+        assert stored.impact_factor == 12.3
+        assert stored.impact_factor_year == 2025
+        assert stored.impact_factor_source == "ablesci_jif_auto"
+        assert paper.journal_id is not None
+
+
+def test_metadata_only_ingest_triggers_impact_enrichment(impact_client):
+    _, Session, _ = impact_client
+    with Session() as session:
+        service = PaperIngestionService(session=session, settings=get_settings())
+        enriched_ids = []
+
+        class FakeEnrichment:
+            def enrich_paper(self, paper):
+                enriched_ids.append(paper.id)
+
+                class Result:
+                    status = "local_cache"
+
+                return Result()
+
+        service.impact_enrichment = FakeEnrichment()
+        paper = service.ingest_metadata_only(
+            {"title": "Auto IF metadata-only paper", "journal": "Cached Journal", "year": 2026},
+            library_name="ImpactAuto",
+        )
+
+        assert enriched_ids == [paper.id]
 
 
 def test_upsert_does_not_duplicate_rows(impact_client):

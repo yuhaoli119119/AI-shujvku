@@ -273,6 +273,7 @@ class PaperQuerySerializationMixin:
         approved_corrections: list[dict[str, Any]] | None = None,
         pending_corrections: list[dict[str, Any]] | None = None,
         object_review_audits: list[dict[str, Any]] | None = None,
+        direct_review: dict[str, Any] | None = None,
         field_conflicts: list[dict[str, Any]] | None = None,
         duplicate_group_size: int = 1,
     ) -> PaperFigureResponse:
@@ -304,6 +305,7 @@ class PaperQuerySerializationMixin:
             if str(correction.get("field_name") or "").strip().lower() == "delete"
         )
         audits = object_review_audits or []
+        direct_review = direct_review or {}
         conflicts = field_conflicts or []
         direct_delete_allowed, direct_delete_reason = direct_delete_eligibility(
             {
@@ -340,6 +342,9 @@ class PaperQuerySerializationMixin:
                 "object_review_audit_count": len(audits),
                 "object_review_audits": audits[:5],
                 "latest_object_review_audit": audits[0] if audits else None,
+                "review_status": direct_review.get("review_status") or ("reviewed" if audits else "unreviewed"),
+                "reviewed_at": direct_review.get("reviewed_at"),
+                "reviewed_by": direct_review.get("reviewed_by"),
                 "conflict_count": len(conflicts),
                 "field_conflicts": conflicts[:5],
             }
@@ -507,6 +512,20 @@ class PaperQuerySerializationMixin:
                 "ai_review_display_label": ai_review_display["label"] if ai_review_display else None,
                 "ai_review_display_reason": ai_review_display["reason"] if ai_review_display else None,
                 "ai_review_display_class": ai_review_display["class_name"] if ai_review_display else None,
+                "is_exportable": bool(review_gate.eligible) if review_gate is not None else False,
+                "export_safety": (
+                    {
+                        "eligible": bool(review_gate.eligible),
+                        "is_exportable": bool(review_gate.eligible),
+                        "blocked_reasons": list(review_gate.reasons),
+                        "review_status": review_gate.review_status,
+                        "review_gate_status": review_gate.review_gate_status,
+                        "provenance_level": review_gate.provenance_level,
+                        "locator_status": review_gate.locator_status,
+                    }
+                    if review_gate is not None
+                    else None
+                ),
             }
         )
 

@@ -140,7 +140,7 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         paper.codex_context.source_assets.pdf_path
     ) || "<source_pdf>";
     const header = [
-        "任务：审核下面这些已列出的 DFT 候选；不要把清单内候选重新当成新数据提交。",
+        "任务：在一次处理中完成已有 DFT 候选核验和全文证据查漏；不要把清单内候选重新当成新数据提交。",
         "要求：先核对 PDF 证据，再逐条给出完整意见。系统按独立 candidate_id 审核提交计票，不按 AI、模型或 source_label 去重；同一模型可以再次提交下一轮审核。",
         "强制规则：清单内每条候选都必须使用该行给出的 target_id；禁止对清单内候选输出 target_id='new' 或 decision='new_candidate'。",
         "有效 AI 意见必须在 evidence_location 同时填写 page 和 quoted_text；缺任一项都不会计入第二意见或裁决依据。",
@@ -153,7 +153,7 @@ function buildCompactBlockedDftBatchPrompt(rows) {
         "- 候选基本正确但字段需要修正/补全时，用 PROPOSED，并填写完整 corrected_value。",
         "- 无法从 PDF 确认时，用 NEEDS_HUMAN，不要硬判。",
         "- 清单内候选只允许 PASS / REJECT / PROPOSED / NEEDS_HUMAN，不能用 new_candidate。",
-        "- 只有发现清单外确实漏提的额外 DFT 行时，才可在处理完清单后追加 decision='new_candidate'、target_id='new'、field_name='dft_results'。",
+        "- 处理完清单后必须继续扫描可读取的 PDF 正文、已审核图表和 SI 证据；发现清单外确实漏提的额外 DFT 行时，追加 decision='new_candidate'、target_id='new'、field_name='dft_results'。",
         "- 追加漏提行后，不要只停在 candidate-only JSON；实际调用 import_analysis 时应使用 auto_apply_review_rules=true，让 new_candidate 自动进入未验证 DFT 候选队列。",
         "- 缺 material identity、缺证据原文、缺准确页码定位时，不要 PASS。",
         "- 即使是 duplicate / REJECT，也必须给出 evidence_location.page 和 quoted_text；重复项还要在 reason 或 corrected_value.duplicate_of 写明保留项 target_id。",
@@ -207,22 +207,6 @@ async function copyNewDftReviewPrompt() {
     showToast("正式 DFT 数据审核提示词请从审核中心按单篇文献复制。", "info");
 }
 
-function dftQueueUrlForSelectedPaper(limit, paperId) {
-    const targetPaperId = paperId || state.selectedPaperId;
-    return "/api/papers/export/dft-review-queue?paper_id=" +
-        encodeURIComponent(targetPaperId) +
-        "&status=needs_review&limit=" + encodeURIComponent(limit || 200);
-}
-
-async function fetchSelectedDftReviewRows(limit, paperId) {
-    const targetPaperId = paperId || state.selectedPaperId;
-    if (!targetPaperId) return [];
-    const queue = await fetchJSON(dftQueueUrlForSelectedPaper(limit || 200, targetPaperId));
-    return Array.isArray(queue && queue.rows) ? queue.rows.filter(function(row) {
-        return row && row.is_exportable !== true;
-    }) : [];
-}
-
 async function autoProcessLowRiskDftRows() {
     if (!state.selectedPaperId) {
         showToast("请先选择一篇文献。", "error");
@@ -236,11 +220,6 @@ function decorateDftReadinessPanel(detail) {
     if (!panel) return;
     const card = panel.querySelector('[data-role="dft-status-panel"]');
     if (!card || card.querySelector('[data-role="dft-readiness-actions"]')) return;
-    const readiness = detail && detail.codex_context && detail.codex_context.dft_export_readiness;
-    const paperId = String(detail && (detail.paper_id || detail.id) || state.selectedPaperId || "");
-    const blockedCount = Number(readiness && readiness.blocked_count || 0);
-    const renderSeq = (state.dftReadinessRenderSeq || 0) + 1;
-    state.dftReadinessRenderSeq = renderSeq;
     const actions = document.createElement("div");
     actions.setAttribute("data-role", "dft-readiness-actions");
     actions.style.display = "flex";
@@ -248,12 +227,6 @@ function decorateDftReadinessPanel(detail) {
     actions.style.flexWrap = "wrap";
     actions.style.margin = "0 0 10px";
     actions.innerHTML =
-        (blockedCount
-            ? '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;width:100%;">' +
-                '<span class="status-chip meta" data-role="dft-new-review-count">待审核 / 补证据 ...</span>' +
-                '<span class="status-chip failed" data-role="dft-needs-human-count">待确认 ...</span>' +
-              '</div>'
-            : "") +
         '<button class="btn ghost small" type="button" onclick="settleAiDftReviews()">刷新审核状态</button>' +
         '<button class="btn ghost small" type="button" onclick="resetDftAiReviewsForPaper()">清除 AI 审核重来</button>' +
         '<button class="btn ghost small" type="button" onclick="openSelectedReviewCenter()">打开审核中心</button>';
@@ -262,9 +235,6 @@ function decorateDftReadinessPanel(detail) {
         card.insertBefore(actions, firstSubtle);
     } else {
         card.appendChild(actions);
-    }
-    if (blockedCount) {
-        refreshDftAutomationSummaryBadges(actions, paperId, renderSeq);
     }
 }
 
@@ -318,5 +288,89 @@ async function copyCodexItem(itemType, itemId) {
         showToast("审核提示已复制，可发给指定 AI 审核。", "success");
     } catch (error) {
         showToast("审核包生成失败：" + error.message, "error");
+    }
+}
+
+function chartRunTargetSignature(run) {
+    const raw = run && run.target_signature;
+    if (!raw) return {};
+    if (typeof raw === "object") return raw;
+    try {
+        const parsed = JSON.parse(raw);
+        return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+        return {};
+    }
+}
+
+async function ensureSelectedChartReviewScopes() {
+    if (!state.selectedPaperId || !state.selectedPaper) return {};
+    const current = state.selectedPaper.chart_review_status;
+    if (current && Array.isArray(current.chart_runs)) return current;
+    const scopes = await fetchJSON(
+        API_BASE + "/" + encodeURIComponent(state.selectedPaperId) + "/chart-review-scopes"
+    );
+    if (state.selectedPaper) state.selectedPaper.chart_review_status = scopes || {};
+    return scopes || {};
+}
+
+function pendingChartRunForFigure(figureId) {
+    const chartStatus = state.selectedPaper && state.selectedPaper.chart_review_status;
+    const targetId = String(figureId || "").trim();
+    if (!targetId || !chartStatus || !Array.isArray(chartStatus.chart_runs)) return null;
+    return chartStatus.chart_runs.find(function(run) {
+        const stage = String(run && run.stage_status || "");
+        const figures = chartRunTargetSignature(run).figures;
+        return !["completed", "not_required"].includes(stage) &&
+            Array.isArray(figures) && figures.map(String).includes(targetId);
+    }) || null;
+}
+
+async function copyFigureChartReviewPrompt(figureId) {
+    if (!state.selectedPaperId) {
+        showToast("请先选择一篇文献。", "error");
+        return;
+    }
+    await ensureSelectedChartReviewScopes();
+    const run = pendingChartRunForFigure(figureId);
+    const runId = String(run && (run.chart_run_id || run.run_id || run.id) || "").trim();
+    if (!runId) {
+        showToast("当前图片没有待补充的图表审核范围，请刷新详情页后重试。", "error");
+        return;
+    }
+    try {
+        const task = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
+            "/chart-review-task?run_id=" + encodeURIComponent(runId)
+        );
+        const figure = Array.isArray(task.figures)
+            ? task.figures.find(function(item) { return String(item && item.source_record_id || "") === String(figureId); })
+            : null;
+        if (!figure || !figure.evidence_id) {
+            throw new Error("当前审核范围没有返回图片证据，不能生成图表审核提示。");
+        }
+        const prompt = [
+            "这是一次单图片图表审核闭环，不是图片说明/元数据修订任务。",
+            "",
+            "目标论文号：" + String(task.paper_code || "-"),
+            "paper_id：" + String(task.paper_id || state.selectedPaperId),
+            "图片 ID：" + String(figureId),
+            "证据 ID：" + String(figure.evidence_id),
+            "PDF 页：" + String(figure.page || "-"),
+            "审核范围由系统生成；run_id：" + runId,
+            "bundle_fingerprint：" + String(task.bundle_fingerprint || "-"),
+            "",
+            "必须完成以下流程：",
+            "1. 调用 get_chart_review_task(paper_id, run_id)、get_codex_item 和 read_paper_page 核对这张图及原始 PDF 页。",
+            "2. 不要调用 import_analysis、propose_correction 或仅修改 caption/content_summary/key_elements 来代替审核；这些写入不改变图表审核状态。",
+            "3. 用 resolve_chart_review_actions 的公开工具契约构造完整 review_result：只覆盖这张图，引用上述真实 evidence_id 和当前 bundle_fingerprint。图、图注和 PDF 一致时使用 KEEP；有问题时使用对应修正动作；证据不足则 NEEDS_HUMAN。",
+            "4. 先执行 validate（只校验）；校验成功后才 resolve/apply；没有未解决项后才调用 finalize_chart_review。",
+            "5. 不要把 AI 结论称为 verified；最后仅报告 stage_status、unresolved_count 和 completed_snapshot_fingerprint。",
+            "6. 如果无法构造通过校验的 review_result，停止并报告 blocked，不要只改图片说明后宣称审核完成。"
+        ].join("\n");
+        await navigator.clipboard.writeText(prompt);
+        showToast("图表审核提示已复制；请发给本地 AI 完成校验、应用和完成步骤。", "success");
+    } catch (error) {
+        showToast("生成图表审核提示失败：" + error.message, "error");
     }
 }

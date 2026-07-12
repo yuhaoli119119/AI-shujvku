@@ -1,4 +1,4 @@
-// Manual review progress, trust state, and RAG quality renderers.
+// Manual review progress and direct review-state renderers.
 function contentReviewStatus(detail, key) {
     return (detail && detail[key]) || "missing";
 }
@@ -46,7 +46,10 @@ function supplementaryMainReviewProgress(detail) {
 }
 
 function manualReviewProgress(detail) {
-    const source = detail && detail.comprehensive_analysis && detail.comprehensive_analysis.manual_review_progress;
+    const source = detail && (
+        detail.manual_review_progress ||
+        (detail.comprehensive_analysis && detail.comprehensive_analysis.manual_review_progress)
+    );
     const progress = source && typeof source === "object" ? source : {};
     const mainProgress = supplementaryMainReviewProgress(detail);
     function normalize(module) {
@@ -77,77 +80,109 @@ function isManualReviewCompleted(detail, module) {
     return !!(progress[module] && progress[module].completed);
 }
 
+function chartReviewExcludedFigures(detail) {
+    const chartStatus = detail && detail.chart_review_status || {};
+    return (chartStatus.excluded_duplicate_figures || []).filter(function(item) {
+        return item && String(item.excluded_figure_id || "").trim();
+    });
+}
+
+function chartReviewExcludedFigure(detail, item) {
+    const figureId = String(item && item.id || "").trim();
+    if (!figureId) return null;
+    return chartReviewExcludedFigures(detail).find(function(exclusion) {
+        return String(exclusion.excluded_figure_id || "").trim() === figureId;
+    }) || null;
+}
+
+function chartReviewDuplicateReasonLabel(exclusion) {
+    const reason = String(exclusion && exclusion.reason || "").trim();
+    const labels = {
+        same_page_same_image_reference: "同页同一图片引用",
+        same_page_same_normalized_caption: "同页相同图注",
+        same_page_highly_similar_caption: "同页高度相似图注",
+        duplicate_scope_object: "重复的图表候选"
+    };
+    return labels[reason] || reason || "与正规图重复";
+}
+
+function chartReviewCoverage(detail) {
+    const excludedFigureIds = new Set(chartReviewExcludedFigures(detail).map(function(item) {
+        return String(item.excluded_figure_id || "").trim();
+    }));
+    const figures = (detail && detail.figures || []).filter(function(item) {
+        return !excludedFigureIds.has(String(item && item.id || "").trim());
+    });
+    const mainFigureIds = new Set(figures.map(function(item) {
+        return String(item && item.id || "").trim();
+    }).filter(Boolean));
+    const reviewedMainFigureIds = new Set(figures.filter(function(item) {
+        return String(item && item.review_status || "").toLowerCase() === "reviewed" ||
+            Number(item && item.object_review_audit_count || 0) > 0;
+    }).map(function(item) { return String(item.id); }));
+    const reviewedTableCount = (detail && detail.tables || []).filter(function(item) {
+        const status = String(item && item.table_review_status || "").toLowerCase();
+        return ["verified", "reviewed", "reviewed_empty_content"].includes(status) ||
+            Number(item && item.object_review_audit_count || 0) > 0;
+    }).length;
+    return {
+        mainFigureIds: mainFigureIds,
+        reviewedMainFigureIds: reviewedMainFigureIds,
+        mainFigureTotal: mainFigureIds.size,
+        reviewedMainFigureCount: reviewedMainFigureIds.size,
+        pendingMainFigureCount: Math.max(0, mainFigureIds.size - reviewedMainFigureIds.size),
+        reviewedTableCount: reviewedTableCount
+    };
+}
+
+function figureChartReviewStatusHtml(detail, item, coverage) {
+    coverage = coverage || chartReviewCoverage(detail);
+    const figureId = String(item && item.id || "").trim();
+    if (chartReviewExcludedFigure(detail, item)) {
+        return '<span class="status-chip subtle">重复候选，已从审核范围排除</span>';
+    }
+    if (!figureId || !coverage.mainFigureIds.has(figureId)) return "";
+    return coverage.reviewedMainFigureIds.has(figureId)
+        ? '<span class="status-chip ok">图表审核已完成</span>'
+        : '<span class="status-chip warn">待补充图表审核</span>' +
+          '<button class="btn primary small" type="button" onclick="event.stopPropagation(); copyFigureChartReviewPrompt(\'' + escAttr(figureId) + '\')">复制图表审核提示</button>';
+}
+
 function chartReviewCompleted(detail) {
-    const chartStatus = detail && detail.chart_review_status;
-    if (!chartStatus || typeof chartStatus !== "object") return false;
-    const stage = String(chartStatus.stage_status || "").trim();
-    const unresolved = Number(chartStatus.unresolved_count || 0);
-    const ragStatus = String(chartStatus.rag_quality_status || "").trim();
-    return (stage === "completed" || stage === "not_required") && unresolved === 0 && (!ragStatus || ragStatus === "ready");
+    const coverage = chartReviewCoverage(detail);
+    if (coverage.mainFigureTotal > 0) return coverage.pendingMainFigureCount === 0;
+    return !!(manualReviewProgress(detail).figures || {}).completed;
 }
 
 function chartReviewScopeSummary(detail) {
-    const chartStatus = detail && detail.chart_review_status;
-    if (!chartStatus || typeof chartStatus !== "object") return "";
-    const primary = chartStatus.primary_completed_run && typeof chartStatus.primary_completed_run === "object"
-        ? chartStatus.primary_completed_run
-        : null;
-    const selected = primary || (chartStatus.scope_type === "external_analysis_run" ? chartStatus : null);
-    const selectedStage = String(selected && selected.stage_status || "").trim();
-    const selectedCounts = selected && selected.counts ? selected.counts : (selected && selected.counts || {});
+    const coverage = chartReviewCoverage(detail);
     const lines = [];
-    if (selected && selectedStage === "completed") {
-        lines.push("AI 批次图表审核已完成：" + Number(selectedCounts.figures || 0) + " 图、" + Number(selectedCounts.tables || 0) + " 表");
+    if (coverage.mainFigureTotal > 0) {
+        lines.push("主文图片审核：已审核 " + coverage.reviewedMainFigureCount + "/" + coverage.mainFigureTotal + " 图" +
+            (coverage.pendingMainFigureCount ? "；待补充 " + coverage.pendingMainFigureCount + " 图" : "；已完成"));
     }
-    const paper = chartStatus.paper_scope && typeof chartStatus.paper_scope === "object" ? chartStatus.paper_scope : null;
-    if (paper) {
-        lines.push("整篇论文审核（" + (String(paper.stage_status || "not_started") === "not_started" ? "未开始" : String(paper.stage_status || "未知")) + "）：" +
-            Number(paper.counts && paper.counts.figures || 0) + " 图、" + Number(paper.counts && paper.counts.tables || 0) + " 表");
+    if (coverage.reviewedTableCount > 0) {
+        lines.push("已审核表格：" + coverage.reviewedTableCount + " 表（可能含关联 SI）");
     }
     return lines.length ? '<div class="subtle" style="margin-top:8px;white-space:pre-line;">' + esc(lines.join("\n")) + '</div>' : "";
 }
 
 function figureReviewCompletionBlocked(detail) {
-    const chartStatus = detail && detail.chart_review_status;
-    if (chartStatus && typeof chartStatus === "object") {
-        const stage = String(chartStatus.stage_status || "").trim();
-        const unresolved = Number(chartStatus.unresolved_count || 0);
-        if (stage && stage !== "completed" && stage !== "not_required") return true;
-        if (unresolved > 0) return true;
-    }
-    const quality = detail && detail.rag_quality && detail.rag_quality.figures;
-    if (quality && Number(quality.blocked || 0) > 0) return true;
+    const coverage = chartReviewCoverage(detail);
+    if (coverage.mainFigureTotal > 0 && coverage.pendingMainFigureCount > 0) return true;
     if (detail && detail.figures_review_status === "risk") return true;
     return false;
 }
 
 function figureReviewBlockingNote(detail) {
     if (!figureReviewCompletionBlocked(detail)) return "";
-    const quality = detail && detail.rag_quality && detail.rag_quality.figures;
-    const chartStatus = detail && detail.chart_review_status;
-    if (chartStatus && typeof chartStatus === "object") {
-        const stage = String(chartStatus.stage_status || "").trim();
-        const unresolved = Number(chartStatus.unresolved_count || 0);
-        if ((stage && stage !== "completed" && stage !== "not_required") || unresolved > 0) {
-            const pendingTables = Array.isArray(chartStatus.unresolved_actions)
-                ? chartStatus.unresolved_actions.filter(function(item) { return String(item && item.category || "") === "table"; }).length
-                : 0;
-            return '<div class="subtle" style="margin-top:6px;color:#b45309;">当前图表审核尚未闭环' +
-                (stage ? "：stage_status=" + esc(stage) : "") +
-                (unresolved ? "，未解决 " + esc(String(unresolved)) + " 项" : "") +
-                (pendingTables ? "（表格 " + esc(String(pendingTables)) + " 项）" : "") +
-                "；图片和表格都完成后才可标记图表完成。</div>";
-        }
+    const coverage = chartReviewCoverage(detail);
+    if (coverage.mainFigureTotal > 0 && coverage.pendingMainFigureCount > 0) {
+        return '<div class="subtle" style="margin-top:6px;color:#b45309;">主文图片已审核 ' +
+            esc(String(coverage.reviewedMainFigureCount)) + "/" + esc(String(coverage.mainFigureTotal)) +
+            '，还有 ' + esc(String(coverage.pendingMainFigureCount)) + ' 张待审核。</div>';
     }
-    const blocked = quality ? Number(quality.blocked || 0) : 0;
-    const reasons = quality && quality.blocked_reasons ? quality.blocked_reasons : {};
-    const reasonText = Object.keys(reasons).slice(0, 4).map(function(key) {
-        return ragReasonLabel(key) + " " + reasons[key];
-    }).join("；");
-    return '<div class="subtle" style="margin-top:6px;color:#b45309;">当前图表尚未达标' +
-        (blocked ? "：" + esc(String(blocked)) + " 项 RAG 不合格" : "") +
-        (reasonText ? "（" + esc(reasonText) + "）" : "") +
-        "；完成标记已暂时失效，需先完成网页/本地 AI 图表复核。</div>";
+    return '<div class="subtle" style="margin-top:6px;color:#b45309;">当前图表存在风险项，需要完成审核后才能标记完成。</div>';
 }
 
 function renderManualReviewCompletionCard(detail, module, title, message) {
@@ -170,7 +205,7 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
                 : chartCompleted && !moduleProgress.completed
                     ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("当前图片和表格审核已闭环。") + '">已闭环</button>'
                 : blocked
-                    ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表 RAG 不合格或风险项。") + '">需先复核</button>'
+                    ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表待审核或存在风险项。") + '">需先复核</button>'
                 : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
                     esc(status ? '取消已完成' : '标记已完成') +
                   '</button>') +
@@ -195,7 +230,7 @@ function renderManualReviewCompletionControls(detail, module) {
             : chartCompleted && !moduleProgress.completed
                 ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("当前图片和表格审核已闭环。") + '">已闭环</button>'
             : blocked
-                ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表 RAG 不合格或风险项。") + '">需先复核</button>'
+                ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表待审核或存在风险项。") + '">需先复核</button>'
             : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
                 esc(status ? '取消已完成' : '标记已完成') +
               '</button>');
@@ -228,6 +263,7 @@ async function setManualReviewProgress(module, completed) {
             }
         );
         if (state.selectedPaper) {
+            state.selectedPaper.manual_review_progress = result.manual_review_progress || {};
             const analysis = Object.assign({}, state.selectedPaper.comprehensive_analysis || {});
             analysis.manual_review_progress = result.manual_review_progress || {};
             state.selectedPaper.comprehensive_analysis = analysis;
@@ -255,127 +291,30 @@ function renderPendingReviewCard(title, message) {
     return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">' + esc(message) + '</div></div>';
 }
 
-function reviewStatusLabel(status, labels) {
-    return labels[status] || labels.raw_only || status || "-";
-}
-
-function reviewStatusChipClass(status, options) {
-    options = options || {};
-    if (status === "risk" || status === "conflict") return "failed";
-    if (status === "missing") return "none";
-    if (status === "ai_verified" || status === "reviewed") return "full";
-    if (status === "raw_only" || status === "candidate") return "parsed";
-    return options.fallback || "meta";
-}
-
-function renderDetailTrustStrip(detail) {
+function renderDetailReviewStatusPanel(detail) {
     const abstractStatus = contentReviewStatus(detail, "abstract_review_status");
     const sectionsStatus = contentReviewStatus(detail, "sections_review_status");
     const figuresStatus = contentReviewStatus(detail, "figures_review_status");
     const dftStatus = contentReviewStatus(detail, "dft_review_status");
-    const chip = function(label, value, className) {
-        return '<span class="status-chip ' + escAttr(className || "meta") + '">' + esc(label) + '：' + esc(value) + '</span>';
-    };
-    return '<div class="section-card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-        '<strong>Review status</strong>' +
-        chip("Figures", reviewStatusLabel(figuresStatus, { ai_verified: "AI verified", risk: "Risk", raw_only: "Parsed, not verified", missing: "Missing" }), reviewStatusChipClass(figuresStatus)) +
-        chip("DFT", reviewStatusLabel(dftStatus, { reviewed: "Reviewed", conflict: "Conflict", candidate: "Candidate parsed", missing: "Missing" }), reviewStatusChipClass(dftStatus)) +
-        chip("Abstract", reviewStatusLabel(abstractStatus, { ai_verified: "AI verified", raw_only: "Parsed, not verified", missing: "Missing" }), reviewStatusChipClass(abstractStatus)) +
-        chip("Sections", reviewStatusLabel(sectionsStatus, { ai_verified: "AI verified", raw_only: "Parsed, not verified", missing: "Missing" }), reviewStatusChipClass(sectionsStatus)) +
-    '</div>';
-    return '<div class="section-card" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">' +
-        '<strong>AI 核验状态</strong>' +
-        chip("图表", reviewStatusLabel(figuresStatus, { ai_verified: "AI已核验", risk: "有风险", raw_only: "已解析", missing: "缺失" }), figuresStatus === "risk" ? "failed" : "meta") +
-        chip("DFT", reviewStatusLabel(dftStatus, { reviewed: "已审核", conflict: "有冲突", candidate: "候选", missing: "缺失" }), dftStatus === "conflict" ? "failed" : "meta") +
-        chip("摘要", reviewStatusLabel(abstractStatus, { ai_verified: "AI已核验", raw_only: "待AI核验", missing: "缺失" }), abstractStatus === "ai_verified" ? "parsed" : "meta") +
-        chip("章节", reviewStatusLabel(sectionsStatus, { ai_verified: "AI已核验", raw_only: "待AI核验", missing: "缺失" }), sectionsStatus === "ai_verified" ? "parsed" : "meta") +
-    '</div>';
-}
-
-function ragReasonLabel(reason) {
-    const labels = {
-        missing_image: "缺图",
-        missing_page: "缺页码",
-        missing_caption: "缺 caption",
-        unclassified_or_unreviewed: "未分类/未核验",
-        missing_material_identity: "缺材料身份",
-        missing_review: "缺审核",
-        unsafe_review: "审核不安全",
-        missing_evidence: "缺证据",
-        missing_evidence_text: "缺证据文本",
-        unsafe_locator: "定位不安全",
-        missing_property_type: "缺性质类型",
-        missing_value: "缺数值",
-        missing_unit: "缺单位",
-        missing_figure_role: "缺图类型",
-        missing_content_summary: "缺图摘要",
-        missing_key_elements: "缺关键元素",
-        caption_echo_summary: "图表摘要没有新增有效信息，只是重复图注",
-        placeholder_key_elements: "key_elements 占位",
-        contains_placeholder_key_elements: "key_elements 含占位",
-        missing_evidence_chain: "缺证据链",
-        unsafe_locator: "定位不安全",
-        unreviewed: "未核验"
-    };
-    if (!reason) return "-";
-    if (reason === "unlocated_full_page_recrop") return "整页兜底图，未精确定位";
-    if (reason.indexOf("crop_status:") === 0) return "裁图状态 " + reason.split(":")[1];
-    if (reason.indexOf("figure_role:") === 0) return "图片角色 " + reason.split(":")[1];
-    return labels[reason] || reason;
-}
-
-function renderRagQualityPanel(detail) {
-    const quality = detail && detail.rag_quality;
-    if (!quality || typeof quality !== "object") return "";
-    const groups = [
-        ["图表 RAG", quality.figures || {}],
-        ["DFT RAG", quality.dft_results || {}],
-        ["写作卡 RAG", quality.writing_cards || {}]
-    ];
-    const cards = groups.map(function(pair) {
-        const label = pair[0];
-        const item = pair[1] || {};
-        const total = Number(item.total || 0);
-        const eligible = Number(item.eligible || 0);
-        const blocked = Number(item.blocked || Math.max(0, total - eligible));
-        const reasons = item.blocked_reasons || {};
-        const warnings = item.quality_warnings || {};
-        const blockedItems = Array.isArray(item.blocked_items) ? item.blocked_items : [];
-        const reasonText = Object.keys(reasons).slice(0, 4).map(function(key) {
-            return ragReasonLabel(key) + " " + reasons[key];
-        }).join("；");
-        const warningText = Object.keys(warnings).slice(0, 4).map(function(key) {
-            return ragReasonLabel(key) + " " + warnings[key];
-        }).join("；");
-        const blockedList = blockedItems.length
-            ? '<details class="rag-blocked-list" style="margin-top:8px;"><summary>查看不合格图表</summary>' +
-                blockedItems.slice(0, 12).map(function(blocked) {
-                    const reasons = Array.isArray(blocked.reasons) ? blocked.reasons : [];
-                    const reasonText = reasons.map(ragReasonLabel).join("；") || "-";
-                    const name = blocked.figure_label || (blocked.page ? "Page " + blocked.page : blocked.source_id);
-                    return '<div class="subtle" style="margin-top:6px;">' +
-                        '<strong>' + esc(name || "-") + '</strong>' +
-                        (blocked.page ? ' · 第 ' + esc(blocked.page) + ' 页' : '') +
-                        '：' + esc(reasonText) +
-                    '</div>';
-                }).join("") +
-                (blockedItems.length > 12 ? '<div class="subtle" style="margin-top:6px;">还有 ' + (blockedItems.length - 12) + ' 项，请到图表页查看。</div>' : '') +
-            '</details>'
-            : "";
-        return '<div class="stat-card rag-quality-card" style="flex-direction: column; align-items: flex-start; min-width: 0; gap: 6px;">' +
-            '<div style="display: flex; justify-content: space-between; width: 100%; align-items: center;">' +
-                '<h3 style="margin: 0;">' + esc(label) + '</h3>' +
-                '<div class="value">' + eligible + ' / ' + total + '</div>' +
-            '</div>' +
-            '<div class="subtle" style="margin-top: 2px;">可用 ' + eligible + '，阻断 ' + blocked + '</div>' +
-            (reasonText ? '<div class="subtle" style="margin-top:6px;">' + esc(reasonText) + '</div>' : '') +
-            (warningText ? '<div class="subtle" style="margin-top:6px;">Warnings: ' + esc(warningText) + '</div>' : '') +
-            blockedList +
+    const progress = manualReviewProgress(detail);
+    const contentReviewed = !!progress.content.completed || [abstractStatus, sectionsStatus].some(isAiVerifiedStatus);
+    const figuresReviewed = !!progress.figures.completed || isAiVerifiedStatus(figuresStatus);
+    const dftReviewed = dftStatus === "reviewed";
+    const card = function(label, reviewed, pendingLabel, missing) {
+        const stateLabel = missing ? "暂无数据" : (reviewed ? "已审核" : pendingLabel);
+        const className = missing ? "none" : (reviewed ? "full" : "meta");
+        return '<div class="stat-card" style="flex-direction:column;align-items:flex-start;gap:6px;min-width:0;">' +
+            '<h3 style="margin:0;">' + esc(label) + '</h3>' +
+            '<span class="status-chip ' + className + '">' + esc(stateLabel) + '</span>' +
         '</div>';
-    }).join("");
-    return '<div class="section-card rag-quality-panel">' +
-        '<h3>RAG 可用状态</h3>' +
-        '<div class="subtle">只统计正式 RAG 会使用的图表、DFT 和写作卡；raw 章节不计入。</div>' +
-        '<div class="cards" style="margin-top:12px;">' + cards + '</div>' +
+    };
+    const counts = detail && detail.counts || {};
+    return '<div class="section-card review-status-panel">' +
+        '<h3>审核状态</h3>' +
+        '<div class="cards" style="margin-top:12px;">' +
+            card("内容", contentReviewed, "待审核", !detail.abstract && !Number(counts.sections || 0)) +
+            card("图表", figuresReviewed, figuresStatus === "risk" ? "有风险" : "待审核", !Number(counts.figures || 0)) +
+            card("DFT 数据", dftReviewed, dftStatus === "conflict" ? "有冲突" : "待审核", !Number(counts.dft_results || 0)) +
+        '</div>' +
     '</div>';
 }

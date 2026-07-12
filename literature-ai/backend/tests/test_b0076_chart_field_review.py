@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -9,9 +10,10 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from app.config import get_settings
-from app.db.models import AuditLog, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, WorkflowJob
+from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, WorkflowJob
 from app.main import app
 from app.services.content_review_bundle_service import ContentReviewBundleService
 from app.services.dft_review_bundle_service import (
@@ -22,6 +24,142 @@ from app.services.evidence_review_bundle_service import EvidenceReviewBundleServ
 from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_paths import resolve_paper_pdf_path
+
+
+def test_paper_scope_chart_bundle_keeps_only_dft_related_si_and_deduplicates(setup_test_db):
+    settings = get_settings()
+    image_path = settings.storage_paths["figures"] / f"{uuid4()}.png"
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (1200, 900), "white").save(image_path, format="PNG")
+    pdf_root = settings.storage_paths["pdf"]
+    pdf_root.mkdir(parents=True, exist_ok=True)
+    import fitz
+    for name in ("B0102.pdf", "S0102.pdf"):
+        document = fitz.open()
+        page = document.new_page()
+        page.insert_text((72, 72), name)
+        document.save(str(pdf_root / name))
+        document.close()
+    with Session(setup_test_db) as session:
+        main = Paper(paper_code="B0102", title="main", pdf_path="B0102.pdf", authors=[])
+        si = Paper(paper_code="S0102", title="support", pdf_path="S0102.pdf", authors=[])
+        session.add_all([main, si])
+        session.flush()
+        session.add(PaperRelationship(source_paper_id=main.id, target_paper_id=si.id, relationship_type="supplementary", created_by="test"))
+        main_figure = PaperFigure(paper_id=main.id, figure_label="Figure 1", caption="ordinary main figure", page=1, image_path=image_path.name)
+        canonical = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S1",
+            caption="Figure S1. DFT adsorption energy comparison for Li2S.",
+            page=2,
+            image_path=image_path.name,
+            figure_role="dft_calculation",
+            content_summary="Compares DFT adsorption energies.",
+            key_elements=["Li2S", "adsorption energy"],
+        )
+        duplicate = PaperFigure(
+            paper_id=si.id,
+            figure_label="fig_candidate_1",
+            caption="Figure S1. DFT adsorption energy comparison for Li2S.",
+            page=2,
+            image_path=image_path.name,
+            figure_role="unknown",
+        )
+        referenced = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S2",
+            caption="Figure S2. Reference geometric sketch.",
+            page=3,
+            image_path=image_path.name,
+        )
+        unrelated = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S3",
+            caption="Figure S3. Experimental cycling photograph.",
+            page=4,
+            image_path=image_path.name,
+        )
+        possible_dft = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S4",
+            caption="Figure S4. AIMD stability and spin density of the optimized catalyst.",
+            page=5,
+            image_path=image_path.name,
+        )
+        session.add_all([main_figure, canonical, duplicate, referenced, unrelated, possible_dft])
+        session.flush()
+        dft_row = DFTResult(
+            paper_id=si.id,
+            property_type="reaction_barrier",
+            value=0.4,
+            unit="eV",
+            evidence_text="The referenced SI figure supports the DFT barrier.",
+        )
+        session.add(dft_row)
+        session.flush()
+        session.add(EvidenceLocator(
+            paper_id=si.id,
+            source_type="pdf",
+            page=3,
+            figure_id=referenced.id,
+            target_type="dft_results",
+            target_id=str(dft_row.id),
+            field_name="value",
+            evidence_text="Figure S2 supports the calculated barrier.",
+            locator_status="exact_page",
+            locator_confidence=1.0,
+        ))
+        session.add_all([
+            PaperTable(paper_id=main.id, caption="Table 1", markdown_content="|a|b|\n|-|-|\n|1|2|", page=1),
+            PaperTable(paper_id=si.id, caption="Table S1", markdown_content="|a|b|\n|-|-|\n|3|4|", page=1),
+        ])
+        session.commit()
+        result = EvidenceReviewBundleService(session, settings).build_zip(main.id)
+    manifest = result["manifest"]
+    assert manifest["chart_counts"] == {"main_figures": 1, "main_tables": 1, "si_figures": 3, "si_tables": 1}
+    assert manifest["counts"]["excluded_duplicate_figures"] == 1
+    assert manifest["excluded_duplicate_figures"] == [{
+        "source_paper_id": str(si.id),
+        "page": 2,
+        "excluded_figure_id": str(duplicate.id),
+        "excluded_figure_label": "fig_candidate_1",
+        "canonical_figure_id": str(canonical.id),
+        "canonical_figure_label": "Figure S1",
+        "reason": "same_page_same_image_reference",
+    }]
+    assert manifest["pdf_files"]["count"] == 2
+    assert manifest["image_files"]["compressed_bytes"] < manifest["image_files"]["original_bytes"]
+    with zipfile.ZipFile(BytesIO(result["content"])) as archive:
+        names = set(archive.namelist())
+        assert "source/main.pdf" in names and "source/si/S0102.pdf" in names
+        assert any(name.endswith(".webp") for name in names)
+        figures = json.loads(archive.read("parsed/extracted_figures.json"))
+        assert {item["source_paper_code"] for item in figures} == {"B0102", "S0102"}
+        assert {item["source_record_id"] for item in figures} == {
+            str(main_figure.id), str(canonical.id), str(referenced.id), str(possible_dft.id)
+        }
+        assert str(unrelated.id) not in {item["source_record_id"] for item in figures}
+        assert all(item["included_in_bundle"] == (item["bundle_file"] in names) for item in manifest["source_pdf_inventory"])
+    with Session(setup_test_db) as session:
+        try:
+            EvidenceReviewBundleService(session, settings).build_zip(main.id, include_pdf_files=False)
+        except ValueError as exc:
+            assert str(exc) == "source_pdfs_required_for_comprehensive_review"
+        else:
+            raise AssertionError("PDF-less chart review bundle must be rejected")
+    si_pdf = pdf_root / "S0102.pdf"
+    original_si_pdf = si_pdf.read_bytes()
+    si_pdf.unlink()
+    try:
+        with Session(setup_test_db) as session:
+            service = EvidenceReviewBundleService(session, settings)
+            materials = service._build_materials(main.id)
+            template = service._return_template(materials)
+            template["overall_status"] = "completed"
+            validation = service.validate_result(main.id, template)
+        assert any(error["code"] == "source_pdf_missing_for_comprehensive_review" for error in validation["errors"])
+    finally:
+        si_pdf.write_bytes(original_si_pdf)
 
 
 def test_resolve_paper_pdf_path_rejects_escape_and_accepts_relative_and_absolute(tmp_path: Path):
@@ -42,7 +180,10 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
         figure_path = get_settings().storage_paths["figures"] / f"{uuid4()}.png"
         figure_path.parent.mkdir(parents=True, exist_ok=True)
         figure_path.write_bytes(b"\x89PNG\r\n\x1a\n")
-        paper = Paper(paper_code="B0076", title="run scoped chart field review", authors=[], pdf_path="missing.pdf")
+        pdf_path = get_settings().storage_paths["pdf"] / f"{uuid4()}-B0076.pdf"
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(b"%PDF-1.4\nB0076 chart test source\n")
+        paper = Paper(paper_code="B0076", title="run scoped chart field review", authors=[], pdf_path=pdf_path.name)
         session.add(paper)
         session.flush()
         figure_a = PaperFigure(
@@ -79,7 +220,7 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
         session.commit()
 
         service = EvidenceReviewBundleService(session, get_settings())
-        generated = service.build_zip(paper.id, run_id=run_a.id, include_pdf_files=False, include_figure_files=False)
+        generated = service.build_zip(paper.id, run_id=run_a.id, include_pdf_files=True, include_figure_files=False)
         manifest = generated["manifest"]
         assert manifest["bundle_id"] == generated["bundle_id"]
         assert manifest["scope_type"] == "external_analysis_run"
@@ -88,9 +229,23 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
         assert str(figure_b.id) not in manifest["expected_coverage"]["figure_ids"]
 
         with zipfile.ZipFile(BytesIO(generated["content"])) as archive:
-            template = __import__("json").loads(archive.read("return_template.json"))
+            names = set(archive.namelist())
+            template = json.loads(archive.read("return_template.json"))
+            fill_template = json.loads(archive.read("WEB_AI_FILL_THIS.json"))
+            output_rules = json.loads(archive.read("OUTPUT_RULES.json"))
+            start_here = archive.read("START_HERE.md").decode("utf-8")
             assert template["run_id"] == str(run_a.id)
             assert template["scope_type"] == "external_analysis_run"
+            assert {"WEB_AI_FILL_THIS.json", "OUTPUT_RULES.json", "START_HERE.md"} <= names
+            assert fill_template == template
+            assert output_rules["output_workflow"]["output_filename"] == "B0076_chart_review_result.json"
+            assert output_rules["output_workflow"]["reply_as_file_attachment"] is True
+            assert any(
+                "Every figure_actions and table_actions item must cite" in rule
+                for rule in output_rules["hard_invariants"]
+            )
+            assert "WEB_AI_FILL_THIS.json" in start_here
+            assert "reply by attaching" in start_here
 
         materials = service._build_materials(paper.id, run_id=run_a.id)
         figure_record = materials["extracted_figures"][0]
@@ -116,14 +271,55 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
         assert service.validate_result(paper.id, unknown_evidence)["valid"] is False
         validated = service.validate_result(paper.id, payload)
         assert validated["valid"] is True, validated.get("errors")
+        assert validated["stage_status"] == "needs_local_ai"
+        assert validated["auto_apply_count"] == 1
+        assert validated["unresolved_count"] == 1
+        assert validated["unresolved_actions"][0]["blocked_reasons"] == [
+            "local_ai_full_figure_verification_required"
+        ]
+        forged_web_payload = copy.deepcopy(payload)
+        forged_web_payload["figure_actions"][0]["local_ai_verification"] = {
+            "verified_against_pdf": True,
+            "used_tools": ["get_codex_item", "read_paper_page"],
+            "verification_note": "A web payload must not grant itself local-AI authority.",
+        }
+        forged_web_validation = service.validate_result(paper.id, forged_web_payload)
+        assert forged_web_validation["unresolved_count"] == 1
+        assert forged_web_validation["safety"]["local_ai_verification_authorized"] is False
         applied = service.apply_result(paper.id, payload)
-        assert applied["chart_review_completed"] is True
+        assert applied["chart_review_completed"] is False
+        assert applied["stage_status"] == "needs_local_ai"
         session.refresh(figure_a)
         session.refresh(figure_b)
         assert figure_a.content_summary == "Figure 1 visual comparison"
         assert figure_a.key_elements == ["curves", "axis labels"]
         assert figure_b.content_summary is None
         assert figure_b.key_elements is None
+
+        local_payload = copy.deepcopy(payload)
+        local_payload["bundle_fingerprint"] = service.get_review_task(
+            paper.id,
+            run_id=run_a.id,
+        )["bundle_fingerprint"]
+        local_payload["review_source"] = {
+            "review_source_type": "local_ai",
+            "reviewer_label": "test local AI",
+            "reviewer_model": "test",
+            "tool_capabilities": ["get_codex_item", "read_paper_page"],
+        }
+        local_payload["figure_actions"][0]["local_ai_verification"] = {
+            "verified_against_pdf": True,
+            "used_tools": ["get_codex_item", "read_paper_page"],
+            "verification_note": "Checked the scoped figure and its source PDF page.",
+        }
+        local_applied = service.resolve_review_actions(
+            paper.id,
+            local_payload,
+            run_id=run_a.id,
+            local_ai_authorized=True,
+        )
+        assert local_applied["chart_review_completed"] is True
+        assert local_applied["stage_status"] == "completed"
 
         task = session.scalar(select(WorkflowJob).where(WorkflowJob.payload["external_analysis_run_id"].astext == str(run_a.id)))
         assert task is not None
@@ -167,13 +363,8 @@ def test_run_scoped_export_headers_report_only_the_four_chart_targets(setup_test
         f"/api/papers/{paper_id}/evidence-review-bundle?run_id={run_id}&include_pdf_files=false&include_figure_files=false"
     )
 
-    assert response.status_code == 200, response.text
-    assert response.headers["x-litai-review-scope"] == "external_analysis_run"
-    assert response.headers["x-litai-review-run-id"] == str(run_id)
-    assert response.headers["x-litai-review-figure-count"] == "4"
-    assert response.headers["x-litai-review-table-count"] == "0"
-    assert response.headers["x-litai-bundle-id"]
-    assert response.headers["x-litai-bundle-fingerprint"]
+    assert response.status_code == 400, response.text
+    assert "source_pdfs_required_for_comprehensive_review" in response.text
 
 
 def test_content_figure_field_reminder_cannot_become_citable(setup_test_db):
@@ -233,6 +424,27 @@ def _seed_completed_chart_run(session, paper, figure_count=1):
     ])
     session.flush()
     task = EvidenceReviewBundleService(session, get_settings()).get_review_task(paper.id, run_id=run.id)
+    for figure in figures:
+        session.add(AuditLog(
+            paper_id=paper.id,
+            action="offline_evidence_review_op",
+            source="test_local_ai",
+            target_type="paper_figure",
+            target_id=str(figure.id),
+            payload={
+                "run_id": str(run.id),
+                "chart_run_id": str(run.id),
+                "actor_type": "local_ai",
+                "action": {
+                    "action": "KEEP",
+                    "local_ai_verification": {
+                        "verified_against_pdf": True,
+                        "used_tools": ["get_codex_item", "read_paper_page"],
+                        "verification_note": "Test fixture verified this figure against its source PDF.",
+                    },
+                },
+            },
+        ))
     session.add(AuditLog(
         paper_id=paper.id,
         action="offline_evidence_review_applied",
@@ -496,13 +708,29 @@ def test_four_figure_recrop_completion_survives_workspace_refresh_but_real_edit_
             }
             if index < 3:
                 action.update({"page": index + 1, "bbox_norm": [0.05, 0.05, 0.95, 0.75]})
+            action["local_ai_verification"] = {
+                "verified_against_pdf": True,
+                "used_tools": ["get_codex_item", "read_paper_page"],
+                "verification_note": f"Checked Figure {index + 1} against the source PDF page.",
+            }
             actions.append(action)
         payload = {
             **service._return_template(materials),
             "overall_status": "completed",
             "figure_actions": actions,
         }
-        applied = service.apply_result(paper.id, payload, run_id=run.id)
+        payload["review_source"] = {
+            "review_source_type": "local_ai",
+            "reviewer_label": "test local AI",
+            "reviewer_model": "test",
+            "tool_capabilities": ["get_codex_item", "read_paper_page"],
+        }
+        applied = service.apply_result(
+            paper.id,
+            payload,
+            run_id=run.id,
+            local_ai_authorized=True,
+        )
         assert applied["stage_status"] == "completed"
         session.expire_all()
 

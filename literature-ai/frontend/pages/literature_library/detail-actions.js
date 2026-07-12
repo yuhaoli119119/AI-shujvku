@@ -236,7 +236,7 @@ async function verifyDftResult(itemId) {
                 : "DFT 核验已记录，但仍有安全门阻断项。",
             safety && safety.is_exportable ? "success" : "info"
         );
-        await refreshSelectedPaperDetail({ reason: "verify_dft_result", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "verify_dft_result", mode: "dft" });
     } catch (error) {
         showToast("DFT 核验失败：" + error.message, "error");
     }
@@ -413,7 +413,7 @@ async function submitDftEdit() {
         if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
         activeDftEditItemId = null;
         showToast("DFT 数据已修改，并已退回待核验。", "success");
-        await refreshSelectedPaperDetail({ reason: "manual_update_dft_result", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "manual_update_dft_result", mode: "dft" });
     } catch (error) {
         showToast("DFT 数据修改失败：" + error.message, "error");
     } finally {
@@ -478,7 +478,7 @@ async function acceptDftResult(itemId) {
             safety && safety.is_exportable ? "success" : "info"
         );
         if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
-        await refreshSelectedPaperDetail({ reason: "accept_dft_result", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "accept_dft_result", mode: "dft" });
     } catch (error) {
         showToast("接受入库失败：" + error.message, "error");
     }
@@ -521,7 +521,7 @@ async function rejectDftResult(itemId) {
         rerenderSelectedDetail(state.selectedPaperId);
         showToast("这条 DFT 已拒绝。", "success");
         if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
-        await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "dft" });
     } catch (error) {
         showToast("拒绝失败：" + error.message, "error");
     }
@@ -552,7 +552,7 @@ async function revokeDftResult(itemId) {
             }
         );
         showToast("这条 DFT 已退回待处理。", "success");
-        await refreshSelectedPaperDetail({ reason: "revoke_dft_result", mode: "full" });
+        await refreshSelectedPaperDetail({ reason: "revoke_dft_result", mode: "dft" });
     } catch (error) {
         showToast("取消入库失败：" + error.message, "error");
     }
@@ -610,7 +610,7 @@ async function recropPaperFigures(paperId) {
         );
         showToast("图片重裁完成：" + (data.extracted_count || 0) + " / " + (data.figure_count || 0), "success");
         if (state.selectedPaperId === paperId) {
-            await refreshSelectedPaperDetail({ reason: "recrop_figures", mode: "full" });
+            await refreshSelectedPaperDetail({ reason: "recrop_figures", mode: "content" });
         } else {
             await loadPaperDetail(paperId);
         }
@@ -636,7 +636,7 @@ async function promptAddRelationship(paperId) {
         });
         showToast("支撑文献绑定成功", "success");
         if (state.selectedPaperId === paperId) {
-            await refreshSelectedPaperDetail({ reason: "relationship_created", mode: "full" });
+            await refreshSelectedPaperDetail({ reason: "relationship_created", mode: "content" });
         } else {
             await loadPaperDetail(paperId);
         }
