@@ -4,6 +4,7 @@ import asyncio
 from uuid import UUID
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,7 @@ from app.db.models import (
     Paper,
 )
 from app.mcp.context import mcp_auth_context
+from app.main import app
 from app.mcp.server import (
     get_dft_audit_issues,
     mcp_server,
@@ -134,6 +136,48 @@ def test_get_dft_audit_issues_mcp_returns_read_only_issue_summary(setup_test_db)
     assert payload["items"][0]["issue_id"] == issue_id
     assert payload["items"][0]["issue_type"] == "missing_dft_result"
     assert payload["items"][0]["source_count"] == 1
+
+
+def test_http_and_mcp_audit_issue_adapters_return_same_cursor_page(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "HTTP MCP parity")
+        service = DFTAuditIssueService(session)
+        for index in range(3):
+            service.upsert_issue(
+                paper_id=paper.id,
+                target_id="new",
+                issue_type="missing_dft_result" if index != 1 else "wrong_value",
+                status="needs_primary_ai",
+                fingerprint=f"adapter-parity-{index}",
+                source_identity="audit_ai",
+            )
+        session.commit()
+        paper_id = str(paper.id)
+
+    http = TestClient(app).get(
+        "/api/dft/audit-issues",
+        params={
+            "paper_id": paper_id,
+            "issue_type": "missing_dft_result",
+            "status": "needs_primary_ai",
+            "limit": 1,
+            "sort_direction": "asc",
+        },
+    )
+    assert http.status_code == 200
+    http_payload = http.json()
+    with mcp_auth_context(_read_auth()):
+        mcp_payload = get_dft_audit_issues(
+            paper_id=paper_id,
+            statuses=["needs_primary_ai"],
+            issue_types=["missing_dft_result"],
+            limit=1,
+            sort_direction="asc",
+        )
+
+    for key in ("total_count", "returned_count", "count", "limit", "has_more", "next_cursor", "sort_direction"):
+        assert mcp_payload[key] == http_payload[key]
+    assert mcp_payload["items"] == http_payload["items"]
 
 
 @pytest.mark.parametrize("auth_factory", [_read_auth, _review_corrections_auth])

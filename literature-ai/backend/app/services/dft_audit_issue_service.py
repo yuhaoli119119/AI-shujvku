@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,7 +27,19 @@ from app.services.external_analysis_identity import (
 DFT_AUDIT_ISSUE_OPEN_STATUSES = set(DFT_AUDIT_ISSUE_PENDING_STATUSES)
 
 
+class DFTAuditIssueCursorError(ValueError):
+    """Raised when an audit-issue cursor cannot be used for this query."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
 class DFTAuditIssueService:
+    CURSOR_VERSION = 1
+    CURSOR_HASH_DOMAIN = "literature-ai:dft-audit-issues:v1"
+    PAGE_LIMIT_MIN = 1
+    PAGE_LIMIT_MAX = 200
     ISSUE_TYPES = {
         "missing_dft_result",
         "wrong_value",
@@ -366,8 +380,182 @@ class DFTAuditIssueService:
             stmt = stmt.where(DFTAuditIssue.status.in_(sorted(statuses)))
         return list(self.session.scalars(stmt.limit(max(1, min(limit, 1000)))).all())
 
+    def query_issues(
+        self,
+        *,
+        paper_id: UUID | None = None,
+        statuses: set[str] | None = None,
+        issue_types: set[str] | None = None,
+        limit: int = 100,
+        cursor: str | None = None,
+        sort_direction: str = "desc",
+    ) -> dict[str, Any]:
+        """Return one stable page after applying every filter in SQL.
+
+        ``total_count`` is computed from the complete filtered set before the
+        keyset cursor is applied.  The cursor carries the canonical filters and
+        sort direction, so it cannot be silently reused for a different query.
+        """
+
+        unknown_statuses = set(statuses or []) - self.STATUSES
+        if unknown_statuses:
+            raise ValueError(f"Unsupported DFT audit issue status: {', '.join(sorted(unknown_statuses))}")
+        unknown_issue_types = set(issue_types or []) - self.ISSUE_TYPES
+        if unknown_issue_types:
+            raise ValueError(f"Unsupported DFT audit issue type: {', '.join(sorted(unknown_issue_types))}")
+        if not isinstance(limit, int) or isinstance(limit, bool):
+            raise ValueError("DFT audit issue limit must be an integer.")
+        if limit < self.PAGE_LIMIT_MIN or limit > self.PAGE_LIMIT_MAX:
+            raise ValueError(
+                f"DFT audit issue limit must be between {self.PAGE_LIMIT_MIN} and {self.PAGE_LIMIT_MAX}."
+            )
+        direction = str(sort_direction or "").strip().lower()
+        if direction not in {"asc", "desc"}:
+            raise ValueError("DFT audit issue sort_direction must be 'asc' or 'desc'.")
+
+        filters = self._canonical_query_filters(
+            paper_id=paper_id,
+            statuses=statuses,
+            issue_types=issue_types,
+        )
+        filtered = select(DFTAuditIssue)
+        if paper_id is not None:
+            filtered = filtered.where(DFTAuditIssue.paper_id == paper_id)
+        if statuses:
+            filtered = filtered.where(DFTAuditIssue.status.in_(sorted(statuses)))
+        if issue_types:
+            filtered = filtered.where(DFTAuditIssue.issue_type.in_(sorted(issue_types)))
+
+        count_stmt = select(func.count()).select_from(filtered.order_by(None).subquery())
+        total_count = int(self.session.scalar(count_stmt) or 0)
+
+        cursor_position = None
+        if cursor:
+            cursor_position = self._decode_cursor(cursor, filters=filters, sort_direction=direction)
+            created_at, issue_id = cursor_position
+            if direction == "desc":
+                filtered = filtered.where(
+                    or_(
+                        DFTAuditIssue.created_at < created_at,
+                        and_(DFTAuditIssue.created_at == created_at, DFTAuditIssue.id < issue_id),
+                    )
+                )
+            else:
+                filtered = filtered.where(
+                    or_(
+                        DFTAuditIssue.created_at > created_at,
+                        and_(DFTAuditIssue.created_at == created_at, DFTAuditIssue.id > issue_id),
+                    )
+                )
+
+        ordering = (
+            (DFTAuditIssue.created_at.desc(), DFTAuditIssue.id.desc())
+            if direction == "desc"
+            else (DFTAuditIssue.created_at.asc(), DFTAuditIssue.id.asc())
+        )
+        rows = list(self.session.scalars(filtered.order_by(*ordering).limit(limit + 1)).all())
+        has_more = len(rows) > limit
+        items = rows[:limit]
+        next_cursor = None
+        if has_more and items:
+            last = items[-1]
+            next_cursor = self._encode_cursor(
+                filters=filters,
+                sort_direction=direction,
+                created_at=last.created_at,
+                issue_id=last.id,
+            )
+        returned_count = len(items)
+        return {
+            "total_count": total_count,
+            "returned_count": returned_count,
+            "count": returned_count,
+            "limit": limit,
+            "has_more": has_more,
+            "next_cursor": next_cursor,
+            "sort_direction": direction,
+            "items": items,
+        }
+
+    @staticmethod
+    def _canonical_query_filters(
+        *,
+        paper_id: UUID | None,
+        statuses: set[str] | None,
+        issue_types: set[str] | None,
+    ) -> dict[str, Any]:
+        return {
+            "paper_id": str(paper_id) if paper_id is not None else None,
+            "statuses": sorted(statuses or []),
+            "issue_types": sorted(issue_types or []),
+        }
+
+    def _encode_cursor(
+        self,
+        *,
+        filters: dict[str, Any],
+        sort_direction: str,
+        created_at: datetime,
+        issue_id: UUID,
+    ) -> str:
+        payload = {
+            "v": self.CURSOR_VERSION,
+            "sort": sort_direction,
+            "filters": filters,
+            "position": {"created_at": created_at.isoformat(), "id": str(issue_id)},
+        }
+        envelope = {**payload, "checksum": self._cursor_checksum(payload)}
+        encoded = base64.urlsafe_b64encode(self._canonical_json(envelope).encode("utf-8")).decode("ascii")
+        return encoded.rstrip("=")
+
+    def _decode_cursor(
+        self,
+        cursor: str,
+        *,
+        filters: dict[str, Any],
+        sort_direction: str,
+    ) -> tuple[datetime, UUID]:
+        try:
+            padded = str(cursor) + "=" * (-len(str(cursor)) % 4)
+            envelope = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise DFTAuditIssueCursorError("invalid_dft_audit_issue_cursor") from exc
+        if not isinstance(envelope, dict):
+            raise DFTAuditIssueCursorError("invalid_dft_audit_issue_cursor")
+        checksum = envelope.pop("checksum", None)
+        if not isinstance(checksum, str) or checksum != self._cursor_checksum(envelope):
+            raise DFTAuditIssueCursorError("tampered_dft_audit_issue_cursor")
+        if envelope.get("v") != self.CURSOR_VERSION:
+            raise DFTAuditIssueCursorError("unsupported_dft_audit_issue_cursor_version")
+        if envelope.get("sort") != sort_direction:
+            raise DFTAuditIssueCursorError("dft_audit_issue_cursor_sort_mismatch")
+        if envelope.get("filters") != filters:
+            raise DFTAuditIssueCursorError("dft_audit_issue_cursor_filter_mismatch")
+        position = envelope.get("position")
+        if not isinstance(position, dict):
+            raise DFTAuditIssueCursorError("invalid_dft_audit_issue_cursor")
+        try:
+            created_at = datetime.fromisoformat(str(position["created_at"]))
+            issue_id = UUID(str(position["id"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DFTAuditIssueCursorError("invalid_dft_audit_issue_cursor_position") from exc
+        return created_at, issue_id
+
+    def _cursor_checksum(self, payload: dict[str, Any]) -> str:
+        material = f"{self.CURSOR_HASH_DOMAIN}\n{self._canonical_json(payload)}"
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _canonical_json(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+
     def serialize_issue(self, issue: DFTAuditIssue) -> dict[str, Any]:
-        return DFTAuditIssueLifecycleService(self.session).serialize_issue(issue)
+        payload = DFTAuditIssueLifecycleService(self.session).serialize_issue(issue)
+        return {
+            **payload,
+            "issue_id": str(issue.id),
+            "source_count": len(issue.source_identities or []),
+        }
 
     @classmethod
     def snapshot_dft_result(cls, row: DFTResult) -> dict[str, Any]:

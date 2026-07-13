@@ -60,7 +60,16 @@ async function mockApis(page, { issues = [makeIssue()], report = makeReport() } 
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ count: issues.length, items: issues, filters: {} }),
+      body: JSON.stringify({
+        total_count: issues.length,
+        returned_count: issues.length,
+        count: issues.length,
+        limit: 100,
+        has_more: false,
+        next_cursor: null,
+        items: issues,
+        filters: {},
+      }),
     });
   });
   await page.route(/\/api\/dft\/audit-report.*/, route => {
@@ -241,7 +250,16 @@ test('renders empty issue state and applies readonly filters', async ({ page }) 
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ count: 0, items: [], filters: {} }),
+      body: JSON.stringify({
+        total_count: 0,
+        returned_count: 0,
+        count: 0,
+        limit: 100,
+        has_more: false,
+        next_cursor: null,
+        items: [],
+        filters: {},
+      }),
     });
   });
   await page.route(/\/api\/dft\/audit-report.*/, route => {
@@ -267,7 +285,141 @@ test('renders empty issue state and applies readonly filters', async ({ page }) 
   await expect(page.locator('#issueList')).toContainText('当前没有待处理 DFT audit issue');
   await expect.poll(() => issueUrl).toContain('paper_id=paper-1');
   await expect.poll(() => issueUrl).toContain('status=needs_user_decision');
+  await expect.poll(() => issueUrl).toContain('issue_type=wrong_value');
   await expect.poll(() => issueUrl).toContain('include_closed=true');
   await expect.poll(() => reportUrl).toContain('days=7');
   await expect.poll(() => reportUrl).toContain('include_closed=true');
+});
+
+test('loads every server-filtered cursor page without client issue-type filtering', async ({ page }) => {
+  const issueUrls = [];
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route(/\/api\/dft\/audit-issues.*/, route => {
+    const url = new URL(route.request().url());
+    issueUrls.push(url.toString());
+    const cursor = url.searchParams.get('cursor');
+    const items = cursor
+      ? [makeIssue({ id: '33333333-3333-4333-8333-333333333333', issue_type: 'wrong_value', target_id: 'result-3' })]
+      : [
+          makeIssue({ id: '11111111-1111-4111-8111-111111111111', issue_type: 'wrong_value', target_id: 'result-1' }),
+          makeIssue({ id: '22222222-2222-4222-8222-222222222222', issue_type: 'wrong_value', target_id: 'result-2' }),
+        ];
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total_count: 3,
+        returned_count: items.length,
+        count: items.length,
+        limit: 100,
+        has_more: !cursor,
+        next_cursor: cursor ? null : 'cursor-page-2',
+        items,
+      }),
+    });
+  });
+  await page.route(/\/api\/dft\/audit-report.*/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(makeReport()),
+  }));
+
+  await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html?paper_id=paper-1&issue_type=wrong_value`);
+
+  await expect(page.locator('.issue-card')).toHaveCount(3);
+  await expect(page.locator('#issueMeta')).toHaveText('3 / 3 items');
+  expect(issueUrls).toHaveLength(2);
+  expect(issueUrls.every(url => new URL(url).searchParams.get('issue_type') === 'wrong_value')).toBe(true);
+  expect(new URL(issueUrls[1]).searchParams.get('cursor')).toBe('cursor-page-2');
+});
+
+for (const scenario of [
+  { name: 'cursor loop', message: 'cursor 出现循环' },
+  { name: 'duplicate id', message: '重复 issue' },
+  { name: 'total count drift', message: 'issue 总数发生变化' },
+]) {
+  test(`stops automatic pagination on ${scenario.name}`, async ({ page }) => {
+    let pageNumber = 0;
+    await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+    await page.route(/\/api\/dft\/audit-issues.*/, route => {
+      pageNumber += 1;
+      const first = pageNumber === 1;
+      const duplicate = scenario.name === 'duplicate id';
+      const cursorLoop = scenario.name === 'cursor loop';
+      const totalDrift = scenario.name === 'total count drift';
+      const item = makeIssue({
+        id: first || duplicate
+          ? '11111111-1111-4111-8111-111111111111'
+          : '22222222-2222-4222-8222-222222222222',
+        issue_type: 'wrong_value',
+      });
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          total_count: !first && totalDrift ? 3 : 2,
+          returned_count: 1,
+          count: 1,
+          limit: 100,
+          has_more: first || cursorLoop,
+          next_cursor: first || cursorLoop ? 'same-cursor' : null,
+          items: [item],
+        }),
+      });
+    });
+    await page.route(/\/api\/dft\/audit-report.*/, route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(makeReport()),
+    }));
+
+    await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html?issue_type=wrong_value`);
+
+    await expect(page.locator('#issueList')).toContainText(scenario.message);
+    expect(pageNumber).toBe(2);
+  });
+}
+
+test('rapid filter switch only renders the latest load generation', async ({ page }) => {
+  let initialRequestStarted = false;
+  await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
+  await page.route(/\/api\/dft\/audit-issues.*/, async route => {
+    const url = new URL(route.request().url());
+    const issueType = url.searchParams.get('issue_type');
+    if (!issueType) {
+      initialRequestStarted = true;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    const item = issueType === 'wrong_value'
+      ? makeIssue({ id: '22222222-2222-4222-8222-222222222222', issue_type: 'wrong_value', target_id: 'latest-result' })
+      : makeIssue({ id: '11111111-1111-4111-8111-111111111111', issue_type: 'missing_dft_result' });
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        total_count: 1,
+        returned_count: 1,
+        count: 1,
+        limit: 100,
+        has_more: false,
+        next_cursor: null,
+        items: [item],
+      }),
+    });
+  });
+  await page.route(/\/api\/dft\/audit-report.*/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify(makeReport()),
+  }));
+
+  await page.goto(`${BASE_URL}/pages/dft_audit_center/index.html`);
+  await expect.poll(() => initialRequestStarted).toBe(true);
+  await page.locator('#issueTypeFilter').selectOption('wrong_value');
+
+  await expect(page.locator('#issueList')).toContainText('wrong_value');
+  await page.waitForTimeout(350);
+  await expect(page.locator('#issueList')).toContainText('latest-result');
+  await expect(page.locator('#issueList')).not.toContainText('missing_dft_result');
+  await expect(page.locator('.issue-card')).toHaveCount(1);
 });

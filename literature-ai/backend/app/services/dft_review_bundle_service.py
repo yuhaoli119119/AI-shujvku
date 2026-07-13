@@ -197,6 +197,23 @@ class DFTReviewBundleService:
             "review_runs": materials["curated_evidence_snapshot"].get("review_runs") or [],
         }
 
+    def get_completeness_snapshot(self, paper_id: UUID) -> dict[str, Any]:
+        """Expose the authoritative, read-only inputs for DFT completeness.
+
+        This keeps source-PDF inventory, chart scope, and bundle fingerprint
+        computation in the existing whole-paper review implementation.
+        """
+
+        materials = self._build_materials(paper_id, enforce_figure_table_gate=False)
+        return {
+            "paper_id": materials["paper_metadata"]["paper_id"],
+            "paper_code": materials["paper_metadata"]["paper_code"],
+            "review_mode": materials["review_mode"],
+            "source_pdf_inventory": materials["paper_metadata"]["source_pdf_inventory"],
+            "review_gate": materials["curated_evidence_snapshot"]["review_gate"],
+            "source_snapshot_fingerprint": materials["bundle_fingerprint"],
+        }
+
     def _resolve_chart_run_id(
         self,
         paper_id: UUID,

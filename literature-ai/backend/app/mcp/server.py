@@ -687,29 +687,31 @@ def get_dft_audit_issues(
     statuses: list[str] | None = None,
     issue_types: list[str] | None = None,
     limit: int = 50,
+    cursor: str | None = None,
+    sort_direction: str = "desc",
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         service = DFTAuditIssueService(session)
-        rows = service.list_issues(
+        page = service.query_issues(
             paper_id=UUID(paper_id),
             statuses=set(statuses or []) or None,
-            limit=max(1, min(limit, 200)),
+            issue_types={str(item).strip() for item in issue_types or [] if str(item).strip()} or None,
+            limit=limit,
+            cursor=cursor,
+            sort_direction=sort_direction,
         )
-        allowed_issue_types = {str(item).strip() for item in issue_types or [] if str(item).strip()}
-        if allowed_issue_types:
-            rows = [row for row in rows if row.issue_type in allowed_issue_types]
         return {
             "paper_id": paper_id,
-            "count": len(rows),
+            **{key: value for key, value in page.items() if key != "items"},
             "items": [
                 {
                     **service.serialize_issue(row),
                     "issue_id": str(row.id),
                     "source_count": len(row.source_identities or []),
                 }
-                for row in rows
+                for row in page["items"]
             ],
         }
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+from datetime import datetime, timedelta
+import json
 from uuid import UUID
 
 import pytest
@@ -10,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.models import AuditLog, DFTAuditIssue, DFTResult, EvidenceSpan, ExtractionFieldReview, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper
 from app.main import app
-from app.services.dft_audit_issue_service import DFTAuditIssueService
+from app.services.dft_audit_issue_service import DFTAuditIssueCursorError, DFTAuditIssueService
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_identity_service import build_dft_scientific_identity, resolve_atom_pair_identity
 from app.services.dft_review_service import DFTResultReviewService
@@ -356,6 +359,184 @@ def test_dft_audit_issues_api_filters_open_paper_issues(setup_test_db):
     assert payload["count"] == 1
     assert payload["items"][0]["issue_type"] == "missing_dft_result"
     assert payload["items"][0]["status"] == "needs_primary_ai"
+
+
+def test_audit_issue_query_filters_before_limit_and_total_count_matches_pages(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "SQL filtered issue page")
+        created = datetime(2026, 7, 14, 10, 0, 0)
+        for index in range(8):
+            session.add(
+                DFTAuditIssue(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id="new",
+                    issue_type="wrong_value" if index < 5 else "missing_dft_result",
+                    severity="medium",
+                    status="needs_primary_ai",
+                    fingerprint=f"sql-filter-{index}",
+                    created_at=created + timedelta(seconds=index),
+                    updated_at=created + timedelta(seconds=index),
+                )
+            )
+        session.flush()
+        service = DFTAuditIssueService(session)
+        first = service.query_issues(
+            paper_id=paper.id,
+            statuses={"needs_primary_ai"},
+            issue_types={"missing_dft_result"},
+            limit=2,
+            sort_direction="asc",
+        )
+        second = service.query_issues(
+            paper_id=paper.id,
+            statuses={"needs_primary_ai"},
+            issue_types={"missing_dft_result"},
+            limit=2,
+            cursor=first["next_cursor"],
+            sort_direction="asc",
+        )
+
+        assert first["total_count"] == second["total_count"] == 3
+        assert first["returned_count"] == first["count"] == 2
+        assert second["returned_count"] == 1
+        assert first["has_more"] is True
+        assert second["has_more"] is False
+        assert all(row.issue_type == "missing_dft_result" for row in [*first["items"], *second["items"]])
+
+
+@pytest.mark.parametrize("direction", ["asc", "desc"])
+def test_audit_issue_keyset_tie_breaker_has_no_duplicates_or_omissions(setup_test_db, direction):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, f"Keyset {direction}")
+        created = datetime(2026, 7, 14, 11, 0, 0)
+        expected_ids = []
+        for index in range(7):
+            issue = DFTAuditIssue(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id="new",
+                issue_type="missing_dft_result",
+                severity="high",
+                status="needs_primary_ai",
+                fingerprint=f"tie-{direction}-{index}",
+                created_at=created,
+                updated_at=created,
+            )
+            session.add(issue)
+            session.flush()
+            expected_ids.append(str(issue.id))
+        service = DFTAuditIssueService(session)
+        cursor = None
+        seen = []
+        while True:
+            page = service.query_issues(
+                paper_id=paper.id,
+                issue_types={"missing_dft_result"},
+                limit=3,
+                cursor=cursor,
+                sort_direction=direction,
+            )
+            seen.extend(str(row.id) for row in page["items"])
+            if not page["has_more"]:
+                break
+            assert page["next_cursor"] not in {None, cursor}
+            cursor = page["next_cursor"]
+
+        assert len(seen) == len(set(seen)) == 7
+        assert set(seen) == set(expected_ids)
+        assert seen == sorted(expected_ids, reverse=direction == "desc")
+
+
+def test_audit_issue_cursor_rejects_tamper_version_filter_and_sort_mismatch(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Cursor contract")
+        for index in range(2):
+            session.add(
+                DFTAuditIssue(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id="new",
+                    issue_type="missing_dft_result",
+                    severity="high",
+                    status="needs_primary_ai",
+                    fingerprint=f"cursor-{index}",
+                )
+            )
+        session.flush()
+        service = DFTAuditIssueService(session)
+        first = service.query_issues(
+            paper_id=paper.id,
+            statuses={"needs_primary_ai"},
+            issue_types={"missing_dft_result"},
+            limit=1,
+        )
+        cursor = first["next_cursor"]
+        assert cursor
+
+        padded = cursor + "=" * (-len(cursor) % 4)
+        tampered_envelope = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        tampered_envelope["position"]["id"] = str(UUID(int=0))
+        tampered = base64.urlsafe_b64encode(
+            service._canonical_json(tampered_envelope).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        with pytest.raises(DFTAuditIssueCursorError, match="tampered_dft_audit_issue_cursor"):
+            service.query_issues(
+                paper_id=paper.id,
+                statuses={"needs_primary_ai"},
+                issue_types={"missing_dft_result"},
+                limit=1,
+                cursor=tampered,
+            )
+        with pytest.raises(DFTAuditIssueCursorError, match="invalid_dft_audit_issue_cursor"):
+            service.query_issues(
+                paper_id=paper.id,
+                statuses={"needs_primary_ai"},
+                issue_types={"missing_dft_result"},
+                limit=1,
+                cursor="not-a-valid-cursor",
+            )
+        with pytest.raises(DFTAuditIssueCursorError, match="dft_audit_issue_cursor_filter_mismatch"):
+            service.query_issues(
+                paper_id=paper.id,
+                statuses={"needs_user_decision"},
+                issue_types={"missing_dft_result"},
+                limit=1,
+                cursor=cursor,
+            )
+        with pytest.raises(DFTAuditIssueCursorError, match="dft_audit_issue_cursor_sort_mismatch"):
+            service.query_issues(
+                paper_id=paper.id,
+                statuses={"needs_primary_ai"},
+                issue_types={"missing_dft_result"},
+                limit=1,
+                cursor=cursor,
+                sort_direction="asc",
+            )
+
+        envelope = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+        envelope["v"] = 999
+        payload = {key: value for key, value in envelope.items() if key != "checksum"}
+        envelope["checksum"] = service._cursor_checksum(payload)
+        wrong_version = base64.urlsafe_b64encode(
+            service._canonical_json(envelope).encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        with pytest.raises(DFTAuditIssueCursorError, match="unsupported_dft_audit_issue_cursor_version"):
+            service.query_issues(
+                paper_id=paper.id,
+                statuses={"needs_primary_ai"},
+                issue_types={"missing_dft_result"},
+                limit=1,
+                cursor=wrong_version,
+            )
+
+
+@pytest.mark.parametrize("limit", [0, 201])
+def test_audit_issue_query_rejects_limit_outside_contract(setup_test_db, limit):
+    with Session(setup_test_db) as session:
+        service = DFTAuditIssueService(session)
+        with pytest.raises(ValueError, match="between 1 and 200"):
+            service.query_issues(limit=limit)
 
 
 def test_human_verify_closes_eligible_issue_but_not_duplicate_suspected(setup_test_db):
