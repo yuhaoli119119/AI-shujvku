@@ -5,7 +5,10 @@ import json
 
 import pytest
 
-from app.services.dft_identity_service import build_dft_identity_v2
+from app.services.dft_identity_service import (
+    build_dft_identity_v2,
+    get_dft_identity_v2_property_policy,
+)
 
 
 pytestmark = pytest.mark.no_test_database
@@ -61,6 +64,133 @@ def test_identity_v2_unknown_units_are_not_silently_deduplicated():
     assert first.observation_key is None
     assert second.observation_key is None
     assert first.identity_payload["observation"]["unit"] != second.identity_payload["observation"]["unit"]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "error_code"),
+    [
+        ("paper_id", "missing_paper_identity"),
+        ("material", "missing_material_identity"),
+        ("property_type", "missing_property_type_identity"),
+    ],
+)
+def test_identity_v2_common_required_fields_block_observation_key(field_name, error_code):
+    payload = _payload()
+    if field_name == "paper_id":
+        payload.pop("paper_id")
+        payload["corrected_value"]["paper_id"] = "nested-paper-is-not-authoritative"
+    else:
+        payload["corrected_value"][field_name] = None
+
+    identity = build_dft_identity_v2(payload)
+
+    assert identity.error_code == error_code
+    assert error_code in identity.error_codes
+    assert identity.observation_key is None
+    assert identity.subject_key.startswith("dft-subject-v2:")
+    assert identity.identity_payload["subject"]
+
+
+def test_identity_v2_property_required_field_matrix_blocks_incomplete_subjects():
+    adsorption = build_dft_identity_v2(_payload(adsorbate=None))
+    reaction_without_step = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            reaction_step=None,
+            state_context="transition_state",
+        )
+    )
+    reaction_without_state = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            reaction_step="Li2S4 -> TS",
+            state_context=None,
+            method_context={},
+        )
+    )
+    bader_without_atom = build_dft_identity_v2(
+        _payload(property_type="Bader charge", site_label=None, unit="e")
+    )
+
+    assert adsorption.error_code == "missing_adsorbate_identity"
+    assert reaction_without_step.error_code == "missing_reaction_step_identity"
+    assert reaction_without_state.error_code == "missing_state_context_identity"
+    assert bader_without_atom.error_code == "missing_atom_or_site_identity"
+    assert all(
+        identity.observation_key is None
+        for identity in (
+            adsorption,
+            reaction_without_step,
+            reaction_without_state,
+            bader_without_atom,
+        )
+    )
+
+
+def test_identity_v2_property_required_field_matrix_accepts_valid_context_aliases():
+    reaction = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            reaction_step="Li2S4 -> TS",
+            method_context={"site_configuration": "transition"},
+        )
+    )
+    bader = build_dft_identity_v2(
+        _payload(property_type="Lowdin charge", site_label=None, atom_label="Fe1", unit="e")
+    )
+
+    assert reaction.observation_key is not None
+    assert reaction.identity_payload["subject"]["property_context"]["configuration"] == "transition"
+    assert bader.observation_key is not None
+    assert bader.identity_payload["subject"]["site_label"] == "fe1"
+
+
+def test_identity_v2_unit_policy_requires_units_unless_explicitly_dimensionless():
+    missing_unit = build_dft_identity_v2(_payload(unit=None))
+    dimensionless = build_dft_identity_v2(
+        _payload(property_type="coordination_number", unit=None, value="4")
+    )
+    wrongly_dimensional = build_dft_identity_v2(
+        _payload(property_type="coordination_number", unit="eV", value="4")
+    )
+
+    assert "missing_unit_identity" in missing_unit.error_codes
+    assert missing_unit.observation_key is None
+    assert dimensionless.identity_payload["property_policy"] == "dimensionless"
+    assert dimensionless.observation_key is not None
+    assert dimensionless.identity_payload["observation"]["unit"] == ""
+    assert "unsupported_unit_identity" in wrongly_dimensional.error_codes
+    assert wrongly_dimensional.observation_key is None
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [
+        ("single value", "point"),
+        ("interval", "range"),
+        ("energy window", "energy_window"),
+    ],
+)
+def test_identity_v2_value_kind_accepts_only_explicit_aliases(alias, canonical):
+    identity = build_dft_identity_v2(
+        _payload(
+            value_kind=alias,
+            value_upper="-0.5" if canonical != "point" else None,
+        )
+    )
+
+    assert identity.observation_key is not None
+    assert identity.identity_payload["observation"]["value_kind"] == canonical
+
+
+def test_identity_v2_unknown_value_kind_and_missing_range_upper_are_blocked():
+    unknown = build_dft_identity_v2(_payload(value_kind="fuzzy-band"))
+    missing_upper = build_dft_identity_v2(_payload(value_kind="range", value_upper=None))
+
+    assert "unsupported_value_kind_identity" in unknown.error_codes
+    assert unknown.observation_key is None
+    assert "missing_value_upper_identity" in missing_upper.error_codes
+    assert missing_upper.observation_key is None
 
 
 def test_identity_v2_distinguishes_point_range_and_energy_window():
@@ -165,3 +295,83 @@ def test_identity_v2_property_specific_context_changes_subject_and_is_serializab
     }
     assert "page" not in json.dumps(pbe.identity_payload, sort_keys=True)
     json.dumps(pbe.identity_payload, ensure_ascii=False, sort_keys=True)
+
+
+def test_identity_v2_optional_method_context_is_reported_without_splitting_keys():
+    first = build_dft_identity_v2(
+        _payload(
+            method_context={
+                "functional": "PBE",
+                "configuration": "bridge",
+                "k_points": "3x3x1",
+                "cutoff_energy_ev": 400,
+                "smearing_width": "0.05",
+                "source_specific_setting": "source-a",
+                "source_candidate_id": "candidate-a",
+                "page": 4,
+            }
+        )
+    )
+    second = build_dft_identity_v2(
+        _payload(
+            method_context={
+                "functional": "PBE",
+                "configuration": "bridge",
+                "k_points": "5x5x1",
+                "cutoff_energy_ev": 520,
+                "smearing_width": "0.10",
+                "source_specific_setting": "source-b",
+                "source_candidate_id": "candidate-b",
+                "page": 99,
+            }
+        )
+    )
+    different_functional = build_dft_identity_v2(
+        _payload(
+            method_context={
+                "functional": "HSE06",
+                "configuration": "bridge",
+                "k_points": "3x3x1",
+            }
+        )
+    )
+
+    assert first.subject_key == second.subject_key
+    assert first.observation_key == second.observation_key
+    assert first.observation_key != different_functional.observation_key
+    assert first.identity_payload["subject"]["property_context"] == {
+        "configuration": "bridge",
+        "functional": "pbe",
+    }
+    assert first.identity_payload["reported_context"] == {
+        "cutoff_energy_ev": "400",
+        "k_points": "3x3x1",
+        "smearing_width": "0.05",
+        "source_specific_setting": "source-a",
+    }
+    assert second.identity_payload["reported_context"] == {
+        "cutoff_energy_ev": "520",
+        "k_points": "5x5x1",
+        "smearing_width": "0.1",
+        "source_specific_setting": "source-b",
+    }
+    serialized = json.dumps(first.identity_payload, sort_keys=True)
+    assert "source_candidate_id" not in serialized
+    assert '"page"' not in serialized
+
+
+def test_identity_v2_property_policy_centralizes_required_and_allowed_context():
+    adsorption = get_dft_identity_v2_property_policy("adsorption energy")
+    reaction = get_dft_identity_v2_property_policy("reaction_barrier")
+
+    assert adsorption.name == "adsorption_energy"
+    assert "functional" in adsorption.allowed_context_keys
+    assert "configuration" in adsorption.allowed_context_keys
+    assert "k_points" not in adsorption.allowed_context_keys
+    assert {requirement.error_code for requirement in reaction.requirements} >= {
+        "missing_paper_identity",
+        "missing_material_identity",
+        "missing_property_type_identity",
+        "missing_reaction_step_identity",
+        "missing_state_context_identity",
+    }

@@ -67,6 +67,22 @@ class DFTIdentityV2:
         return self.error_codes[0] if self.error_codes else None
 
 
+@dataclass(frozen=True)
+class DFTIdentityRequirement:
+    error_code: str
+    any_of: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class DFTIdentityPropertyPolicy:
+    name: str
+    exact_property_types: frozenset[str]
+    property_markers: tuple[str, ...]
+    allowed_context_keys: frozenset[str]
+    requirements: tuple[DFTIdentityRequirement, ...]
+    dimensionless: bool = False
+
+
 _V2_PROVENANCE_KEYS = {
     "candidate",
     "candidate_id",
@@ -83,14 +99,24 @@ _V2_PROVENANCE_KEYS = {
     "row_index",
     "run_id",
     "source",
+    "source_candidate_id",
     "source_document_type",
     "source_id",
+    "source_identity",
+    "source_label",
+    "source_page",
+    "source_path",
+    "source_row",
+    "source_row_index",
+    "source_run_id",
+    "source_table",
     "source_type",
+    "source_url",
     "table",
     "table_id",
     "updated_at",
 }
-_V2_COMMON_CONTEXT_KEYS = {
+_V2_COMMON_CONTEXT_KEYS = frozenset({
     "charge_state",
     "configuration",
     "coverage",
@@ -98,8 +124,8 @@ _V2_COMMON_CONTEXT_KEYS = {
     "spin_state",
     "surface",
     "termination",
-}
-_V2_ENERGY_CONTEXT_KEYS = {
+})
+_V2_ENERGY_CONTEXT_KEYS = frozenset({
     "dispersion_correction",
     "electrode_potential",
     "electric_field",
@@ -107,29 +133,132 @@ _V2_ENERGY_CONTEXT_KEYS = {
     "pressure",
     "solvation_model",
     "temperature",
-}
-_V2_REACTION_CONTEXT_KEYS = {
+})
+_V2_REACTION_CONTEXT_KEYS = frozenset({
     "final_state",
     "initial_state",
     "pathway",
     "transition_state",
-}
-_V2_ELECTRONIC_CONTEXT_KEYS = {
+})
+_V2_ELECTRONIC_CONTEXT_KEYS = frozenset({
     "band_gap_type",
     "energy_reference",
     "functional",
     "orbital",
     "soc",
     "spin_channel",
-}
-_V2_CHARGE_CONTEXT_KEYS = {"charge_scheme", "functional", "partitioning_method"}
-_V2_BOND_CONTEXT_KEYS = {"bond_state", "functional", "spin_channel"}
+})
+_V2_CHARGE_CONTEXT_KEYS = frozenset({"charge_scheme", "functional", "partitioning_method"})
+_V2_BOND_CONTEXT_KEYS = frozenset({"bond_state", "functional", "spin_channel"})
 _V2_CONTEXT_ALIASES = {
     "exchange_correlation_functional": "functional",
     "xc_functional": "functional",
     "adsorption_configuration": "configuration",
     "site_configuration": "configuration",
     "surface_facet": "facet",
+}
+_V2_COMMON_REQUIREMENTS = (
+    DFTIdentityRequirement("missing_paper_identity", ("paper_id",)),
+    DFTIdentityRequirement("missing_material_identity", ("material_key",)),
+    DFTIdentityRequirement("missing_property_type_identity", ("property_type",)),
+)
+_V2_ADSORPTION_REQUIREMENTS = (
+    DFTIdentityRequirement("missing_adsorbate_identity", ("adsorbate",)),
+)
+_V2_REACTION_BARRIER_REQUIREMENTS = (
+    DFTIdentityRequirement("missing_reaction_step_identity", ("reaction_step",)),
+    DFTIdentityRequirement(
+        "missing_state_context_identity",
+        (
+            "state_context",
+            "property_context.configuration",
+            "property_context.initial_state",
+            "property_context.transition_state",
+            "property_context.final_state",
+        ),
+    ),
+)
+_V2_ATOM_OR_SITE_REQUIREMENTS = (
+    DFTIdentityRequirement(
+        "missing_atom_or_site_identity",
+        ("active_site_instance_key", "site_label", "canonical_atom_pair"),
+    ),
+)
+
+
+def _v2_policy(
+    name: str,
+    *,
+    exact_property_types: Iterable[str] = (),
+    property_markers: Iterable[str] = (),
+    context_keys: Iterable[str] = (),
+    requirements: tuple[DFTIdentityRequirement, ...] = (),
+    dimensionless: bool = False,
+) -> DFTIdentityPropertyPolicy:
+    return DFTIdentityPropertyPolicy(
+        name=name,
+        exact_property_types=frozenset(exact_property_types),
+        property_markers=tuple(property_markers),
+        allowed_context_keys=frozenset(_V2_COMMON_CONTEXT_KEYS | frozenset(context_keys)),
+        requirements=(*_V2_COMMON_REQUIREMENTS, *requirements),
+        dimensionless=dimensionless,
+    )
+
+
+_V2_PROPERTY_POLICIES = (
+    _v2_policy(
+        "dimensionless",
+        exact_property_types=("coordination_number", "dimensionless_ratio", "poisson_ratio"),
+        dimensionless=True,
+    ),
+    _v2_policy(
+        "reaction_barrier",
+        property_markers=("reaction_barrier", "activation_barrier", "activation_energy"),
+        context_keys=(_V2_ENERGY_CONTEXT_KEYS | _V2_REACTION_CONTEXT_KEYS),
+        requirements=_V2_REACTION_BARRIER_REQUIREMENTS,
+    ),
+    _v2_policy(
+        "adsorption_energy",
+        property_markers=("adsorption_energy",),
+        context_keys=_V2_ENERGY_CONTEXT_KEYS,
+        requirements=_V2_ADSORPTION_REQUIREMENTS,
+    ),
+    _v2_policy(
+        "atomic_charge",
+        property_markers=("bader", "lowdin"),
+        context_keys=_V2_CHARGE_CONTEXT_KEYS,
+        requirements=_V2_ATOM_OR_SITE_REQUIREMENTS,
+    ),
+    _v2_policy(
+        "electronic_structure",
+        property_markers=("band", "dos", "pdos", "orbital"),
+        context_keys=_V2_ELECTRONIC_CONTEXT_KEYS,
+    ),
+    _v2_policy(
+        "bond",
+        property_markers=("bond", "icohp", "cohp"),
+        context_keys=(_V2_BOND_CONTEXT_KEYS | _V2_ENERGY_CONTEXT_KEYS),
+    ),
+    _v2_policy(
+        "energy",
+        property_markers=("energy",),
+        context_keys=_V2_ENERGY_CONTEXT_KEYS,
+    ),
+)
+_V2_DEFAULT_PROPERTY_POLICY = _v2_policy("default")
+
+_V2_VALUE_KIND_ALIASES = {
+    "point": "point",
+    "scalar": "point",
+    "single": "point",
+    "single_value": "point",
+    "range": "range",
+    "interval": "range",
+    "min_max": "range",
+    "lower_upper": "range",
+    "energy_window": "energy_window",
+    "energy_range": "energy_window",
+    "window": "energy_window",
 }
 _V2_UNIT_RULES: dict[str, tuple[str, Decimal]] = {
     "ev": ("eV", Decimal("1")),
@@ -158,6 +287,16 @@ def normalize_dft_property_type(value: Any) -> str:
     return re.sub(r"[_\s-]+", "_", text).strip("_")
 
 
+def get_dft_identity_v2_property_policy(value: Any) -> DFTIdentityPropertyPolicy:
+    property_type = normalize_dft_property_type(value)
+    for policy in _V2_PROPERTY_POLICIES:
+        if property_type in policy.exact_property_types:
+            return policy
+        if any(marker in property_type for marker in policy.property_markers):
+            return policy
+    return _V2_DEFAULT_PROPERTY_POLICY
+
+
 def normalize_dft_value_kind(
     value: Any,
     *,
@@ -171,6 +310,26 @@ def normalize_dft_value_kind(
     if value_upper not in (None, "", []):
         return "energy_window" if "window" in normalize_dft_property_type(property_type) else "range"
     return "point"
+
+
+def normalize_dft_value_kind_v2(
+    value: Any,
+    *,
+    value_upper: Any = None,
+    property_type: Any = None,
+) -> tuple[str, bool]:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+    normalized = re.sub(r"[_\s-]+", "_", text).strip("_")
+    if not normalized:
+        if value_upper in (None, "", []):
+            return "point", True
+        if "window" in normalize_dft_property_type(property_type):
+            return "energy_window", True
+        return "range", True
+    canonical = _V2_VALUE_KIND_ALIASES.get(normalized)
+    if canonical is None:
+        return normalized, False
+    return canonical, True
 
 
 def property_requires_atom_pair(value: Any) -> bool:
@@ -329,13 +488,13 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
     )
     adsorbate = _first_value(sources, ("normalized_adsorbate", "adsorbate"))
     atom_pair = resolve_atom_pair_identity(payload, property_type=property_type_raw)
-    property_context = _property_specific_context(sources, property_type)
+    property_policy = get_dft_identity_v2_property_policy(property_type)
+    property_context, reported_context = _property_specific_context(
+        sources,
+        property_policy,
+    )
     subject = {
-        "paper_id": _text(
-            payload.get("paper_id")
-            if payload.get("paper_id") not in (None, "", [])
-            else _first_value(sources, ("paper_id",))
-        ),
+        "paper_id": _text(payload.get("paper_id")),
         "material_key": _text(material),
         "property_type": property_type,
         "property_subtype": _text(
@@ -353,7 +512,19 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
         ),
         "canonical_atom_pair": atom_pair.canonical,
         "site_label": _text(
-            _first_value(sources, ("site_label", "adsorption_site", "site"))
+            _first_value(
+                sources,
+                (
+                    "site_label",
+                    "adsorption_site",
+                    "site",
+                    "atom",
+                    "atom_label",
+                    "atom_site",
+                    "atom_identity",
+                    "site_identity",
+                ),
+            )
         ),
         "state_context": _normalize_context_value(
             _first_value(sources, ("state_context",))
@@ -364,29 +535,35 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
 
     value_raw = _first_value(sources, ("normalized_value", "value"))
     value_upper_raw = _first_value(sources, ("normalized_value_upper", "value_upper"))
-    value_kind = normalize_dft_value_kind(
+    value_kind, value_kind_supported = normalize_dft_value_kind_v2(
         _first_value(sources, ("normalized_value_kind", "value_kind", "value_type")),
         value_upper=value_upper_raw,
         property_type=property_type_raw,
     )
     unit_raw = _first_value(sources, ("normalized_unit", "unit"))
-    unit, factor, unit_supported = _normalize_v2_unit(unit_raw, property_type=property_type)
+    unit, factor, unit_error = _normalize_v2_unit(
+        unit_raw,
+        property_type=property_type,
+        dimensionless=property_policy.dimensionless,
+    )
     value, value_valid = _canonical_decimal(value_raw, factor=factor)
     value_upper, value_upper_valid = _canonical_decimal(value_upper_raw, factor=factor)
 
-    errors: list[str] = []
+    errors = _required_identity_errors(subject, property_policy)
     if atom_pair.error_code:
         errors.append(atom_pair.error_code)
     if value_raw in (None, "", []):
         errors.append("missing_value_identity")
     elif not value_valid:
         errors.append("invalid_numeric_identity")
+    if not value_kind_supported:
+        errors.append("unsupported_value_kind_identity")
     if value_kind in {"range", "energy_window"} and value_upper_raw in (None, "", []):
         errors.append("missing_value_upper_identity")
     elif value_upper_raw not in (None, "", []) and not value_upper_valid:
         errors.append("invalid_value_upper_identity")
-    if not unit_supported:
-        errors.append("unsupported_unit_identity")
+    if unit_error:
+        errors.append(unit_error)
 
     observation = {
         "value": value,
@@ -403,8 +580,10 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
         )
     identity_payload = {
         "identity_version": 2,
+        "property_policy": property_policy.name,
         "subject": subject,
         "observation": observation,
+        "reported_context": reported_context,
         "atom_pair": {
             "canonical": atom_pair.canonical,
             "normalized_aliases": list(atom_pair.normalized_aliases),
@@ -444,21 +623,11 @@ def _identity_v2_sources(payload: dict[str, Any]) -> tuple[dict[str, Any], ...]:
 
 def _property_specific_context(
     sources: tuple[dict[str, Any], ...],
-    property_type: str,
-) -> dict[str, Any]:
-    allowed = set(_V2_COMMON_CONTEXT_KEYS)
-    if any(token in property_type for token in ("energy", "barrier", "icohp", "cohp")):
-        allowed.update(_V2_ENERGY_CONTEXT_KEYS)
-    if any(token in property_type for token in ("reaction", "barrier")):
-        allowed.update(_V2_REACTION_CONTEXT_KEYS)
-    if any(token in property_type for token in ("band", "dos", "pdos", "orbital")):
-        allowed.update(_V2_ELECTRONIC_CONTEXT_KEYS)
-    if "charge" in property_type:
-        allowed.update(_V2_CHARGE_CONTEXT_KEYS)
-    if any(token in property_type for token in ("bond", "icohp", "cohp")):
-        allowed.update(_V2_BOND_CONTEXT_KEYS)
-
+    policy: DFTIdentityPropertyPolicy,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    allowed = policy.allowed_context_keys
     context: dict[str, Any] = {}
+    reported_context: dict[str, Any] = {}
     for source in reversed(sources):
         for container_name in ("property_context", "method_context", "calculation_context"):
             container = source.get(container_name)
@@ -468,15 +637,55 @@ def _property_specific_context(
                 key = _normalize_context_key(raw_key)
                 if _is_provenance_context_key(key) or raw_value in (None, "", []):
                     continue
-                context[key] = _normalize_context_value(raw_value)
+                normalized_value = _normalize_context_value(raw_value)
+                if key in allowed:
+                    context[key] = normalized_value
+                    reported_context.pop(key, None)
+                else:
+                    reported_context[key] = normalized_value
 
-    for raw_key in sorted(allowed | set(_V2_CONTEXT_ALIASES)):
+    allowed_input_keys = set(allowed)
+    allowed_input_keys.update(
+        alias for alias, canonical in _V2_CONTEXT_ALIASES.items() if canonical in allowed
+    )
+    for raw_key in sorted(allowed_input_keys):
         value = _first_value(sources, (raw_key,))
         if value in (None, "", []):
             continue
         key = _V2_CONTEXT_ALIASES.get(raw_key, raw_key)
         context[key] = _normalize_context_value(value)
-    return {key: context[key] for key in sorted(context)}
+        reported_context.pop(key, None)
+    return (
+        {key: context[key] for key in sorted(context)},
+        {key: reported_context[key] for key in sorted(reported_context)},
+    )
+
+
+def _required_identity_errors(
+    subject: dict[str, Any],
+    policy: DFTIdentityPropertyPolicy,
+) -> list[str]:
+    errors: list[str] = []
+    for requirement in policy.requirements:
+        if not any(
+            _identity_value_present(_identity_subject_value(subject, path))
+            for path in requirement.any_of
+        ):
+            errors.append(requirement.error_code)
+    return errors
+
+
+def _identity_subject_value(subject: dict[str, Any], path: str) -> Any:
+    value: Any = subject
+    for part in path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
+
+
+def _identity_value_present(value: Any) -> bool:
+    return value not in (None, "", [], {})
 
 
 def _normalize_context_key(value: Any) -> str:
@@ -495,7 +704,6 @@ def _is_provenance_context_key(key: str) -> bool:
             "locator_",
             "page_",
             "row_",
-            "source_",
             "table_",
         )
     )
@@ -527,22 +735,37 @@ def _normalize_context_value(value: Any) -> Any:
     return " ".join(text.casefold().split())
 
 
-def _normalize_v2_unit(value: Any, *, property_type: str) -> tuple[str, Decimal, bool]:
-    if value in (None, ""):
-        return "", Decimal("1"), True
+def _normalize_v2_unit(
+    value: Any,
+    *,
+    property_type: str,
+    dimensionless: bool,
+) -> tuple[str, Decimal, str | None]:
+    if value in (None, "") or not str(value).strip():
+        return (
+            "",
+            Decimal("1"),
+            None if dimensionless else "missing_unit_identity",
+        )
     token = unicodedata.normalize("NFKC", str(value)).translate(_UNICODE_DASHES)
     token = token.strip().casefold().replace(" ", "")
     token = token.replace("ångström", "angstrom").replace("ångstrom", "angstrom")
     token = token.replace("^-1", "-1")
     if token in {"1", "dimensionless", "unitless", "none"}:
-        return "", Decimal("1"), True
+        return (
+            "" if dimensionless else token,
+            Decimal("1"),
+            None if dimensionless else "unsupported_unit_identity",
+        )
+    if dimensionless:
+        return token, Decimal("1"), "unsupported_unit_identity"
     if token == "a" and ("length" in property_type or property_requires_atom_pair(property_type)):
         token = "å"
     rule = _V2_UNIT_RULES.get(token)
     if rule is None:
-        return token, Decimal("1"), False
+        return token, Decimal("1"), "unsupported_unit_identity"
     canonical, factor = rule
-    return canonical, factor, True
+    return canonical, factor, None
 
 
 def _canonical_decimal(value: Any, *, factor: Decimal = Decimal("1")) -> tuple[str, bool]:
