@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import get_settings
@@ -29,6 +29,7 @@ from app.db.models import (
 from app.db.session import get_db_session
 from app.main import app
 from app.services.dft_material_binding_service import DFTMaterialBindingService
+from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
@@ -83,6 +84,8 @@ def test_new_dft_semantic_signature_ignores_locator_but_keeps_scientific_identit
         "cucu@c2n",
         "limiting_potential",
         "-0.76",
+        "",
+        "point",
         "v",
         "c2h4",
         "limiting potential via *co -> *co+*co",
@@ -268,6 +271,275 @@ def test_new_dft_materialization_persists_range_and_pdf_locator(verification_env
         assert locator is not None
         assert locator.page == 15
         assert locator.locator_status == "exact_page"
+
+
+def test_interval_candidate_reuses_same_existing_row_and_conflicts_on_different_upper(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Interval identity materialization", pdf_path="interval.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="FePc@WS2", catalyst_type="unknown")
+        session.add(sample)
+        session.flush()
+        existing = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=sample.id,
+            adsorbate="Li2S4",
+            property_type="pdos_overlap_energy_window",
+            value=-2.5,
+            value_upper=-0.5,
+            value_kind="energy_window",
+            unit="eV",
+            candidate_status="new_candidate",
+            evidence_payload={"material_identity": "FePc@WS2", "page": 7},
+        )
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="interval-identity")
+        session.add_all([existing, run])
+        session.flush()
+
+        def add_candidate(upper: float, page: int, value_kind: str):
+            candidate = ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material_identity": "FePc@WS2",
+                        "adsorbate": "Li2S4",
+                        "property_type": "pdos_overlap_energy_window",
+                        "value": "-2.5000",
+                        "value_upper": upper,
+                        "value_kind": value_kind,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {"page": page, "quoted_text": f"PDOS interval ends at {upper} eV"},
+                },
+                status="candidate",
+            )
+            session.add(candidate)
+            session.flush()
+            return candidate
+
+        exact = add_candidate(-0.5, 8, "Energy-Window")
+        conflicting = add_candidate(-0.4, 9, "energy_window")
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        assert result["materialized_items"] == [
+            {
+                **result["materialized_items"][0],
+                "candidate_id": str(exact.id),
+                "action": "deduplicated",
+                "dft_result_id": str(existing.id),
+            }
+        ]
+        assert result["skipped_items"] == [
+            {"candidate_id": str(conflicting.id), "reason": "conflicting_dft_observation_for_subject"}
+        ]
+        assert session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id)) == 1
+        assert exact.materialized_target_id == str(existing.id)
+        assert conflicting.materialized_target_id is None
+        assert conflicting.status == "requires_resolution"
+
+
+def _atomic_binding_payload(*, material: str = "New-Material", value: float = -3.21) -> dict:
+    return {
+        "target_type": "dft_results",
+        "target_id": "new",
+        "decision": "new_candidate",
+        "corrected_value": {
+            "material_identity": material,
+            "adsorbate": "Li2S6",
+            "property_type": "adsorption_energy",
+            "reaction_step": "Li2S6 adsorption",
+            "value": value,
+            "unit": "eV",
+        },
+        "evidence_location": {"page": 11, "quoted_text": f"{material} Li2S6 {value} eV"},
+    }
+
+
+def _atomic_binding_counts(session, paper_id):
+    return (
+        session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper_id)),
+        session.scalar(select(func.count(EvidenceLocator.id)).where(EvidenceLocator.paper_id == paper_id)),
+        session.scalar(select(func.count(CatalystSample.id)).where(CatalystSample.paper_id == paper_id)),
+    )
+
+
+@pytest.mark.parametrize("bound_side", ["issue", "candidate"])
+def test_materialization_binding_conflict_rolls_back_all_dft_side_effects(verification_env, bound_side):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title=f"Atomic conflict {bound_side}", pdf_path="atomic-conflict.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        original_sample = CatalystSample(paper_id=paper.id, name="Original-Material", catalyst_type="unknown")
+        session.add(original_sample)
+        session.flush()
+        original = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=original_sample.id,
+            property_type="reaction_barrier",
+            value=0.61,
+            unit="eV",
+            candidate_status="system_candidate",
+            evidence_payload={"material_identity": "Original-Material", "page": 3},
+        )
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label=f"atomic-{bound_side}")
+        session.add_all([original, run])
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(original.id),
+                field_name="value",
+                page=3,
+                evidence_text="Original evidence",
+                locator_status="exact_page",
+            )
+        )
+        payload = _atomic_binding_payload()
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload=payload,
+            status="candidate",
+            materialized_target_type="dft_results" if bound_side == "candidate" else None,
+            materialized_target_id=str(original.id) if bound_side == "candidate" else None,
+        )
+        session.add(candidate)
+        session.flush()
+        fingerprint = DFTAuditIssueService(session).fingerprint_missing_issue(
+            paper_id=paper.id,
+            payload=payload,
+            candidate_id=str(candidate.id),
+        )
+        issue = DFTAuditIssue(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(original.id) if bound_side == "issue" else "new",
+            issue_type="missing_dft_result",
+            severity="high",
+            status="fixed_by_primary_ai" if bound_side == "issue" else "needs_primary_ai",
+            fingerprint=fingerprint,
+        )
+        session.add(issue)
+        session.flush()
+        before = _atomic_binding_counts(session, paper.id)
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        expected_reason = (
+            "dft_audit_issue_bound_to_different_result"
+            if bound_side == "issue"
+            else "dft_candidate_bound_to_different_result"
+        )
+        assert result["materialized_count"] == 0
+        assert result["skipped_items"] == [{"candidate_id": str(candidate.id), "reason": expected_reason}]
+        assert _atomic_binding_counts(session, paper.id) == before
+        assert candidate.materialized_target_id == (str(original.id) if bound_side == "candidate" else None)
+        assert candidate.status == "requires_resolution"
+        assert issue.target_id == (str(original.id) if bound_side == "issue" else "new")
+        assert issue.status == "needs_user_decision"
+
+
+def test_materialization_same_candidate_and_issue_target_is_idempotent(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Atomic same target", pdf_path="atomic-same.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="New-Material", catalyst_type="unknown")
+        session.add(sample)
+        session.flush()
+        payload = _atomic_binding_payload()
+        existing = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=sample.id,
+            adsorbate="Li2S6",
+            property_type="adsorption_energy",
+            reaction_step="Li2S6 adsorption",
+            value=-3.21,
+            value_kind="point",
+            unit="eV",
+            candidate_status="new_candidate",
+            evidence_payload={"material_identity": "New-Material", "page": 11},
+        )
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="atomic-same")
+        session.add_all([existing, run])
+        session.flush()
+        session.add(
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="dft_results",
+                target_id=str(existing.id),
+                field_name="value",
+                page=11,
+                evidence_text="Existing evidence",
+                locator_status="exact_page",
+            )
+        )
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload=payload,
+            status="requires_resolution",
+            materialized_target_type="dft_results",
+            materialized_target_id=str(existing.id),
+        )
+        session.add(candidate)
+        session.flush()
+        fingerprint = DFTAuditIssueService(session).fingerprint_missing_issue(
+            paper_id=paper.id,
+            payload=payload,
+            candidate_id=str(candidate.id),
+        )
+        issue = DFTAuditIssue(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(existing.id),
+            issue_type="missing_dft_result",
+            severity="high",
+            status="fixed_by_primary_ai",
+            fingerprint=fingerprint,
+        )
+        session.add(issue)
+        session.flush()
+        before = _atomic_binding_counts(session, paper.id)
+
+        first = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+        after_first = _atomic_binding_counts(session, paper.id)
+        second = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        assert first["materialized_items"][0]["action"] == "deduplicated"
+        assert first["materialized_items"][0]["dft_result_id"] == str(existing.id)
+        assert second["materialized_count"] == 0
+        assert before == after_first == _atomic_binding_counts(session, paper.id)
+        assert candidate.materialized_target_id == str(existing.id)
+        assert candidate.status == "materialized"
+        assert issue.target_id == str(existing.id)
+        assert issue.status == "fixed_by_primary_ai"
 
 
 def test_bond_candidate_materialization_keeps_atom_subjects_and_reports_value_conflict(verification_env):

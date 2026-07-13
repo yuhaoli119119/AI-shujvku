@@ -12,7 +12,7 @@ from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, Ev
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_material_binding_service import DFTMaterialBindingService
-from app.services.dft_identity_service import build_dft_scientific_identity
+from app.services.dft_identity_service import build_dft_scientific_identity, normalize_dft_value_kind
 from app.services.dft_rescan_policy import normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.review_safety import DFT_REJECTED_STATUSES
@@ -45,6 +45,9 @@ class DFTAuditIssueRepairService:
     }
     UPDATE_FIELDS = {
         "value",
+        "value_upper",
+        "value_kind",
+        "value_type",
         "unit",
         "property_type",
         "adsorbate",
@@ -229,6 +232,16 @@ class DFTAuditIssueRepairService:
             adsorbate=self._first_text(suggested.get("adsorbate")),
             property_type=self._first_text(suggested.get("property_type")),
             value=self._float_or_raise(suggested.get("value"), "value"),
+            value_upper=(
+                self._float_or_raise(suggested.get("value_upper"), "value_upper")
+                if suggested.get("value_upper") not in (None, "", [])
+                else None
+            ),
+            value_kind=normalize_dft_value_kind(
+                self._first_text(suggested.get("value_kind"), suggested.get("value_type")),
+                value_upper=suggested.get("value_upper"),
+                property_type=suggested.get("property_type"),
+            ),
             unit=self._first_text(suggested.get("unit")),
             reaction_step=self._first_text(suggested.get("reaction_step")),
             source_section=self._source_section_from_evidence(evidence),
@@ -334,6 +347,8 @@ class DFTAuditIssueRepairService:
         if str(row.candidate_status or "").strip().lower() in FINAL_DFT_STATUSES:
             return self._needs_user_for_final_row(issue=issue, repaired_by=repaired_by, reason=reason, row=row)
         fields = self._repair_fields(repair_payload)
+        if "value_type" in fields:
+            fields.setdefault("value_kind", fields.pop("value_type"))
         unknown_fields = set(fields) - self.UPDATE_FIELDS
         if unknown_fields:
             raise ValueError(f"Unsupported DFT repair field(s): {', '.join(sorted(unknown_fields))}")
@@ -396,6 +411,14 @@ class DFTAuditIssueRepairService:
                 continue
             if field == "value":
                 value = self._float_or_raise(value, "value")
+            if field == "value_upper":
+                value = self._float_or_raise(value, "value_upper")
+            if field == "value_kind":
+                value = normalize_dft_value_kind(
+                    value,
+                    value_upper=fields.get("value_upper", row.value_upper),
+                    property_type=fields.get("property_type", row.property_type),
+                )
             if field == "evidence_payload":
                 value = self._repair_evidence_payload(issue=issue, evidence=evidence, suggested={})
             current = getattr(row, field)
@@ -572,6 +595,9 @@ class DFTAuditIssueRepairService:
             "adsorbate",
             "reaction_step",
             "value",
+            "value_upper",
+            "value_kind",
+            "value_type",
             "unit",
             "atom_pair",
             "bond_pair",
@@ -678,6 +704,8 @@ class DFTAuditIssueRepairService:
                     "property_subtype": suggested.get("property_subtype"),
                     "reaction_step": suggested.get("reaction_step"),
                     "value": suggested.get("value"),
+                    "value_upper": suggested.get("value_upper"),
+                    "value_kind": suggested.get("value_kind") or suggested.get("value_type"),
                     "unit": suggested.get("unit"),
                     **{
                         key: suggested.get(key)
@@ -700,6 +728,8 @@ class DFTAuditIssueRepairService:
                     "property_type": row.property_type,
                     "reaction_step": row.reaction_step,
                     "value": row.value,
+                    "value_upper": row.value_upper,
+                    "value_kind": row.value_kind,
                     "unit": row.unit,
                 },
                 "evidence_payload": evidence,
@@ -761,7 +791,17 @@ class DFTAuditIssueRepairService:
     def _stale_fields(self, issue: DFTAuditIssue, row: DFTResult) -> list[str]:
         snapshot = issue.current_snapshot if isinstance(issue.current_snapshot, dict) else {}
         stale: list[str] = []
-        for field in ("catalyst_sample_id", "adsorbate", "property_type", "value", "unit", "reaction_step", "evidence_payload"):
+        for field in (
+            "catalyst_sample_id",
+            "adsorbate",
+            "property_type",
+            "value",
+            "value_upper",
+            "value_kind",
+            "unit",
+            "reaction_step",
+            "evidence_payload",
+        ):
             if field not in snapshot:
                 continue
             current = str(row.catalyst_sample_id) if field == "catalyst_sample_id" and row.catalyst_sample_id else getattr(row, field)
@@ -770,7 +810,21 @@ class DFTAuditIssueRepairService:
         return stale
 
     def _fields_already_match(self, row: DFTResult, fields: dict[str, Any]) -> bool:
-        comparable = {key: value for key, value in fields.items() if key in {"value", "unit", "property_type", "adsorbate", "reaction_step", "evidence_text"}}
+        comparable = {
+            key: value
+            for key, value in fields.items()
+            if key
+            in {
+                "value",
+                "value_upper",
+                "value_kind",
+                "unit",
+                "property_type",
+                "adsorbate",
+                "reaction_step",
+                "evidence_text",
+            }
+        }
         if not comparable:
             return False
         return all(self._value_key(getattr(row, key)) == self._value_key(value) for key, value in comparable.items())

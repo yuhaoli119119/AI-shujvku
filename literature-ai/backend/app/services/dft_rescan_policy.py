@@ -223,7 +223,21 @@ def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
 def _row_signature(row: Any) -> str:
     if isinstance(row, dict):
         payload = dict(row.get("evidence_payload") or {})
-        payload.update({key: row.get(key) for key in ("paper_id", "adsorbate", "property_type", "value", "unit", "reaction_step")})
+        payload.update(
+            {
+                key: row.get(key)
+                for key in (
+                    "paper_id",
+                    "adsorbate",
+                    "property_type",
+                    "value",
+                    "value_upper",
+                    "value_kind",
+                    "unit",
+                    "reaction_step",
+                )
+            }
+        )
         return str(payload.get("dedupe_signature") or build_dft_dedupe_signature(payload))
     evidence_payload = getattr(row, "evidence_payload", None)
     payload = dict(evidence_payload) if isinstance(evidence_payload, dict) else {}
@@ -233,6 +247,8 @@ def _row_signature(row: Any) -> str:
             "adsorbate": getattr(row, "adsorbate", None),
             "property_type": getattr(row, "property_type", None),
             "value": getattr(row, "value", None),
+            "value_upper": getattr(row, "value_upper", None),
+            "value_kind": getattr(row, "value_kind", None),
             "unit": getattr(row, "unit", None),
             "reaction_step": getattr(row, "reaction_step", None),
         }

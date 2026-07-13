@@ -20,7 +20,12 @@ from app.db.models import (
 )
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
-from app.services.dft_identity_service import build_dft_scientific_identity, normalize_atom_pair, property_has_symmetric_atom_pair
+from app.services.dft_identity_service import (
+    build_dft_scientific_identity,
+    normalize_atom_pair,
+    normalize_dft_value_kind,
+    property_has_symmetric_atom_pair,
+)
 from app.services.dft_material_binding_service import DFTMaterialBindingService
 from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
@@ -79,7 +84,6 @@ class VerificationSessionDFTCandidateMixin:
         issue_service = DFTAuditIssueService(self.session)
         issue_service.begin_import_batch(paper_id=paper_id)
         issue_lifecycle = DFTAuditIssueLifecycleService(self.session)
-        material_binding_service = DFTMaterialBindingService(self.session)
         for candidate, run_id, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
             run = SimpleNamespace(
                 id=run_id,
@@ -126,6 +130,13 @@ class VerificationSessionDFTCandidateMixin:
                         candidate_item,
                         existing_by_method_step_signature.get(method_step_signature, []),
                     )
+            if existing is None:
+                existing = self._same_bound_dft_result(
+                    paper_id=paper_id,
+                    candidate=candidate,
+                    issue=issue,
+                    candidate_item=candidate_item,
+                )
             if existing is None and candidate_item["dedupe_allowed"]:
                 subject_matches = existing_by_subject_signature.get(candidate_item["subject_signature"], [])
                 if subject_matches:
@@ -144,50 +155,74 @@ class VerificationSessionDFTCandidateMixin:
                     note=f"{reason}:{existing.id}",
                 )
                 continue
-            if existing is None:
-                existing = self._insert_new_dft_candidate(
-                    paper_id=paper_id,
-                    candidate_item=candidate_item,
-                    source_label=run.source_label or run.source or reviewer,
-                    existing_by_identity=existing_by_identity,
-                )
-                if candidate_item["dedupe_allowed"]:
-                    existing_by_signature[signature] = existing
-                    existing_by_subject_signature.setdefault(candidate_item["subject_signature"], []).append(existing)
-                method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
-                if method_step_signature is not None:
-                    existing_by_method_step_signature.setdefault(method_step_signature, []).append(existing)
-                action = "created"
-            else:
-                self._maybe_upgrade_method_only_reaction_step(existing, candidate_item)
-                action = "deduplicated"
-            material_binding = material_binding_service.ensure_row_binding(
-                row=existing,
-                material_identity=candidate_item["material_identity"],
-            )
             try:
-                issue_lifecycle.bind_candidate_to_result(candidate, existing)
-                issue_lifecycle.bind_missing_issue_to_result(
-                    issue,
-                    existing,
-                    repaired_by=reviewer,
-                    resolution_note=f"materialized_dft_result:{existing.id}",
-                )
+                issue_lifecycle.assert_candidate_binding_compatible(candidate, existing)
+                issue_lifecycle.assert_missing_issue_binding_compatible(issue, existing)
             except ValueError as exc:
                 reason = str(exc)
                 if reason not in {"dft_candidate_bound_to_different_result", "dft_audit_issue_bound_to_different_result"}:
                     raise
                 skipped.append({"candidate_id": str(candidate.id), "reason": reason})
                 self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                issue_lifecycle.mark_pending(issue, status="needs_user_decision", note=reason)
+                self._mark_issue_for_binding_conflict(issue_lifecycle, issue, reason=reason)
                 continue
-            support_lifecycle = self._resolve_materialized_support_candidate(
-                paper_id=paper_id,
-                candidate_item=candidate_item,
-                canonical_row=existing,
-                action=action,
-                reviewer=reviewer,
-            )
+
+            try:
+                with self.session.begin_nested():
+                    if existing is None:
+                        existing, created = self._insert_new_dft_candidate_in_current_savepoint(
+                            paper_id=paper_id,
+                            candidate_item=candidate_item,
+                            source_label=run.source_label or run.source or reviewer,
+                        )
+                        action = "created" if created else "deduplicated"
+                    else:
+                        self._maybe_upgrade_method_only_reaction_step(existing, candidate_item)
+                        action = "deduplicated"
+                    # Recheck after selecting or creating the canonical row so a concurrent
+                    # binding change cannot leave partial DFT side effects behind.
+                    issue_lifecycle.assert_candidate_binding_compatible(candidate, existing)
+                    issue_lifecycle.assert_missing_issue_binding_compatible(issue, existing)
+                    material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                        row=existing,
+                        material_identity=candidate_item["material_identity"],
+                    )
+                    issue_lifecycle.bind_candidate_to_result(candidate, existing)
+                    issue_lifecycle.bind_missing_issue_to_result(
+                        issue,
+                        existing,
+                        repaired_by=reviewer,
+                        resolution_note=f"materialized_dft_result:{existing.id}",
+                    )
+                    support_lifecycle = self._resolve_materialized_support_candidate(
+                        paper_id=paper_id,
+                        candidate_item=candidate_item,
+                        canonical_row=existing,
+                        action=action,
+                        reviewer=reviewer,
+                    )
+                    self.session.flush()
+            except ValueError as exc:
+                reason = str(exc)
+                if reason not in {"dft_candidate_bound_to_different_result", "dft_audit_issue_bound_to_different_result"}:
+                    raise
+                skipped.append({"candidate_id": str(candidate.id), "reason": reason})
+                self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
+                self._mark_issue_for_binding_conflict(issue_lifecycle, issue, reason=reason)
+                continue
+
+            identity = self._new_dft_identity(candidate_item["signature"])
+            existing_by_identity[identity] = existing
+            if candidate_item["dedupe_allowed"]:
+                existing_by_signature[signature] = existing
+                subject_rows = existing_by_subject_signature.setdefault(candidate_item["subject_signature"], [])
+                if all(row.id != existing.id for row in subject_rows):
+                    subject_rows.append(existing)
+            method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
+            if method_step_signature is not None:
+                method_rows = existing_by_method_step_signature.setdefault(method_step_signature, [])
+                if all(row.id != existing.id for row in method_rows):
+                    method_rows.append(existing)
             materialized.append(
                 {
                     "candidate_id": str(candidate.id),
@@ -223,6 +258,45 @@ class VerificationSessionDFTCandidateMixin:
             "skipped_count": len(skipped),
             "skipped_items": skipped,
         }
+
+    def _same_bound_dft_result(
+        self,
+        *,
+        paper_id: UUID,
+        candidate: ExternalAnalysisCandidate,
+        issue: Any,
+        candidate_item: dict[str, Any],
+    ) -> DFTResult | None:
+        candidate_type = str(candidate.materialized_target_type or "").strip()
+        candidate_id = str(candidate.materialized_target_id or "").strip()
+        issue_type = str(issue.target_type or "").strip()
+        issue_id = str(issue.target_id or "").strip()
+        if not candidate_id or not issue_id or issue_id.lower() == "new":
+            return None
+        if candidate_type != "dft_results" or issue_type != "dft_results" or candidate_id != issue_id:
+            return None
+        try:
+            row_id = UUID(candidate_id)
+        except ValueError:
+            return None
+        row = self.session.get(DFTResult, row_id)
+        if row is None or row.paper_id != paper_id:
+            return None
+        identity = self._scientific_identity_for_row(row)
+        if identity.observation_signature != candidate_item["observation_signature"]:
+            return None
+        return row
+
+    @staticmethod
+    def _mark_issue_for_binding_conflict(
+        issue_lifecycle: DFTAuditIssueLifecycleService,
+        issue: Any,
+        *,
+        reason: str,
+    ) -> None:
+        if str(issue.status or "").strip().lower() in {"closed", "false_positive"}:
+            return
+        issue_lifecycle.mark_pending(issue, status="needs_user_decision", note=reason)
 
     def _new_dft_candidate_item(
         self,
@@ -343,6 +417,8 @@ class VerificationSessionDFTCandidateMixin:
                 "adsorbate": adsorbate,
                 "reaction_step": reaction_step,
                 "value": value,
+                "value_upper": value_upper,
+                "value_kind": value_kind,
                 "unit": unit,
                 **{key: val for key, val in identity_fields.items() if val not in (None, "")},
             },
@@ -422,7 +498,7 @@ class VerificationSessionDFTCandidateMixin:
     ) -> DFTResult:
         identity = self._new_dft_identity(candidate_item["signature"])
         existing = existing_by_identity.get(identity) if existing_by_identity is not None else None
-        if existing_by_identity is None:
+        if existing is None:
             existing = self.session.scalar(
                 select(DFTResult).where(
                     DFTResult.paper_id == paper_id,
@@ -431,6 +507,43 @@ class VerificationSessionDFTCandidateMixin:
             )
         if existing is not None:
             return existing
+        try:
+            with self.session.begin_nested():
+                row, _created = self._insert_new_dft_candidate_in_current_savepoint(
+                    paper_id=paper_id,
+                    candidate_item=candidate_item,
+                    source_label=source_label,
+                )
+        except IntegrityError:
+            winner = self.session.scalar(
+                select(DFTResult).where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.candidate_identity == identity,
+                )
+            )
+            if winner is None:
+                raise
+            row = winner
+        if existing_by_identity is not None:
+            existing_by_identity[identity] = row
+        return row
+
+    def _insert_new_dft_candidate_in_current_savepoint(
+        self,
+        *,
+        paper_id: UUID,
+        candidate_item: dict[str, Any],
+        source_label: str,
+    ) -> tuple[DFTResult, bool]:
+        identity = self._new_dft_identity(candidate_item["signature"])
+        existing = self.session.scalar(
+            select(DFTResult).where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.candidate_identity == identity,
+            )
+        )
+        if existing is not None:
+            return existing, False
         row = DFTResult(
             paper_id=paper_id,
             adsorbate=candidate_item["adsorbate"],
@@ -449,27 +562,11 @@ class VerificationSessionDFTCandidateMixin:
             extraction_protocol_version="ide_ai_new_candidate_v1",
             candidate_identity=identity,
         )
-        if existing_by_identity is not None:
-            self.session.add(row)
-            self.session.flush()
-            existing_by_identity[identity] = row
-        else:
-            try:
-                with self.session.begin_nested():
-                    self.session.add(row)
-                    self.session.flush()
-            except IntegrityError:
-                winner = self.session.scalar(
-                    select(DFTResult).where(
-                        DFTResult.paper_id == paper_id,
-                        DFTResult.candidate_identity == identity,
-                    )
-                )
-                if winner is None:
-                    raise
-                return winner
+        self.session.add(row)
+        self.session.flush()
         self._upsert_new_dft_locator(row, candidate_item["evidence_payload"], source_label=source_label)
-        return row
+        self.session.flush()
+        return row, True
 
     @staticmethod
     def _new_dft_identity(signature: Any) -> str:
@@ -483,15 +580,11 @@ class VerificationSessionDFTCandidateMixin:
         self.session.flush()
 
     def _new_dft_value_kind(self, corrected: dict[str, Any], *, value_upper: float | None) -> str:
-        explicit = self._first_text(corrected.get("value_kind"), corrected.get("value_type"))
-        if explicit:
-            return explicit
-        if value_upper is not None:
-            property_text = str(corrected.get("property_type") or corrected.get("property") or "").lower()
-            if "window" in property_text:
-                return "energy_window"
-            return "range"
-        return "point"
+        return normalize_dft_value_kind(
+            self._first_text(corrected.get("value_kind"), corrected.get("value_type")),
+            value_upper=value_upper,
+            property_type=corrected.get("property_type") or corrected.get("property"),
+        )
 
     def _upsert_new_dft_locator(self, row: DFTResult, evidence_payload: dict[str, Any], *, source_label: str) -> None:
         page = self._int_or_none(evidence_payload.get("page"))
@@ -557,6 +650,8 @@ class VerificationSessionDFTCandidateMixin:
                     "adsorbate": row.adsorbate,
                     "reaction_step": row.reaction_step,
                     "value": row.value,
+                    "value_upper": row.value_upper,
+                    "value_kind": row.value_kind,
                     "unit": row.unit,
                 },
                 "evidence_payload": evidence_payload,
@@ -584,6 +679,8 @@ class VerificationSessionDFTCandidateMixin:
                     "material_identity": material_identity,
                     "property_type": row.property_type,
                     "value": row.value,
+                    "value_upper": row.value_upper,
+                    "value_kind": row.value_kind,
                     "unit": row.unit,
                     "adsorbate": row.adsorbate,
                     "reaction_step": row.reaction_step,
@@ -601,10 +698,18 @@ class VerificationSessionDFTCandidateMixin:
     def _new_dft_semantic_signature(candidate_item: dict[str, Any]) -> tuple[str, ...]:
         value = candidate_item.get("value")
         value_part = "" if value is None else f"{float(value):.8g}"
+        value_upper = candidate_item.get("value_upper")
+        value_upper_part = "" if value_upper is None else f"{float(value_upper):.8g}"
         base = [
             candidate_item.get("material_identity"),
             candidate_item.get("property_type"),
             value_part,
+            value_upper_part,
+            normalize_dft_value_kind(
+                candidate_item.get("value_kind"),
+                value_upper=value_upper,
+                property_type=candidate_item.get("property_type"),
+            ),
             candidate_item.get("unit"),
             candidate_item.get("adsorbate"),
             normalize_dft_reaction_step_for_identity(
@@ -638,11 +743,19 @@ class VerificationSessionDFTCandidateMixin:
             return None
         value = candidate_item.get("value")
         value_part = "" if value is None else f"{float(value):.8g}"
+        value_upper = candidate_item.get("value_upper")
+        value_upper_part = "" if value_upper is None else f"{float(value_upper):.8g}"
         base = [
             "method_step_compatible",
             candidate_item.get("material_identity"),
             candidate_item.get("property_type"),
             value_part,
+            value_upper_part,
+            normalize_dft_value_kind(
+                candidate_item.get("value_kind"),
+                value_upper=value_upper,
+                property_type=candidate_item.get("property_type"),
+            ),
             candidate_item.get("unit"),
             candidate_item.get("adsorbate"),
         ]

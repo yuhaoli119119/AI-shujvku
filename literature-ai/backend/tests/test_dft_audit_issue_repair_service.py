@@ -467,6 +467,76 @@ def test_create_missing_dft_uses_canonical_atom_pair_and_reports_subject_value_c
         assert len(rows) == 1
 
 
+def test_create_missing_dft_reuses_exact_interval_and_rejects_different_upper(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Interval repair conflict")
+        existing = DFTResult(
+            paper_id=paper.id,
+            adsorbate="Li2S4",
+            property_type="pdos_overlap_energy_window",
+            value=-2.5,
+            value_upper=-0.5,
+            value_kind="energy_window",
+            unit="eV",
+            candidate_status="system_candidate",
+            evidence_payload={"material_identity": "FePc@WS2", "page": 4},
+        )
+        session.add(existing)
+        session.flush()
+        exact = DFTAuditIssueService(session).upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="interval-exact",
+            suggested_dft={
+                "material_identity": "FePc@WS2",
+                "adsorbate": "Li2S4",
+                "property_type": "pdos_overlap_energy_window",
+                "value": "-2.5000",
+                "value_upper": "-0.500",
+                "value_type": "Energy Window",
+                "unit": "eV",
+            },
+            evidence_payload={"page": 5, "quoted_text": "PDOS interval -2.5 to -0.5 eV"},
+        )
+        conflicting = DFTAuditIssueService(session).upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="interval-conflict",
+            suggested_dft={
+                "material_identity": "FePc@WS2",
+                "adsorbate": "Li2S4",
+                "property_type": "pdos_overlap_energy_window",
+                "value": -2.5,
+                "value_upper": -0.4,
+                "value_kind": "energy_window",
+                "unit": "eV",
+            },
+            evidence_payload={"page": 6, "quoted_text": "PDOS interval -2.5 to -0.4 eV"},
+        )
+        session.commit()
+        paper_id = paper.id
+        existing_id = str(existing.id)
+        exact_id = str(exact.id)
+        conflicting_id = str(conflicting.id)
+
+    with mcp_auth_context(_review_auth()):
+        exact_result = repair_dft_audit_issue(exact_id, "create_missing_dft", {}, "exact interval", {})
+        with pytest.raises(ValueError, match="conflicting_dft_observation_for_subject"):
+            repair_dft_audit_issue(conflicting_id, "create_missing_dft", {}, "different upper", {})
+
+    assert exact_result["status"] == "linked_existing"
+    assert exact_result["dft_result_id"] == existing_id
+    with Session(setup_test_db) as session:
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        assert len(rows) == 1
+        assert rows[0].value_upper == -0.5
+        assert rows[0].value_kind == "energy_window"
+
+
 def test_supporting_reference_missing_repair_does_not_create_main_paper_dft(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Supporting reference repair")

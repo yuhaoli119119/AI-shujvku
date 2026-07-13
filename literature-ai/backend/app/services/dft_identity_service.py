@@ -56,6 +56,21 @@ def normalize_dft_property_type(value: Any) -> str:
     return re.sub(r"[_\s-]+", "_", text).strip("_")
 
 
+def normalize_dft_value_kind(
+    value: Any,
+    *,
+    value_upper: Any = None,
+    property_type: Any = None,
+) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
+    normalized = re.sub(r"[_\s-]+", "_", text).strip("_")
+    if normalized:
+        return normalized
+    if value_upper not in (None, "", []):
+        return "energy_window" if "window" in normalize_dft_property_type(property_type) else "range"
+    return "point"
+
+
 def property_requires_atom_pair(value: Any) -> bool:
     property_type = normalize_dft_property_type(value)
     return property_type.startswith("bond_length") or "icohp" in property_type or "cohp" in property_type
@@ -163,9 +178,16 @@ def build_dft_scientific_identity(payload: dict[str, Any]) -> DFTScientificIdent
         "state_context": _text(_first_value(sources, ("state_context",))),
     }
     subject_signature = _signature("dft-subject", components)
+    value_upper = _first_value(sources, ("normalized_value_upper", "value_upper"))
     observation = {
         "subject_signature": subject_signature,
         "value": normalize_numeric_value(_first_value(sources, ("normalized_value", "value"))),
+        "value_upper": normalize_numeric_value(value_upper),
+        "value_kind": normalize_dft_value_kind(
+            _first_value(sources, ("normalized_value_kind", "value_kind", "value_type")),
+            value_upper=value_upper,
+            property_type=property_type,
+        ),
         "unit": normalize_unit(_first_value(sources, ("normalized_unit", "unit"))),
     }
     return DFTScientificIdentity(

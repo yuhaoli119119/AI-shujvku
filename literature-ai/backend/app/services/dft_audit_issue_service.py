@@ -52,6 +52,9 @@ class DFTAuditIssueService:
     SEVERITIES = {"low", "medium", "high", "critical"}
     DFT_FIELD_ISSUES = {
         "value": "wrong_value",
+        "value_upper": "wrong_value",
+        "value_kind": "wrong_value",
+        "value_type": "wrong_value",
         "unit": "wrong_unit",
         "catalyst_sample_id": "wrong_material",
         "material": "wrong_material",
@@ -432,6 +435,8 @@ class DFTAuditIssueService:
             "adsorbate": self._first_text(corrected.get("adsorbate"), payload.get("adsorbate")),
             "reaction_step": self._first_text(corrected.get("reaction_step"), payload.get("reaction_step")),
             "value": corrected.get("value"),
+            "value_upper": corrected.get("value_upper"),
+            "value_kind": self._first_text(corrected.get("value_kind"), corrected.get("value_type")),
             "unit": self._first_text(corrected.get("unit")),
             "raw_corrected_value": corrected,
         }

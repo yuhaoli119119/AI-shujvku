@@ -130,6 +130,55 @@ def test_atom_pair_identity_rejects_conflicting_aliases():
     assert identity.error_code == "conflicting_atom_pair_aliases"
 
 
+def test_interval_observation_identity_normalizes_bounds_and_value_kind():
+    base = {
+        "corrected_value": {
+            "material": "FePc@WS2",
+            "adsorbate": "Li2S4",
+            "property_type": "pdos_overlap_energy_window",
+            "value": "-2.5000",
+            "value_upper": "-0.500",
+            "value_kind": "Energy Window",
+            "unit": "eV",
+        }
+    }
+    same = {
+        "corrected_value": {
+            **base["corrected_value"],
+            "value": -2.5,
+            "value_upper": -0.5,
+            "value_kind": "energy-window",
+        }
+    }
+    different_upper = {
+        "corrected_value": {**base["corrected_value"], "value_upper": -0.4}
+    }
+
+    first = build_dft_scientific_identity(base)
+    assert first.observation_signature == build_dft_scientific_identity(same).observation_signature
+    assert first.subject_signature == build_dft_scientific_identity(different_upper).subject_signature
+    assert first.observation_signature != build_dft_scientific_identity(different_upper).observation_signature
+
+
+def test_point_range_and_energy_window_are_distinct_observations_with_same_bounds():
+    def identity(value_kind: str):
+        return build_dft_scientific_identity(
+            {
+                "corrected_value": {
+                    "material": "FePc@WS2",
+                    "property_type": "pdos_overlap",
+                    "value": -2.5,
+                    "value_upper": -0.5,
+                    "value_kind": value_kind,
+                    "unit": "eV",
+                }
+            }
+        )
+
+    signatures = {identity(kind).observation_signature for kind in ("point", "range", "energy_window")}
+    assert len(signatures) == 3
+
+
 def test_missing_issue_fingerprint_ignores_locator_provenance(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Missing issue locator-independent identity")

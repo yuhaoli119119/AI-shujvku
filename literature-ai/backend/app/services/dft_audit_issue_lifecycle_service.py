@@ -45,6 +45,8 @@ class DFTAuditIssueLifecycleService:
         "adsorbate",
         "property_type",
         "value",
+        "value_upper",
+        "value_kind",
         "unit",
         "reaction_step",
         "candidate_status",
@@ -110,6 +112,29 @@ class DFTAuditIssueLifecycleService:
         self.session.flush()
         return issue
 
+    def assert_missing_issue_binding_compatible(
+        self,
+        issue: DFTAuditIssue,
+        row: DFTResult | None,
+    ) -> None:
+        current_target = str(issue.target_id or "").strip()
+        if not current_target or current_target.lower() == "new":
+            return
+        if row is None or issue.target_type != "dft_results" or current_target != str(row.id):
+            raise ValueError("dft_audit_issue_bound_to_different_result")
+
+    def assert_candidate_binding_compatible(
+        self,
+        candidate: ExternalAnalysisCandidate,
+        row: DFTResult | None,
+    ) -> None:
+        current_type = str(candidate.materialized_target_type or "").strip()
+        current_id = str(candidate.materialized_target_id or "").strip()
+        if not current_type and not current_id:
+            return
+        if row is None or current_type != "dft_results" or current_id != str(row.id):
+            raise ValueError("dft_candidate_bound_to_different_result")
+
     def bind_candidate_to_result(
         self,
         candidate: ExternalAnalysisCandidate,
@@ -121,6 +146,10 @@ class DFTAuditIssueLifecycleService:
         current_id = str(candidate.materialized_target_id or "").strip()
         if current_type or current_id:
             if current_type == "dft_results" and current_id == str(row.id):
+                if candidate.status != "materialized":
+                    candidate.status = "materialized"
+                    self.session.add(candidate)
+                    self.session.flush()
                 return False
             raise ValueError("dft_candidate_bound_to_different_result")
         candidate.materialized_target_type = "dft_results"
@@ -315,6 +344,8 @@ class DFTAuditIssueLifecycleService:
             "adsorbate": row.adsorbate,
             "property_type": row.property_type,
             "value": row.value,
+            "value_upper": row.value_upper,
+            "value_kind": row.value_kind,
             "unit": row.unit,
             "reaction_step": row.reaction_step,
             "candidate_status": row.candidate_status,
