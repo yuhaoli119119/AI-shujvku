@@ -53,6 +53,7 @@ DFT_RESOLUTION_CODES = {
     "binding_conflict": "binding_conflict",
     "scientific_conflict": "scientific_conflict",
     "invalid_identity": "invalid_identity",
+    "identity_split": "identity_split",
 }
 
 
@@ -544,6 +545,69 @@ class DFTAuditIssueLifecycleService:
         self.session.add(candidate)
         self.session.flush()
         return True
+
+    def release_candidate_for_identity_split(
+        self,
+        *,
+        candidate: ExternalAnalysisCandidate,
+        old_result: DFTResult,
+        parent_issue: DFTAuditIssue,
+        child_issue: DFTAuditIssue,
+        candidate_identity: DFTIdentityV2,
+    ) -> ExternalAnalysisCandidate:
+        """Release one false-deduped candidate under an explicit split lineage.
+
+        This is intentionally narrower than a general unbind operation.  It is
+        only valid after the terminal parent records ``identity_split`` and the
+        identity-specific child/source relation already exists.
+        """
+
+        locked = self.session.scalar(
+            select(ExternalAnalysisCandidate)
+            .where(ExternalAnalysisCandidate.id == candidate.id)
+            .with_for_update()
+        )
+        if locked is None:
+            raise ValueError("dft_candidate_snapshot_drift")
+        if parent_issue.status not in DFT_AUDIT_ISSUE_TERMINAL_STATUSES:
+            raise ValueError("identity_split_parent_must_be_terminal")
+        if parent_issue.resolution_code != DFT_RESOLUTION_CODES["identity_split"]:
+            raise ValueError("identity_split_parent_resolution_missing")
+        if child_issue.parent_issue_id != parent_issue.id:
+            raise ValueError("identity_split_child_parent_mismatch")
+        if child_issue.status in DFT_AUDIT_ISSUE_TERMINAL_STATUSES:
+            raise ValueError("identity_split_child_must_be_pending")
+        if child_issue.issue_key != self.issue_key(
+            paper_id=child_issue.paper_id,
+            issue_type=child_issue.issue_type,
+            identity=candidate_identity,
+        ):
+            raise ValueError("identity_split_child_issue_key_mismatch")
+        relation = self.session.get(
+            DFTAuditIssueSource,
+            {"issue_id": child_issue.id, "candidate_id": locked.id},
+        )
+        if relation is None or child_issue.source_candidate_ids != [str(locked.id)]:
+            raise ValueError("identity_split_child_source_relation_missing")
+        if locked.paper_id != old_result.paper_id or child_issue.paper_id != locked.paper_id:
+            raise ValueError("identity_split_cross_paper_release")
+        if (
+            locked.materialized_target_type != "dft_results"
+            or str(locked.materialized_target_id or "") != str(old_result.id)
+        ):
+            raise ValueError("identity_split_candidate_old_binding_mismatch")
+        old_identity = self.identity_for_result(old_result)
+        if not candidate_identity.observation_key or not old_identity.observation_key:
+            raise ValueError("identity_split_requires_valid_v2_identity")
+        if candidate_identity.subject_key == old_identity.subject_key:
+            raise ValueError("identity_split_subject_not_distinct")
+        locked.materialized_target_type = None
+        locked.materialized_target_id = None
+        locked.status = "candidate"
+        locked.mapping_reason = "identity_split_reconciliation"
+        self.session.add(locked)
+        self.session.flush()
+        return locked
 
     def mark_pending(
         self,

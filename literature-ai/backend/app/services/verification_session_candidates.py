@@ -46,6 +46,7 @@ class VerificationSessionDFTCandidateMixin:
         paper_id: UUID,
         reviewer: str,
         candidate_run_id: UUID | None = None,
+        candidate_ids: set[UUID] | None = None,
     ) -> dict[str, Any]:
         stmt = (
             select(
@@ -66,6 +67,16 @@ class VerificationSessionDFTCandidateMixin:
         )
         if candidate_run_id is not None:
             stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        if candidate_ids is not None:
+            normalized_candidate_ids = {UUID(str(value)) for value in candidate_ids}
+            if not normalized_candidate_ids:
+                return {
+                    "materialized_count": 0,
+                    "materialized_items": [],
+                    "skipped_count": 0,
+                    "skipped_items": [],
+                }
+            stmt = stmt.where(ExternalAnalysisCandidate.id.in_(normalized_candidate_ids))
         rows = self.session.execute(stmt).all()
         existing_dft_rows = self.session.scalars(
             select(DFTResult).where(DFTResult.paper_id == paper_id)

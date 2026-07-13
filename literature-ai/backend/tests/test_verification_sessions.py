@@ -174,6 +174,75 @@ def test_new_dft_materialization_keeps_method_only_and_specific_v2_subjects_dist
         assert len({candidate.materialized_target_id for candidate in candidates}) == 2
 
 
+def test_new_dft_materialization_candidate_ids_filter_is_exact(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Exact candidate filter", pdf_path="filter.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="filter-test")
+        session.add(run)
+        session.flush()
+
+        def candidate(material: str, value: float) -> ExternalAnalysisCandidate:
+            return ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                status="candidate",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material_identity": material,
+                        "property_type": "adsorption_energy",
+                        "adsorbate": "Li2S",
+                        "value": value,
+                        "unit": "eV",
+                    },
+                    "evidence_location": {
+                        "source_document_type": "main_text",
+                        "page": 7,
+                        "quoted_text": f"{material}: {value} eV",
+                    },
+                },
+            )
+
+        selected = candidate("selected", -1.1)
+        untouched = candidate("untouched", -1.2)
+        session.add_all([selected, untouched])
+        session.flush()
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+            candidate_ids={selected.id},
+        )
+
+        assert result["materialized_count"] == 1
+        assert result["materialized_items"][0]["candidate_id"] == str(selected.id)
+        assert session.get(ExternalAnalysisCandidate, selected.id).status == "materialized"
+        untouched = session.get(ExternalAnalysisCandidate, untouched.id)
+        assert untouched.status == "candidate"
+        assert untouched.materialized_target_id is None
+        assert session.scalar(
+            select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id)
+        ) == 1
+
+        empty = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+            candidate_ids=set(),
+        )
+        assert empty == {
+            "materialized_count": 0,
+            "materialized_items": [],
+            "skipped_count": 0,
+            "skipped_items": [],
+        }
+
+
 def test_new_dft_materialization_rejects_missing_pdf_page_anchor(verification_env):
     Session = verification_env
     with Session() as session:
