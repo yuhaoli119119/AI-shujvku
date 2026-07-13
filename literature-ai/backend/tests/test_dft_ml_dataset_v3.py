@@ -149,6 +149,15 @@ def test_v3_ready_record_contract_and_v2_is_unchanged():
             assert payload["manifest"]["schema_version"] == "dft_results_ml_v3"
             assert payload["manifest"]["source_schema_version"] == "dft_results_ml_v2"
             assert payload["manifest"]["task_status"] == "candidate"
+            assert payload["manifest"]["lifecycle_reconciled"] is False
+            assert payload["manifest"]["review_scope_complete"] is False
+            assert payload["manifest"]["is_complete"] is False
+            assert payload["manifest"]["exported_verified_rows"] == 1
+            assert payload["manifest"]["excluded_rows"] >= 0
+            assert payload["manifest"]["completeness_blockers"] == ["paper_scope_not_provided"]
+            assert payload["manifest"]["review_scope_blockers"] == ["paper_scope_not_provided"]
+            assert payload["manifest"]["identity_version"] == 2
+            assert payload["manifest"]["source_snapshot_fingerprint"] is None
             assert payload["manifest"]["property_type_fields"] == [
                 "property_type",
                 "normalized_property_type",
@@ -509,7 +518,7 @@ def test_v3_rds_gibbs_free_energy_with_null_adsorbate_and_complete_catalyst_is_t
         engine.dispose()
 
 
-def test_v3_adsorption_energy_with_null_adsorbate_stays_blocked():
+def test_v3_adsorption_energy_with_null_adsorbate_is_excluded_by_identity_gate():
     engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
@@ -517,12 +526,10 @@ def test_v3_adsorption_energy_with_null_adsorbate_stays_blocked():
             row.adsorbate = None
             session.commit()
 
+            v2 = build_dft_ml_dataset(session)
             payload = build_dft_ml_dataset_v3(session, task="adsorption_energy", ready_only=False)
-            assert [record["record_id"] for record in payload["records"]] == [str(row.id)]
-            record = payload["records"][0]
-            assert record["label_ready"] is True
-            assert record["tabular_ml_ready"] is False
-            assert "missing_canonical_adsorbate" in record["feature_blockers"]
+            assert payload["records"] == []
+            assert v2["metadata"]["blocked_reasons"]["missing_adsorbate_identity"] == 1
     finally:
         engine.dispose()
 

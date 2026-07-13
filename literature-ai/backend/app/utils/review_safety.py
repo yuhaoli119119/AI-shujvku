@@ -5,11 +5,12 @@ from dataclasses import dataclass
 import re
 from typing import Any
 
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     CatalystSample,
+    DFTAuditIssue,
     DFTResult,
     EvidenceClaim,
     EvidenceLocator,
@@ -19,10 +20,12 @@ from app.db.models import (
     WritingCard,
 )
 from app.utils.locator_degradation import locator_degradation
+from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_identity_service import (
     property_requires_atom_pair,
     resolve_atom_pair_identity,
 )
+from app.services.dft_audit_issue_lifecycle_service import DFT_AUDIT_ISSUE_PENDING_STATUSES
 
 
 SAFE_REVIEWER_STATUS = "verified"
@@ -31,6 +34,8 @@ UNSAFE_REVIEWER_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "pend
 UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", ""}
 
 DFT_REJECTED_STATUSES = {"rejected", "ai_rejected", "rejected_by_local_ai"}
+DFT_RESULT_CONFLICT_ISSUE_TYPES = {"duplicate_suspected", "negative_consensus"}
+DFT_RESULT_CONFLICT_CODES = {"binding_conflict", "scientific_conflict", "identity_conflict"}
 MISSING_UNIT_MARKERS = {
     "n/a",
     "na",
@@ -164,19 +169,58 @@ def get_target_reviews(
     )
 
 
-def dft_export_data_quality_reasons(row: DFTResult) -> tuple[str, ...]:
+def dft_export_data_quality_reasons(row: DFTResult, session: Session | None = None) -> tuple[str, ...]:
     property_type = _normalized(row.property_type)
-    if not property_requires_atom_pair(property_type):
-        return ()
     reasons: list[str] = []
-    unit = _normalized(row.unit)
-    if not unit or unit in MISSING_UNIT_MARKERS:
-        reasons.append("missing_required_unit")
-    payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-    atom_pair = resolve_atom_pair_identity(payload, property_type=property_type)
-    if atom_pair.error_code:
-        reasons.append(atom_pair.error_code)
-    return tuple(reasons)
+    if property_requires_atom_pair(property_type):
+        unit = _normalized(row.unit)
+        if not unit or unit in MISSING_UNIT_MARKERS:
+            reasons.append("missing_required_unit")
+        payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+        atom_pair = resolve_atom_pair_identity(payload, property_type=property_type)
+        if atom_pair.error_code:
+            reasons.append(atom_pair.error_code)
+    if session is not None:
+        from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+
+        taxonomy = get_property_taxonomy(row.property_type)
+        is_text_claim = taxonomy["ml_role"] == "lm_auxiliary" or taxonomy["physical_dimension"] == "text"
+        if not is_text_claim:
+            identity = DFTAuditIssueLifecycleService(session).identity_for_result(row)
+            reasons.extend(identity.error_codes)
+    return tuple(dict.fromkeys(reasons))
+
+
+def _open_dft_result_conflict_ids(session: Session, rows: list[DFTResult]) -> set[str]:
+    if not rows or not _table_exists(session, "dft_audit_issues"):
+        return set()
+    paper_ids = {row.paper_id for row in rows}
+    target_ids = {str(row.id) for row in rows}
+    result_ids = {row.id for row in rows}
+    issues = session.scalars(
+        select(DFTAuditIssue).where(
+            DFTAuditIssue.paper_id.in_(paper_ids),
+            DFTAuditIssue.status.in_(sorted(DFT_AUDIT_ISSUE_PENDING_STATUSES)),
+            or_(
+                DFTAuditIssue.issue_type.in_(sorted(DFT_RESULT_CONFLICT_ISSUE_TYPES)),
+                DFTAuditIssue.lifecycle_stage.in_(sorted(DFT_RESULT_CONFLICT_CODES)),
+                DFTAuditIssue.resolution_code.in_(sorted(DFT_RESULT_CONFLICT_CODES)),
+                DFTAuditIssue.last_error_code.in_(sorted(DFT_RESULT_CONFLICT_CODES)),
+            ),
+            or_(
+                DFTAuditIssue.result_id.in_(result_ids),
+                DFTAuditIssue.target_id.in_(target_ids),
+            ),
+        )
+    ).all()
+    conflict_ids: set[str] = set()
+    for issue in issues:
+        if issue.result_id is not None:
+            conflict_ids.add(str(issue.result_id))
+        target_id = str(issue.target_id or "").strip()
+        if target_id in target_ids:
+            conflict_ids.add(target_id)
+    return conflict_ids
 
 
 def has_safe_verified_review(
@@ -504,7 +548,9 @@ def is_export_eligible_extraction(
         reasons = (*reasons, "target_rejected")
     if is_dft_target:
         if isinstance(row, DFTResult):
-            reasons = (*reasons, *dft_export_data_quality_reasons(row))
+            reasons = (*reasons, *dft_export_data_quality_reasons(row, session))
+            if str(row.id) in _open_dft_result_conflict_ids(session, [row]):
+                reasons = (*reasons, "open_result_level_conflict")
         reasons = tuple(dict.fromkeys(reasons))
     review_status = safe_review.reviewer_status if safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
@@ -592,6 +638,7 @@ def bulk_export_gate_results(
             claim_pages_by_target[target_id_str].append((page_start, page_end))
 
     material_identity_ids: set[str] = set()
+    open_conflict_ids: set[str] = set()
     if is_dft_target:
         catalyst_ids = {
             row.catalyst_sample_id
@@ -602,6 +649,10 @@ def bulk_export_gate_results(
             for catalyst in session.scalars(select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))).all():
                 if _catalyst_has_material_identity(catalyst):
                     material_identity_ids.add(str(catalyst.id))
+        open_conflict_ids = _open_dft_result_conflict_ids(
+            session,
+            [row for row in rows if isinstance(row, DFTResult)],
+        )
 
     gates: dict[str, ExportGateResult] = {}
     for target_id, row in row_by_id.items():
@@ -632,7 +683,9 @@ def bulk_export_gate_results(
             reasons = (*reasons, "target_rejected")
         if is_dft_target:
             if isinstance(row, DFTResult):
-                reasons = (*reasons, *dft_export_data_quality_reasons(row))
+                reasons = (*reasons, *dft_export_data_quality_reasons(row, session))
+                if target_id in open_conflict_ids:
+                    reasons = (*reasons, "open_result_level_conflict")
             reasons = tuple(dict.fromkeys(reasons))
         review_status = safe_review.reviewer_status if safe_review is not None else (
             ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))

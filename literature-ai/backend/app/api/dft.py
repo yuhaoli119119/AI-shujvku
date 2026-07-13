@@ -43,29 +43,38 @@ def _v3_filename(task: str, suffix: str) -> str:
 def get_dft_audit_issues(
     paper_id: UUID | None = Query(default=None),
     status: list[str] | None = Query(default=None),
+    issue_type: list[str] | None = Query(default=None),
     include_closed: bool = Query(default=False),
-    limit: int = Query(default=200, ge=1, le=1000),
+    limit: int = Query(default=100, ge=1, le=DFTAuditIssueService.PAGE_LIMIT_MAX),
+    cursor: str | None = Query(default=None),
+    sort_direction: str = Query(default="desc", pattern="^(asc|desc)$"),
     session: Session = Depends(get_db_session),
 ) -> dict:
     statuses = set(status or [])
+    issue_types = {str(value).strip() for value in issue_type or [] if str(value).strip()}
     if not statuses and not include_closed:
         statuses = set(DFT_AUDIT_ISSUE_OPEN_STATUSES)
     try:
         service = DFTAuditIssueService(session)
-        rows = service.list_issues(
+        page = service.query_issues(
             paper_id=paper_id,
             statuses=statuses or None,
+            issue_types=issue_types or None,
             limit=limit,
+            cursor=cursor,
+            sort_direction=sort_direction,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
-        "items": [service.serialize_issue(row) for row in rows],
-        "count": len(rows),
+        **{key: value for key, value in page.items() if key != "items"},
+        "items": [service.serialize_issue(row) for row in page["items"]],
         "filters": {
             "paper_id": str(paper_id) if paper_id else None,
             "status": sorted(statuses) if statuses else None,
+            "issue_type": sorted(issue_types) if issue_types else None,
             "include_closed": include_closed,
+            "sort_direction": sort_direction,
         },
     }
 

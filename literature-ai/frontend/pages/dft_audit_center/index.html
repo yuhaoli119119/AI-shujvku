@@ -168,7 +168,8 @@
   </main>
 
   <script>
-    const state = { issues: [], filteredIssues: [], report: null, loading: false };
+    const state = { issues: [], report: null, loading: false, totalCount: 0 };
+    let loadGeneration = 0;
 
     function esc(value) {
       return String(value == null ? "" : value)
@@ -196,18 +197,22 @@
       document.getElementById("includeClosedInput").value = params.get("include_closed") || "false";
     }
 
-    function buildIssueParams() {
+    function buildIssueParams(cursor) {
       const params = new URLSearchParams();
       const paperId = document.getElementById("paperIdInput").value.trim();
       const status = document.getElementById("statusFilter").value;
+      const issueType = document.getElementById("issueTypeFilter").value;
       const includeClosed = document.getElementById("includeClosedInput").value;
       if (paperId) params.set("paper_id", paperId);
       if (status) params.append("status", status);
+      if (issueType) params.append("issue_type", issueType);
       if (!status && includeClosed !== "true") {
         ["open", "needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai"].forEach(item => params.append("status", item));
       }
       params.set("include_closed", includeClosed);
-      params.set("limit", "500");
+      params.set("limit", "100");
+      params.set("sort_direction", "desc");
+      if (cursor) params.set("cursor", cursor);
       return params;
     }
 
@@ -225,24 +230,72 @@
       return Math.max(1, Math.min(365, Number.isFinite(value) ? value : 30));
     }
 
+    function assertCurrentLoad(generation) {
+      if (generation !== loadGeneration) {
+        const error = new Error("stale_dft_audit_load");
+        error.name = "StaleDFTAuditLoad";
+        throw error;
+      }
+    }
+
+    async function loadAllIssues(generation) {
+      const issues = [];
+      const seenIssueIds = new Set();
+      const seenCursors = new Set();
+      let cursor = null;
+      let totalCount = null;
+      while (true) {
+        assertCurrentLoad(generation);
+        const payload = await fetchJSON("/api/dft/audit-issues?" + buildIssueParams(cursor).toString());
+        assertCurrentLoad(generation);
+        const pageTotal = Number(payload.total_count || 0);
+        if (totalCount == null) totalCount = pageTotal;
+        else if (pageTotal !== totalCount) throw new Error("分页期间 issue 总数发生变化，请刷新重试");
+        for (const item of payload.items || []) {
+          const issueId = String(item.id || item.issue_id || "");
+          if (issueId && seenIssueIds.has(issueId)) throw new Error("服务端分页返回了重复 issue");
+          if (issueId) seenIssueIds.add(issueId);
+          issues.push(item);
+        }
+        if (!payload.has_more) break;
+        const nextCursor = String(payload.next_cursor || "");
+        if (!nextCursor) throw new Error("服务端返回 has_more 但缺少 next_cursor");
+        if (seenCursors.has(nextCursor)) throw new Error("服务端分页 cursor 出现循环");
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      }
+      if (issues.length !== totalCount) {
+        throw new Error("分页结果数量与 total_count 不一致，请刷新重试");
+      }
+      assertCurrentLoad(generation);
+      return { items: issues, total_count: totalCount || 0 };
+    }
+
     async function loadData() {
+      const generation = ++loadGeneration;
       state.loading = true;
+      state.issues = [];
+      state.totalCount = 0;
       document.getElementById("issueList").innerHTML = '<div class="empty">正在加载 issue...</div>';
       document.getElementById("reportSummary").innerHTML = '<div class="empty">正在加载报表...</div>';
       try {
         const [issuesPayload, report] = await Promise.all([
-          fetchJSON("/api/dft/audit-issues?" + buildIssueParams().toString()),
+          loadAllIssues(generation),
           fetchJSON("/api/dft/audit-report?" + buildReportParams().toString())
         ]);
+        assertCurrentLoad(generation);
         state.issues = issuesPayload.items || [];
+        state.totalCount = Number(issuesPayload.total_count || state.issues.length);
         state.report = report || {};
         renderAll();
       } catch (error) {
+        if (error && error.name === "StaleDFTAuditLoad") return;
+        if (generation !== loadGeneration) return;
         document.getElementById("issueList").innerHTML = '<div class="error">加载失败：' + esc(error.message) + '</div>';
         document.getElementById("reportSummary").innerHTML = '<div class="error">报表加载失败：' + esc(error.message) + '</div>';
         document.getElementById("warningList").innerHTML = '<div class="error">无法读取 warning。</div>';
       } finally {
-        state.loading = false;
+        if (generation === loadGeneration) state.loading = false;
       }
     }
 
@@ -293,14 +346,12 @@
     }
 
     function renderIssues() {
-      const issueType = document.getElementById("issueTypeFilter").value;
-      state.filteredIssues = state.issues.filter(item => !issueType || item.issue_type === issueType);
-      document.getElementById("issueMeta").textContent = state.filteredIssues.length + " / " + state.issues.length + " items";
-      if (!state.filteredIssues.length) {
+      document.getElementById("issueMeta").textContent = state.issues.length + " / " + state.totalCount + " items";
+      if (!state.issues.length) {
         document.getElementById("issueList").innerHTML = '<div class="empty">当前没有待处理 DFT audit issue。</div>';
         return;
       }
-      document.getElementById("issueList").innerHTML = state.filteredIssues.map(renderIssue).join("");
+      document.getElementById("issueList").innerHTML = state.issues.map(renderIssue).join("");
     }
 
     function renderIssue(item) {
@@ -449,7 +500,7 @@
     }
 
     document.getElementById("refreshBtn").addEventListener("click", loadData);
-    document.getElementById("issueTypeFilter").addEventListener("change", renderAll);
+    document.getElementById("issueTypeFilter").addEventListener("change", loadData);
     document.getElementById("statusFilter").addEventListener("change", loadData);
     document.getElementById("includeClosedInput").addEventListener("change", loadData);
     document.getElementById("daysInput").addEventListener("change", loadData);

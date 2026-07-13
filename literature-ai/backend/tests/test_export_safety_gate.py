@@ -14,6 +14,7 @@ from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, 
 from app.db.models import (
     Base,
     CatalystSample,
+    DFTAuditIssue,
     DFTResult,
     DFTSetting,
     EvidenceSpan,
@@ -26,7 +27,7 @@ from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
 from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
-from app.utils.review_safety import dft_export_data_quality_reasons
+from app.utils.review_safety import bulk_export_gate_results, dft_export_data_quality_reasons
 
 
 @pytest.mark.parametrize("property_type", ["bond_length", "ICOHP", "COHP"])
@@ -180,6 +181,35 @@ def _evidence_ref(session: Session, paper: Paper, row: DFTResult, *, page: int |
     session.add(span)
     session.flush()
     return span
+
+
+def test_dft_row_export_gate_blocks_open_result_level_conflict(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        row = _dft(session, paper)
+        _safe_review(session, paper, row)
+        _evidence_ref(session, paper, row, page=2)
+        conflict = DFTAuditIssue(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            result_id=row.id,
+            issue_type="duplicate_suspected",
+            severity="high",
+            status="needs_user_decision",
+            fingerprint="open-result-conflict",
+        )
+        session.add(conflict)
+        session.flush()
+
+        blocked = bulk_export_gate_results(session, [row], target_type="dft_results")[str(row.id)]
+        assert blocked.eligible is False
+        assert "open_result_level_conflict" in blocked.reasons
+
+        conflict.status = "closed"
+        session.flush()
+        eligible = bulk_export_gate_results(session, [row], target_type="dft_results")[str(row.id)]
+        assert "open_result_level_conflict" not in eligible.reasons
 
 
 async def _response_text(response) -> str:
@@ -684,6 +714,8 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
             # Check normalization logic with other units
             safe_row_mev = _dft(session, paper)
             safe_row_mev.property_type = "reaction_barrier"
+            safe_row_mev.reaction_step = "Li2S4 to Li2S2"
+            safe_row_mev.evidence_payload = {"state_context": "transition_state"}
             safe_row_mev.value = 500
             safe_row_mev.unit = "meV"
             _safe_review(session, paper, safe_row_mev)

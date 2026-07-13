@@ -254,6 +254,15 @@ class DFTDatasetContractV3(BaseModel):
     label_ready_count: int
     tabular_ready_count: int
     excluded_counts: dict[str, int] = Field(default_factory=dict)
+    lifecycle_reconciled: bool
+    review_scope_complete: bool
+    is_complete: bool
+    exported_verified_rows: int
+    excluded_rows: int
+    completeness_blockers: list[str] = Field(default_factory=list)
+    review_scope_blockers: list[str] = Field(default_factory=list)
+    identity_version: Literal[2]
+    source_snapshot_fingerprint: str | None = None
 
 
 class DFTProvenancePayloadV3(DFTProvenancePayloadV2):

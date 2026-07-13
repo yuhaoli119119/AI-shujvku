@@ -39,6 +39,16 @@ def test_identity_v2_decimal_and_known_unit_equivalence_without_float_drift():
     assert different.observation_key != ev.observation_key
 
 
+def test_identity_v2_molar_energy_units_normalize_to_ev():
+    ev = build_dft_identity_v2(_payload(value="-1", unit="eV"))
+    kj = build_dft_identity_v2(_payload(value="-96.4853321233", unit="kJ/mol"))
+
+    assert kj.error_codes == ()
+    assert kj.identity_payload["observation"]["unit"] == "eV"
+    assert abs(float(kj.identity_payload["observation"]["value"]) + 1.0) < 1e-10
+    assert ev.subject_key == kj.subject_key
+
+
 def test_identity_v2_known_length_units_are_equivalent():
     angstrom = build_dft_identity_v2(
         _payload(property_type="bond_length", atom_pair="Li1-S", value="2.1", unit="Å")

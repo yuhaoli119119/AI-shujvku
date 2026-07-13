@@ -29,6 +29,7 @@ from app.normalizers.chemistry_normalizer import (
 )
 from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.catalyst_sample_identity import resolve_sample_identity
+from app.services.dft_completeness_service import DFTCompletenessService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
@@ -1332,6 +1333,11 @@ def build_dft_ml_dataset_v3(
         "tabular_ready_count": sum(bool(record["tabular_ml_ready"]) for record in candidates),
         "excluded_counts": dict(sorted(excluded.items())),
     }
+    completeness = DFTCompletenessService(session).evaluate_export(
+        paper_id=paper_id,
+        exported_verified_rows=len(returned),
+        excluded_rows=max(0, int(v2["metadata"]["total_candidates"]) - len(returned)),
+    )
     created_at = datetime.now(timezone.utc).isoformat()
     contract = {
         "schema_version": "dft_results_ml_v3",
@@ -1359,6 +1365,15 @@ def build_dft_ml_dataset_v3(
             "canonical_property_type",
         ],
         **counts,
+        "lifecycle_reconciled": completeness["lifecycle_reconciled"],
+        "review_scope_complete": completeness["review_scope_complete"],
+        "is_complete": completeness["is_complete"],
+        "exported_verified_rows": completeness["exported_verified_rows"],
+        "excluded_rows": completeness["excluded_rows"],
+        "completeness_blockers": completeness["completeness_blockers"],
+        "review_scope_blockers": completeness["review_scope_blockers"],
+        "identity_version": completeness["identity_version"],
+        "source_snapshot_fingerprint": completeness["source_snapshot_fingerprint"],
     }
     return {
         "metadata": dict(contract),
