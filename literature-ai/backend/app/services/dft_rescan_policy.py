@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from typing import Any
+from uuid import uuid4
 
 
 SOURCE_DOCUMENT_TYPES = {
@@ -201,71 +200,24 @@ def normalize_numeric_value(value: Any) -> str:
     return f"{number:.6g}"
 
 
-def _first_payload(*payloads: dict[str, Any], keys: tuple[str, ...]) -> Any:
-    for payload in payloads:
-        if not isinstance(payload, dict):
-            continue
-        for key in keys:
-            value = payload.get(key)
-            if value not in (None, "", []):
-                return value
-    return None
-
-
-def _owned_source_bucket(source_document_type: str) -> str:
-    if source_document_type == "supporting_reference":
-        return "supporting_reference"
-    return "paper_owned"
-
-
 def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
-    """Build a stable DFT value signature without page/table locator fields.
+    """Build a DFT value signature without page/table locator fields.
 
     Main-text and SI occurrences are intentionally placed in the same
     paper-owned bucket so repeated evidence for the same paper data merges
     instead of creating a new row. Supporting-reference data remains separate.
+    A bond-specific observation without atom-pair identity deliberately receives
+    a non-repeatable signature so it cannot be auto-deduplicated.
     """
 
-    corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
-    evidence = payload.get("evidence_payload") if isinstance(payload.get("evidence_payload"), dict) else {}
-    location = payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}
-    source_type = normalize_source_document_type(
-        _first_payload(payload, evidence, location, keys=("source_document_type", "source_type"))
-    )
-    material = _first_payload(
-        payload,
-        corrected,
-        keys=("normalized_material_or_catalyst", "normalized_material", "material", "catalyst", "catalyst_name"),
-    )
-    adsorbate = _first_payload(payload, corrected, keys=("normalized_adsorbate", "adsorbate"))
-    property_type = _first_payload(payload, corrected, keys=("normalized_property_type", "property_type", "energy_type"))
-    property_subtype = _first_payload(payload, corrected, evidence, location, keys=("property_subtype", "normalized_property_subtype"))
-    parts = {
-        "paper_id": _text(payload.get("paper_id")),
-        "source_bucket": _owned_source_bucket(source_type),
-        "material": _text(material),
-        "active_site_instance_key": _text(_first_payload(payload, corrected, evidence, location, keys=("active_site_instance_key",))),
-        "adsorbate": _text(adsorbate),
-        "property_type": _text(property_type),
-        "property_subtype": _text(property_subtype),
-        "reaction_step": normalize_dft_reaction_step_for_identity(
-            _first_payload(payload, corrected, keys=("normalized_reaction_step", "reaction_step")),
-            property_type=property_type,
-            adsorbate=adsorbate,
-            material=material,
-        ),
-        "atom_pair": _text(_first_payload(payload, corrected, evidence, location, keys=("atom_pair",))),
-        "site_label": _text(_first_payload(payload, corrected, evidence, location, keys=("site_label", "adsorption_site", "site"))),
-        "state_context": _text(_first_payload(payload, corrected, evidence, location, keys=("state_context",))),
-        "value": normalize_numeric_value(_first_payload(payload, corrected, keys=("normalized_value", "value"))),
-        "unit": normalize_unit(_first_payload(payload, corrected, keys=("normalized_unit", "unit"))),
-        "source_table_id": _text(_first_payload(payload, corrected, evidence, location, keys=("source_table_id",))),
-        "source_row_index": _text(_first_payload(payload, corrected, evidence, location, keys=("source_row_index",))),
-        "source_column_index": _text(_first_payload(payload, corrected, evidence, location, keys=("source_column_index",))),
-    }
-    canonical = json.dumps(parts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
-    return f"dft:{digest}"
+    from app.services.dft_identity_service import build_dft_scientific_identity
+
+    identity = build_dft_scientific_identity(payload)
+    if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+        raise ValueError("conflicting_atom_pair_aliases")
+    if identity.atom_pair.error_code == "missing_atom_pair_identity":
+        return f"dft:non-deduplicable:missing_atom_pair_identity:{uuid4().hex}"
+    return identity.observation_signature
 
 
 def _row_signature(row: Any) -> str:

@@ -7,7 +7,16 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, ExtractionFieldReview, Paper
+from app.db.models import (
+    AuditLog,
+    CatalystSample,
+    DFTAuditIssue,
+    DFTResult,
+    ExtractionFieldReview,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    Paper,
+)
 from app.mcp.context import mcp_auth_context
 from app.mcp.server import (
     get_dft_audit_issues,
@@ -255,9 +264,89 @@ def test_batch_fast_path_repairs_and_finalizes_all_missing_issues(setup_test_db)
         assert all(issue is not None and issue.status == "closed" for issue in issues)
         assert untouched_other_issue is not None
         assert untouched_other_issue.status == "needs_primary_ai"
-        assert all(row.candidate_status in {"ML_Ready", "human_reviewed_needs_evidence"} for row in rows)
+        assert all(row.candidate_status == "ai_verified_ml_ready" for row in rows)
         assert reviews
         assert all(review.reviewer_status == "verified" for review in reviews)
+        assert all(review.review_payload["ai_verification"]["verification_actor_type"] == "ai" for review in reviews)
+        verify_logs = session.scalars(
+            select(AuditLog).where(
+                AuditLog.paper_id == paper_id,
+                AuditLog.action == "verify_dft_result",
+            )
+        ).all()
+        assert verify_logs
+        assert all(log.payload["actor_type"] == "ai" for log in verify_logs)
+
+
+def test_batch_fast_path_blocks_legacy_issue_with_multiple_scientific_subjects(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Legacy false dedupe guard")
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="legacy-guard")
+        session.add(run)
+        session.flush()
+        candidate_ids = []
+        for atom_pair in ("Li1-S", "Li2-S"):
+            candidate = ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "decision": "new_candidate",
+                    "corrected_value": {
+                        "material_identity": "Fe-GDY",
+                        "property_type": "bond_length",
+                        "value": 2.1,
+                        "unit": "Å",
+                        "atom_pair": atom_pair,
+                    },
+                    "evidence_location": {"page": 5, "quoted_text": f"{atom_pair} 2.1 Å"},
+                },
+                status="candidate",
+            )
+            session.add(candidate)
+            session.flush()
+            candidate_ids.append(str(candidate.id))
+        issue_service = DFTAuditIssueService(session)
+        issue = issue_service.upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="legacy-false-dedupe",
+            suggested_dft={
+                "material_identity": "Fe-GDY",
+                "property_type": "bond_length",
+                "value": 2.1,
+                "unit": "Å",
+                "atom_pair": "Li1-S",
+            },
+            evidence_payload={"page": 5, "quoted_text": "legacy merged evidence"},
+            source_candidate_id=candidate_ids[0],
+        )
+        issue_service.upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="legacy-false-dedupe",
+            source_candidate_id=candidate_ids[1],
+        )
+        session.commit()
+        paper_id = paper.id
+        issue_id = issue.id
+
+    with mcp_auth_context(_propose_auth()):
+        result = repair_dft_audit_issues_batch(paper_id=str(paper_id), auto_finalize=True)
+
+    assert result["processed_count"] == 1
+    assert result["finalized_count"] == 0
+    assert result["items"][0]["status"] == "blocked"
+    assert result["items"][0]["error_code"] == "legacy_false_dedupe_requires_identity_split"
+    with Session(setup_test_db) as session:
+        assert session.get(DFTAuditIssue, issue_id).status == "needs_primary_ai"
+        assert session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all() == []
 
 
 def test_create_missing_dft_is_idempotent_for_same_issue(setup_test_db):
@@ -315,6 +404,67 @@ def test_create_missing_dft_dedupes_generic_adsorption_step_against_existing_row
         assert len(samples) == 1
         assert samples[0].name == "Fe-GDY"
         assert rows[0].catalyst_sample_id == samples[0].id
+
+
+def test_create_missing_dft_uses_canonical_atom_pair_and_reports_subject_value_conflict(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Bond repair conflict")
+        existing = DFTResult(
+            paper_id=paper.id,
+            property_type="bond_length",
+            value=2.1,
+            unit="Å",
+            candidate_status="system_candidate",
+            evidence_payload={"material_identity": "Fe-GDY", "atom_pair": "Li1-S", "page": 4},
+        )
+        session.add(existing)
+        session.flush()
+        exact = DFTAuditIssueService(session).upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="bond-exact",
+            suggested_dft={
+                "material_identity": "Fe-GDY",
+                "property_type": "bond_length",
+                "value": 2.1,
+                "unit": "Å",
+                "bond_pair": "S-Li1",
+            },
+            evidence_payload={"page": 5, "quoted_text": "S-Li1 2.1 Å"},
+        )
+        conflicting = DFTAuditIssueService(session).upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="bond-conflict",
+            suggested_dft={
+                "material_identity": "Fe-GDY",
+                "property_type": "bond_length",
+                "value": 2.2,
+                "unit": "Å",
+                "interaction_pair": "Li1-S",
+            },
+            evidence_payload={"page": 6, "quoted_text": "Li1-S 2.2 Å"},
+        )
+        session.commit()
+        paper_id = paper.id
+        existing_id = str(existing.id)
+        exact_id = str(exact.id)
+        conflicting_id = str(conflicting.id)
+
+    with mcp_auth_context(_review_auth()):
+        exact_result = repair_dft_audit_issue(exact_id, "create_missing_dft", {}, "exact pair", {})
+        with pytest.raises(ValueError, match="conflicting_dft_observation_for_subject"):
+            repair_dft_audit_issue(conflicting_id, "create_missing_dft", {}, "conflicting value", {})
+
+    assert exact_result["status"] == "linked_existing"
+    assert exact_result["dft_result_id"] == existing_id
+    with Session(setup_test_db) as session:
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+        assert len(rows) == 1
 
 
 def test_supporting_reference_missing_repair_does_not_create_main_paper_dft(setup_test_db):

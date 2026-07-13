@@ -6,6 +6,7 @@ import asyncio
 import csv
 import io
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -25,6 +26,31 @@ from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
 from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
+from app.utils.review_safety import dft_export_data_quality_reasons
+
+
+@pytest.mark.parametrize("property_type", ["bond_length", "ICOHP", "COHP"])
+@pytest.mark.parametrize("alias", ["atom_pair", "bond_pair", "bond", "interaction_pair"])
+def test_property_specific_atom_pair_gate_accepts_all_aliases(property_type, alias):
+    row = DFTResult(
+        property_type=property_type,
+        unit="eV",
+        evidence_payload={alias: "Li1-S"},
+    )
+
+    assert dft_export_data_quality_reasons(row) == ()
+
+
+def test_property_specific_atom_pair_gate_reports_missing_and_conflicting_identity():
+    missing = DFTResult(property_type="bond_length_Li-S", unit="Å", evidence_payload={})
+    conflicting = DFTResult(
+        property_type="COHP",
+        unit="eV",
+        evidence_payload={"atom_pair": "Li1-S", "bond_pair": "Li2-S"},
+    )
+
+    assert dft_export_data_quality_reasons(missing) == ("missing_atom_pair_identity",)
+    assert dft_export_data_quality_reasons(conflicting) == ("conflicting_atom_pair_aliases",)
 
 
 def _session(tmp_path):
@@ -358,7 +384,7 @@ def test_negative_icohp_requires_real_unit_and_bond_identity(tmp_path):
             response, rows = _export_rows(session)
 
             assert rows == []
-            assert "missing_bond_identity" in response.headers["x-d1-blocked-reasons"]
+            assert "missing_atom_pair_identity" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 

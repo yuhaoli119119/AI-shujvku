@@ -787,6 +787,19 @@ def repair_dft_audit_issues_batch(
         for issue in issues:
             try:
                 with session.begin_nested():
+                    legacy_error = repair_service.legacy_false_dedupe_error(issue)
+                    if legacy_error:
+                        results.append(
+                            {
+                                "issue_id": str(issue.id),
+                                "issue_type": issue.issue_type,
+                                "status": "blocked",
+                                "error": legacy_error,
+                                "error_code": legacy_error,
+                                "finalized": False,
+                            }
+                        )
+                        continue
                     action, repair_payload = _fast_dft_repair_action(issue)
                     if action == "verify_existing":
                         repair_result = {
@@ -802,6 +815,8 @@ def repair_dft_audit_issues_batch(
                             confirm_reject_candidate=True,
                             reviewer=auth.source_prefix,
                             reviewer_note=f"Fast-mode resolution for {issue.issue_type}.",
+                            verification_actor_type="ai",
+                            source_label="mcp_fast_batch",
                             commit=False,
                         )
                         results.append(
@@ -838,6 +853,8 @@ def repair_dft_audit_issues_batch(
                             reviewer=auth.source_prefix,
                             reviewer_note="Fast-mode DFT processing completed from stored evidence.",
                             evidence_payload=issue.evidence_payload or {},
+                            verification_actor_type="ai",
+                            source_label="mcp_fast_batch",
                             commit=False,
                         )
                         finalized = True

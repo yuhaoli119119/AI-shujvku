@@ -17,6 +17,7 @@ from app.db.models import (
     AuditLog,
     Base,
     CatalystSample,
+    DFTAuditIssue,
     DFTResult,
     EvidenceLocator,
     ExtractionFieldReview,
@@ -267,6 +268,212 @@ def test_new_dft_materialization_persists_range_and_pdf_locator(verification_env
         assert locator is not None
         assert locator.page == 15
         assert locator.locator_status == "exact_page"
+
+
+def test_bond_candidate_materialization_keeps_atom_subjects_and_reports_value_conflict(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Bond identity candidates", pdf_path="bond-identity.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="bond-identity")
+        session.add(run)
+        session.flush()
+
+        def add_candidate(*, value: float, pair_key: str | None, pair: str | None, page: int):
+            corrected = {
+                "material_identity": "Fe-GDY",
+                "property_type": "bond_length",
+                "value": value,
+                "unit": "Å",
+            }
+            if pair_key and pair:
+                corrected[pair_key] = pair
+            candidate = ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload={
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "decision": "new_candidate",
+                    "corrected_value": corrected,
+                    "evidence_location": {"page": page, "quoted_text": f"{pair or 'unspecified pair'} {value} Å"},
+                },
+                status="candidate",
+            )
+            session.add(candidate)
+            session.flush()
+            return candidate
+
+        li1 = add_candidate(value=2.1, pair_key="atom_pair", pair="Li1-S", page=4)
+        li1_reversed = add_candidate(value=2.1, pair_key="bond", pair="S–Li1", page=5)
+        li1_conflict = add_candidate(value=2.2, pair_key="bond_pair", pair="Li1-S", page=6)
+        li2 = add_candidate(value=2.1, pair_key="interaction_pair", pair="Li2-S", page=7)
+        missing_first = add_candidate(value=2.1, pair_key=None, pair=None, page=8)
+        missing_second = add_candidate(value=2.1, pair_key=None, pair=None, page=9)
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()
+        assert [item["action"] for item in result["materialized_items"]] == [
+            "created",
+            "deduplicated",
+            "created",
+            "created",
+            "created",
+        ]
+        assert result["skipped_items"] == [
+            {"candidate_id": str(li1_conflict.id), "reason": "conflicting_dft_observation_for_subject"}
+        ]
+        assert len(rows) == 4
+        assert li1.materialized_target_id == li1_reversed.materialized_target_id
+        assert li2.materialized_target_id != li1.materialized_target_id
+        assert missing_first.materialized_target_id != missing_second.materialized_target_id
+        assert li1_conflict.status == "requires_resolution"
+        assert li1_conflict.mapping_reason == "conflicting_dft_observation_for_subject"
+
+
+def test_materialized_missing_issue_stays_open_until_ai_verification_and_closed_issue_is_not_reopened(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Materialized issue lifecycle", pdf_path="materialized-issue.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="issue-lifecycle")
+        session.add(run)
+        session.flush()
+        payload = {
+            "target_type": "dft_results",
+            "target_id": "new",
+            "decision": "new_candidate",
+            "corrected_value": {
+                "material_identity": "Fe-GDY",
+                "adsorbate": "Li2S4",
+                "property_type": "adsorption_energy",
+                "reaction_step": "Li2S4 adsorption",
+                "value": -1.1,
+                "unit": "eV",
+            },
+            "evidence_location": {"page": 5, "quoted_text": "Fe-GDY Li2S4 adsorption -1.10 eV"},
+        }
+        first_candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload=payload,
+            status="candidate",
+        )
+        session.add(first_candidate)
+        session.flush()
+
+        materialized = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+        row = session.get(DFTResult, UUID(materialized["materialized_items"][0]["dft_result_id"]))
+        issue = session.scalar(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper.id))
+
+        assert issue.target_id == str(row.id)
+        assert issue.status == "fixed_by_primary_ai"
+        assert issue.resolved_at is None
+
+        verified = DFTResultReviewService(session).verify_result(
+            paper_id=paper.id,
+            result_id=row.id,
+            confirm_reviewed_against_pdf=True,
+            reviewer="pytest-ai",
+            evidence_payload=payload["evidence_location"],
+            verification_actor_type="ai",
+            source_label="pytest-local-ai",
+            commit=False,
+        )
+        assert verified["closed_audit_issue_ids"] == [str(issue.id)]
+        assert issue.status == "closed"
+        assert row.candidate_status == "ai_verified_ml_ready"
+
+        second_payload = {**payload, "evidence_location": {"page": 12, "quoted_text": payload["evidence_location"]["quoted_text"]}}
+        second_candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload=second_payload,
+            status="candidate",
+        )
+        session.add(second_candidate)
+        session.flush()
+        repeated = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+
+        assert repeated["materialized_items"][0]["action"] == "deduplicated"
+        assert second_candidate.materialized_target_id == str(row.id)
+        assert issue.status == "closed"
+        assert issue.resolution_note == "ai_verified"
+
+
+def test_new_dft_materialization_does_not_revive_rejected_exact_match(verification_env):
+    Session = verification_env
+    with Session() as session:
+        paper = Paper(title="Rejected exact DFT", pdf_path="rejected-exact.pdf", authors=["A"])
+        session.add(paper)
+        session.flush()
+        existing = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            reaction_step="Li2S4 adsorption",
+            value=-1.1,
+            unit="eV",
+            candidate_status="Rejected",
+            evidence_payload={"material_identity": "Fe-GDY", "page": 4},
+        )
+        session.add(existing)
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="rejected-exact")
+        session.add(run)
+        session.flush()
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload={
+                "target_type": "dft_results",
+                "target_id": "new",
+                "decision": "new_candidate",
+                "corrected_value": {
+                    "material_identity": "Fe-GDY",
+                    "property_type": "adsorption_energy",
+                    "adsorbate": "Li2S4",
+                    "reaction_step": "adsorption of Li2S4",
+                    "value": -1.1,
+                    "unit": "eV",
+                },
+                "evidence_location": {"page": 8, "quoted_text": "Fe-GDY Li2S4 -1.10 eV"},
+            },
+            status="candidate",
+        )
+        session.add(candidate)
+        session.flush()
+
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper.id,
+            reviewer="pytest",
+        )
+        issue = session.scalar(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper.id))
+
+        assert result["materialized_count"] == 0
+        assert result["skipped_items"] == [
+            {"candidate_id": str(candidate.id), "reason": "exact_dedupe_target_rejected"}
+        ]
+        assert candidate.status == "requires_resolution"
+        assert candidate.materialized_target_id is None
+        assert issue.status == "needs_user_decision"
+        assert existing.candidate_status == "Rejected"
+        assert len(session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)).all()) == 1
 
 
 def test_dft_material_binding_backfill_reuses_creates_and_skips_missing_identity(verification_env):

@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DFTAuditIssue, DFTResult, utcnow
+from app.db.models import DFTAuditIssue, DFTResult, ExternalAnalysisCandidate, utcnow
 
 
 DFT_AUDIT_ISSUE_PENDING_STATUSES = {
@@ -90,6 +90,14 @@ class DFTAuditIssueLifecycleService:
     ) -> DFTAuditIssue:
         if issue.paper_id != row.paper_id:
             raise ValueError("DFT audit issue and DFT result belong to different papers.")
+        current_target = str(issue.target_id or "").strip()
+        if current_target and current_target.lower() != "new":
+            if issue.target_type != "dft_results" or current_target != str(row.id):
+                raise ValueError("dft_audit_issue_bound_to_different_result")
+            if issue.status in DFT_AUDIT_ISSUE_TERMINAL_STATUSES or issue.status == "fixed_by_primary_ai":
+                return issue
+        if issue.status in DFT_AUDIT_ISSUE_TERMINAL_STATUSES:
+            return issue
         issue.target_type = "dft_results"
         issue.target_id = str(row.id)
         issue.status = "fixed_by_primary_ai"
@@ -101,6 +109,26 @@ class DFTAuditIssueLifecycleService:
         self.session.add(issue)
         self.session.flush()
         return issue
+
+    def bind_candidate_to_result(
+        self,
+        candidate: ExternalAnalysisCandidate,
+        row: DFTResult,
+    ) -> bool:
+        if candidate.paper_id != row.paper_id:
+            raise ValueError("DFT candidate and DFT result belong to different papers.")
+        current_type = str(candidate.materialized_target_type or "").strip()
+        current_id = str(candidate.materialized_target_id or "").strip()
+        if current_type or current_id:
+            if current_type == "dft_results" and current_id == str(row.id):
+                return False
+            raise ValueError("dft_candidate_bound_to_different_result")
+        candidate.materialized_target_type = "dft_results"
+        candidate.materialized_target_id = str(row.id)
+        candidate.status = "materialized"
+        self.session.add(candidate)
+        self.session.flush()
+        return True
 
     def mark_pending(
         self,

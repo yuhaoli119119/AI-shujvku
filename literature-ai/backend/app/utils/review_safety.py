@@ -19,6 +19,10 @@ from app.db.models import (
     WritingCard,
 )
 from app.utils.locator_degradation import locator_degradation
+from app.services.dft_identity_service import (
+    property_requires_atom_pair,
+    resolve_atom_pair_identity,
+)
 
 
 SAFE_REVIEWER_STATUS = "verified"
@@ -39,7 +43,6 @@ MISSING_UNIT_MARKERS = {
     "not specified in evidence",
     "source_unreported",
 }
-BOND_SPECIFIC_DFT_PROPERTIES = {"icohp", "negative_icohp"}
 
 TARGET_TYPE_ALIASES: dict[str, set[str]] = {
     "dft_results": {"dft_results", "dft_result", "DFTResult"},
@@ -161,28 +164,18 @@ def get_target_reviews(
     )
 
 
-def _dft_payload_value(row: DFTResult, *keys: str) -> Any:
-    payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-    corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
-    for source in (payload, corrected):
-        for key in keys:
-            value = source.get(key)
-            if not _is_blank(value):
-                return value
-    return None
-
-
 def dft_export_data_quality_reasons(row: DFTResult) -> tuple[str, ...]:
     property_type = _normalized(row.property_type)
-    if property_type not in BOND_SPECIFIC_DFT_PROPERTIES:
+    if not property_requires_atom_pair(property_type):
         return ()
     reasons: list[str] = []
     unit = _normalized(row.unit)
     if not unit or unit in MISSING_UNIT_MARKERS:
         reasons.append("missing_required_unit")
-    bond = _dft_payload_value(row, "bond_pair", "bond", "interaction_pair")
-    if _is_blank(bond):
-        reasons.append("missing_bond_identity")
+    payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+    atom_pair = resolve_atom_pair_identity(payload, property_type=property_type)
+    if atom_pair.error_code:
+        reasons.append(atom_pair.error_code)
     return tuple(reasons)
 
 

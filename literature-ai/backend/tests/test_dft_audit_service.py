@@ -239,6 +239,56 @@ def test_dft_dedupe_signature_merges_main_text_and_si_repeated_value():
     assert supporting_ref != main
 
 
+def test_dft_dedupe_signature_uses_canonical_atom_pair_and_ignores_locator():
+    base = {
+        "paper_id": "paper-1",
+        "corrected_value": {
+            "material": "Fe-GDY",
+            "property_type": "bond_length",
+            "value": 2.1,
+            "unit": "Å",
+            "atom_pair": "Li1-S",
+        },
+        "evidence_location": {"page": 4, "table": "T1", "source_document_type": "main_text"},
+    }
+    reversed_alias = {
+        **base,
+        "corrected_value": {**base["corrected_value"], "atom_pair": None},
+        "evidence_location": {
+            "page": 9,
+            "table": "T7",
+            "source_document_type": "supplementary_information",
+            "bond_pair": "S – Li1",
+        },
+    }
+    different_site = {
+        **base,
+        "corrected_value": {**base["corrected_value"], "atom_pair": "Li2-S"},
+    }
+
+    assert build_dft_dedupe_signature(base) == build_dft_dedupe_signature(reversed_alias)
+    assert build_dft_dedupe_signature(base) != build_dft_dedupe_signature(different_site)
+
+
+def test_dft_dedupe_signature_refuses_stable_identity_without_required_atom_pair():
+    payload = {
+        "paper_id": "paper-1",
+        "corrected_value": {
+            "material": "Fe-GDY",
+            "property_type": "bond_length",
+            "value": 2.1,
+            "unit": "Å",
+        },
+    }
+
+    first = build_dft_dedupe_signature(payload)
+    second = build_dft_dedupe_signature(payload)
+
+    assert first.startswith("dft:non-deduplicable:missing_atom_pair_identity:")
+    assert second.startswith("dft:non-deduplicable:missing_atom_pair_identity:")
+    assert first != second
+
+
 def test_dft_dedupe_signature_does_not_treat_method_as_reaction_step_identity():
     assert is_dft_method_only_reaction_step("DFT-D2 GGA-PBE") is True
     assert normalize_dft_reaction_step_for_identity("DFT-D2 GGA-PBE") == ""

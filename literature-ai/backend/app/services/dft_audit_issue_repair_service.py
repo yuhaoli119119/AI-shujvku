@@ -8,12 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan
+from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan, ExternalAnalysisCandidate
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_material_binding_service import DFTMaterialBindingService
-from app.services.dft_rescan_policy import build_dft_dedupe_signature, normalize_source_document_type
+from app.services.dft_identity_service import build_dft_scientific_identity
+from app.services.dft_rescan_policy import normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.review_safety import DFT_REJECTED_STATUSES
 
 
 AI_PRIMARY_APPLIED_STATUS = "ai_primary_applied"
@@ -187,6 +189,21 @@ class DFTAuditIssueRepairService:
             evidence=evidence,
         )
         if existing is not None:
+            if str(existing.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
+                self._mark_issue(
+                    issue,
+                    status="needs_user_decision",
+                    repaired_by=repaired_by,
+                    note=reason or f"Exact DFT match {existing.id} is rejected and cannot be revived.",
+                    action_result="needs_user_decision",
+                )
+                return {
+                    "status": "needs_user_decision",
+                    "reason": "exact_dedupe_target_rejected",
+                    "issue_id": str(issue.id),
+                    "dft_result_id": str(existing.id),
+                    "writes_final_truth": False,
+                }
             material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
                 row=existing,
                 material_identity=suggested["material_identity"],
@@ -548,7 +565,19 @@ class DFTAuditIssueRepairService:
         payload_suggested = repair_payload.get("suggested_dft")
         if isinstance(payload_suggested, dict):
             suggested.update({key: value for key, value in payload_suggested.items() if value not in (None, "")})
-        allowed_direct = {"material_identity", "property_type", "adsorbate", "reaction_step", "value", "unit"}
+        allowed_direct = {
+            "material_identity",
+            "property_type",
+            "property_subtype",
+            "adsorbate",
+            "reaction_step",
+            "value",
+            "unit",
+            "atom_pair",
+            "bond_pair",
+            "bond",
+            "interaction_pair",
+        }
         suggested.update({key: repair_payload[key] for key in allowed_direct if repair_payload.get(key) not in (None, "")})
         return suggested
 
@@ -584,6 +613,15 @@ class DFTAuditIssueRepairService:
                 "repair_policy": "dft_audit_issue_primary_repair_v1",
             }
         )
+        identity = self._identity_for_suggested(
+            paper_id=issue.paper_id,
+            suggested=suggested,
+            evidence=merged,
+        )
+        if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+            raise ValueError("conflicting_atom_pair_aliases")
+        if identity.atom_pair.canonical:
+            merged["atom_pair"] = identity.atom_pair.canonical
         merged["source_document_type"] = normalize_source_document_type(
             merged.get("source_document_type") or merged.get("source_type")
         )
@@ -594,7 +632,15 @@ class DFTAuditIssueRepairService:
             if suggested.get(field) in (None, "", []):
                 raise ValueError(f"create_missing_dft requires suggested_dft.{field}.")
         if suggested.get("adsorbate") in (None, "", []) and suggested.get("reaction_step") in (None, "", []):
-            raise ValueError("create_missing_dft requires at least adsorbate or reaction_step.")
+            identity = self._identity_for_suggested(
+                paper_id=UUID(int=0),
+                suggested=suggested,
+                evidence=evidence,
+            )
+            if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+                raise ValueError("conflicting_atom_pair_aliases")
+            if not identity.atom_pair.canonical:
+                raise ValueError("create_missing_dft requires adsorbate, reaction_step, or atom-pair identity.")
         if not has_evidence_anchor(evidence):
             raise ValueError("create_missing_dft requires evidence with page/table/figure/quoted_text/evidence_text.")
 
@@ -605,36 +651,51 @@ class DFTAuditIssueRepairService:
         suggested: dict[str, Any],
         evidence: dict[str, Any],
     ) -> DFTResult | None:
-        desired_signature = self._dedupe_signature_for_suggested(paper_id=paper_id, suggested=suggested, evidence=evidence)
+        desired_identity = self._identity_for_suggested(paper_id=paper_id, suggested=suggested, evidence=evidence)
+        if desired_identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+            raise ValueError("conflicting_atom_pair_aliases")
+        if not desired_identity.dedupe_allowed:
+            return None
+        conflicting_observation = False
         for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all():
-            if self._dedupe_signature_for_row(row) == desired_signature:
+            row_identity = self._identity_for_row(row)
+            if row_identity.dedupe_allowed and row_identity.observation_signature == desired_identity.observation_signature:
                 return row
+            if row_identity.dedupe_allowed and row_identity.subject_signature == desired_identity.subject_signature:
+                conflicting_observation = True
+        if conflicting_observation:
+            raise ValueError("conflicting_dft_observation_for_subject")
         return None
 
-    def _dedupe_signature_for_suggested(self, *, paper_id: UUID, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:
-        return build_dft_dedupe_signature(
+    def _identity_for_suggested(self, *, paper_id: UUID, suggested: dict[str, Any], evidence: dict[str, Any]):
+        return build_dft_scientific_identity(
             {
                 "paper_id": str(paper_id),
                 "corrected_value": {
                     "material": suggested.get("material_identity"),
                     "adsorbate": suggested.get("adsorbate"),
                     "property_type": suggested.get("property_type"),
+                    "property_subtype": suggested.get("property_subtype"),
                     "reaction_step": suggested.get("reaction_step"),
                     "value": suggested.get("value"),
                     "unit": suggested.get("unit"),
+                    **{
+                        key: suggested.get(key)
+                        for key in ("atom_pair", "bond_pair", "bond", "interaction_pair")
+                        if suggested.get(key) not in (None, "", [])
+                    },
                 },
                 "evidence_payload": evidence,
             }
         )
 
-    def _dedupe_signature_for_row(self, row: DFTResult) -> str:
+    def _identity_for_row(self, row: DFTResult):
         evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-        material_identity = self._material_identity_for_row(row)
-        return build_dft_dedupe_signature(
+        return build_dft_scientific_identity(
             {
                 "paper_id": str(row.paper_id),
                 "corrected_value": {
-                    "material": material_identity,
+                    "material": self._material_identity_for_row(row),
                     "adsorbate": row.adsorbate,
                     "property_type": row.property_type,
                     "reaction_step": row.reaction_step,
@@ -644,6 +705,39 @@ class DFTAuditIssueRepairService:
                 "evidence_payload": evidence,
             }
         )
+
+    def _dedupe_signature_for_suggested(self, *, paper_id: UUID, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:
+        return self._identity_for_suggested(
+            paper_id=paper_id,
+            suggested=suggested,
+            evidence=evidence,
+        ).observation_signature
+
+    def _dedupe_signature_for_row(self, row: DFTResult) -> str:
+        return self._identity_for_row(row).observation_signature
+
+    def legacy_false_dedupe_error(self, issue: DFTAuditIssue) -> str | None:
+        if issue.issue_type != "missing_dft_result" or len(issue.source_candidate_ids or []) < 2:
+            return None
+        candidate_ids: list[UUID] = []
+        for raw_id in issue.source_candidate_ids or []:
+            try:
+                candidate_ids.append(UUID(str(raw_id)))
+            except ValueError:
+                continue
+        if len(candidate_ids) < 2:
+            return None
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.id.in_(candidate_ids))
+        ).all()
+        subjects: set[str] = set()
+        for candidate in candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            identity = build_dft_scientific_identity({"paper_id": str(issue.paper_id), **payload})
+            subjects.add(identity.subject_signature)
+        if len(subjects) > 1:
+            return "legacy_false_dedupe_requires_identity_split"
+        return None
 
     def _material_identity_for_row(self, row: DFTResult) -> str | None:
         if row.catalyst_sample_id:

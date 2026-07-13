@@ -15,6 +15,7 @@ from app.services.dft_audit_issue_lifecycle_service import (
     DFTAuditIssueLifecycleService,
 )
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity, normalize_source_document_type
+from app.services.dft_identity_service import build_dft_scientific_identity
 from app.services.external_analysis_identity import (
     UNTRUSTED_LEGACY_SOURCE_IDENTITY,
     review_source_identity,
@@ -251,10 +252,20 @@ class DFTAuditIssueService:
             paper_id=paper_id,
             payload=payload,
             issue_type=issue_type,
+            candidate_id=str(candidate.id),
         )
+        existing = self._missing_issue_by_fingerprint(
+            paper_id=paper_id,
+            issue_type=issue_type,
+            fingerprint=fingerprint,
+        )
+        if existing is not None and self._batch_issues is not None:
+            self._batch_issues[
+                (str(existing.target_type), str(existing.target_id), str(existing.issue_type), str(existing.fingerprint))
+            ] = existing
         return self.upsert_issue(
             paper_id=paper_id,
-            target_id="new",
+            target_id=existing.target_id if existing is not None else "new",
             issue_type=issue_type,
             status=status,
             severity="low" if is_supporting_reference else "medium" if is_ml_predicted else "high",
@@ -267,7 +278,7 @@ class DFTAuditIssueService:
             ),
             source_candidate_id=str(candidate.id),
             fingerprint=fingerprint,
-            resolution_note=(
+            resolution_note=None if existing is not None and existing.status in {"closed", "false_positive"} else (
                 "Supporting-reference DFT finding is tracked as source_scope_error, not as a main-paper missing result."
                 if is_supporting_reference
                 else "ML-predicted value is outside the DFTResult lane and requires user-controlled prediction-data review."
@@ -350,36 +361,48 @@ class DFTAuditIssueService:
         paper_id: UUID,
         payload: dict[str, Any],
         issue_type: str = "missing_dft_result",
+        candidate_id: str | None = None,
     ) -> str:
-        suggested = self._suggested_dft_from_payload(payload)
-        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
-        evidence_dict = evidence if isinstance(evidence, dict) else {}
-        source_bucket = normalize_source_document_type(
-            payload.get("source_document_type")
-            or payload.get("source_type")
-            or evidence_dict.get("source_document_type")
-            or evidence_dict.get("source_type")
-        )
-        reaction_step = normalize_dft_reaction_step_for_identity(
-            suggested.get("reaction_step"),
-            property_type=suggested.get("property_type"),
-            adsorbate=suggested.get("adsorbate"),
-            material=suggested.get("material_identity"),
-        )
+        identity = build_dft_scientific_identity({"paper_id": str(paper_id), **payload})
         return self._hash_parts(
             [
-                "dft_missing_issue_v1",
+                "dft_missing_issue_v2",
                 str(paper_id),
                 issue_type,
-                source_bucket,
-                self._normalized_part(suggested.get("material_identity")),
-                self._normalized_part(suggested.get("property_type")),
-                self._normalized_part(suggested.get("adsorbate")),
-                self._value_key(suggested.get("value")),
-                self._normalized_part(suggested.get("unit")),
-                self._normalized_part(reaction_step),
-                self._evidence_anchor(evidence_dict),
+                identity.subject_signature,
+                identity.observation_signature,
+                identity.atom_pair.error_code,
+                list(identity.atom_pair.normalized_aliases),
+                str(candidate_id or "") if not identity.dedupe_allowed else "",
             ]
+        )
+
+    def _missing_issue_by_fingerprint(
+        self,
+        *,
+        paper_id: UUID,
+        issue_type: str,
+        fingerprint: str,
+    ) -> DFTAuditIssue | None:
+        if self._batch_issues is not None:
+            match = next(
+                (
+                    issue
+                    for issue in self._batch_issues.values()
+                    if issue.paper_id == paper_id
+                    and issue.issue_type == issue_type
+                    and issue.fingerprint == fingerprint
+                ),
+                None,
+            )
+            if match is not None:
+                return match
+        return self.session.scalar(
+            select(DFTAuditIssue)
+            .where(DFTAuditIssue.paper_id == paper_id)
+            .where(DFTAuditIssue.issue_type == issue_type)
+            .where(DFTAuditIssue.fingerprint == fingerprint)
+            .order_by(DFTAuditIssue.created_at.asc())
         )
 
     def _issue_type_for_field(self, field_name: str, opinion: dict[str, Any]) -> str:
@@ -390,7 +413,9 @@ class DFTAuditIssueService:
 
     def _suggested_dft_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
-        return {
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        suggested = {
             "material_identity": self._first_text(
                 corrected.get("material_identity"),
                 corrected.get("material"),
@@ -410,6 +435,11 @@ class DFTAuditIssueService:
             "unit": self._first_text(corrected.get("unit")),
             "raw_corrected_value": corrected,
         }
+        for alias in ("atom_pair", "bond_pair", "bond", "interaction_pair"):
+            value = self._first_text(corrected.get(alias), payload.get(alias), evidence.get(alias))
+            if value:
+                suggested[alias] = value
+        return suggested
 
     @staticmethod
     def _is_supporting_reference_payload(payload: dict[str, Any], corrected: dict[str, Any], evidence: Any) -> bool:

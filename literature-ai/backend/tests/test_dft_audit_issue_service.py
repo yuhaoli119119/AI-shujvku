@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +11,8 @@ from app.config import get_settings
 from app.db.models import AuditLog, DFTAuditIssue, DFTResult, EvidenceSpan, ExtractionFieldReview, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper
 from app.main import app
 from app.services.dft_audit_issue_service import DFTAuditIssueService
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+from app.services.dft_identity_service import build_dft_scientific_identity, resolve_atom_pair_identity
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
@@ -71,6 +74,116 @@ def _dft_row(session: Session, paper: Paper, *, status: str = "system_candidate"
     )
     session.flush()
     return row
+
+
+@pytest.mark.parametrize(
+    ("container", "alias"),
+    [
+        ("payload", "atom_pair"),
+        ("corrected_value", "bond_pair"),
+        ("evidence_payload", "bond"),
+        ("evidence_location", "interaction_pair"),
+    ],
+)
+def test_atom_pair_identity_reads_all_aliases_from_all_supported_sources(container, alias):
+    payload = {"corrected_value": {"property_type": "bond_length"}}
+    target = payload if container == "payload" else payload.setdefault(container, {})
+    target[alias] = " Li1 – S "
+
+    identity = resolve_atom_pair_identity(payload)
+
+    assert identity.canonical == "li1-s"
+    assert identity.error_code is None
+
+
+def test_atom_pair_identity_preserves_site_number_and_is_symmetric_only_for_bond_properties():
+    li1 = build_dft_scientific_identity(
+        {"corrected_value": {"material": "Fe-GDY", "property_type": "bond_length", "value": 2.1, "unit": "Å", "atom_pair": "Li1-S"}}
+    )
+    reversed_li1 = build_dft_scientific_identity(
+        {"corrected_value": {"material": "Fe-GDY", "property_type": "bond_length", "value": 2.1, "unit": "Å", "bond": "S - Li1"}}
+    )
+    li2 = build_dft_scientific_identity(
+        {"corrected_value": {"material": "Fe-GDY", "property_type": "bond_length", "value": 2.1, "unit": "Å", "interaction_pair": "Li2-S"}}
+    )
+    directional_forward = resolve_atom_pair_identity(
+        {"corrected_value": {"property_type": "directional_charge_transfer", "atom_pair": "Li1-S"}}
+    )
+    directional_reverse = resolve_atom_pair_identity(
+        {"corrected_value": {"property_type": "directional_charge_transfer", "atom_pair": "S-Li1"}}
+    )
+
+    assert li1.observation_signature == reversed_li1.observation_signature
+    assert li1.subject_signature != li2.subject_signature
+    assert directional_forward.canonical != directional_reverse.canonical
+
+
+def test_atom_pair_identity_rejects_conflicting_aliases():
+    identity = resolve_atom_pair_identity(
+        {
+            "corrected_value": {"property_type": "ICOHP", "atom_pair": "Li1-S"},
+            "evidence_payload": {"bond_pair": "Li2-S"},
+        }
+    )
+
+    assert identity.canonical is None
+    assert identity.error_code == "conflicting_atom_pair_aliases"
+
+
+def test_missing_issue_fingerprint_ignores_locator_provenance(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Missing issue locator-independent identity")
+        base = {
+            "target_type": "dft_results",
+            "target_id": "new",
+            "decision": "new_candidate",
+            "corrected_value": {
+                "material": "Fe-GDY",
+                "property_type": "bond_length",
+                "value": 2.1,
+                "unit": "Å",
+                "atom_pair": "Li1-S",
+            },
+        }
+        service = DFTAuditIssueService(session)
+
+        first = service.fingerprint_missing_issue(
+            paper_id=paper.id,
+            payload={**base, "evidence_location": {"page": 4, "table": "T1", "source_document_type": "main_text"}},
+        )
+        second = service.fingerprint_missing_issue(
+            paper_id=paper.id,
+            payload={**base, "evidence_location": {"page": 9, "table": "T7", "source_document_type": "supplementary_information"}},
+        )
+
+        assert first == second
+
+
+def test_issue_and_candidate_binding_is_idempotent_and_rejects_different_result(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Binding conflict")
+        run = _run(session, paper, "binding")
+        candidate = _candidate(session, paper, run, {}, status="requires_resolution")
+        first = _dft_row(session, paper)
+        second = _dft_row(session, paper)
+        issue = DFTAuditIssueService(session).upsert_issue(
+            paper_id=paper.id,
+            target_id="new",
+            issue_type="missing_dft_result",
+            status="needs_primary_ai",
+            fingerprint="binding-conflict",
+        )
+        lifecycle = DFTAuditIssueLifecycleService(session)
+
+        assert lifecycle.bind_candidate_to_result(candidate, first) is True
+        lifecycle.bind_missing_issue_to_result(issue, first, repaired_by="pytest")
+        assert lifecycle.bind_candidate_to_result(candidate, first) is False
+        lifecycle.bind_missing_issue_to_result(issue, first, repaired_by="pytest")
+
+        with pytest.raises(ValueError, match="dft_candidate_bound_to_different_result"):
+            lifecycle.bind_candidate_to_result(candidate, second)
+        with pytest.raises(ValueError, match="dft_audit_issue_bound_to_different_result"):
+            lifecycle.bind_missing_issue_to_result(issue, second, repaired_by="pytest")
 
 
 def test_missing_dft_result_issue_is_idempotent_and_merges_sources(setup_test_db):
