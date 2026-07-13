@@ -21,7 +21,9 @@ from app.db.models import (
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_identity_service import (
+    DFTIdentityV2,
     build_dft_scientific_identity,
+    get_dft_identity_v2_property_policy,
     normalize_atom_pair,
     normalize_dft_value_kind,
     property_has_symmetric_atom_pair,
@@ -68,22 +70,17 @@ class VerificationSessionDFTCandidateMixin:
         existing_dft_rows = self.session.scalars(
             select(DFTResult).where(DFTResult.paper_id == paper_id)
         ).all()
-        existing_by_signature = self._existing_new_dft_signatures(paper_id, rows=existing_dft_rows)
-        existing_by_subject_signature = self._existing_new_dft_subject_signatures(paper_id, rows=existing_dft_rows)
-        existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(
-            paper_id,
-            rows=existing_dft_rows,
-        )
-        existing_by_identity = {
-            str(row.candidate_identity): row
-            for row in existing_dft_rows
-            if str(row.candidate_identity or "").strip()
-        }
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         issue_service = DFTAuditIssueService(self.session)
-        issue_service.begin_import_batch(paper_id=paper_id)
         issue_lifecycle = DFTAuditIssueLifecycleService(self.session)
+        existing_by_observation: dict[str, DFTResult] = {}
+        existing_by_subject: dict[str, list[DFTResult]] = defaultdict(list)
+        for existing_row in existing_dft_rows:
+            existing_identity = issue_lifecycle.identity_for_result(existing_row)
+            if existing_identity.observation_key:
+                existing_by_observation.setdefault(existing_identity.observation_key, existing_row)
+                existing_by_subject[existing_identity.subject_key].append(existing_row)
         for candidate, run_id, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
             run = SimpleNamespace(
                 id=run_id,
@@ -98,142 +95,230 @@ class VerificationSessionDFTCandidateMixin:
             target_id = str(payload.get("target_id") or "").strip().lower()
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
                 continue
-            issue = issue_service.create_or_update_missing_issue(
-                paper_id=paper_id,
-                candidate=candidate,
-                run=run,
-                payload=payload,
-            )
             if bool(payload.get("borrowed_from_reference")):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
-                self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
+                self._persist_new_dft_candidate_failure(
+                    paper_id=paper_id,
+                    candidate=candidate,
+                    run=run,
+                    payload=payload,
+                    reason="borrowed_supporting_reference",
+                    needs_user_decision=False,
+                )
                 continue
             if self._is_supporting_reference_dft_payload(payload):
                 skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
-                self._retire_skipped_new_dft_candidate(candidate, reason="borrowed_supporting_reference")
-                continue
-            candidate_item, reason = self._new_dft_candidate_item(payload, run=run, candidate_id=candidate.id)
-            if candidate_item is None:
-                skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                if reason == "conflicting_atom_pair_aliases":
-                    self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                    issue_lifecycle.mark_pending(issue, status="needs_user_decision", note=reason)
-                else:
-                    self._retire_skipped_new_dft_candidate(candidate, reason=reason)
-                continue
-            signature = candidate_item["signature"]
-            existing = existing_by_signature.get(signature) if candidate_item["dedupe_allowed"] else None
-            if existing is None:
-                method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
-                if method_step_signature is not None:
-                    existing = self._method_step_compatible_existing(
-                        candidate_item,
-                        existing_by_method_step_signature.get(method_step_signature, []),
-                    )
-            if existing is None:
-                existing = self._same_bound_dft_result(
+                self._persist_new_dft_candidate_failure(
                     paper_id=paper_id,
                     candidate=candidate,
-                    issue=issue,
-                    candidate_item=candidate_item,
-                )
-            if existing is None and candidate_item["dedupe_allowed"]:
-                subject_matches = existing_by_subject_signature.get(candidate_item["subject_signature"], [])
-                if subject_matches:
-                    reason = "conflicting_dft_observation_for_subject"
-                    skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                    self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                    issue_lifecycle.mark_pending(issue, status="needs_user_decision", note=reason)
-                    continue
-            if existing is not None and str(existing.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
-                reason = "exact_dedupe_target_rejected"
-                skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                issue_lifecycle.mark_pending(
-                    issue,
-                    status="needs_user_decision",
-                    note=f"{reason}:{existing.id}",
+                    run=run,
+                    payload=payload,
+                    reason="borrowed_supporting_reference",
+                    needs_user_decision=False,
                 )
                 continue
-            try:
-                issue_lifecycle.assert_candidate_binding_compatible(candidate, existing)
-                issue_lifecycle.assert_missing_issue_binding_compatible(issue, existing)
-            except ValueError as exc:
-                reason = str(exc)
-                if reason not in {"dft_candidate_bound_to_different_result", "dft_audit_issue_bound_to_different_result"}:
-                    raise
+            # Identity/PDF parsing is deliberately outside the write savepoint.
+            candidate_item, reason = self._new_dft_candidate_item(
+                payload,
+                paper_id=paper_id,
+                run=run,
+                candidate_id=candidate.id,
+            )
+            if candidate_item is None:
                 skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                self._mark_issue_for_binding_conflict(issue_lifecycle, issue, reason=reason)
+                self._persist_new_dft_candidate_failure(
+                    paper_id=paper_id,
+                    candidate=candidate,
+                    run=run,
+                    payload=payload,
+                    reason=reason,
+                    needs_user_decision=reason == "conflicting_atom_pair_aliases",
+                )
                 continue
-
+            identity_v2: DFTIdentityV2 = candidate_item["identity_v2"]
+            existing = (
+                existing_by_observation.get(identity_v2.observation_key)
+                if identity_v2.observation_key
+                else None
+            )
+            outcome: dict[str, Any] | None = None
             try:
                 with self.session.begin_nested():
+                    issue = issue_service.create_or_update_missing_issue(
+                        paper_id=paper_id,
+                        candidate=candidate,
+                        run=run,
+                        payload=payload,
+                    )
                     if existing is None:
-                        existing, created = self._insert_new_dft_candidate_in_current_savepoint(
+                        existing = self._same_bound_dft_result(
+                            paper_id=paper_id,
+                            candidate=candidate,
+                            issue=issue,
+                            candidate_item=candidate_item,
+                        )
+                    candidate, issue = issue_lifecycle.lock_candidate_issue_for_reconcile(
+                        candidate=candidate,
+                        issue=issue,
+                        row=existing,
+                        identity=identity_v2,
+                        candidate_payload_snapshot=payload,
+                    )
+                    if issue_lifecycle.is_terminal_issue(issue):
+                        outcome = {
+                            "skipped": "terminal_dft_audit_issue",
+                            "issue_id": str(issue.id),
+                        }
+                    elif existing is None and identity_v2.observation_key:
+                        subject_matches = existing_by_subject.get(identity_v2.subject_key, [])
+                        if subject_matches:
+                            reason = "conflicting_dft_observation_for_subject"
+                            self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
+                            issue_lifecycle.mark_pending(issue, status="needs_user_decision", note=reason)
+                            outcome = {"skipped": reason, "issue_id": str(issue.id)}
+                    if outcome is None and existing is not None and str(existing.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
+                        reason = "exact_dedupe_target_rejected"
+                        self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
+                        issue_lifecycle.mark_pending(
+                            issue,
+                            status="needs_user_decision",
+                            note=f"{reason}:{existing.id}",
+                        )
+                        outcome = {"skipped": reason, "issue_id": str(issue.id)}
+                    if outcome is not None:
+                        self.session.flush()
+                    else:
+                        if existing is None:
+                            existing, created = self._insert_new_dft_candidate_in_current_savepoint(
+                                paper_id=paper_id,
+                                candidate_item=candidate_item,
+                                source_label=run.source_label or run.source or reviewer,
+                            )
+                            action = "created" if created else "deduplicated"
+                        else:
+                            action = "deduplicated"
+                        material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                            row=existing,
+                            material_identity=candidate_item["material_identity"],
+                        )
+                        issue_lifecycle.reconcile_candidate_binding(
+                            candidate=candidate,
+                            issue=issue,
+                            row=existing,
+                            identity=identity_v2,
+                            repaired_by=reviewer,
+                            resolution_note=f"materialized_dft_result:{existing.id}",
+                            candidate_payload_snapshot=payload,
+                        )
+                        support_lifecycle = self._resolve_materialized_support_candidate(
                             paper_id=paper_id,
                             candidate_item=candidate_item,
-                            source_label=run.source_label or run.source or reviewer,
+                            canonical_row=existing,
+                            action=action,
+                            reviewer=reviewer,
                         )
-                        action = "created" if created else "deduplicated"
-                    else:
-                        self._maybe_upgrade_method_only_reaction_step(existing, candidate_item)
-                        action = "deduplicated"
-                    # Recheck after selecting or creating the canonical row so a concurrent
-                    # binding change cannot leave partial DFT side effects behind.
-                    issue_lifecycle.assert_candidate_binding_compatible(candidate, existing)
-                    issue_lifecycle.assert_missing_issue_binding_compatible(issue, existing)
-                    material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
-                        row=existing,
-                        material_identity=candidate_item["material_identity"],
+                        self.session.flush()
+                        outcome = {
+                            "action": action,
+                            "issue_id": str(issue.id),
+                            "material_binding": material_binding,
+                            "support_lifecycle": support_lifecycle,
+                        }
+            except IntegrityError:
+                # A concurrent valid v2 observation must deterministically reuse
+                # the committed winner. Invalid identities never enter this path.
+                if not identity_v2.observation_key:
+                    raise
+                existing = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.identity_version == 2,
+                        DFTResult.observation_key == identity_v2.observation_key,
                     )
-                    issue_lifecycle.bind_candidate_to_result(candidate, existing)
-                    issue_lifecycle.bind_missing_issue_to_result(
-                        issue,
-                        existing,
-                        repaired_by=reviewer,
-                        resolution_note=f"materialized_dft_result:{existing.id}",
-                    )
-                    support_lifecycle = self._resolve_materialized_support_candidate(
+                )
+                if existing is None:
+                    raise
+                with self.session.begin_nested():
+                    issue = issue_service.create_or_update_missing_issue(
                         paper_id=paper_id,
-                        candidate_item=candidate_item,
-                        canonical_row=existing,
-                        action=action,
-                        reviewer=reviewer,
+                        candidate=candidate,
+                        run=run,
+                        payload=payload,
                     )
-                    self.session.flush()
+                    candidate, issue = issue_lifecycle.lock_candidate_issue_for_reconcile(
+                        candidate=candidate,
+                        issue=issue,
+                        row=existing,
+                        identity=identity_v2,
+                        candidate_payload_snapshot=payload,
+                    )
+                    if issue_lifecycle.is_terminal_issue(issue):
+                        outcome = {
+                            "skipped": "terminal_dft_audit_issue",
+                            "issue_id": str(issue.id),
+                        }
+                    else:
+                        material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                            row=existing,
+                            material_identity=candidate_item["material_identity"],
+                        )
+                        issue_lifecycle.reconcile_candidate_binding(
+                            candidate=candidate,
+                            issue=issue,
+                            row=existing,
+                            identity=identity_v2,
+                            repaired_by=reviewer,
+                            resolution_note=f"materialized_dft_result:{existing.id}",
+                            candidate_payload_snapshot=payload,
+                        )
+                        support_lifecycle = self._resolve_materialized_support_candidate(
+                            paper_id=paper_id,
+                            candidate_item=candidate_item,
+                            canonical_row=existing,
+                            action="deduplicated",
+                            reviewer=reviewer,
+                        )
+                        outcome = {
+                            "action": "deduplicated",
+                            "issue_id": str(issue.id),
+                            "material_binding": material_binding,
+                            "support_lifecycle": support_lifecycle,
+                        }
             except ValueError as exc:
                 reason = str(exc)
                 if reason not in {"dft_candidate_bound_to_different_result", "dft_audit_issue_bound_to_different_result"}:
                     raise
                 skipped.append({"candidate_id": str(candidate.id), "reason": reason})
-                self._hold_new_dft_candidate_for_decision(candidate, reason=reason)
-                self._mark_issue_for_binding_conflict(issue_lifecycle, issue, reason=reason)
+                self._persist_new_dft_candidate_failure(
+                    paper_id=paper_id,
+                    candidate=candidate,
+                    run=run,
+                    payload=payload,
+                    reason=reason,
+                    needs_user_decision=True,
+                )
                 continue
-
-            identity = self._new_dft_identity(candidate_item["signature"])
-            existing_by_identity[identity] = existing
-            if candidate_item["dedupe_allowed"]:
-                existing_by_signature[signature] = existing
-                subject_rows = existing_by_subject_signature.setdefault(candidate_item["subject_signature"], [])
+            if outcome is not None and outcome.get("skipped"):
+                skipped.append({"candidate_id": str(candidate.id), "reason": outcome["skipped"]})
+                continue
+            if existing is None or outcome is None:
+                raise RuntimeError("dft_candidate_final_consistency_failed")
+            if identity_v2.observation_key:
+                existing_by_observation[identity_v2.observation_key] = existing
+                subject_rows = existing_by_subject.setdefault(identity_v2.subject_key, [])
                 if all(row.id != existing.id for row in subject_rows):
                     subject_rows.append(existing)
-            method_step_signature = self._new_dft_method_step_compatible_signature(candidate_item)
-            if method_step_signature is not None:
-                method_rows = existing_by_method_step_signature.setdefault(method_step_signature, [])
-                if all(row.id != existing.id for row in method_rows):
-                    method_rows.append(existing)
             materialized.append(
                 {
                     "candidate_id": str(candidate.id),
-                    "action": action,
+                    "action": outcome["action"],
                     "dft_result_id": str(existing.id),
-                    "issue_id": str(issue.id),
+                    "issue_id": outcome["issue_id"],
                     "property_type": existing.property_type,
                     "value": existing.value,
                     "unit": existing.unit,
-                    "material_binding": material_binding,
-                    "support_lifecycle": support_lifecycle,
+                    "material_binding": outcome["material_binding"],
+                    "support_lifecycle": outcome["support_lifecycle"],
                 }
             )
         if materialized:
@@ -269,8 +354,12 @@ class VerificationSessionDFTCandidateMixin:
     ) -> DFTResult | None:
         candidate_type = str(candidate.materialized_target_type or "").strip()
         candidate_id = str(candidate.materialized_target_id or "").strip()
-        issue_type = str(issue.target_type or "").strip()
-        issue_id = str(issue.target_id or "").strip()
+        if issue.result_id is not None:
+            issue_id = str(issue.result_id)
+            issue_type = "dft_results"
+        else:
+            issue_type = str(issue.target_type or "").strip()
+            issue_id = str(issue.target_id or "").strip()
         if not candidate_id or not issue_id or issue_id.lower() == "new":
             return None
         if candidate_type != "dft_results" or issue_type != "dft_results" or candidate_id != issue_id:
@@ -282,8 +371,12 @@ class VerificationSessionDFTCandidateMixin:
         row = self.session.get(DFTResult, row_id)
         if row is None or row.paper_id != paper_id:
             return None
-        identity = self._scientific_identity_for_row(row)
-        if identity.observation_signature != candidate_item["observation_signature"]:
+        identity = DFTAuditIssueLifecycleService(self.session).identity_for_result(row)
+        candidate_identity: DFTIdentityV2 = candidate_item["identity_v2"]
+        if (
+            not candidate_identity.observation_key
+            or identity.observation_key != candidate_identity.observation_key
+        ):
             return None
         return row
 
@@ -302,6 +395,7 @@ class VerificationSessionDFTCandidateMixin:
         self,
         payload: dict[str, Any],
         *,
+        paper_id: UUID | None = None,
         run: ExternalAnalysisRun,
         candidate_id: UUID | None = None,
     ) -> tuple[dict[str, Any] | None, str]:
@@ -326,8 +420,11 @@ class VerificationSessionDFTCandidateMixin:
                 payload.get("normalized_energy_type"),
             )
         )
-        scientific_identity = build_dft_scientific_identity(payload)
-        if scientific_identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+        identity_v2 = DFTAuditIssueLifecycleService.build_identity(
+            paper_id=paper_id or run.paper_id,
+            payload=payload,
+        )
+        if identity_v2.atom_pair.error_code == "conflicting_atom_pair_aliases":
             return None, "conflicting_atom_pair_aliases"
         value = self._float_or_none(corrected.get("value"))
         value_upper = self._float_or_none(corrected.get("value_upper"))
@@ -341,7 +438,8 @@ class VerificationSessionDFTCandidateMixin:
             return None, "missing_property_type"
         if value is None:
             return None, "missing_value"
-        if not unit:
+        property_policy = get_dft_identity_v2_property_policy(property_type)
+        if not unit and not property_policy.dimensionless:
             return None, "missing_unit"
         if pdf_anchor is None:
             return None, "missing_pdf_evidence_anchor"
@@ -400,7 +498,7 @@ class VerificationSessionDFTCandidateMixin:
         identity_fields = {
             "property_subtype": self._first_text(corrected.get("property_subtype"), evidence_payload.get("property_subtype")),
             "active_site_instance_key": self._first_text(corrected.get("active_site_instance_key"), evidence_payload.get("active_site_instance_key")),
-            "atom_pair": scientific_identity.atom_pair.canonical,
+            "atom_pair": identity_v2.atom_pair.canonical,
             "site_label": self._first_text(corrected.get("site_label"), corrected.get("adsorption_site"), evidence_payload.get("site_label")),
             "state_context": self._first_text(corrected.get("state_context"), evidence_payload.get("state_context")),
             "source_table_id": self._first_text(corrected.get("source_table_id"), evidence_payload.get("source_table_id")),
@@ -408,26 +506,7 @@ class VerificationSessionDFTCandidateMixin:
             "source_column_index": self._first_text(corrected.get("source_column_index"), evidence_payload.get("source_column_index")),
         }
         merged_evidence_payload.update({key: value for key, value in identity_fields.items() if value not in (None, "")})
-        identity_payload = {
-            "paper_id": str(payload.get("paper_id") or ""),
-            "corrected_value": {
-                **corrected,
-                "material_identity": material_identity,
-                "property_type": property_type,
-                "adsorbate": adsorbate,
-                "reaction_step": reaction_step,
-                "value": value,
-                "value_upper": value_upper,
-                "value_kind": value_kind,
-                "unit": unit,
-                **{key: val for key, val in identity_fields.items() if val not in (None, "")},
-            },
-            "evidence_payload": evidence_payload,
-        }
-        scientific_identity = build_dft_scientific_identity(identity_payload)
-        signature = scientific_identity.observation_signature
-        if not scientific_identity.dedupe_allowed:
-            signature = f"{signature}:candidate:{candidate_id or 'unbound'}"
+        signature = identity_v2.observation_key or f"{identity_v2.subject_key}:candidate:{candidate_id or 'unbound'}"
         return (
             {
                 "material_identity": material_identity,
@@ -444,10 +523,11 @@ class VerificationSessionDFTCandidateMixin:
                 "confidence": payload.get("confidence"),
                 "evidence_payload": merged_evidence_payload,
                 "signature": signature,
-                "subject_signature": scientific_identity.subject_signature,
-                "observation_signature": scientific_identity.observation_signature,
-                "dedupe_allowed": scientific_identity.dedupe_allowed,
-                "identity_error_code": scientific_identity.atom_pair.error_code,
+                "subject_signature": identity_v2.subject_key,
+                "observation_signature": identity_v2.observation_key,
+                "dedupe_allowed": identity_v2.dedupe_allowed,
+                "identity_error_code": identity_v2.error_code,
+                "identity_v2": identity_v2,
                 "source_dft_result_id": source_dft_result_id,
                 "source_paper_id": source_paper_id,
                 **identity_fields,
@@ -496,15 +576,24 @@ class VerificationSessionDFTCandidateMixin:
         source_label: str,
         existing_by_identity: dict[str, DFTResult] | None = None,
     ) -> DFTResult:
+        identity_v2: DFTIdentityV2 = candidate_item["identity_v2"]
         identity = self._new_dft_identity(candidate_item["signature"])
-        existing = existing_by_identity.get(identity) if existing_by_identity is not None else None
+        existing = (
+            existing_by_identity.get(identity)
+            if identity_v2.observation_key and existing_by_identity is not None
+            else None
+        )
         if existing is None:
-            existing = self.session.scalar(
-                select(DFTResult).where(
-                    DFTResult.paper_id == paper_id,
-                    DFTResult.candidate_identity == identity,
+            if identity_v2.observation_key:
+                existing = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.identity_version == 2,
+                        DFTResult.observation_key == identity_v2.observation_key,
+                    )
                 )
-            )
+            else:
+                existing = None
         if existing is not None:
             return existing
         try:
@@ -515,16 +604,20 @@ class VerificationSessionDFTCandidateMixin:
                     source_label=source_label,
                 )
         except IntegrityError:
-            winner = self.session.scalar(
-                select(DFTResult).where(
-                    DFTResult.paper_id == paper_id,
-                    DFTResult.candidate_identity == identity,
+            if identity_v2.observation_key:
+                winner = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.identity_version == 2,
+                        DFTResult.observation_key == identity_v2.observation_key,
+                    )
                 )
-            )
+            else:
+                raise
             if winner is None:
                 raise
             row = winner
-        if existing_by_identity is not None:
+        if identity_v2.observation_key and existing_by_identity is not None:
             existing_by_identity[identity] = row
         return row
 
@@ -535,13 +628,18 @@ class VerificationSessionDFTCandidateMixin:
         candidate_item: dict[str, Any],
         source_label: str,
     ) -> tuple[DFTResult, bool]:
+        identity_v2: DFTIdentityV2 = candidate_item["identity_v2"]
         identity = self._new_dft_identity(candidate_item["signature"])
-        existing = self.session.scalar(
-            select(DFTResult).where(
-                DFTResult.paper_id == paper_id,
-                DFTResult.candidate_identity == identity,
+        if identity_v2.observation_key:
+            existing = self.session.scalar(
+                select(DFTResult).where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.identity_version == 2,
+                    DFTResult.observation_key == identity_v2.observation_key,
+                )
             )
-        )
+        else:
+            existing = None
         if existing is not None:
             return existing, False
         row = DFTResult(
@@ -562,6 +660,7 @@ class VerificationSessionDFTCandidateMixin:
             extraction_protocol_version="ide_ai_new_candidate_v1",
             candidate_identity=identity,
         )
+        DFTAuditIssueLifecycleService.apply_result_identity(row, identity_v2)
         self.session.add(row)
         self.session.flush()
         self._upsert_new_dft_locator(row, candidate_item["evidence_payload"], source_label=source_label)
@@ -578,6 +677,50 @@ class VerificationSessionDFTCandidateMixin:
         candidate.mapping_reason = reason
         self.session.add(candidate)
         self.session.flush()
+
+    def _persist_new_dft_candidate_failure(
+        self,
+        *,
+        paper_id: UUID,
+        candidate: ExternalAnalysisCandidate,
+        run: ExternalAnalysisRun,
+        payload: dict[str, Any],
+        reason: str,
+        needs_user_decision: bool,
+    ) -> None:
+        """Persist one isolated failure after pre-parse, without partial bindings."""
+
+        with self.session.begin_nested():
+            locked_candidate = self.session.scalar(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.id == candidate.id)
+                .with_for_update()
+            )
+            if locked_candidate is None:
+                raise ValueError("dft_candidate_snapshot_drift")
+            live_payload = (
+                locked_candidate.normalized_payload
+                if isinstance(locked_candidate.normalized_payload, dict)
+                else {}
+            )
+            if DFTAuditIssueLifecycleService._canonical_json(live_payload) != DFTAuditIssueLifecycleService._canonical_json(payload):
+                raise ValueError("dft_candidate_snapshot_drift")
+            issue = DFTAuditIssueService(self.session).create_or_update_missing_issue(
+                paper_id=paper_id,
+                candidate=locked_candidate,
+                run=run,
+                payload=payload,
+            )
+            if needs_user_decision:
+                self._hold_new_dft_candidate_for_decision(locked_candidate, reason=reason)
+                DFTAuditIssueLifecycleService(self.session).mark_pending(
+                    issue,
+                    status="needs_user_decision",
+                    note=reason,
+                )
+            else:
+                self._retire_skipped_new_dft_candidate(locked_candidate, reason=reason)
+            self.session.flush()
 
     def _new_dft_value_kind(self, corrected: dict[str, Any], *, value_upper: float | None) -> str:
         return normalize_dft_value_kind(

@@ -27,6 +27,7 @@ from app.db.models import (
 )
 from app.mcp import server as mcp_server
 from app.services.extraction_review_service import ExtractionReviewService
+from app.services.dft_identity_service import build_dft_identity_v2
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_workbench_service import PaperWorkbenchService
 from app.services.paper_reprocessing import PaperReprocessingService
@@ -117,6 +118,19 @@ def test_dft_candidate_identity_prevents_concurrent_duplicates(tmp_path):
     engine, factory = _database()
     paper_id = _paper(factory)
     gate = Barrier(2)
+    identity_v2 = build_dft_identity_v2(
+        {
+            "paper_id": str(paper_id),
+            "corrected_value": {
+                "material": "Fe-N4",
+                "adsorbate": "Li2S4",
+                "property_type": "adsorption_energy",
+                "value": -1.23,
+                "unit": "eV",
+                "reaction_step": "adsorption",
+            },
+        }
+    )
     item = {
         "adsorbate": "Li2S4",
         "property_type": "adsorption_energy",
@@ -128,7 +142,8 @@ def test_dft_candidate_identity_prevents_concurrent_duplicates(tmp_path):
         "evidence_text": "Delta G is -1.23 eV",
         "confidence": 0.9,
         "evidence_payload": {"material_identity": "Fe-N4"},
-        "signature": ("fe-n4", "adsorption_energy", "-1.23", "ev", "adsorption", "figure 2", ""),
+        "signature": identity_v2.observation_key,
+        "identity_v2": identity_v2,
     }
 
     def insert(_):

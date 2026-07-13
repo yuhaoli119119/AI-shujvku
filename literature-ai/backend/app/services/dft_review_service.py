@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -15,7 +16,7 @@ from app.services.dft_review_imported import DFTImportedOpinionMixin
 from app.services.dft_review_materials import DFTMaterialBindingMixin
 from app.services.review_service import ReviewService
 from app.utils.evidence_anchors import has_evidence_anchor
-from app.utils.review_safety import is_export_eligible_extraction
+from app.utils.review_safety import DFT_REJECTED_STATUSES, is_export_eligible_extraction
 
 
 __all__ = [
@@ -86,6 +87,8 @@ class DFTResultReviewService(
         row = self.session.get(DFTResult, result_id)
         if row is None or row.paper_id != paper_id:
             raise LookupError("DFT result not found for this paper.")
+        if str(row.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
+            raise ValueError("rejected_dft_result_cannot_be_verified")
 
         snapshot = self.review_service.get_target_field_snapshot("dft_results", row)
         selected_fields = self._select_review_fields(snapshot, field_names)
@@ -185,6 +188,32 @@ class DFTResultReviewService(
         self.session.add(row)
         self.session.flush()
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+        result_identity = self.issue_lifecycle.identity_for_result(row)
+        identity_block_reason = None if result_identity.observation_key else (
+            result_identity.error_code or "invalid_v2_result_identity"
+        )
+        if identity_block_reason:
+            gate = replace(
+                gate,
+                eligible=False,
+                reasons=tuple(dict.fromkeys([*gate.reasons, identity_block_reason])),
+            )
+        closed_issues = self.issue_lifecycle.apply_verify(
+            paper_id=paper_id,
+            result_id=result_id,
+            reviewer=reviewer_name,
+            actor_type=verification_actor_type,
+            export_gate_passed=gate.eligible,
+        )
+        if closed_issues and not gate.eligible:
+            self.session.flush()
+            gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
+            if identity_block_reason:
+                gate = replace(
+                    gate,
+                    eligible=False,
+                    reasons=tuple(dict.fromkeys([*gate.reasons, identity_block_reason])),
+                )
         if gate.eligible:
             row.candidate_status = "ai_verified_ml_ready" if verification_actor_type == "ai" else "ML_Ready"
             if verification_actor_type == "ai" and row.ml_ready_at is None:
@@ -205,12 +234,16 @@ class DFTResultReviewService(
                     "blocked_reasons": list(gate.reasons),
                 }
         self.session.add(row)
-        closed_issues = self.issue_lifecycle.apply_verify(
-            paper_id=paper_id,
-            result_id=result_id,
-            reviewer=reviewer_name,
-            actor_type=verification_actor_type,
-        )
+        if gate.eligible:
+            additionally_closed = self.issue_lifecycle.apply_verify(
+                paper_id=paper_id,
+                result_id=result_id,
+                reviewer=reviewer_name,
+                actor_type=verification_actor_type,
+                export_gate_passed=True,
+            )
+            known_ids = {issue.id for issue in closed_issues}
+            closed_issues.extend(issue for issue in additionally_closed if issue.id not in known_ids)
         audit = AuditLog(
             paper_id=paper_id,
             action="verify_dft_result",

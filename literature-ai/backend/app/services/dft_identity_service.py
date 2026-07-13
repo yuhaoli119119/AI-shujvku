@@ -587,6 +587,7 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
         "atom_pair": {
             "canonical": atom_pair.canonical,
             "normalized_aliases": list(atom_pair.normalized_aliases),
+            "error_code": atom_pair.error_code,
             "required": atom_pair.required,
             "symmetric": atom_pair.symmetric,
         },

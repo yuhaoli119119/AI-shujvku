@@ -95,7 +95,7 @@ def test_new_dft_semantic_signature_ignores_locator_but_keeps_scientific_identit
     )
 
 
-def test_new_dft_materialization_merges_method_only_step_with_specific_adsorption_step(verification_env):
+def test_new_dft_materialization_keeps_method_only_and_specific_v2_subjects_distinct(verification_env):
     Session = verification_env
     with Session() as session:
         paper = Paper(title="Method-only DFT duplicate paper", pdf_path="method-only.pdf", authors=["A"])
@@ -161,14 +161,17 @@ def test_new_dft_materialization_merges_method_only_step_with_specific_adsorptio
             select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper.id)
         ).all()
 
-        assert [item["action"] for item in result["materialized_items"]] == ["created", "deduplicated"]
-        assert len(dft_rows) == 1
-        assert dft_rows[0].reaction_step == "Li2S adsorption on WN4@G side"
-        assert dft_rows[0].catalyst_sample_id is not None
-        sample = session.get(CatalystSample, dft_rows[0].catalyst_sample_id)
-        assert sample is not None
-        assert sample.name == "WN4@G/TiS2"
-        assert {candidate.materialized_target_id for candidate in candidates} == {str(dft_rows[0].id)}
+        assert [item["action"] for item in result["materialized_items"]] == ["created", "created"]
+        assert len(dft_rows) == 2
+        assert len({row.subject_key for row in dft_rows}) == 2
+        assert len({row.observation_key for row in dft_rows}) == 2
+        assert {row.reaction_step for row in dft_rows} == {
+            "DFT-D2 GGA-PBE",
+            "Li2S adsorption on WN4@G side",
+        }
+        assert all(row.catalyst_sample_id is not None for row in dft_rows)
+        assert {session.get(CatalystSample, row.catalyst_sample_id).name for row in dft_rows} == {"WN4@G/TiS2"}
+        assert len({candidate.materialized_target_id for candidate in candidates}) == 2
 
 
 def test_new_dft_materialization_rejects_missing_pdf_page_anchor(verification_env):
@@ -682,8 +685,13 @@ def test_materialized_missing_issue_stays_open_until_ai_verification_and_closed_
             reviewer="pytest",
         )
 
-        assert repeated["materialized_items"][0]["action"] == "deduplicated"
-        assert second_candidate.materialized_target_id == str(row.id)
+        assert repeated["materialized_count"] == 0
+        assert repeated["skipped_items"] == [
+            {"candidate_id": str(second_candidate.id), "reason": "terminal_dft_audit_issue"}
+        ]
+        assert second_candidate.status == "candidate"
+        assert second_candidate.materialized_target_type is None
+        assert second_candidate.materialized_target_id is None
         assert issue.status == "closed"
         assert issue.resolution_note == "ai_verified"
 

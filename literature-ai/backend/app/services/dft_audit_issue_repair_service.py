@@ -12,7 +12,11 @@ from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, Ev
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_material_binding_service import DFTMaterialBindingService
-from app.services.dft_identity_service import build_dft_scientific_identity, normalize_dft_value_kind
+from app.services.dft_identity_service import (
+    DFTIdentityV2,
+    get_dft_identity_v2_property_policy,
+    normalize_dft_value_kind,
+)
 from app.services.dft_rescan_policy import normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.review_safety import DFT_REJECTED_STATUSES
@@ -76,26 +80,29 @@ class DFTAuditIssueRepairService:
         action = str(action or "").strip()
         if action not in self.ACTIONS:
             raise ValueError(f"Unsupported DFT audit issue repair action: {action}")
-        issue = self.session.get(DFTAuditIssue, issue_id)
+        issue = self.session.scalar(
+            select(DFTAuditIssue).where(DFTAuditIssue.id == issue_id).with_for_update()
+        )
         if issue is None:
             raise LookupError("DFT audit issue not found.")
         payload = repair_payload if isinstance(repair_payload, dict) else {}
-        result = self._dispatch(
-            issue=issue,
-            action=action,
-            repair_payload=payload,
-            reason=str(reason or "").strip(),
-            evidence_payload=evidence_payload,
-            repaired_by=repaired_by,
-        )
-        self._audit_repair(
-            issue=issue,
-            action=action,
-            result=result,
-            repaired_by=repaired_by,
-            required_capability=required_capability,
-            repair_actor_role=repair_actor_role,
-        )
+        with self.session.begin_nested():
+            result = self._dispatch(
+                issue=issue,
+                action=action,
+                repair_payload=payload,
+                reason=str(reason or "").strip(),
+                evidence_payload=evidence_payload,
+                repaired_by=repaired_by,
+            )
+            self._audit_repair(
+                issue=issue,
+                action=action,
+                result=result,
+                repaired_by=repaired_by,
+                required_capability=required_capability,
+                repair_actor_role=repair_actor_role,
+            )
         self.session.flush()
         return result
 
@@ -185,7 +192,29 @@ class DFTAuditIssueRepairService:
                 "issue_id": str(issue.id),
                 "writes_final_truth": False,
             }
-        self._validate_missing_suggestion(suggested, evidence)
+        self._validate_missing_suggestion(suggested, evidence, paper_id=issue.paper_id)
+        desired_identity = self._identity_for_suggested(
+            paper_id=issue.paper_id,
+            suggested=suggested,
+            evidence=evidence,
+        )
+        if issue.result_id is not None:
+            bound_row = self.session.get(DFTResult, issue.result_id)
+            if bound_row is None or bound_row.paper_id != issue.paper_id:
+                raise ValueError("dft_audit_issue_bound_result_missing")
+            bound_identity = DFTAuditIssueLifecycleService(self.session).identity_for_result(bound_row)
+            if (
+                bound_identity.subject_key != desired_identity.subject_key
+                or bound_identity.observation_key != desired_identity.observation_key
+            ):
+                raise ValueError("dft_audit_issue_bound_to_different_result")
+            return {
+                "status": "linked_existing",
+                "issue_id": str(issue.id),
+                "dft_result_id": str(bound_row.id),
+                "changed_fields": [],
+                "writes_final_truth": False,
+            }
         existing = self._find_equivalent_dft_result(
             paper_id=issue.paper_id,
             suggested=suggested,
@@ -256,25 +285,41 @@ class DFTAuditIssueRepairService:
             extraction_protocol_version="dft_audit_issue_primary_repair_v1",
             candidate_identity=self._candidate_identity_for_issue(issue, suggested, evidence),
         )
+        DFTAuditIssueLifecycleService.apply_result_identity(row, desired_identity)
         try:
             with self.session.begin_nested():
                 self.session.add(row)
                 self.session.flush()
         except IntegrityError:
-            winner = self.session.scalar(
-                select(DFTResult).where(
-                    DFTResult.paper_id == issue.paper_id,
-                    DFTResult.candidate_identity == row.candidate_identity,
+            if desired_identity.observation_key:
+                winner = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == issue.paper_id,
+                        DFTResult.identity_version == 2,
+                        DFTResult.observation_key == desired_identity.observation_key,
+                    )
                 )
-            )
+            else:
+                winner = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == issue.paper_id,
+                        DFTResult.candidate_identity == row.candidate_identity,
+                    )
+                )
             if winner is None:
                 raise
+            winner_identity = DFTAuditIssueLifecycleService(self.session).identity_for_result(winner)
+            if winner_identity.observation_key != desired_identity.observation_key:
+                raise ValueError("dft_result_identity_conflict")
+            if not desired_identity.observation_key and issue.result_id != winner.id:
+                raise ValueError("non_deduplicable_candidate_identity_conflict")
             row = winner
         self._bind_missing_issue_to_result(
             issue,
             row=row,
             repaired_by=repaired_by,
             note=f"created_dft_result:{row.id}; {reason}".strip("; "),
+            identity=desired_identity,
         )
         self._ensure_evidence_span_for_created_result(issue=issue, row=row, evidence=evidence)
         return {
@@ -338,10 +383,17 @@ class DFTAuditIssueRepairService:
     ) -> dict[str, Any]:
         if issue.issue_type not in self.UPDATE_ISSUE_TYPES:
             raise ValueError(f"update_dft_fields is not allowed for issue_type={issue.issue_type}.")
-        target_id = str(issue.target_id or "").strip()
-        if not target_id or target_id.lower() == "new":
-            raise ValueError("update_dft_fields requires an existing DFTResult target_id.")
-        row = self.session.get(DFTResult, UUID(target_id))
+        if issue.result_id is not None:
+            row_id = issue.result_id
+        else:
+            target_id = str(issue.target_id or "").strip()
+            if not target_id or target_id.lower() == "new":
+                raise ValueError("update_dft_fields requires an existing DFTResult result_id.")
+            try:
+                row_id = UUID(target_id)
+            except ValueError as exc:
+                raise ValueError("invalid_dft_audit_issue_result_id") from exc
+        row = self.session.get(DFTResult, row_id)
         if row is None or row.paper_id != issue.paper_id:
             raise LookupError("Target DFT result not found for issue.")
         if str(row.candidate_status or "").strip().lower() in FINAL_DFT_STATUSES:
@@ -434,8 +486,30 @@ class DFTAuditIssueRepairService:
             )
             if "evidence_payload" not in changed_fields:
                 changed_fields.append("evidence_payload")
+        updated_identity = DFTAuditIssueLifecycleService(self.session).build_identity(
+            paper_id=row.paper_id,
+            payload=DFTAuditIssueLifecycleService(self.session).authoritative_payload_for_result(row),
+        )
+        exact, conflicts = DFTAuditIssueLifecycleService(self.session).classify_result_identity(
+            paper_id=row.paper_id,
+            identity=updated_identity,
+            exclude_result_id=row.id,
+        )
+        if exact is not None or conflicts:
+            raise ValueError(
+                "dft_result_identity_conflict"
+                if exact is not None
+                else "conflicting_dft_observation_for_subject"
+            )
+        DFTAuditIssueLifecycleService.apply_result_identity(row, updated_identity)
         row.candidate_status = AI_PRIMARY_APPLIED_STATUS
         self.session.add(row)
+        DFTAuditIssueLifecycleService(self.session).initialize_issue_identity(
+            issue,
+            identity=updated_identity,
+            row=row,
+            lifecycle_stage="pending_verification",
+        )
         self._mark_issue(
             issue,
             status="fixed_by_primary_ai",
@@ -469,12 +543,29 @@ class DFTAuditIssueRepairService:
         row = self.session.get(DFTResult, UUID(str(target)))
         if row is None or row.paper_id != issue.paper_id:
             raise LookupError("Linked DFT result not found for this paper.")
-        self._mark_issue(
+        if str(row.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
+            self._mark_issue(
+                issue,
+                status="needs_user_decision",
+                repaired_by=repaired_by,
+                note=f"exact_dedupe_target_rejected:{row.id}",
+                action_result="needs_user_decision",
+            )
+            return {
+                "status": "needs_user_decision",
+                "reason": "exact_dedupe_target_rejected",
+                "issue_id": str(issue.id),
+                "dft_result_id": str(row.id),
+                "changed_fields": [],
+                "writes_final_truth": False,
+            }
+        identity = DFTAuditIssueLifecycleService(self.session).identity_for_result(row)
+        DFTAuditIssueLifecycleService(self.session).bind_missing_issue_to_result(
             issue,
-            status="fixed_by_primary_ai",
+            row,
             repaired_by=repaired_by,
-            note=f"linked_duplicate_dft_result:{row.id}; {reason}".strip("; "),
-            action_result="linked_duplicate",
+            resolution_note=f"linked_duplicate_dft_result:{row.id}; {reason}".strip("; "),
+            identity=identity,
         )
         return {
             "status": "linked_duplicate",
@@ -539,12 +630,14 @@ class DFTAuditIssueRepairService:
         row: DFTResult,
         repaired_by: str,
         note: str,
+        identity: DFTIdentityV2 | None = None,
     ) -> None:
         DFTAuditIssueLifecycleService(self.session).bind_missing_issue_to_result(
             issue,
             row,
             repaired_by=repaired_by,
             resolution_note=note,
+            identity=identity,
         )
 
     def _audit_repair(
@@ -653,20 +746,26 @@ class DFTAuditIssueRepairService:
         )
         return {key: value for key, value in merged.items() if value not in (None, "")}
 
-    def _validate_missing_suggestion(self, suggested: dict[str, Any], evidence: dict[str, Any]) -> None:
-        for field in ("material_identity", "property_type", "value", "unit"):
+    def _validate_missing_suggestion(
+        self,
+        suggested: dict[str, Any],
+        evidence: dict[str, Any],
+        *,
+        paper_id: UUID,
+    ) -> None:
+        for field in ("material_identity", "property_type", "value"):
             if suggested.get(field) in (None, "", []):
                 raise ValueError(f"create_missing_dft requires suggested_dft.{field}.")
-        if suggested.get("adsorbate") in (None, "", []) and suggested.get("reaction_step") in (None, "", []):
-            identity = self._identity_for_suggested(
-                paper_id=UUID(int=0),
-                suggested=suggested,
-                evidence=evidence,
-            )
-            if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
-                raise ValueError("conflicting_atom_pair_aliases")
-            if not identity.atom_pair.canonical:
-                raise ValueError("create_missing_dft requires adsorbate, reaction_step, or atom-pair identity.")
+        property_policy = get_dft_identity_v2_property_policy(suggested.get("property_type"))
+        if suggested.get("unit") in (None, "", []) and not property_policy.dimensionless:
+            raise ValueError("create_missing_dft requires suggested_dft.unit.")
+        identity = self._identity_for_suggested(
+            paper_id=paper_id,
+            suggested=suggested,
+            evidence=evidence,
+        )
+        if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+            raise ValueError("conflicting_atom_pair_aliases")
         if not has_evidence_anchor(evidence):
             raise ValueError("create_missing_dft requires evidence with page/table/figure/quoted_text/evidence_text.")
 
@@ -682,21 +781,20 @@ class DFTAuditIssueRepairService:
             raise ValueError("conflicting_atom_pair_aliases")
         if not desired_identity.dedupe_allowed:
             return None
-        conflicting_observation = False
-        for row in self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all():
-            row_identity = self._identity_for_row(row)
-            if row_identity.dedupe_allowed and row_identity.observation_signature == desired_identity.observation_signature:
-                return row
-            if row_identity.dedupe_allowed and row_identity.subject_signature == desired_identity.subject_signature:
-                conflicting_observation = True
-        if conflicting_observation:
+        exact, conflicts = DFTAuditIssueLifecycleService(self.session).classify_result_identity(
+            paper_id=paper_id,
+            identity=desired_identity,
+        )
+        if exact is not None:
+            return exact
+        if conflicts:
             raise ValueError("conflicting_dft_observation_for_subject")
         return None
 
     def _identity_for_suggested(self, *, paper_id: UUID, suggested: dict[str, Any], evidence: dict[str, Any]):
-        return build_dft_scientific_identity(
-            {
-                "paper_id": str(paper_id),
+        return DFTAuditIssueLifecycleService.build_identity(
+            paper_id=paper_id,
+            payload={
                 "corrected_value": {
                     "material": suggested.get("material_identity"),
                     "adsorbate": suggested.get("adsorbate"),
@@ -714,37 +812,21 @@ class DFTAuditIssueRepairService:
                     },
                 },
                 "evidence_payload": evidence,
-            }
+            },
         )
 
     def _identity_for_row(self, row: DFTResult):
-        evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-        return build_dft_scientific_identity(
-            {
-                "paper_id": str(row.paper_id),
-                "corrected_value": {
-                    "material": self._material_identity_for_row(row),
-                    "adsorbate": row.adsorbate,
-                    "property_type": row.property_type,
-                    "reaction_step": row.reaction_step,
-                    "value": row.value,
-                    "value_upper": row.value_upper,
-                    "value_kind": row.value_kind,
-                    "unit": row.unit,
-                },
-                "evidence_payload": evidence,
-            }
-        )
+        return DFTAuditIssueLifecycleService(self.session).identity_for_result(row)
 
     def _dedupe_signature_for_suggested(self, *, paper_id: UUID, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:
         return self._identity_for_suggested(
             paper_id=paper_id,
             suggested=suggested,
             evidence=evidence,
-        ).observation_signature
+        ).observation_key or ""
 
     def _dedupe_signature_for_row(self, row: DFTResult) -> str:
-        return self._identity_for_row(row).observation_signature
+        return self._identity_for_row(row).observation_key or ""
 
     def legacy_false_dedupe_error(self, issue: DFTAuditIssue) -> str | None:
         if issue.issue_type != "missing_dft_result" or len(issue.source_candidate_ids or []) < 2:
@@ -763,8 +845,8 @@ class DFTAuditIssueRepairService:
         subjects: set[str] = set()
         for candidate in candidates:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            identity = build_dft_scientific_identity({"paper_id": str(issue.paper_id), **payload})
-            subjects.add(identity.subject_signature)
+            identity = DFTAuditIssueLifecycleService.build_identity(paper_id=issue.paper_id, payload=payload)
+            subjects.add(identity.subject_key)
         if len(subjects) > 1:
             return "legacy_false_dedupe_requires_identity_split"
         return None
@@ -785,7 +867,12 @@ class DFTAuditIssueRepairService:
         return sample
 
     def _candidate_identity_for_issue(self, issue: DFTAuditIssue, suggested: dict[str, Any], evidence: dict[str, Any]) -> str:
-        signature = self._dedupe_signature_for_suggested(paper_id=issue.paper_id, suggested=suggested, evidence=evidence)
+        identity = self._identity_for_suggested(
+            paper_id=issue.paper_id,
+            suggested=suggested,
+            evidence=evidence,
+        )
+        signature = identity.observation_key or f"non_deduplicable_issue:{issue.id}"
         return hashlib.sha256(f"dft_issue_repair:{signature}".encode("utf-8")).hexdigest()
 
     def _stale_fields(self, issue: DFTAuditIssue, row: DFTResult) -> list[str]:

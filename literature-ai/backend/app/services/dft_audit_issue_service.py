@@ -15,7 +15,7 @@ from app.services.dft_audit_issue_lifecycle_service import (
     DFTAuditIssueLifecycleService,
 )
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity, normalize_source_document_type
-from app.services.dft_identity_service import build_dft_scientific_identity
+from app.services.dft_identity_service import DFTIdentityV2
 from app.services.external_analysis_identity import (
     UNTRUSTED_LEGACY_SOURCE_IDENTITY,
     review_source_identity,
@@ -95,6 +95,8 @@ class DFTAuditIssueService:
         source_identity: str | None = None,
         source_candidate_id: str | None = None,
         resolution_note: str | None = None,
+        identity: DFTIdentityV2 | None = None,
+        result_row: DFTResult | None = None,
     ) -> DFTAuditIssue:
         issue_type = self._checked(issue_type, self.ISSUE_TYPES, "issue_type")
         severity = self._checked(severity, self.SEVERITIES, "severity")
@@ -117,6 +119,7 @@ class DFTAuditIssueService:
                     DFTAuditIssue.fingerprint == fingerprint,
                 )
             )
+        existing_was_found = existing is not None
         if existing is None:
             existing = DFTAuditIssue(
                 paper_id=paper_id,
@@ -134,6 +137,12 @@ class DFTAuditIssueService:
                 fingerprint=fingerprint,
                 resolution_note=resolution_note,
             )
+            if identity is not None:
+                DFTAuditIssueLifecycleService(self.session).initialize_issue_identity(
+                    existing,
+                    identity=identity,
+                    row=result_row,
+                )
             if self._batch_issues is not None:
                 self.session.add(existing)
                 self.session.flush()
@@ -156,6 +165,9 @@ class DFTAuditIssueService:
                     if winner is None:
                         raise
                     existing = winner
+                    existing_was_found = True
+        if existing_was_found and existing.status in {"closed", "false_positive"}:
+            return existing
         changed = False
         merged_identities = self._merged_list(existing.source_identities or [], source_identity)
         if merged_identities != (existing.source_identities or []):
@@ -189,6 +201,25 @@ class DFTAuditIssueService:
             existing.updated_at = utcnow()
             self.session.add(existing)
             self.session.flush()
+        if identity is not None:
+            DFTAuditIssueLifecycleService(self.session).initialize_issue_identity(
+                existing,
+                identity=identity,
+                row=result_row,
+                lifecycle_stage=existing.lifecycle_stage or "discovered",
+                resolution_code=existing.resolution_code,
+                last_error_code=existing.last_error_code,
+            )
+            self.session.flush()
+        if source_candidate_id:
+            try:
+                candidate_uuid = UUID(str(source_candidate_id))
+            except ValueError:
+                candidate_uuid = None
+            if candidate_uuid is not None:
+                candidate = self.session.get(ExternalAnalysisCandidate, candidate_uuid)
+                if candidate is not None:
+                    DFTAuditIssueLifecycleService(self.session).bind_source_candidate(existing, candidate)
         return existing
 
     def create_or_update_consensus_issue(
@@ -216,6 +247,7 @@ class DFTAuditIssueService:
             suggested_value=suggested,
             evidence_payload=evidence,
         )
+        identity = DFTAuditIssueLifecycleService(self.session).identity_for_result(row)
         return self.upsert_issue(
             paper_id=paper_id,
             target_id=str(row.id),
@@ -233,6 +265,8 @@ class DFTAuditIssueService:
             source_candidate_id=source_candidate_id or str(opinion.get("candidate_id") or ""),
             fingerprint=fingerprint,
             resolution_note="DFT audit consensus recorded as an issue; underlying DFTResult was not verified, rejected, or edited.",
+            identity=identity,
+            result_row=row,
         )
 
     def create_or_update_missing_issue(
@@ -266,6 +300,10 @@ class DFTAuditIssueService:
             self._batch_issues[
                 (str(existing.target_type), str(existing.target_id), str(existing.issue_type), str(existing.fingerprint))
             ] = existing
+        identity = DFTAuditIssueLifecycleService.build_identity(
+            paper_id=paper_id,
+            payload=payload,
+        )
         return self.upsert_issue(
             paper_id=paper_id,
             target_id=existing.target_id if existing is not None else "new",
@@ -288,6 +326,7 @@ class DFTAuditIssueService:
                 if is_ml_predicted
                 else "Missing DFT result draft queued for authorized AI or user-controlled follow-up."
             ),
+            identity=identity,
         )
 
     def close_issue(self, issue_id: UUID, *, status: str, resolved_by: str, resolution_note: str | None = None) -> DFTAuditIssue:
@@ -366,17 +405,16 @@ class DFTAuditIssueService:
         issue_type: str = "missing_dft_result",
         candidate_id: str | None = None,
     ) -> str:
-        identity = build_dft_scientific_identity({"paper_id": str(paper_id), **payload})
+        identity = DFTAuditIssueLifecycleService.build_identity(paper_id=paper_id, payload=payload)
         return self._hash_parts(
             [
-                "dft_missing_issue_v2",
+                "dft_missing_issue_identity_v2",
                 str(paper_id),
                 issue_type,
-                identity.subject_signature,
-                identity.observation_signature,
-                identity.atom_pair.error_code,
-                list(identity.atom_pair.normalized_aliases),
-                str(candidate_id or "") if not identity.dedupe_allowed else "",
+                identity.subject_key,
+                identity.observation_key,
+                list(identity.error_codes),
+                str(candidate_id or "") if not identity.observation_key else "",
             ]
         )
 
