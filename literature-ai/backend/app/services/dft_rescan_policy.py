@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 from uuid import uuid4
@@ -221,24 +223,41 @@ def build_dft_dedupe_signature(payload: dict[str, Any]) -> str:
 
 
 def _row_signature(row: Any) -> str:
+    payload = _row_identity_payload(row)
+    from app.services.dft_identity_service import build_dft_scientific_identity
+
+    identity = build_dft_scientific_identity(payload)
+    if identity.atom_pair.error_code == "conflicting_atom_pair_aliases":
+        raise ValueError("conflicting_atom_pair_aliases")
+    if identity.atom_pair.error_code != "missing_atom_pair_identity":
+        # Historical dedupe_signature values predate the full scientific identity
+        # and must never bypass the current observation signature.
+        return identity.observation_signature
+
+    saved_signature = str(payload.get("dedupe_signature") or "").strip()
+    if saved_signature.startswith("dft:non-deduplicable:"):
+        return saved_signature
+    return _missing_atom_pair_row_signature(row, payload)
+
+
+def _row_identity_payload(row: Any) -> dict[str, Any]:
     if isinstance(row, dict):
         payload = dict(row.get("evidence_payload") or {})
-        payload.update(
-            {
-                key: row.get(key)
-                for key in (
-                    "paper_id",
-                    "adsorbate",
-                    "property_type",
-                    "value",
-                    "value_upper",
-                    "value_kind",
-                    "unit",
-                    "reaction_step",
-                )
-            }
-        )
-        return str(payload.get("dedupe_signature") or build_dft_dedupe_signature(payload))
+        if row.get("dedupe_signature") not in (None, "") and not payload.get("dedupe_signature"):
+            payload["dedupe_signature"] = row["dedupe_signature"]
+        for key in (
+            "paper_id",
+            "adsorbate",
+            "property_type",
+            "value",
+            "value_upper",
+            "value_kind",
+            "unit",
+            "reaction_step",
+        ):
+            if key in row:
+                payload[key] = row[key]
+        return payload
     evidence_payload = getattr(row, "evidence_payload", None)
     payload = dict(evidence_payload) if isinstance(evidence_payload, dict) else {}
     payload.update(
@@ -253,7 +272,40 @@ def _row_signature(row: Any) -> str:
             "reaction_step": getattr(row, "reaction_step", None),
         }
     )
-    return str(payload.get("dedupe_signature") or build_dft_dedupe_signature(payload))
+    return payload
+
+
+def _missing_atom_pair_row_signature(row: Any, payload: dict[str, Any]) -> str:
+    stable_id = _row_stable_identity(row, payload)
+    return f"dft:non-deduplicable:missing_atom_pair_identity:row:{stable_id}"
+
+
+def _row_stable_identity(row: Any, payload: dict[str, Any]) -> str:
+    values: list[Any] = []
+    if isinstance(row, dict):
+        sources = (
+            row,
+            payload,
+            row.get("evidence_payload") or {},
+            row.get("corrected_value") or {},
+            payload.get("corrected_value") or {},
+        )
+    else:
+        sources = (payload, payload.get("corrected_value") or {})
+        values.append(getattr(row, "id", None))
+        values.append(getattr(row, "candidate_identity", None))
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        for key in ("id", "candidate_id", "source_candidate_id", "candidate_identity"):
+            values.append(source.get(key))
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    fallback_payload = {key: value for key, value in payload.items() if key != "dedupe_signature"}
+    canonical = json.dumps(fallback_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def summarize_rescan_progress(

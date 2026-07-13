@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 
 from app.db.models import Base, DFTResult, Paper, PaperFigure, PaperTable
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_rescan_policy import (
+    _row_signature,
     build_dft_dedupe_signature,
     finalize_rescan_summary,
     is_dft_method_only_reaction_step,
@@ -287,6 +289,133 @@ def test_dft_dedupe_signature_refuses_stable_identity_without_required_atom_pair
     assert first.startswith("dft:non-deduplicable:missing_atom_pair_identity:")
     assert second.startswith("dft:non-deduplicable:missing_atom_pair_identity:")
     assert first != second
+
+
+def test_row_signature_recomputes_valid_point_identity_instead_of_using_legacy_signature():
+    historical_row = {
+        "id": "historical-point-1",
+        "paper_id": "paper-1",
+        "adsorbate": "Li2S4",
+        "property_type": "adsorption_energy",
+        "reaction_step": "Li2S4 adsorption",
+        "value": -1.1,
+        "unit": "eV",
+        "evidence_payload": {"material_identity": "Fe-GDY", "dedupe_signature": "legacy-point-signature"},
+    }
+    current_candidate = {
+        "paper_id": "paper-1",
+        "adsorbate": "Li2S4",
+        "property_type": "adsorption_energy",
+        "reaction_step": "Li2S4 adsorption",
+        "value": "-1.1000",
+        "unit": "ev",
+        "evidence_payload": {"material_identity": "Fe-GDY"},
+    }
+
+    assert _row_signature(historical_row) != "legacy-point-signature"
+    assert _row_signature(historical_row) == _row_signature(current_candidate)
+
+
+def test_row_signature_recomputes_interval_identity_when_legacy_signatures_match():
+    base = {
+        "paper_id": "paper-1",
+        "adsorbate": "Li2S4",
+        "property_type": "pdos_overlap_energy_window",
+        "value": -2.5,
+        "value_kind": "energy_window",
+        "unit": "eV",
+        "evidence_payload": {"material_identity": "FePc@WS2", "dedupe_signature": "legacy-interval-signature"},
+    }
+    lower_interval = {**base, "id": "interval-1", "value_upper": -0.5}
+    different_upper = {**base, "id": "interval-2", "value_upper": -0.4}
+    same_interval_current = {
+        **base,
+        "id": "interval-3",
+        "value_upper": "-0.5000",
+        "evidence_payload": {"material_identity": "FePc@WS2"},
+    }
+
+    assert _row_signature(lower_interval) != "legacy-interval-signature"
+    assert _row_signature(lower_interval) != _row_signature(different_upper)
+    assert _row_signature(lower_interval) == _row_signature(same_interval_current)
+
+
+def test_row_signature_missing_atom_pair_is_stable_per_row_and_never_merges_sources():
+    base = {
+        "paper_id": "paper-1",
+        "property_type": "bond_length",
+        "value": 2.1,
+        "unit": "Å",
+        "evidence_payload": {"material_identity": "Fe-GDY"},
+    }
+    first = {**base, "id": "missing-pair-row-1"}
+    second = {**base, "id": "missing-pair-row-2", "evidence_payload": {"material_identity": "Fe-GDY", "source_candidate_id": "source-2"}}
+    source_candidate_only = {
+        **base,
+        "evidence_payload": {"material_identity": "Fe-GDY", "source_candidate_id": "source-only-1"},
+    }
+    saved = {
+        **base,
+        "id": "missing-pair-row-3",
+        "evidence_payload": {
+            "material_identity": "Fe-GDY",
+            "dedupe_signature": "dft:non-deduplicable:missing_atom_pair_identity:saved-row-3",
+        },
+    }
+
+    assert _row_signature(first) == _row_signature(first)
+    assert _row_signature(first) != _row_signature(second)
+    assert _row_signature(source_candidate_only) == _row_signature(source_candidate_only)
+    assert _row_signature(source_candidate_only) != _row_signature(first)
+    assert _row_signature(saved) == "dft:non-deduplicable:missing_atom_pair_identity:saved-row-3"
+
+
+def test_row_signature_does_not_let_legacy_signature_hide_conflicting_atom_pair_aliases():
+    row = {
+        "id": "conflicting-pair-row",
+        "paper_id": "paper-1",
+        "property_type": "bond_length",
+        "value": 2.1,
+        "unit": "Å",
+        "evidence_payload": {
+            "material_identity": "Fe-GDY",
+            "atom_pair": "Li1-S",
+            "bond_pair": "Li2-S",
+            "dedupe_signature": "legacy-conflicting-signature",
+        },
+    }
+
+    with pytest.raises(ValueError, match="conflicting_atom_pair_aliases"):
+        _row_signature(row)
+
+
+def test_rescan_progress_matches_legacy_row_with_current_interval_and_counts_new_upper_bound():
+    legacy_row = {
+        "id": "legacy-interval-row",
+        "paper_id": "paper-1",
+        "adsorbate": "Li2S4",
+        "property_type": "pdos_overlap_energy_window",
+        "value": -2.5,
+        "value_upper": -0.5,
+        "value_kind": "energy_window",
+        "unit": "eV",
+        "evidence_payload": {"material_identity": "FePc@WS2", "dedupe_signature": "legacy-interval-signature"},
+    }
+    identical_current = {
+        **legacy_row,
+        "id": "current-interval-row",
+        "value_upper": "-0.5000",
+        "evidence_payload": {"material_identity": "FePc@WS2"},
+    }
+    different_upper = {**identical_current, "id": "current-other-upper", "value_upper": -0.4}
+
+    duplicate = summarize_rescan_progress([legacy_row], [identical_current], [], rescan_round=1)
+    new = summarize_rescan_progress([legacy_row], [different_upper], [], rescan_round=1)
+
+    assert duplicate["new_unique_count"] == 0
+    assert duplicate["duplicate_count"] == 1
+    assert new["new_unique_count"] == 1
+    assert new["duplicate_count"] == 0
 
 
 def test_dft_dedupe_signature_does_not_treat_method_as_reaction_step_identity():
