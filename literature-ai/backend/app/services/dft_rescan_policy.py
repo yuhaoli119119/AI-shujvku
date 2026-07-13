@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from typing import Any
 from uuid import uuid4
@@ -277,10 +275,14 @@ def _row_identity_payload(row: Any) -> dict[str, Any]:
 
 def _missing_atom_pair_row_signature(row: Any, payload: dict[str, Any]) -> str:
     stable_id = _row_stable_identity(row, payload)
-    return f"dft:non-deduplicable:missing_atom_pair_identity:row:{stable_id}"
+    if stable_id:
+        return f"dft:non-deduplicable:missing_atom_pair_identity:row:{stable_id}"
+    # An anonymous record has no durable row-level identity. Prefer preventing
+    # two unknown sources from merging over stable signatures across calls.
+    return f"dft:non-deduplicable:missing_atom_pair_identity:anonymous:{uuid4().hex}"
 
 
-def _row_stable_identity(row: Any, payload: dict[str, Any]) -> str:
+def _row_stable_identity(row: Any, payload: dict[str, Any]) -> str | None:
     values: list[Any] = []
     if isinstance(row, dict):
         sources = (
@@ -303,9 +305,7 @@ def _row_stable_identity(row: Any, payload: dict[str, Any]) -> str:
         text = str(value or "").strip()
         if text:
             return text
-    fallback_payload = {key: value for key, value in payload.items() if key != "dedupe_signature"}
-    canonical = json.dumps(fallback_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return None
 
 
 def summarize_rescan_progress(

@@ -354,6 +354,7 @@ def test_row_signature_missing_atom_pair_is_stable_per_row_and_never_merges_sour
         **base,
         "evidence_payload": {"material_identity": "Fe-GDY", "source_candidate_id": "source-only-1"},
     }
+    candidate_only = {**base, "candidate_id": "candidate-only-1"}
     saved = {
         **base,
         "id": "missing-pair-row-3",
@@ -367,7 +368,30 @@ def test_row_signature_missing_atom_pair_is_stable_per_row_and_never_merges_sour
     assert _row_signature(first) != _row_signature(second)
     assert _row_signature(source_candidate_only) == _row_signature(source_candidate_only)
     assert _row_signature(source_candidate_only) != _row_signature(first)
+    assert _row_signature(candidate_only) == _row_signature(candidate_only)
     assert _row_signature(saved) == "dft:non-deduplicable:missing_atom_pair_identity:saved-row-3"
+
+
+def test_anonymous_missing_atom_pair_rows_are_unique_and_counted_as_new_rescan_results():
+    anonymous_a = {
+        "paper_id": "paper-1",
+        "property_type": "bond_length",
+        "value": 2.1,
+        "unit": "Å",
+        "evidence_payload": {"material_identity": "Fe-GDY"},
+    }
+    anonymous_b = {
+        "paper_id": "paper-1",
+        "property_type": "bond_length",
+        "value": 2.1,
+        "unit": "Å",
+        "evidence_payload": {"material_identity": "Fe-GDY"},
+    }
+
+    assert _row_signature(anonymous_a) != _row_signature(anonymous_b)
+    summary = summarize_rescan_progress([], [anonymous_a, anonymous_b], [], rescan_round=1)
+    assert summary["new_unique_count"] == 2
+    assert summary["duplicate_count"] == 0
 
 
 def test_row_signature_does_not_let_legacy_signature_hide_conflicting_atom_pair_aliases():
