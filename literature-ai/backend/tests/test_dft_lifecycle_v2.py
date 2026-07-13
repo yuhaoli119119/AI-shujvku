@@ -113,6 +113,39 @@ def _v2_row(session: Session, paper: Paper, *, value: float = -1.2, material: st
     return row
 
 
+def test_legacy_result_transient_identity_uses_only_explicit_reaction_pathway(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, title="Legacy reaction identity")
+        sample = CatalystSample(paper_id=paper.id, name="FeN4-G")
+        session.add(sample)
+        session.flush()
+        common = {
+            "paper_id": paper.id,
+            "catalyst_sample_id": sample.id,
+            "adsorbate": "Li2S",
+            "property_type": "reaction_barrier",
+            "reaction_step": "Li2S dissociation",
+            "value": 1.7,
+            "unit": "eV",
+            "candidate_status": "ai_verified_ml_ready",
+        }
+        explicit = DFTResult(**common, reaction_type="SRR_LiS", evidence_payload={"page": 5})
+        missing = DFTResult(**common, reaction_type=None, evidence_payload={"page": 5})
+        session.add_all([explicit, missing])
+        session.flush()
+
+        lifecycle = DFTAuditIssueLifecycleService(session)
+        explicit_payload = lifecycle.authoritative_payload_for_result(explicit)
+        explicit_identity = lifecycle.identity_for_result(explicit)
+        missing_identity = lifecycle.identity_for_result(missing)
+
+        assert explicit_payload["corrected_value"]["reaction_type"] == "SRR_LiS"
+        assert explicit_identity.observation_key
+        assert explicit_identity.identity_payload["subject"]["property_context"]["pathway"] == "srr_lis"
+        assert missing_identity.observation_key is None
+        assert "missing_state_context_identity" in missing_identity.error_codes
+
+
 def test_materialization_double_writes_v1_v2_issue_and_source(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session)

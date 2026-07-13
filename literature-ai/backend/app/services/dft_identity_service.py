@@ -156,6 +156,7 @@ _V2_CONTEXT_ALIASES = {
     "adsorption_configuration": "configuration",
     "site_configuration": "configuration",
     "surface_facet": "facet",
+    "reaction_type": "pathway",
 }
 _V2_COMMON_REQUIREMENTS = (
     DFTIdentityRequirement("missing_paper_identity", ("paper_id",)),
@@ -172,6 +173,7 @@ _V2_REACTION_BARRIER_REQUIREMENTS = (
         (
             "state_context",
             "property_context.configuration",
+            "property_context.pathway",
             "property_context.initial_state",
             "property_context.transition_state",
             "property_context.final_state",
@@ -208,7 +210,12 @@ def _v2_policy(
 _V2_PROPERTY_POLICIES = (
     _v2_policy(
         "dimensionless",
-        exact_property_types=("coordination_number", "dimensionless_ratio", "poisson_ratio"),
+        exact_property_types=(
+            "adsorption_energy_vs_charge_transfer_r_squared",
+            "coordination_number",
+            "dimensionless_ratio",
+            "poisson_ratio",
+        ),
         dimensionless=True,
     ),
     _v2_policy(
@@ -221,6 +228,12 @@ _V2_PROPERTY_POLICIES = (
         "adsorption_energy",
         property_markers=("adsorption_energy",),
         context_keys=_V2_ENERGY_CONTEXT_KEYS,
+        requirements=_V2_ADSORPTION_REQUIREMENTS,
+    ),
+    _v2_policy(
+        "aggregate_charge_transfer",
+        exact_property_types=("bader_charge_transfer",),
+        context_keys=(_V2_CHARGE_CONTEXT_KEYS | frozenset({"sign_convention"})),
         requirements=_V2_ADSORPTION_REQUIREMENTS,
     ),
     _v2_policy(
@@ -279,6 +292,9 @@ _V2_UNIT_RULES: dict[str, tuple[str, Decimal]] = {
     "|e|": ("e", Decimal("1")),
     "ev/atom": ("eV/atom", Decimal("1")),
     "mev/atom": ("eV/atom", Decimal("0.001")),
+    "ev/e": ("eV/e", Decimal("1")),
+    "μb": ("μB", Decimal("1")),
+    "µb": ("μB", Decimal("1")),
 }
 
 
@@ -493,6 +509,11 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
         sources,
         property_policy,
     )
+    if property_policy.name == "aggregate_charge_transfer":
+        property_context = {
+            **property_context,
+            "charge_scope": "aggregate_support_adsorbate_charge_transfer",
+        }
     subject = {
         "paper_id": _text(payload.get("paper_id")),
         "material_key": _text(material),
@@ -527,7 +548,7 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
             )
         ),
         "state_context": _normalize_context_value(
-            _first_value(sources, ("state_context",))
+            _first_value(sources, ("state_context", "state"))
         ),
         "property_context": property_context,
     }

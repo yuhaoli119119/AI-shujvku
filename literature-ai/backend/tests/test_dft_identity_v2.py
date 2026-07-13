@@ -375,3 +375,110 @@ def test_identity_v2_property_policy_centralizes_required_and_allowed_context():
         "missing_reaction_step_identity",
         "missing_state_context_identity",
     }
+
+
+def test_recorded_statistical_and_magnetic_units_are_supported_without_weakening_required_fields():
+    r_squared = build_dft_identity_v2(
+        _payload(
+            property_type="adsorption_energy_vs_charge_transfer_r_squared",
+            adsorbate="Li2S",
+            value="0.95",
+            unit="dimensionless",
+        )
+    )
+    slope = build_dft_identity_v2(
+        _payload(
+            property_type="adsorption_energy_vs_charge_transfer_slope",
+            adsorbate="Li2S",
+            value="8.65",
+            unit="eV/e",
+        )
+    )
+    magnetic = build_dft_identity_v2(
+        _payload(
+            property_type="magnetic_moment",
+            adsorbate=None,
+            value="1.919",
+            unit="μB",
+            state="bare",
+        )
+    )
+    assert r_squared.observation_key
+    assert r_squared.identity_payload["observation"]["unit"] == ""
+    assert slope.observation_key
+    assert slope.identity_payload["observation"]["unit"] == "eV/e"
+    assert magnetic.observation_key
+    assert magnetic.identity_payload["observation"]["unit"] == "μB"
+    assert magnetic.identity_payload["subject"]["state_context"] == "bare"
+
+
+def test_aggregate_charge_transfer_and_explicit_reaction_pathway_are_central_policies():
+    charge_transfer = build_dft_identity_v2(
+        _payload(
+            property_type="bader_charge_transfer",
+            adsorbate="Li2S",
+            site_label=None,
+            value="-0.52",
+            unit="e",
+            sign_convention="positive=electron loss; negative=electron gain",
+        )
+    )
+    reaction = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            adsorbate="Li2S",
+            site_label=None,
+            reaction_step="Li2S dissociation during charging",
+            reaction_type="Li2S_dissociation",
+            value="1.70",
+            unit="eV",
+        )
+    )
+    assert charge_transfer.observation_key
+    assert charge_transfer.identity_payload["property_policy"] == "aggregate_charge_transfer"
+    assert charge_transfer.identity_payload["subject"]["property_context"] == {
+        "charge_scope": "aggregate_support_adsorbate_charge_transfer",
+        "sign_convention": "positive=electron loss; negative=electron gain",
+    }
+    assert reaction.observation_key
+    assert reaction.identity_payload["subject"]["property_context"]["pathway"] == "li2s_dissociation"
+
+    atomic_charge = build_dft_identity_v2(
+        _payload(
+            property_type="bader_charge",
+            adsorbate="Li2S",
+            site_label=None,
+            value="-0.52",
+            unit="e",
+        )
+    )
+    missing_pathway = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            adsorbate="Li2S",
+            site_label=None,
+            reaction_step="Li2S dissociation during charging",
+            reaction_type=None,
+            value="1.70",
+            unit="eV",
+        )
+    )
+    assert atomic_charge.observation_key is None
+    assert "missing_atom_or_site_identity" in atomic_charge.error_codes
+    assert missing_pathway.observation_key is None
+    assert "missing_state_context_identity" in missing_pathway.error_codes
+
+    explicit_state = build_dft_identity_v2(
+        _payload(
+            property_type="reaction_barrier",
+            adsorbate="Li2S",
+            site_label=None,
+            reaction_step="Li2S dissociation during charging",
+            reaction_type="Li2S_dissociation",
+            state="initial-transition-final",
+            value="1.70",
+            unit="eV",
+        )
+    )
+    assert explicit_state.observation_key
+    assert explicit_state.identity_payload["subject"]["state_context"] == "initial-transition-final"

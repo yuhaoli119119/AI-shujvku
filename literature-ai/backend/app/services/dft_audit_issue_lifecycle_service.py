@@ -87,6 +87,7 @@ class DFTAuditIssueLifecycleService:
         "value_kind",
         "unit",
         "reaction_step",
+        "reaction_type",
         "candidate_status",
         "evidence_payload",
     )
@@ -196,6 +197,7 @@ class DFTAuditIssueLifecycleService:
                 "property_type": row.property_type,
                 "adsorbate": row.adsorbate,
                 "reaction_step": row.reaction_step,
+                "reaction_type": row.reaction_type,
                 "value": row.value,
                 "value_upper": row.value_upper,
                 "value_kind": row.value_kind,
