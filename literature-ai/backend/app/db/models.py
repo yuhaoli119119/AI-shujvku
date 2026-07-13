@@ -430,6 +430,10 @@ class DFTResult(Base):
     evidence_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     extraction_protocol_version: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     candidate_identity: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    identity_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    subject_key: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    observation_key: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    identity_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     local_ai_verification_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     ml_ready_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
     ml_ready_source: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
@@ -448,6 +452,14 @@ class DFTResult(Base):
 
     __table_args__ = (
         sa.UniqueConstraint("paper_id", "candidate_identity", name="uq_dft_result_candidate_identity"),
+        sa.Index(
+            "uq_dft_results_identity_v2_observation",
+            "paper_id",
+            "identity_version",
+            "observation_key",
+            unique=True,
+            postgresql_where=sa.text("observation_key IS NOT NULL"),
+        ),
     )
 
 
@@ -458,7 +470,23 @@ class DFTAuditIssue(Base):
     paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
     target_type: Mapped[str] = mapped_column(sa.String(64), default="dft_results", server_default="dft_results", index=True)
     target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    result_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("dft_results.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     issue_type: Mapped[str] = mapped_column(sa.String(64), index=True)
+    issue_key_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    issue_key: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, index=True)
+    lifecycle_version: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    lifecycle_stage: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
+    resolution_code: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    parent_issue_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("dft_audit_issues.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    last_error_code: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    retry_count: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=False), nullable=True, index=True
+    )
     severity: Mapped[str] = mapped_column(sa.String(16), default="medium", server_default="medium", index=True)
     status: Mapped[str] = mapped_column(sa.String(32), default="open", server_default="open", index=True)
     current_snapshot: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
@@ -483,6 +511,26 @@ class DFTAuditIssue(Base):
             "fingerprint",
             name="uq_dft_audit_issue_identity",
         ),
+    )
+
+
+class DFTAuditIssueSource(Base):
+    __tablename__ = "dft_audit_issue_sources"
+
+    issue_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("dft_audit_issues.id", ondelete="CASCADE"), primary_key=True
+    )
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("external_analysis_candidates.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, server_default=sa.func.current_timestamp(), nullable=False
+    )
+
+    __table_args__ = (
+        sa.Index("ix_dft_audit_issue_sources_issue_id", "issue_id"),
+        sa.Index("ix_dft_audit_issue_sources_candidate_id", "candidate_id"),
     )
 
 
