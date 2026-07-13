@@ -295,17 +295,22 @@ class VerificationSessionReviewApplicationMixin:
             "field_name": field_name,
             "evidence_payload": evidence_payload,
         }
-        result = DFTResultReviewService(self.session).apply_imported_opinion(
+        review_service = getattr(self, "_dft_import_review_service", None)
+        compact_result = review_service is not None
+        if review_service is None:
+            review_service = DFTResultReviewService(self.session)
+        result = review_service.apply_imported_opinion(
             paper_id=paper_id,
             result_id=UUID(str(target_id)),
             opinion=imported_opinion,
             reviewer=reviewer,
-            expected_write_versions=self._current_dft_review_versions(
+            expected_write_versions=review_service.current_review_versions(
                 paper_id=paper_id,
-                target_id=target_id,
+                result_id=UUID(str(target_id)),
             ),
             write_lock_tokens=write_lock_tokens,
             commit=False,
+            compact_result=compact_result,
         )
         return {
             "action": "apply_imported_dft_opinion",
@@ -574,7 +579,12 @@ class VerificationSessionReviewApplicationMixin:
 
         row_material = None
         if isinstance(row, DFTResult) and row.catalyst_sample_id:
-            sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+            catalyst_cache = self.session.info.get("dft_import_catalysts_by_id")
+            sample = (
+                catalyst_cache.get(str(row.catalyst_sample_id))
+                if isinstance(catalyst_cache, dict)
+                else self.session.get(CatalystSample, row.catalyst_sample_id)
+            )
             row_material = sample.name if sample and sample.name else str(row.catalyst_sample_id)
         material_identity = pick(
             "catalyst_sample_id",

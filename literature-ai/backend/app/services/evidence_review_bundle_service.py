@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, utcnow
+from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperTable, utcnow
 from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewFigureAction,
     OfflineEvidenceReviewResult,
@@ -28,6 +28,7 @@ from app.services.figure_review_scope import (
     include_figure_in_chart_review_scope,
 )
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
+from app.services.review_bundle_shared import compact_figure_artifact, linked_source_papers
 from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.services.review_service import ReviewService
 from app.services.table_curation_service import TableCurationService
@@ -203,7 +204,7 @@ class EvidenceReviewBundleService:
                     omitted_files.append({"kind": "image", "source_record_id": figure.get("source_record_id"), "reason": "figure_file_limit_reached"})
                     break
                 original_size = artifact.stat().st_size
-                data, suffix, compacted = self._bundle_figure_artifact(artifact)
+                data, suffix, compacted = compact_figure_artifact(artifact)
                 if figure_bytes_total + len(data) > MAX_TOTAL_FIGURE_BYTES:
                     figure_warnings.append("figure_byte_limit_reached")
                     omitted_files.append({"kind": "image", "source_record_id": figure.get("source_record_id"), "reason": "figure_byte_limit_reached"})
@@ -2205,7 +2206,11 @@ class EvidenceReviewBundleService:
         if not str(paper.paper_code or "").strip():
             raise ValueError("paper_code_required_before_offline_evidence_review_export")
 
-        source_papers = self._source_papers(paper)
+        source_papers = linked_source_papers(
+            self.session,
+            paper,
+            relationship_types=SUPPLEMENTARY_RELATIONSHIP_TYPES,
+        )
         source_ids = [item["paper"].id for item in source_papers]
         tables = self.session.scalars(select(PaperTable).where(PaperTable.paper_id.in_(source_ids))).all()
         all_figures = self.session.scalars(select(PaperFigure).where(PaperFigure.paper_id.in_(source_ids))).all()
@@ -2511,37 +2516,6 @@ class EvidenceReviewBundleService:
                     "reason": reason,
                 })
         return [row for row in figures if str(row.id) not in excluded_ids], exclusions
-
-    def _source_papers(self, paper: Paper) -> list[dict[str, Any]]:
-        relationships = self.session.scalars(
-            select(PaperRelationship).where(
-                PaperRelationship.source_paper_id == paper.id,
-                PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
-            )
-        ).all()
-        sources = [
-            {
-                "paper": paper,
-                "prefix": "main",
-                "source_document_type": "main_text",
-                "relationship_id": None,
-            }
-        ]
-        seen = {paper.id}
-        for relationship in sorted(relationships, key=lambda item: str(item.target_paper_id)):
-            related = self.session.get(Paper, relationship.target_paper_id)
-            if related is None or related.id in seen:
-                continue
-            seen.add(related.id)
-            sources.append(
-                {
-                    "paper": related,
-                    "prefix": "si",
-                    "source_document_type": "supplementary_information",
-                    "relationship_id": str(relationship.id),
-                }
-            )
-        return sources
 
     def _source_document_payload(self, item: dict[str, Any]) -> dict[str, Any]:
         paper: Paper = item["paper"]
@@ -2891,33 +2865,6 @@ class EvidenceReviewBundleService:
             settings=self.settings,
             trusted_persisted_reference=True,
         )
-
-    @staticmethod
-    def _bundle_figure_artifact(artifact: Path) -> tuple[bytes, str, bool]:
-        original = artifact.read_bytes()
-        original_suffix = artifact.suffix.lower() or ".png"
-        try:
-            from PIL import Image
-
-            with Image.open(BytesIO(original)) as source:
-                source.load()
-                if source.mode == "RGBA":
-                    image = Image.new("RGB", source.size, "white")
-                    image.paste(source, mask=source.getchannel("A"))
-                elif source.mode not in {"RGB", "L"}:
-                    image = source.convert("RGB")
-                else:
-                    image = source.copy()
-                if image.mode == "L":
-                    image = image.convert("RGB")
-                output = BytesIO()
-                image.save(output, format="WEBP", quality=92, method=6)
-                compact = output.getvalue()
-            if compact and len(compact) < len(original):
-                return compact, ".webp", True
-        except Exception:
-            pass
-        return original, original_suffix, False
 
     @staticmethod
     def _private_path(value: Any) -> Path | None:

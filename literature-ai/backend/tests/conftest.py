@@ -17,14 +17,19 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 
-@pytest.fixture(autouse=True)
-def default_test_database_mode(monkeypatch, request):
-    if request.node.get_closest_marker("no_test_database"):
-        yield
-        return
+def pytest_collection_modifyitems(items):
+    """Expose the suite's real database boundary to marker-based runners."""
+    for item in items:
+        if item.get_closest_marker("no_test_database"):
+            item.add_marker(pytest.mark.unit)
+        else:
+            item.add_marker(pytest.mark.postgres)
 
+
+@pytest.fixture(scope="session")
+def shared_test_database():
+    """Create one isolated schema per pytest process, not one full schema per test."""
     from app.config import get_settings
-    from app.db.session import _engines, _session_factories
 
     base_url = os.getenv("LITAI_TEST_ROOT_DATABASE_URL") or get_settings().database_url
     parsed = make_url(base_url)
@@ -43,22 +48,77 @@ def default_test_database_mode(monkeypatch, request):
     from app.db.models import Base
 
     Base.metadata.create_all(test_engine, checkfirst=False)
-    monkeypatch.setenv("LITAI_DATABASE_URL", test_url)
-    monkeypatch.setenv("LITAI_TEST_DATABASE_URL", test_url)
+    old_database_url = os.environ.get("LITAI_DATABASE_URL")
+    old_test_database_url = os.environ.get("LITAI_TEST_DATABASE_URL")
+    os.environ["LITAI_DATABASE_URL"] = test_url
+    os.environ["LITAI_TEST_DATABASE_URL"] = test_url
 
     get_settings.cache_clear()
     try:
-        yield
+        yield PostgreSQLTestDatabase(
+            url=test_url,
+            engine=test_engine,
+            session_factory=sessionmaker(bind=test_engine, autoflush=False, autocommit=False, future=True),
+            schema=schema,
+        )
     finally:
-        for engine in list(_engines.values()):
-            engine.dispose()
-        _engines.clear()
-        _session_factories.clear()
+        if old_database_url is None:
+            os.environ.pop("LITAI_DATABASE_URL", None)
+        else:
+            os.environ["LITAI_DATABASE_URL"] = old_database_url
+        if old_test_database_url is None:
+            os.environ.pop("LITAI_TEST_DATABASE_URL", None)
+        else:
+            os.environ["LITAI_TEST_DATABASE_URL"] = old_test_database_url
         get_settings.cache_clear()
         test_engine.dispose()
         with admin_engine.begin() as connection:
             connection.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
         admin_engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def default_test_database_mode(request, shared_test_database):
+    if request.node.get_closest_marker("no_test_database"):
+        yield
+        return
+
+    from app.config import get_settings
+    from app.db.models import Base
+    from app.db.session import _engines, _initialized_urls, _session_factories
+
+    get_settings.cache_clear()
+    try:
+        yield shared_test_database
+    finally:
+        for engine in list(_engines.values()):
+            engine.dispose()
+        _engines.clear()
+        _session_factories.clear()
+        _initialized_urls.clear()
+        get_settings.cache_clear()
+        shared_test_database.engine.dispose()
+
+        base_table_names = {table.name for table in Base.metadata.sorted_tables}
+        with shared_test_database.engine.begin() as connection:
+            existing_names = connection.execute(
+                text("SELECT tablename FROM pg_tables WHERE schemaname = :schema"),
+                {"schema": shared_test_database.schema},
+            ).scalars().all()
+            extra_names = sorted(set(existing_names) - base_table_names)
+            for table_name in extra_names:
+                escaped = table_name.replace('"', '""')
+                connection.execute(
+                    text(f'DROP TABLE IF EXISTS "{shared_test_database.schema}"."{escaped}" CASCADE')
+                )
+            remaining_names = sorted(set(existing_names) & base_table_names)
+            if remaining_names:
+                qualified = ", ".join(
+                    f'"{shared_test_database.schema}"."{name.replace(chr(34), chr(34) * 2)}"'
+                    for name in remaining_names
+                )
+                connection.execute(text(f"TRUNCATE TABLE {qualified} RESTART IDENTITY CASCADE"))
+        Base.metadata.create_all(shared_test_database.engine, checkfirst=True)
 
 
 @dataclass

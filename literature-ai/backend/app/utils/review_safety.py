@@ -65,6 +65,8 @@ LOCATOR_PAYLOAD_KEYS = {
 }
 
 _TABLE_NAMES_BY_BIND: dict[int, set[str]] = {}
+_BATCH_REVIEWS_CACHE_KEY = "dft_import_reviews_by_target"
+_BATCH_EVIDENCE_CACHE_KEY = "dft_import_evidence_reference_ids"
 
 
 @dataclass(frozen=True)
@@ -141,6 +143,10 @@ def get_target_reviews(
     target_type: str,
     target_id: Any,
 ) -> list[ExtractionFieldReview]:
+    batch_reviews = session.info.get(_BATCH_REVIEWS_CACHE_KEY)
+    cache_key = (str(paper_id), _normalized(target_type), str(target_id))
+    if isinstance(batch_reviews, dict) and cache_key in batch_reviews:
+        return list(batch_reviews[cache_key])
     if not _table_exists(session, "extraction_field_reviews"):
         return []
     target_types = _target_type_values(target_type)
@@ -214,6 +220,10 @@ def has_required_evidence_reference(
     target_id: Any,
 ) -> bool:
     target_id_str = str(target_id)
+    batch_evidence_ids = session.info.get(_BATCH_EVIDENCE_CACHE_KEY)
+    cache_key = (str(paper_id), _normalized(target_type), target_id_str)
+    if isinstance(batch_evidence_ids, set) and cache_key in batch_evidence_ids:
+        return True
     target_types = _target_type_values(target_type)
     if _table_exists(session, "evidence_spans"):
         span_exists = session.scalar(

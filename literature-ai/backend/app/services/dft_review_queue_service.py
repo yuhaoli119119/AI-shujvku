@@ -517,20 +517,26 @@ class DFTReviewQueueService:
         audits_by_target: dict[str, list[dict[str, Any]]] = {target_id: [] for target_id in target_ids}
         deduped_by_target: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {target_id: {} for target_id in target_ids}
         rows = self.session.execute(
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            select(
+                ExternalAnalysisCandidate,
+                ExternalAnalysisRun.source,
+                ExternalAnalysisRun.source_label,
+                ExternalAnalysisRun.source_identity,
+                ExternalAnalysisRun.source_identity_verified,
+            )
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(ExternalAnalysisCandidate.paper_id.in_(paper_ids))
             .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
             .order_by(ExternalAnalysisCandidate.created_at.desc())
         ).all()
-        for candidate, run in rows:
+        for candidate, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
             payload = dict(candidate.normalized_payload) if isinstance(candidate.normalized_payload, dict) else {}
             if not payload.get("source"):
-                payload["source"] = run.source
+                payload["source"] = run_source
             if not payload.get("source_label"):
-                payload["source_label"] = run.source_label
-            payload["source_identity"] = run.source_identity
-            payload["source_identity_verified"] = bool(run.source_identity_verified)
+                payload["source_label"] = run_source_label
+            payload["source_identity"] = run_source_identity
+            payload["source_identity_verified"] = bool(run_source_identity_verified)
             target_type = str(payload.get("target_type") or "").strip()
             target_id = str(payload.get("target_id") or payload.get("dft_result_id") or payload.get("record_id") or "")
             decision = str(payload.get("decision") or "").strip().lower()

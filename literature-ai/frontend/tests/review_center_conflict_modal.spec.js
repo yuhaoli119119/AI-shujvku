@@ -87,6 +87,7 @@ test.describe('Review Center Conflict Modal', () => {
             target_reaction_token: '{{TARGET_REACTION}}',
             templates: {
               figure: 'FIGURE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
+              figure_table: 'FIGURE TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
             },
@@ -104,20 +105,18 @@ test.describe('Review Center Conflict Modal', () => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html?paper_id=main-paper`);
 
     await page.selectOption('#webAiWorkflowSelect', 'copy_dft_prompt');
-    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('请解压并阅读这个 DFT 终审包');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('请解压这个 DFT 审核包');
     const webAiPrompt = await page.evaluate(() => window.__clipboardText);
     expect(webAiPrompt).toContain('stage_status');
     expect(webAiPrompt).toContain('completed_snapshot_fingerprint');
     expect(webAiPrompt).toContain('PASS');
     expect(webAiPrompt).toContain('new_candidate');
     expect(webAiPrompt).toContain('evidence_id');
-    expect(webAiPrompt).toContain('最终只输出一份严格符合 return_schema.json 的完整 JSON');
+    expect(webAiPrompt).toContain('最终只回复填写完成的 JSON 文件附件');
     await page.evaluate(() => { window.__clipboardText = ''; });
 
     const promptSelect = page.locator('#promptCopySelect');
-    await expect(promptSelect).toContainText('主文图片审核提示词');
-    await expect(promptSelect).toContainText('支撑文献图片审核提示词');
-    await expect(promptSelect).toContainText('表格审核提示词');
+    await expect(promptSelect).toContainText('整篇主文+DFT相关SI图表审核提示词');
     await expect(promptSelect).toContainText('DFT 数据审核与入库提示词');
     await expect(promptSelect).not.toContainText('DFT 数据处理提示词');
     await expect(promptSelect).not.toContainText('图表指令');
@@ -140,15 +139,17 @@ test.describe('Review Center Conflict Modal', () => {
 
     await rowChecks.nth(0).uncheck();
     await rowChecks.nth(1).check();
-    await page.selectOption('#promptCopySelect', 'table');
+    await page.selectOption('#promptCopySelect', 'figure_table');
     await expect(page.locator('#toast')).toContainText('只能选择主文献');
 
-    await page.selectOption('#promptCopySelect', 'support_figure');
-    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('FIGURE TEMPLATE');
-    const supportPrompt = await page.evaluate(() => window.__clipboardText);
-    expect(supportPrompt).toContain('paper_id: si-paper');
-    expect(supportPrompt).toContain('role: supplementary_information');
-    expect(supportPrompt).toContain('只审核当前唯一支撑文献/SI 的图片');
+    await rowChecks.nth(1).uncheck();
+    await rowChecks.nth(0).check();
+    await page.selectOption('#promptCopySelect', 'figure_table');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('FIGURE TABLE TEMPLATE');
+    const figureTablePrompt = await page.evaluate(() => window.__clipboardText);
+    expect(figureTablePrompt).toContain('paper_id: main-paper');
+    expect(figureTablePrompt).toContain('role: main_paper');
+    expect(figureTablePrompt).toContain('一次审核该主文全部图表、与 DFT 明确相关或可能相关的 SI 图片');
   });
 
   test('links grouped conflicts to read-only evidence preview', async ({ page }) => {
@@ -428,9 +429,7 @@ test.describe('Review Center Conflict Modal', () => {
 
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
 
-    await expect(page.locator('#promptCopySelect')).toContainText('主文图片审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('支撑文献图片审核提示词');
-    await expect(page.locator('#promptCopySelect')).toContainText('表格审核提示词');
+    await expect(page.locator('#promptCopySelect')).toContainText('整篇主文+DFT相关SI图表审核提示词');
     await expect(page.locator('#promptCopySelect')).toContainText('DFT 数据审核与入库提示词');
     await expect(page.locator('#promptCopySelect')).not.toContainText('DFT 数据处理提示词');
     await expect(page.locator('#promptCopySelect')).not.toContainText('图表指令');

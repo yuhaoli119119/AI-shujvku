@@ -64,6 +64,15 @@ class DFTAuditIssueService:
 
     def __init__(self, session: Session):
         self.session = session
+        self._batch_issues: dict[tuple[str, str, str, str], DFTAuditIssue] | None = None
+
+    def begin_import_batch(self, *, paper_id: UUID) -> None:
+        self._batch_issues = {
+            (str(issue.target_type), str(issue.target_id), str(issue.issue_type), str(issue.fingerprint)): issue
+            for issue in self.session.scalars(
+                select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)
+            ).all()
+        }
 
     def upsert_issue(
         self,
@@ -92,15 +101,18 @@ class DFTAuditIssueService:
         if not fingerprint:
             raise ValueError("DFT audit issue fingerprint is required.")
 
-        existing = self.session.scalar(
-            select(DFTAuditIssue).where(
-                DFTAuditIssue.paper_id == paper_id,
-                DFTAuditIssue.target_type == target_type,
-                DFTAuditIssue.target_id == target_id,
-                DFTAuditIssue.issue_type == issue_type,
-                DFTAuditIssue.fingerprint == fingerprint,
+        issue_key = (target_type, target_id, issue_type, fingerprint)
+        existing = self._batch_issues.get(issue_key) if self._batch_issues is not None else None
+        if self._batch_issues is None:
+            existing = self.session.scalar(
+                select(DFTAuditIssue).where(
+                    DFTAuditIssue.paper_id == paper_id,
+                    DFTAuditIssue.target_type == target_type,
+                    DFTAuditIssue.target_id == target_id,
+                    DFTAuditIssue.issue_type == issue_type,
+                    DFTAuditIssue.fingerprint == fingerprint,
+                )
             )
-        )
         if existing is None:
             existing = DFTAuditIssue(
                 paper_id=paper_id,
@@ -118,23 +130,28 @@ class DFTAuditIssueService:
                 fingerprint=fingerprint,
                 resolution_note=resolution_note,
             )
-            try:
-                with self.session.begin_nested():
-                    self.session.add(existing)
-                    self.session.flush()
-            except IntegrityError:
-                winner = self.session.scalar(
-                    select(DFTAuditIssue).where(
-                        DFTAuditIssue.paper_id == paper_id,
-                        DFTAuditIssue.target_type == target_type,
-                        DFTAuditIssue.target_id == target_id,
-                        DFTAuditIssue.issue_type == issue_type,
-                        DFTAuditIssue.fingerprint == fingerprint,
+            if self._batch_issues is not None:
+                self.session.add(existing)
+                self.session.flush()
+                self._batch_issues[issue_key] = existing
+            else:
+                try:
+                    with self.session.begin_nested():
+                        self.session.add(existing)
+                        self.session.flush()
+                except IntegrityError:
+                    winner = self.session.scalar(
+                        select(DFTAuditIssue).where(
+                            DFTAuditIssue.paper_id == paper_id,
+                            DFTAuditIssue.target_type == target_type,
+                            DFTAuditIssue.target_id == target_id,
+                            DFTAuditIssue.issue_type == issue_type,
+                            DFTAuditIssue.fingerprint == fingerprint,
+                        )
                     )
-                )
-                if winner is None:
-                    raise
-                existing = winner
+                    if winner is None:
+                        raise
+                    existing = winner
         changed = False
         merged_identities = self._merged_list(existing.source_identities or [], source_identity)
         if merged_identities != (existing.source_identities or []):

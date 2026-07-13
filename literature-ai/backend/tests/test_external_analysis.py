@@ -16,6 +16,7 @@ from app.db.models import AuditLog, Base, CatalystSample, DFTAuditIssue, DFTResu
 from app.db.session import get_db_session
 from app.main import app
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
+from app.services.external_analysis_models import ExternalObjectReviewAuditModel
 from app.services.workflow_jobs import build_job_summary, serialize_job
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.verification_session_service import VerificationSessionService
@@ -80,6 +81,170 @@ def test_import_warning_decision_aliases_match_dft_queue_semantics():
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("revision") == "PROPOSED"
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("needs_user_decision") == "NEEDS_HUMAN"
     assert ExternalAnalysisService._normalize_dft_review_decision_for_warning("ambiguous") == "NEEDS_HUMAN"
+
+
+def test_external_object_review_audit_preserves_dft_import_contract_fields():
+    payload = {
+        "target_type": "dft_results",
+        "target_id": "new",
+        "temporary_id": "new-dft-001",
+        "field_name": "dft_results",
+        "decision": "new_candidate",
+        "evidence_ids": ["table:evidence-001"],
+        "dedupe_analysis": {
+            "compared_target_ids": ["existing-dft-001"],
+            "conclusion": "distinct",
+            "reason": "The material and reported value are different.",
+        },
+    }
+
+    dumped = ExternalObjectReviewAuditModel.model_validate(payload).model_dump(mode="json")
+
+    assert dumped["temporary_id"] == payload["temporary_id"]
+    assert dumped["evidence_ids"] == payload["evidence_ids"]
+    assert dumped["dedupe_analysis"] == payload["dedupe_analysis"]
+
+
+def _verification_requirement(evidence_id: str, paper_id: str, page: int) -> dict[str, Any]:
+    return {
+        "evidence_id": evidence_id,
+        "source_paper_id": paper_id,
+        "source_paper_code": "BTEST",
+        "source_record_id": f"record-{evidence_id}",
+        "item_type": "figure",
+        "page": page,
+        "source_document_type": "main_text",
+    }
+
+
+def _complete_local_verification(evidence_ids: list[str], paper_id: str, page: int) -> dict[str, Any]:
+    return {
+        "local_ai_verification": {
+            "verified_against_pdf": True,
+            "used_tools": ["get_codex_item", "read_paper_page"],
+            "checked_evidence_ids": evidence_ids,
+            "checked_pages": [{"paper_id": paper_id, "page": page}],
+            "verification_note": "Checked the stored layout and bundled source PDF page evidence.",
+        }
+    }
+
+
+def test_grouped_local_verification_results_can_cover_multiple_audits_independently():
+    paper_id = "paper-main"
+    shared = _verification_requirement("evidence-shared", paper_id, 6)
+    first = _complete_local_verification(["evidence-shared"], paper_id, 6)
+    second = _complete_local_verification(["evidence-shared"], paper_id, 6)
+
+    assert ExternalAnalysisService._local_ai_verification_failures(first, [shared]) == []
+    assert ExternalAnalysisService._local_ai_verification_failures(second, [shared]) == []
+
+    first_requirement = _verification_requirement("evidence-first", paper_id, 9)
+    second_requirement = _verification_requirement("evidence-second", paper_id, 9)
+    first_page_reuse = _complete_local_verification(["evidence-first"], paper_id, 9)
+    second_page_reuse = _complete_local_verification(["evidence-second"], paper_id, 9)
+    assert ExternalAnalysisService._local_ai_verification_failures(first_page_reuse, [first_requirement]) == []
+    assert ExternalAnalysisService._local_ai_verification_failures(second_page_reuse, [second_requirement]) == []
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_failure"),
+    [
+        (
+            lambda verification: verification.update({"verified_against_pdf": False}),
+            "verified_against_pdf_not_true",
+        ),
+        (
+            lambda verification: verification.update({"used_tools": ["get_codex_item"]}),
+            "required_tools_missing",
+        ),
+        (
+            lambda verification: verification.update({"checked_evidence_ids": ["evidence-one"]}),
+            "checked_evidence_ids_incomplete",
+        ),
+        (
+            lambda verification: verification.update(
+                {"checked_pages": [{"paper_id": "paper-si", "page": 6}]}
+            ),
+            "checked_pages_incomplete_or_wrong_source",
+        ),
+        (
+            lambda verification: verification.update(
+                {"checked_pages": [{"paper_id": "paper-main", "page": 7}]}
+            ),
+            "checked_pages_incomplete_or_wrong_source",
+        ),
+        (
+            lambda verification: verification.update({"verification_note": ""}),
+            "verification_note_required",
+        ),
+    ],
+)
+def test_local_verification_rejects_incomplete_or_wrong_server_coverage(mutate, expected_failure):
+    requirements = [
+        _verification_requirement("evidence-one", "paper-main", 6),
+        _verification_requirement("evidence-two", "paper-main", 6),
+    ]
+    payload = _complete_local_verification(["evidence-one", "evidence-two"], "paper-main", 6)
+    mutate(payload["local_ai_verification"])
+
+    failures = ExternalAnalysisService._local_ai_verification_failures(payload, requirements)
+
+    assert expected_failure in failures
+
+
+def test_main_and_si_equal_page_numbers_are_not_interchangeable():
+    requirement = _verification_requirement("si-evidence", "paper-si", 6)
+    payload = _complete_local_verification(["si-evidence"], "paper-main", 6)
+
+    failures = ExternalAnalysisService._local_ai_verification_failures(payload, [requirement])
+
+    assert "checked_pages_incomplete_or_wrong_source" in failures
+
+
+def test_legacy_per_audit_complete_verification_payload_remains_compatible_without_extra_forbid():
+    requirement = _verification_requirement("evidence-legacy", "paper-main", 4)
+    payload = {
+        "target_type": "dft_results",
+        "target_id": "new",
+        "temporary_id": "new-dft-legacy",
+        "field_name": "dft_results",
+        "decision": "new_candidate",
+        "evidence_ids": ["evidence-legacy"],
+        "required_evidence_checks": [requirement],
+        "local_ai_verification": {
+            "verified_against_pdf": True,
+            "tools_used": ["get_codex_item", "read_paper_page"],
+            "checked_evidence_ids": ["evidence-legacy"],
+            "checked_pages": [{"source_paper_id": "paper-main", "page": 4}],
+            "verification_note": "Legacy per-audit full check.",
+        },
+    }
+
+    model = ExternalObjectReviewAuditModel.model_validate(payload)
+
+    assert model.local_ai_verification == payload["local_ai_verification"]
+    assert ExternalAnalysisService._local_ai_verification_failures(payload, [requirement]) == []
+
+
+def test_object_review_key_distinguishes_temporary_ids_only_for_new_candidates():
+    base = {
+        "paper_id": "paper-001",
+        "target_type": "dft_results",
+        "target_id": "new",
+        "field_name": "dft_results",
+        "decision": "new_candidate",
+        "corrected_value": {"value": -1.23, "unit": "eV"},
+    }
+    first = {**base, "temporary_id": "new-dft-001"}
+    second = {**base, "temporary_id": "new-dft-002"}
+
+    assert ExternalAnalysisService._object_review_key(first) != ExternalAnalysisService._object_review_key(second)
+
+    existing_first = {**first, "target_id": "existing-dft-001"}
+    existing_second = {**second, "target_id": "existing-dft-001"}
+    assert ExternalAnalysisService._object_review_key(existing_first) == ExternalAnalysisService._object_review_key(
+        existing_second
+    )
 
 
 def test_external_analysis_extracts_json_from_surrounding_ai_text():

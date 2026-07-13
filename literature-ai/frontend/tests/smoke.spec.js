@@ -3159,7 +3159,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     page.on('dialog', async dialog => {
       expect(dialog.message()).toContain('整 run 操作');
-      expect(dialog.message()).toContain('不会自动变成人工 verified');
+      expect(dialog.message()).toContain('不会自动变成 verified');
       await dialog.accept();
     });
 
@@ -3167,6 +3167,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
     await page.click('.paper-row');
     await page.click('button[data-tab="review"]');
+    await expect.poll(() => page.evaluate(() => (state.externalRuns || []).length)).toBe(1);
 
     const rendered = await page.evaluate(() => renderCandidates('dft-run-1', state.externalRuns[0].candidates));
     expect(rendered).toContain('待按审核规则处理');
@@ -3245,6 +3246,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
     await page.click('.paper-row');
     await page.click('button[data-tab="review"]');
+    await expect.poll(() => page.evaluate(() => state.externalRuns.length)).toBeGreaterThan(0);
 
     const legacyTable = await page.evaluate(() => {
       const candidate = state.externalRuns[0].candidates.find(item => item.id === 'legacy-table-1');
@@ -3363,7 +3365,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#dftContent [data-role="dft-status-panel"]')).toHaveCount(1);
     await expect(page.locator('#dftContent')).not.toContainText('DFT 进度');
     await expect(page.locator('#dftContent')).toContainText('可导出 0');
-    await expect(page.locator('#dftContent')).toContainText('尚未完成审核');
+    await expect(page.locator('#dftContent')).toContainText('未完成');
     const dftActions = page.locator('#dftContent [data-role="dft-readiness-actions"]');
     await expect(dftActions).toHaveCount(1);
     await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toHaveCount(0);
@@ -3465,10 +3467,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect.poll(() => verifyPayload).not.toBeNull();
     expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
     expect(verifyPayload.reviewer).toBe('literature_library_dft');
-    await page.waitForFunction(() => {
-      const selectedPaper = window.state && window.state.selectedPaper;
-      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
-    });
     await page.locator('#dftContent [data-role="dft-sample-group"]').first().evaluate(group => group.setAttribute('open', ''));
     await expect(page.locator('#dftEditDialog')).toHaveCount(0);
     await page.evaluate(() => openDftEditDialog('dft-1'));
@@ -3487,10 +3485,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
     expect(Object.keys(manualUpdatePayload.updates)).toEqual(['value']);
     await expect(page.locator('#dftDetailDialog')).toBeHidden();
-    await page.waitForFunction(() => {
-      const selectedPaper = window.state && window.state.selectedPaper;
-      return selectedPaper && selectedPaper._detailMode === 'full' && !(window.state && window.state.fullDetailLoadingFor);
-    });
     const groupedDftNumbers = await page.evaluate(() => {
       const host = document.createElement('div');
       host.innerHTML = renderReadableCards('候选 DFT 数据', [
@@ -3503,10 +3497,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(groupedDftNumbers).toEqual(['DFT #1', 'DFT #2', 'DFT #3']);
 
       await page.click('button[data-tab="figures"]');
-      await expect(page.locator('#figuresContent button:has-text("复制审核提示")')).toHaveCount(1);
+      await expect(page.locator('#figuresContent button:has-text("复制图片说明核对提示")')).toHaveCount(1);
     });
 
     test('business flow: unbound DFT group can create and bind catalyst basic info', async ({ page }) => {
+      await page.unroute('**/api/**', mockApi);
       const detail = JSON.parse(JSON.stringify(PAPER_DETAIL));
       detail.catalyst_samples_items = [];
       detail.dft_results_items = [{
@@ -3518,7 +3513,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         unit: 'eV',
       }];
       let createPayload = null;
-      await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => jsonResponse(route, detail));
+      await page.route('**/api/papers/paper-1**', route => {
+        if (new URL(route.request().url()).pathname !== '/api/papers/paper-1') return route.fallback();
+        return jsonResponse(route, detail);
+      });
       await page.route(/\/api\/papers\/paper-1\/catalyst-samples\/from-dft-group$/, async route => {
         createPayload = JSON.parse(route.request().postData() || '{}');
         return jsonResponse(route, {
@@ -3529,24 +3527,28 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           created: true,
         });
       });
+      await page.route('**/api/**', route => {
+        const pathname = new URL(route.request().url()).pathname;
+        if (pathname === '/api/papers/paper-1') return jsonResponse(route, detail);
+        if (pathname === '/api/papers/paper-1/catalyst-samples/from-dft-group') {
+          createPayload = JSON.parse(route.request().postData() || '{}');
+          return jsonResponse(route, {
+            status: 'created_and_bound', paper_id: 'paper-1', catalyst_sample_id: 'created-sample-1',
+            bound_dft_result_ids: ['7eb977a3-45cb-4d5c-9704-b1f9fece76e2'], created: true,
+          });
+        }
+        return mockApi(route);
+      });
 
       await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
       await page.waitForTimeout(500);
       await page.click('.paper-row');
       await page.click('button[data-tab="dft"]');
-      await page.waitForFunction(() => {
-        const selectedPaper = window.state && window.state.selectedPaper;
-        const isFullDetail = selectedPaper && selectedPaper._detailMode === 'full';
-        const fullDetailIdle = !(window.state && window.state.fullDetailLoadingFor);
-        const createButton = Array.from(document.querySelectorAll('#dftContent [data-role="dft-sample-group"] button'))
-          .find(button => button.textContent && button.textContent.includes('补充基础信息'));
-        return isFullDetail && fullDetailIdle && createButton && createButton.offsetParent !== null;
-      });
-
       const group = page.locator('#dftContent [data-role="dft-sample-group"]').first();
       await expect(group).toContainText('基础信息待补');
       await expect(group).not.toContainText('待绑定样本');
-      await group.locator('summary').first().click();
+      await group.locator(':scope > summary').click();
+      await expect(group.locator('button:has-text("补充基础信息")')).toBeVisible();
       await group.locator('button:has-text("补充基础信息")').click();
       const form = group.locator('.dft-basic-info-form[data-mode="create"]');
       await expect(form).toBeVisible();
@@ -3761,14 +3763,14 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#dftContent button:has-text("刷新审核状态")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
-      await expect(page.locator('#dftContent')).toContainText('正式 DFT 任务请回审核中心按单篇文献复制提示词');
-      await expect(page.locator('#dftContent')).toContainText('一份证据合格的 AI 意见');
-      await expect(page.locator('#dftContent')).toContainText('page 和 quoted_text');
+      await expect(page.locator('#dftContent')).toContainText('打开审核中心');
+      await expect(page.locator('#dftContent')).toContainText('AI 已提修正');
+      await expect(page.locator('#dftContent')).toContainText('AI 确认字段');
       await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
 
       const cards = page.locator('#dftContent .dft-compact-card');
     await expect(cards.filter({ hasText: 'd_band_center' }).first()).toContainText('AI 确认字段');
-    await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('已采纳 AI 修正');
+    await expect(cards.filter({ hasText: 'charge_transfer' }).first()).toContainText('AI 已提修正');
     await expect(cards.filter({ hasText: 'free_energy' }).first()).toContainText('第二意见缺证据定位');
     await expect(page.locator('#dftContent button:has-text("取消入库")')).toHaveCount(0);
     const authoritativeAiDisplay = await page.evaluate(() => dftAiOpinionMeta({
@@ -3809,13 +3811,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         dft_workflow_label: '可导出',
       };
       return {
-        consensusCount: classified.consensus.length,
+        newReviewCount: classified.newReview.length,
         rejectedActions: renderDftDecisionActions(rejected, false),
         mlReadyActions: renderDftDecisionActions(mlReadyWithoutSafety, false),
         rejectedStatus: dftItemStatusMeta(rejected).label,
       };
     });
-    expect(submissionVoteBehavior.consensusCount).toBe(1);
+    expect(submissionVoteBehavior.newReviewCount).toBe(1);
     expect(submissionVoteBehavior.rejectedActions).toContain('修改数据');
     expect(submissionVoteBehavior.mlReadyActions).toContain('修改数据');
     expect(submissionVoteBehavior.rejectedActions).not.toContain('接受入库');
@@ -4636,7 +4638,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#pdfViewerOverlay')).toBeVisible();
     await page.evaluate(() => window.closePdfViewer && window.closePdfViewer());
 
-    await page.locator('#figuresContent summary button').first().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 
@@ -4721,7 +4722,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(cards.nth(1)).toContainText(/PDF 页码\s*5/);
     await expect(cards.nth(2)).toContainText(/PDF 页码\s*8/);
     await expect(cards.nth(1)).toContainText('当前没有可展示的裁图');
-    await expect(cards.nth(1)).toContainText('RAG 不合格');
+    await expect(cards.nth(1)).toContainText('Figure reliability: needs review');
     await expect(page.locator('#figuresContent .figure-missing-image')).toHaveCount(1);
   });
 
@@ -4762,7 +4763,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const figureCard = page.locator('#figuresContent details.figure-card').first();
     await expect(figureCard).toBeVisible();
-    await expect(figureCard.locator('summary')).toContainText('直接删除');
+    await expect(figureCard.locator(':scope > summary')).toContainText('直接删除');
     await figureCard.locator('button:has-text("直接删除")').click();
     await expect.poll(() => deletePayload).not.toBeNull();
     expect(deletePayload).toMatchObject({
@@ -4799,7 +4800,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const figureCard = page.locator('#figuresContent details.figure-card').first();
     await expect(figureCard).toBeVisible();
-    await expect(figureCard.locator('summary')).not.toContainText('直接删除');
+    await expect(figureCard.locator(':scope > summary')).not.toContainText('直接删除');
     await expect(figureCard.locator('button:has-text("直接删除")')).toHaveCount(0);
   });
 
@@ -4829,7 +4830,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(700);
 
     const figureCard = page.locator('#figuresContent details.figure-card').first();
-    await expect(figureCard.locator('summary')).toContainText('直接删除');
+    await expect(figureCard.locator(':scope > summary')).toContainText('直接删除');
     await expect(figureCard).toContainText('Legacy delete proposals still pending (1)');
   });
 
@@ -4909,7 +4910,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const prompt = await page.evaluate(() => canonicalIdePromptForSelectedPaper('dft'));
 
     expect(prompt).toContain('统一 DFT 提示词');
-    expect(prompt).toContain('单个 AI 不得最终确认 DFT');
+    expect(prompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
     expect(prompt).toContain('paper_id=paper-1');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
   });
@@ -4980,10 +4981,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    await expect(page.locator('#promptCopySelect option')).toHaveCount(5);
-    await expect(page.locator('#promptCopySelect option[value="main_figure"]')).toHaveText('主文图片审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="support_figure"]')).toHaveText('支撑文献图片审核提示词');
-    await expect(page.locator('#promptCopySelect option[value="table"]')).toHaveText('表格审核提示词');
+    await expect(page.locator('#promptCopySelect option')).toHaveCount(3);
+    await expect(page.locator('#promptCopySelect option[value="figure_table"]')).toHaveText('整篇主文+DFT相关SI图表审核提示词');
     await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 数据审核与入库提示词');
     await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveCount(0);
     await expect(page.locator('#promptCopySelect option[value="figure"]')).toHaveCount(0);
@@ -4993,18 +4992,13 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       selectedPaperIds.clear();
       selectedPaperIds.add(String(state.rows[0].paper_id));
       return {
-        mainFigure: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.main_figure),
-        table: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.table),
+        figureTable: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.figure_table),
         dft: await buildIdePromptForCopy(PROMPT_COPY_ACTIONS.dft),
       };
     });
 
-    expect(prompts.mainFigure).toContain('统一图片提示词');
-    expect(prompts.mainFigure).toContain('source_label=<agent_name>_main_figure_');
-    expect(prompts.mainFigure).toContain('只审核当前唯一主文献的图片');
-    expect(prompts.table).toContain('统一表格提示词');
-    expect(prompts.table).toContain('source_label=<agent_name>_table_');
-    expect(prompts.table).toContain('只审核当前唯一主文献及其已关联 SI 的表格');
+    expect(prompts.figureTable).toContain('source_label=<agent_name>_figure_table_');
+    expect(prompts.figureTable).toContain('一次审核该主文全部图表、与 DFT 明确相关或可能相关的 SI 图片');
     expect(prompts.dft).toContain('统一 DFT 提示词');
     expect(prompts.dft).toContain('source_label=<agent_name>_dft_');
     expect(prompts.dft).toContain('一份证据合格的 AI 意见即可通过受控入口');
@@ -5682,7 +5676,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     let detailRequests = 0;
     let listRequests = 0;
 
-    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+    await page.route('**/api/papers**', route => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname !== '/api/papers' && pathname !== '/api/papers/') return route.fallback();
       if (route.request().method() !== 'GET') {
         return route.fallback();
       }
@@ -5906,9 +5902,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test('business flow: literature library resolves paper code to UUID before supplementary upload', async ({ page }) => {
+    await page.unroute('**/api/**', mockApi);
     let uploadPath = '';
 
-    await page.route(/\/api\/papers\/?(?:\?.*)?$/, route => {
+    await page.route('**/api/papers**', route => {
+      if (new URL(route.request().url()).pathname !== '/api/papers') return route.fallback();
       if (route.request().method() !== 'GET') {
         return route.fallback();
       }
@@ -5955,6 +5953,41 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           title: 'Supporting Information for Main Paper Resolved From Code',
           status: 'completed'
         }
+      });
+    });
+    await page.route('**/api/**', route => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/api/papers/libraries' || pathname === '/api/libraries') {
+        return jsonResponse(route, [{ name: 'Default Library', is_active: true, paper_count: 1 }]);
+      }
+      if ((pathname === '/api/papers' || pathname === '/api/papers/') && route.request().method() === 'GET') {
+        return jsonResponse(route, [{
+          id: 'paper-uuid-1', paper_id: 'paper-uuid-1', title: 'Main Paper Resolved From Code',
+          doi: '10.1000/main-resolved', year: 2025, journal: 'Journal of Testing', paper_type: 'B',
+          paper_code: 'B0095', library_name: 'Default Library', pdf_path: 'main.pdf', oa_status: 'uploaded',
+          counts: { sections: 8, figures: 2, dft_results: 1, writing_cards: 1 },
+        }]);
+      }
+      if (pathname === '/api/papers/paper-uuid-1' || pathname === '/api/papers/paper-uuid-1/') {
+        const detail = cloneJson(PAPER_DETAIL);
+        Object.assign(detail, {
+          id: 'paper-uuid-1', paper_id: 'paper-uuid-1', title: 'Main Paper Resolved From Code',
+          doi: '10.1000/main-resolved', paper_type: 'B', paper_code: 'B0095', library_name: 'Default Library',
+          outgoing_relationships: [], incoming_relationships: [],
+        });
+        return jsonResponse(route, detail);
+      }
+      if (pathname === '/api/papers/paper-uuid-1/supplementary/upload/jobs') {
+        uploadPath = pathname;
+        return jsonResponse(route, { job_id: 'si-upload-job-uuid', status: 'queued' });
+      }
+      if (pathname === '/api/jobs/si-upload-job-uuid') {
+        return jsonResponse(route, { job_id: 'si-upload-job-uuid', status: 'completed', result: { paper_id: 'paper-si-uuid-1', title: 'SI', status: 'completed' } });
+      }
+      return route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({ detail: `Unhandled test route: ${route.request().method()} ${pathname}` }),
       });
     });
 

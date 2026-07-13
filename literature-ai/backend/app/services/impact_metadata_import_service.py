@@ -6,7 +6,6 @@ import io
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +22,7 @@ from app.db.models import (
     PaperCitationEligibility,
     PaperImpactMetadata,
     PaperRelationship,
+    utcnow,
 )
 
 
@@ -433,14 +433,14 @@ class ImpactMetadataImportService:
                     source_name=item.impact_factor_source,
                     source_url=item.source_url,
                     source_snapshot_hash=source_snapshot_hash,
-                    retrieved_at=datetime.utcnow(),
+                    retrieved_at=utcnow(),
                 )
             )
             return True
         metric.metric_value = item.impact_factor
         metric.source_url = item.source_url or metric.source_url
         metric.source_snapshot_hash = source_snapshot_hash
-        metric.retrieved_at = datetime.utcnow()
+        metric.retrieved_at = utcnow()
         return False
 
     def _needs_metadata_remaining(self, *, pending_paper_ids: set[UUID], library_name: str | None) -> int:

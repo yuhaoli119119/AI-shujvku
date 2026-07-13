@@ -17,7 +17,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import Paper, PaperSection, ParseJob, WorkflowJob
+from app.db.models import Paper, PaperSection, ParseJob, WorkflowJob, utcnow
 from app.db.session import session_scope
 from app.schemas.api import (
     AIWorkflowFailedItemResponse,
@@ -99,7 +99,7 @@ def expire_stale_activity(
     workflow_minutes: int = STALE_WORKFLOW_JOB_MINUTES,
     parse_minutes: int = STALE_PARSE_JOB_MINUTES,
 ) -> dict[str, int]:
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     workflow_cutoff = now - timedelta(minutes=max(1, workflow_minutes))
     parse_cutoff = now - timedelta(minutes=max(1, parse_minutes))
     expired_workflow = 0
@@ -634,7 +634,7 @@ def update_job(
         job.result = result
     if error is not None or status == "completed":
         job.error = error
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utcnow()
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -669,7 +669,7 @@ def cancel_job(session: Session, job_id: str) -> WorkflowJob:
             "cancel_mode": "soft",
         },
     )
-    job.updated_at = datetime.utcnow()
+    job.updated_at = utcnow()
     session.add(job)
     session.commit()
     session.refresh(job)

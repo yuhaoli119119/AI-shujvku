@@ -12,6 +12,7 @@ from app.services.dft_rescan_policy import (
     normalize_source_document_type,
     normalize_unit,
 )
+from app.services.manual_review_progress import normalize_manual_review_progress
 from app.services.supplementary_dft_lifecycle_service import (
     CLOSED_SUPPORT_DFT_LIFECYCLE_STATUSES,
     OPEN_SUPPORT_DFT_LIFECYCLE_STATUSES,
@@ -32,6 +33,8 @@ FINALIZED_DFT_CANDIDATE_STATUSES = {
 
 class PaperWorkbenchReviewCenterMixin:
     """Helper methods used by the paper review-center summary."""
+
+    _manual_review_progress = staticmethod(normalize_manual_review_progress)
 
     @staticmethod
     def _is_active_dft_candidate(status: Any) -> bool:
@@ -302,31 +305,6 @@ class PaperWorkbenchReviewCenterMixin:
             ),
             reverse=True,
         )
-
-    @staticmethod
-    def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-        source = data if isinstance(data, dict) else {}
-        progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
-
-        def normalize_entry(module: str) -> dict[str, Any]:
-            raw = progress.get(module)
-            if isinstance(raw, dict):
-                return {
-                    "completed": bool(raw.get("completed")),
-                    "updated_at": raw.get("updated_at"),
-                    "updated_by": raw.get("updated_by"),
-                }
-            return {
-                "completed": bool(raw),
-                "updated_at": None,
-                "updated_by": None,
-            }
-
-        return {
-            "content": normalize_entry("content"),
-            "figures": normalize_entry("figures"),
-            "dft": normalize_entry("dft"),
-        }
 
     @staticmethod
     def _lightweight_dft_audit(

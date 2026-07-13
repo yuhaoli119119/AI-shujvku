@@ -729,6 +729,107 @@ CREATE TABLE evidence_locators (
 	FOREIGN KEY(table_id) REFERENCES paper_tables (id) ON DELETE SET NULL
 );
 
+
+CREATE TABLE dft_audit_issues (
+	id UUID NOT NULL,
+	paper_id UUID NOT NULL,
+	target_type VARCHAR(64) NOT NULL,
+	target_id VARCHAR(64),
+	issue_type VARCHAR(64) NOT NULL,
+	severity VARCHAR(16) NOT NULL,
+	status VARCHAR(32) NOT NULL,
+	current_snapshot JSONB,
+	suggested_value JSONB,
+	suggested_dft JSONB,
+	evidence_payload JSONB,
+	source_identities JSONB NOT NULL,
+	source_candidate_ids JSONB NOT NULL,
+	fingerprint VARCHAR(128) NOT NULL,
+	resolution_note TEXT,
+	resolved_by VARCHAR(128),
+	resolved_at TIMESTAMP WITHOUT TIME ZONE,
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_dft_audit_issue_identity UNIQUE (paper_id, target_type, target_id, issue_type, fingerprint),
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE content_evidence_items (
+	id UUID NOT NULL,
+	paper_id UUID NOT NULL,
+	run_id UUID,
+	category VARCHAR(64) NOT NULL,
+	source_type VARCHAR(64) NOT NULL,
+	source_id VARCHAR(96) NOT NULL,
+	source_record JSONB,
+	content TEXT NOT NULL,
+	evidence_text TEXT,
+	evidence_locator JSONB,
+	page_start INTEGER,
+	page_end INTEGER,
+	section_title TEXT,
+	review_status VARCHAR(32) NOT NULL,
+	citation_status VARCHAR(32) NOT NULL,
+	risk_flags JSONB NOT NULL,
+	source_identity VARCHAR(160),
+	source_identity_verified BOOLEAN DEFAULT false NOT NULL,
+	reviewer VARCHAR(128),
+	reviewed_at TIMESTAMP WITHOUT TIME ZONE,
+	snapshot_fingerprint VARCHAR(64),
+	embedding vector(1024),
+	embedding_model VARCHAR(128),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_content_evidence_source UNIQUE (source_type, source_id),
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE,
+	FOREIGN KEY(run_id) REFERENCES external_analysis_runs (id) ON DELETE SET NULL
+);
+
+
+CREATE TABLE content_review_bundles (
+	id UUID NOT NULL,
+	paper_id UUID NOT NULL,
+	run_id UUID,
+	bundle_type VARCHAR(64) NOT NULL,
+	snapshot_fingerprint VARCHAR(64) NOT NULL,
+	manifest JSONB NOT NULL,
+	result_payload JSONB,
+	status VARCHAR(32) NOT NULL,
+	created_by VARCHAR(128),
+	created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE,
+	FOREIGN KEY(run_id) REFERENCES external_analysis_runs (id) ON DELETE SET NULL
+);
+
+CREATE INDEX ix_dft_audit_issues_paper_id ON dft_audit_issues (paper_id);
+CREATE INDEX ix_dft_audit_issues_target_type ON dft_audit_issues (target_type);
+CREATE INDEX ix_dft_audit_issues_target_id ON dft_audit_issues (target_id);
+CREATE INDEX ix_dft_audit_issues_issue_type ON dft_audit_issues (issue_type);
+CREATE INDEX ix_dft_audit_issues_severity ON dft_audit_issues (severity);
+CREATE INDEX ix_dft_audit_issues_status ON dft_audit_issues (status);
+CREATE INDEX ix_dft_audit_issues_fingerprint ON dft_audit_issues (fingerprint);
+
+CREATE INDEX ix_content_evidence_items_paper_id ON content_evidence_items (paper_id);
+CREATE INDEX ix_content_evidence_items_run_id ON content_evidence_items (run_id);
+CREATE INDEX ix_content_evidence_items_category ON content_evidence_items (category);
+CREATE INDEX ix_content_evidence_items_source_type ON content_evidence_items (source_type);
+CREATE INDEX ix_content_evidence_items_source_id ON content_evidence_items (source_id);
+CREATE INDEX ix_content_evidence_items_review_status ON content_evidence_items (review_status);
+CREATE INDEX ix_content_evidence_items_citation_status ON content_evidence_items (citation_status);
+CREATE INDEX ix_content_evidence_items_snapshot_fingerprint ON content_evidence_items (snapshot_fingerprint);
+CREATE INDEX ix_content_evidence_scope ON content_evidence_items (paper_id, category, review_status);
+CREATE INDEX ix_content_evidence_citation ON content_evidence_items (citation_status, review_status);
+
+CREATE INDEX ix_content_review_bundles_paper_id ON content_review_bundles (paper_id);
+CREATE INDEX ix_content_review_bundles_run_id ON content_review_bundles (run_id);
+CREATE INDEX ix_content_review_bundles_snapshot_fingerprint ON content_review_bundles (snapshot_fingerprint);
+CREATE INDEX ix_content_review_bundles_status ON content_review_bundles (status);
+
 CREATE INDEX ix_literature_intake_sessions_status ON literature_intake_sessions (status);
 CREATE INDEX ix_literature_intake_sessions_library_name ON literature_intake_sessions (library_name);
 

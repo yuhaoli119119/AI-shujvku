@@ -578,12 +578,38 @@ def test_offline_review_validation_returns_import_request_without_writing(setup_
     assert payload["valid"] is True
     assert payload["validated_audit_count"] == 1
     assert payload["safety"]["writes_database"] is False
+    assert "may reuse one successful tool result" in payload["safety"]["next_step"]
+    assert payload["local_ai_writeback_contract"]["reuse_policy"][
+        "per_audit_coverage_record_still_required"
+    ] is True
     request = payload["import_analysis_request"]
     assert request["source"] == "local_ai"
     assert request["raw_payload"]["review_metadata"]["local_ai_verification_required"] is True
-    assert request["raw_payload"]["object_review_audits"][0]["writes_final_truth"] is False
-    assert request["raw_payload"]["object_review_audits"][0]["local_ai_verification"]["verified_against_pdf"] is False
-    assert request["raw_payload"]["object_review_audits"][0]["evidence_location"]["evidence_ids"]
+    normalized_audit = request["raw_payload"]["object_review_audits"][0]
+    assert normalized_audit["writes_final_truth"] is False
+    assert normalized_audit["local_ai_verification"]["verified_against_pdf"] is False
+    assert normalized_audit["evidence_location"]["evidence_ids"]
+    assert normalized_audit["required_evidence_checks"] == [
+        {
+            "evidence_id": evidence_lines[0]["evidence_id"],
+            "source_paper_id": str(paper_id),
+            "source_paper_code": "B0078",
+            "source_record_id": str(row_id),
+            "item_type": "dft_result",
+            "page": 6,
+            "source_document_type": "main_text",
+        }
+    ]
+    assert normalized_audit["required_page_checks"] == [
+        {
+            "source_paper_id": str(paper_id),
+            "source_paper_code": "B0078",
+            "page": 6,
+            "source_document_type": "main_text",
+        }
+    ]
+    assert request["raw_payload"]["local_ai_verification_plan"]["evidence_check_count"] == 1
+    assert request["raw_payload"]["local_ai_verification_plan"]["page_check_count"] == 1
 
     with Session(setup_test_db) as session:
         assert session.query(ExternalAnalysisRun).count() == 0
@@ -628,6 +654,57 @@ def _completed_dft_template(service, paper_id, row_id):
         }],
     })
     return template
+
+
+def test_validation_emits_executable_checks_for_every_cited_evidence(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_id)
+        evidence_items = [
+            next(
+                item
+                for item in materials["evidence_map"].values()
+                if item.get("source_record_type") == "paper_section"
+                and item.get("source_paper_id") == str(paper_id)
+            ),
+            next(item for item in materials["evidence_map"].values() if item.get("evidence_kind") == "figure"),
+            next(item for item in materials["evidence_map"].values() if item.get("evidence_kind") == "table"),
+        ]
+        template = service._return_template(materials)
+        template.update(
+            {
+                "overall_status": "uncertain",
+                "object_review_audits": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": str(row_id),
+                        "field_name": "dft_results",
+                        "decision": "PASS",
+                        "evidence_checked": True,
+                        "evidence_ids": [item["evidence_id"] for item in evidence_items],
+                        "reason": "All cited evidence objects are covered explicitly.",
+                    }
+                ],
+            }
+        )
+
+        result = service.validate_result(paper_id, template)
+
+    assert result["valid"] is True, result["errors"]
+    audit = result["import_analysis_request"]["raw_payload"]["object_review_audits"][0]
+    requirements = {item["evidence_id"]: item for item in audit["required_evidence_checks"]}
+    assert set(requirements) == {item["evidence_id"] for item in evidence_items}
+    assert {item["item_type"] for item in requirements.values()} == {"section", "figure", "table"}
+    assert all(item["source_record_id"] not in {"new", ""} for item in requirements.values())
+    assert all(item["source_paper_id"] and item["source_paper_code"] for item in requirements.values())
+    assert all(isinstance(item["page"], int) for item in requirements.values())
+    si_requirement = next(
+        item for item in requirements.values() if item["source_document_type"] == "supplementary_information"
+    )
+    assert si_requirement["source_paper_code"] == "B0078-SI1"
 
 
 def test_comprehensive_review_rejects_missing_main_or_si_pdf_and_accepts_full_inventory(setup_test_db):
@@ -812,6 +889,117 @@ def test_offline_review_validation_allows_multiple_new_dft_candidates_with_tempo
     audits = result["import_analysis_request"]["raw_payload"]["object_review_audits"]
     new_audits = [audit for audit in audits if audit["target_id"] == "new"]
     assert {audit["temporary_id"] for audit in new_audits} == {"new-dft-001", "new-dft-002"}
+
+
+def test_local_verification_plan_deduplicates_evidence_and_paper_page_keys(setup_test_db):
+    paper_id, row_id = _seed_review_materials(setup_test_db)
+    figure_root = get_settings().storage_paths["figures"]
+    Image.new("RGB", (120, 80), "white").save(figure_root / "same-page-main.png", format="PNG")
+    Image.new("RGB", (120, 80), "gray").save(figure_root / "same-page-si.png", format="PNG")
+    with Session(setup_test_db) as session:
+        si = session.scalars(select(Paper).where(Paper.paper_code == "B0078-SI1")).one()
+        main_second = PaperFigure(
+            paper_id=paper_id,
+            figure_label="Figure 5",
+            caption="Figure 5. Work-function descriptor from DFT.",
+            figure_role="dft_calculation",
+            content_summary="The plotted vacuum-level offset identifies a separate surface descriptor.",
+            key_elements=["vacuum level", "surface work function"],
+            image_path="same-page-main.png",
+            page=6,
+        )
+        si_same_page = PaperFigure(
+            paper_id=si.id,
+            figure_label="Figure S5",
+            caption="Figure S5. Magnetic descriptor from DFT.",
+            figure_role="dft_calculation",
+            content_summary="Spin-resolved states provide a separate supplementary magnetic quantity.",
+            key_elements=["spin density", "magnetic moment"],
+            image_path="same-page-si.png",
+            page=6,
+        )
+        session.add_all([main_second, si_same_page])
+        session.commit()
+        main_second_id = str(main_second.id)
+        si_same_page_id = str(si_same_page.id)
+        si_id = str(si.id)
+
+    _mark_figure_table_review_completed(setup_test_db, paper_id)
+    with Session(setup_test_db) as session:
+        service = DFTReviewBundleService(session, get_settings())
+        materials = service._build_materials(paper_id)
+        by_record_id = {
+            str(item.get("source_record_id")): item
+            for item in materials["evidence_map"].values()
+            if item.get("source_record_id")
+        }
+        shared = next(
+            item
+            for item in materials["evidence_map"].values()
+            if item.get("evidence_kind") == "figure" and item.get("source_paper_id") == str(paper_id)
+            and str(item.get("source_record_id")) not in {main_second_id}
+        )
+        main_same_page = by_record_id[main_second_id]
+        si_same_page = by_record_id[si_same_page_id]
+        template = service._return_template(materials)
+        audits = [
+            {
+                "target_type": "dft_results",
+                "target_id": str(row_id),
+                "field_name": "dft_results",
+                "decision": "PASS",
+                "evidence_checked": True,
+                "evidence_ids": [shared["evidence_id"]],
+                "reason": "Existing candidate coverage.",
+            }
+        ]
+        for index, (evidence, property_type) in enumerate(
+            (
+                (shared, "shared_evidence_descriptor"),
+                (main_same_page, "same_main_page_descriptor"),
+                (si_same_page, "same_number_si_page_descriptor"),
+            ),
+            start=1,
+        ):
+            audits.append(
+                {
+                    "target_type": "dft_results",
+                    "target_id": "new",
+                    "temporary_id": f"new-dft-grouped-{index}",
+                    "field_name": "dft_results",
+                    "decision": "new_candidate",
+                    "evidence_checked": True,
+                    "evidence_ids": [evidence["evidence_id"]],
+                    "corrected_value": {
+                        "material_identity": "Fe-N-C",
+                        "property_type": property_type,
+                        "value": float(index),
+                        "unit": "eV",
+                    },
+                    "reason": "Distinct grouped-verification fixture.",
+                }
+            )
+        template.update({"overall_status": "uncertain", "object_review_audits": audits})
+
+        result = service.validate_result(paper_id, template)
+
+    assert result["valid"] is True, result["errors"]
+    raw_payload = result["import_analysis_request"]["raw_payload"]
+    plan = raw_payload["local_ai_verification_plan"]
+    assert plan["evidence_check_count"] == 3
+    assert plan["page_check_count"] == 2
+    assert {
+        (item["source_paper_id"], item["page"])
+        for item in plan["unique_page_checks"]
+    } == {(str(paper_id), 6), (si_id, 6)}
+    normalized_audits = raw_payload["object_review_audits"]
+    shared_requirements = [
+        audit["required_evidence_checks"]
+        for audit in normalized_audits
+        if audit["evidence_ids"] == [shared["evidence_id"]]
+    ]
+    assert len(shared_requirements) == 2
+    assert shared_requirements[0] == shared_requirements[1]
 
 
 def test_offline_review_existing_dft_uses_locator_pdf_anchor_when_payload_has_no_page(setup_test_db):
@@ -1474,6 +1662,24 @@ def test_gap_discovery_exports_terminal_context_and_rejects_duplicate_or_unrevie
     assert duplicate_response.status_code == 200
     assert any(item["code"] == "duplicate_existing_terminal_candidate" for item in duplicate_response.json()["errors"])
 
+    missing_dedupe = dict(template)
+    missing_dedupe.update({"overall_status": "completed", "object_review_audits": [{
+        "target_type": "dft_results", "target_id": "new", "temporary_id": "new-dft-missing-dedupe",
+        "field_name": "dft_results", "decision": "new_candidate", "evidence_checked": True,
+        "evidence_ids": [reviewed_id],
+        "corrected_value": {"material_identity": "Co-N-C", "property_type": "formation_energy", "value": -0.2, "unit": "eV", "adsorbate": "Li2S"},
+        "reason": "Distinct proposal without the required explicit terminal-context comparison.", "blocking_errors": [],
+    }]})
+    missing_dedupe_response = client.post(
+        f"/api/papers/{paper_id}/dft-review-result/validate",
+        json=missing_dedupe,
+    )
+    assert missing_dedupe_response.status_code == 200
+    assert any(
+        item["code"] == "terminal_context_dedupe_analysis_required"
+        for item in missing_dedupe_response.json()["errors"]
+    )
+
     unreviewed = dict(template)
     unreviewed.update({"overall_status": "completed", "object_review_audits": [{
         "target_type": "dft_results", "target_id": "new", "temporary_id": "new-dft-002",
@@ -1539,6 +1745,13 @@ def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup
         "verified_against_pdf": True,
         "used_tools": ["get_codex_item", "read_paper_page"],
         "checked_evidence_ids": [evidence_id],
+        "checked_pages": [
+            {
+                "paper_id": audit["required_evidence_checks"][0]["source_paper_id"],
+                "page": audit["required_evidence_checks"][0]["page"],
+            }
+        ],
+        "verification_note": "Checked the stored page layout and the bundled source PDF evidence.",
     }
     applied = client.post("/api/external-analysis/import", json=request)
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -37,7 +38,14 @@ class VerificationSessionDFTCandidateMixin:
         candidate_run_id: UUID | None = None,
     ) -> dict[str, Any]:
         stmt = (
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            select(
+                ExternalAnalysisCandidate,
+                ExternalAnalysisRun.id,
+                ExternalAnalysisRun.source,
+                ExternalAnalysisRun.source_label,
+                ExternalAnalysisRun.source_identity,
+                ExternalAnalysisRun.source_identity_verified,
+            )
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
@@ -49,14 +57,36 @@ class VerificationSessionDFTCandidateMixin:
         if candidate_run_id is not None:
             stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
         rows = self.session.execute(stmt).all()
-        existing_by_signature = self._existing_new_dft_signatures(paper_id)
-        existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(paper_id)
-        existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(paper_id)
+        existing_dft_rows = self.session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == paper_id)
+        ).all()
+        existing_by_signature = self._existing_new_dft_signatures(paper_id, rows=existing_dft_rows)
+        existing_by_semantic_signature = self._existing_new_dft_semantic_signatures(
+            paper_id,
+            rows=existing_dft_rows,
+        )
+        existing_by_method_step_signature = self._existing_new_dft_method_step_signatures(
+            paper_id,
+            rows=existing_dft_rows,
+        )
+        existing_by_identity = {
+            str(row.candidate_identity): row
+            for row in existing_dft_rows
+            if str(row.candidate_identity or "").strip()
+        }
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         issue_service = DFTAuditIssueService(self.session)
+        issue_service.begin_import_batch(paper_id=paper_id)
         material_binding_service = DFTMaterialBindingService(self.session)
-        for candidate, run in rows:
+        for candidate, run_id, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
+            run = SimpleNamespace(
+                id=run_id,
+                source=run_source,
+                source_label=run_source_label,
+                source_identity=run_source_identity,
+                source_identity_verified=run_source_identity_verified,
+            )
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             decision = str(payload.get("decision") or "").strip().lower()
@@ -103,6 +133,7 @@ class VerificationSessionDFTCandidateMixin:
                     paper_id=paper_id,
                     candidate_item=candidate_item,
                     source_label=run.source_label or run.source or reviewer,
+                    existing_by_identity=existing_by_identity,
                 )
                 existing_by_signature[signature] = existing
                 semantic_signature = self._new_dft_semantic_signature(candidate_item)
@@ -344,14 +375,17 @@ class VerificationSessionDFTCandidateMixin:
         paper_id: UUID,
         candidate_item: dict[str, Any],
         source_label: str,
+        existing_by_identity: dict[str, DFTResult] | None = None,
     ) -> DFTResult:
         identity = self._new_dft_identity(candidate_item["signature"])
-        existing = self.session.scalar(
-            select(DFTResult).where(
-                DFTResult.paper_id == paper_id,
-                DFTResult.candidate_identity == identity,
+        existing = existing_by_identity.get(identity) if existing_by_identity is not None else None
+        if existing_by_identity is None:
+            existing = self.session.scalar(
+                select(DFTResult).where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.candidate_identity == identity,
+                )
             )
-        )
         if existing is not None:
             return existing
         row = DFTResult(
@@ -359,8 +393,8 @@ class VerificationSessionDFTCandidateMixin:
             adsorbate=candidate_item["adsorbate"],
             property_type=candidate_item["property_type"],
             value=candidate_item["value"],
-            value_upper=candidate_item["value_upper"],
-            value_kind=candidate_item["value_kind"],
+            value_upper=candidate_item.get("value_upper"),
+            value_kind=candidate_item.get("value_kind"),
             unit=candidate_item["unit"],
             reaction_step=candidate_item["reaction_step"],
             source_section=candidate_item["source_section"],
@@ -372,20 +406,25 @@ class VerificationSessionDFTCandidateMixin:
             extraction_protocol_version="ide_ai_new_candidate_v1",
             candidate_identity=identity,
         )
-        try:
-            with self.session.begin_nested():
-                self.session.add(row)
-                self.session.flush()
-        except IntegrityError:
-            winner = self.session.scalar(
-                select(DFTResult).where(
-                    DFTResult.paper_id == paper_id,
-                    DFTResult.candidate_identity == identity,
+        if existing_by_identity is not None:
+            self.session.add(row)
+            self.session.flush()
+            existing_by_identity[identity] = row
+        else:
+            try:
+                with self.session.begin_nested():
+                    self.session.add(row)
+                    self.session.flush()
+            except IntegrityError:
+                winner = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.candidate_identity == identity,
+                    )
                 )
-            )
-            if winner is None:
-                raise
-            return winner
+                if winner is None:
+                    raise
+                return winner
         self._upsert_new_dft_locator(row, candidate_item["evidence_payload"], source_label=source_label)
         return row
 
@@ -424,8 +463,14 @@ class VerificationSessionDFTCandidateMixin:
         )
         self.session.add(locator)
 
-    def _existing_new_dft_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], DFTResult]:
-        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+    def _existing_new_dft_signatures(
+        self,
+        paper_id: UUID,
+        *,
+        rows: list[DFTResult] | None = None,
+    ) -> dict[tuple[str, ...], DFTResult]:
+        if rows is None:
+            rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
         signatures: dict[tuple[str, ...], DFTResult] = {}
         for row in rows:
             evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
@@ -451,8 +496,14 @@ class VerificationSessionDFTCandidateMixin:
             signatures.setdefault(signature, row)
         return signatures
 
-    def _existing_new_dft_semantic_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], list[DFTResult]]:
-        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+    def _existing_new_dft_semantic_signatures(
+        self,
+        paper_id: UUID,
+        *,
+        rows: list[DFTResult] | None = None,
+    ) -> dict[tuple[str, ...], list[DFTResult]]:
+        if rows is None:
+            rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
         signatures: dict[tuple[str, ...], list[DFTResult]] = defaultdict(list)
         for row in rows:
             evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
@@ -479,8 +530,14 @@ class VerificationSessionDFTCandidateMixin:
             signatures[signature].append(row)
         return signatures
 
-    def _existing_new_dft_method_step_signatures(self, paper_id: UUID) -> dict[tuple[str, ...], list[DFTResult]]:
-        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+    def _existing_new_dft_method_step_signatures(
+        self,
+        paper_id: UUID,
+        *,
+        rows: list[DFTResult] | None = None,
+    ) -> dict[tuple[str, ...], list[DFTResult]]:
+        if rows is None:
+            rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
         signatures: dict[tuple[str, ...], list[DFTResult]] = defaultdict(list)
         for row in rows:
             evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}

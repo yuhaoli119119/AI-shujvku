@@ -204,8 +204,8 @@ def test_paper_detail_dft_item_exposes_converged_status_for_exportable_historica
 
             assert detail is not None
             payload = detail.dft_results_items[0]
-            assert payload.ai_review_display_status == "reject_suggested"
-            assert payload.ai_review_display_label == "AI 建议拒绝"
+            assert payload.ai_review_display_status == "exportable_with_historical_reject"
+            assert payload.ai_review_display_label == "AI 意见已收敛"
     finally:
         engine.dispose()
 

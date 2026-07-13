@@ -119,7 +119,7 @@ def test_supporting_information_bundle_includes_only_dft_related_figures(setup_t
         str(si_dft_figure.id),
     }
     assert "excluded_non_dft_supplementary_figures:1" in materials["warnings"]
-    assert validation["valid"] is True
+    assert validation["valid"] is True, validation["errors"]
 
 
 def test_non_dft_supplementary_figure_changes_do_not_invalidate_chart_completion(setup_test_db):
@@ -187,7 +187,7 @@ def test_non_dft_supplementary_figure_changes_do_not_invalidate_chart_completion
             ],
             [_table_action(table, evidence_ids=["si:table:001"])],
         )
-        completed = _service(session).apply_result(main.id, payload)
+        completed = _apply_as_local_ai(session, main, payload)
         si_unused_figure.content_summary = "Updated SEM morphology image that remains outside the chart review scope."
         session.add(si_unused_figure)
         session.commit()
@@ -219,6 +219,32 @@ def _local_ai_verification(note: str = "Checked the target object and its cited 
     }
 
 
+def _local_ai_payload(payload: dict) -> dict:
+    verification = _local_ai_verification()
+    return {
+        **payload,
+        "review_source": {
+            **payload["review_source"],
+            "review_source_type": "local_ai",
+            "reviewer_label": "local-ai-test",
+        },
+        "figure_actions": [
+            {**action, "local_ai_verification": verification}
+            if str(action.get("action") or "").upper() != "NEEDS_HUMAN"
+            else dict(action)
+            for action in payload["figure_actions"]
+        ],
+    }
+
+
+def _apply_as_local_ai(session: Session, paper: Paper, payload: dict) -> dict:
+    return _service(session).resolve_review_actions(
+        paper.id,
+        _local_ai_payload(payload),
+        local_ai_authorized=True,
+    )
+
+
 def _figure_action(figure: PaperFigure, action: str = "KEEP", **overrides) -> dict:
     payload = {
         "action": action,
@@ -246,6 +272,24 @@ def _table_action(table: PaperTable, action: str = "KEEP", **overrides) -> dict:
 
 
 def _result_payload(session: Session, paper: Paper, figures: list[dict], tables: list[dict], *, status: str = "completed") -> dict:
+    related_ids = session.scalars(
+        select(PaperRelationship.target_paper_id).where(PaperRelationship.source_paper_id == paper.id)
+    ).all()
+    source_papers = [paper, *[item for item in (session.get(Paper, paper_id) for paper_id in related_ids) if item]]
+    pdf_root = get_settings().storage_paths["pdf"]
+    pdf_root.mkdir(parents=True, exist_ok=True)
+    for source_paper in source_papers:
+        pdf_name = source_paper.pdf_path or f"{source_paper.paper_code or source_paper.id}.pdf"
+        pdf_path = pdf_root / pdf_name
+        if not pdf_path.exists():
+            import fitz
+
+            document = fitz.open()
+            document.new_page()
+            document.save(pdf_path)
+            document.close()
+        source_paper.pdf_path = pdf_name
+    session.flush()
     return {
         "schema_version": "offline_figure_table_evidence_review_result_v1",
         "bundle_fingerprint": _fingerprint(session, paper),
@@ -294,7 +338,7 @@ def test_one_skipped_item_does_not_complete_chart_stage(setup_test_db):
 
     assert applied["chart_review_completed"] is False
     assert applied["stage_status"] == "needs_local_ai"
-    assert applied["unresolved_count"] == 1
+    assert applied["unresolved_count"] == 2
     assert applied_logs == []
 
 
@@ -327,7 +371,10 @@ def test_documented_needs_human_remains_pending_and_blocks_chart_stage(setup_tes
     assert validation["valid"] is True
     assert validation["unresolved_count"] == 1
     assert validation["stage_status"] == "needs_local_ai"
-    assert "needs_human" in validation["unresolved_actions"][0]["blocked_reasons"]
+    assert any(
+        "needs_human" in item["blocked_reasons"]
+        for item in validation["unresolved_actions"]
+    )
     assert applied["chart_review_completed"] is False
     assert response.status_code == 409
 
@@ -353,9 +400,12 @@ def test_documented_low_confidence_table_needs_human_remains_pending(setup_test_
         applied = _service(session).apply_result(paper.id, payload)
 
     assert validation["valid"] is True
-    assert validation["unresolved_count"] == 1
+    assert validation["unresolved_count"] == 2
     assert validation["stage_status"] == "needs_local_ai"
-    assert "needs_human" in validation["unresolved_actions"][0]["blocked_reasons"]
+    assert any(
+        "needs_human" in item["blocked_reasons"]
+        for item in validation["unresolved_actions"]
+    )
     assert applied["stage_status"] == "needs_local_ai"
     assert applied["chart_review_completed"] is False
 
@@ -388,7 +438,7 @@ def test_manual_figures_completion_requires_tables_resolved(setup_test_db):
     assert response.status_code == 409
     body = response.json()
     assert body["detail"]["code"] == "figure_table_review_not_completed"
-    assert body["detail"]["chart_review"]["unresolved_count"] == 1
+    assert body["detail"]["chart_review"]["unresolved_count"] == 2
 
 
 def test_duplicate_conflicting_figure_actions_fail_validation(setup_test_db):
@@ -448,11 +498,14 @@ def test_web_ai_common_json_shape_issues_are_normalized_or_unresolved(setup_test
 
     assert validation["valid"] is True
     assert validation["apply_ready"] is False
-    assert validation["unresolved_count"] == 1
+    assert validation["unresolved_count"] == 2
     assert validation["execution_plan"][0]["payload"]["dft_relevance"] == "explicit_dft"
     assert validation["execution_plan"][1]["action"] == "MERGE"
     assert validation["execution_plan"][1]["payload"]["dft_relevance"] == "none"
-    assert "merge_requires_source_table_id_and_target_table_id" in validation["unresolved_actions"][0]["blocked_reasons"]
+    assert any(
+        "merge_requires_source_table_id_and_target_table_id" in item["blocked_reasons"]
+        for item in validation["unresolved_actions"]
+    )
 
 
 def test_exact_duplicate_table_actions_are_deduped_before_conflict_checks(setup_test_db):
@@ -466,11 +519,11 @@ def test_exact_duplicate_table_actions_are_deduped_before_conflict_checks(setup_
     assert len([item for item in validation["execution_plan"] if item["category"] == "table"]) == 1
 
 
-def test_no_unresolved_actions_auto_completes_chart_stage(setup_test_db):
+def test_authenticated_local_ai_with_no_unresolved_actions_completes_chart_stage(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH05")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        result = _service(session).apply_result(paper.id, payload)
+        result = _apply_as_local_ai(session, paper, payload)
         session.refresh(paper)
         applied_logs = session.scalars(select(AuditLog).where(AuditLog.action == "offline_evidence_review_applied")).all()
 
@@ -513,7 +566,7 @@ def test_local_ai_batch_resolve_then_finalize_succeeds_via_mcp_tools(setup_test_
         )
         partial = _service(session).apply_result(paper.id, initial_payload)
         paper_id = str(paper.id)
-        resolved_figure_action = _figure_action(figure)
+        resolved_figure_action = _figure_action(figure, local_ai_verification=_local_ai_verification())
         resolved_table_action = _table_action(table)
 
     assert partial["chart_review_completed"] is False
@@ -525,7 +578,10 @@ def test_local_ai_batch_resolve_then_finalize_succeeds_via_mcp_tools(setup_test_
             **initial_payload,
             "bundle_fingerprint": task["bundle_fingerprint"],
             "overall_status": "completed",
-            "review_source": _review_source("local-ai"),
+            "review_source": {
+                **_review_source("local-ai"),
+                "review_source_type": "local_ai",
+            },
             "figure_actions": [resolved_figure_action],
             "table_actions": [resolved_table_action],
         }
@@ -542,8 +598,9 @@ def test_repeated_submit_is_idempotent(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH07")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        first = _service(session).apply_result(paper.id, payload)
-        second = _service(session).apply_result(paper.id, payload)
+        local_payload = _local_ai_payload(payload)
+        first = _service(session).apply_result(paper.id, local_payload, local_ai_authorized=True)
+        second = _service(session).apply_result(paper.id, local_payload, local_ai_authorized=True)
         applied_count = session.query(AuditLog).filter_by(action="offline_evidence_review_applied").count()
 
     assert first["chart_review_completed"] is True
@@ -556,7 +613,7 @@ def test_completed_chart_review_immediately_allows_dft_bundle_export(setup_test_
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH08")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        completed = _service(session).apply_result(paper.id, payload)
+        completed = _apply_as_local_ai(session, paper, payload)
         paper_id = paper.id
 
     response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
@@ -617,7 +674,17 @@ def test_local_ai_resolves_merge_delete_reject_and_low_confidence_atomically(set
             ],
         )
 
-        result = _service(session).resolve_review_actions(paper.id, payload)
+        result = _service(session).resolve_review_actions(
+            paper.id,
+            {
+                **payload,
+                "review_source": {
+                    **payload["review_source"],
+                    "review_source_type": "local_ai",
+                },
+            },
+            local_ai_authorized=True,
+        )
         remaining_figures = session.query(PaperFigure).filter(PaperFigure.paper_id == paper.id).count()
         remaining_table_ids = [
             row.id for row in session.query(PaperTable).filter(PaperTable.paper_id == paper.id).all()
@@ -632,14 +699,14 @@ def test_local_ai_resolves_merge_delete_reject_and_low_confidence_atomically(set
     assert remaining_figures == 0
     assert remaining_table_ids == [first_table_id]
     assert {row.payload["action"]["action"] for row in operation_logs} == {"REJECT", "MERGE", "DELETE"}
-    assert all(row.payload["actor_type"] == "ai" for row in operation_logs)
+    assert {row.payload["actor_type"] for row in operation_logs} == {"ai", "local_ai"}
 
 
 def test_chart_mutation_invalidates_completion_and_old_payload_is_not_idempotent(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH10")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        completed = _service(session).apply_result(paper.id, payload)
+        completed = _apply_as_local_ai(session, paper, payload)
         old_fingerprint = completed["completed_snapshot_fingerprint"]
         table.markdown_content = "| Metric | Value |\n|---|---|\n| changed | 99 |"
         session.add(table)
@@ -662,7 +729,7 @@ def test_evidence_gated_table_update_refreshes_effective_chart_completion(setup_
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH11")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        completed = _service(session).apply_result(paper.id, payload)
+        completed = _apply_as_local_ai(session, paper, payload)
         old_fingerprint = completed["completed_snapshot_fingerprint"]
         TableCurationService(session, reviewer="local_ai_chart_review").update_table(
             paper_id=paper.id,

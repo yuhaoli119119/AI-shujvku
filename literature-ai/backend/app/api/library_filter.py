@@ -4,8 +4,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models import Paper, PaperCitationEligibility, PaperImpactMetadata
 from app.db.session import get_db_session
 from app.services.citation_eligibility_service import CitationEligibilityService, CitationEligibilityUpdate
 from app.services.paper_filter_service import PaperFilterCriteria, PaperFilterService
@@ -133,10 +135,6 @@ def _eligibility_response(row) -> dict:
         "user_note": row.user_note,
         "updated_at": row.updated_at,
     }
-
-
-from sqlalchemy import select
-from app.db.models import Paper, PaperImpactMetadata, PaperCitationEligibility
 
 @router.get("/{paper_id}/citation-metadata-preview")
 async def citation_metadata_preview(

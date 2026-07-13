@@ -10,6 +10,7 @@
 - AI collaboration rules: [AGENTS.md](./AGENTS.md)
 - Documentation index: [docs/README.md](./docs/README.md)
 - MCP API and tool surface: [docs/mcp/MCP_API.md](./docs/mcp/MCP_API.md)
+- Current architecture and maintenance boundaries: [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 
 ## Directory Role
 
@@ -27,3 +28,4 @@
 - This file is no longer a second full README.
 - Use the root README for the current baseline, startup path, directory policy, and repository-level guidance.
 - Use `AGENTS.md` and `docs/README.md` when you need operating rules or deeper documentation links.
+- Run `python ../scripts/verify.py fast` for daily verification or `python ../scripts/verify.py full` before release.

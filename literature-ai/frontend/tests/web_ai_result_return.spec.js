@@ -1,11 +1,9 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
+const { readPageSource } = require('./helpers/read-page-source');
 
-const REVIEW_CENTER = fs.readFileSync(
-  path.resolve(__dirname, '../pages/review_center/index.html'),
-  'utf8'
-);
+const REVIEW_CENTER = readPageSource('pages/review_center/index.html');
 const FEATURE_SCOPE = REVIEW_CENTER.slice(
   REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_START'),
   REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_END')
@@ -78,15 +76,24 @@ test('switching papers clears pasted content, validation state, and copy permiss
 test('copied instruction is product-neutral and requires fresh validation plus authenticated MCP', () => {
   expect(FEATURE_SCOPE).toContain('重新 POST 到 /api/papers/');
   expect(FEATURE_SCOPE).toContain('只使用这次新返回的 import_analysis_request');
-  expect(FEATURE_SCOPE).toContain('逐条调用 get_codex_item');
-  expect(FEATURE_SCOPE).toContain('read_paper_page 核对原 PDF');
+  expect(FEATURE_SCOPE).toContain('每个唯一 evidence_id 调用一次 get_codex_item');
+  expect(FEATURE_SCOPE).toContain('每个唯一 (source_paper_id,page) 调用一次 read_paper_page');
+  expect(FEATURE_SCOPE).toContain('成功结果可跨 audit 复用');
+  expect(FEATURE_SCOPE).toContain('逐条覆盖其全部 required_evidence_checks');
+  expect(FEATURE_SCOPE).toContain("不得把 target_id='new' 或 temporary_id 当作 get_codex_item 的 UUID");
+  expect(FEATURE_SCOPE).toContain('read_paper_page 只返回数据库已存的页面布局内容');
+  expect(FEATURE_SCOPE).toContain('source/main.pdf');
   expect(FEATURE_SCOPE).toContain('local_ai_verification={verified_against_pdf:true');
+  expect(FEATURE_SCOPE).toContain('checked_evidence_ids:[...]');
+  expect(FEATURE_SCOPE).toContain("checked_pages:[{paper_id:'...',page:1}]");
+  expect(FEATURE_SCOPE).toContain("verification_note:'...'");
   expect(FEATURE_SCOPE).toContain('stage_status 为 completed/not_required');
   expect(FEATURE_SCOPE).toContain('completed_snapshot_fingerprint');
   expect(FEATURE_SCOPE).toContain('优先调用当前会话已认证 MCP 的 import_analysis');
   expect(FEATURE_SCOPE).toContain('禁止直接写 PostgreSQL');
   expect(FEATURE_SCOPE).toContain('dft_readback.object_versions');
   expect(FEATURE_SCOPE).not.toMatch(/Codex|DeepSeek|Anti-Gravity|ChatGPT/);
+  expect(FEATURE_SCOPE).not.toContain('逐条调用 get_codex_item');
 });
 
 test('DFT web AI prompt requires one-pass existing review and missing-data discovery', () => {

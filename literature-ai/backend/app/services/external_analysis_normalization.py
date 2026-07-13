@@ -431,9 +431,22 @@ class ExternalAnalysisNormalizationMixin:
 
     @staticmethod
     def _object_review_key(item: dict[str, Any]) -> str:
+        target_id = str(item.get("target_id") or "")
+        temporary_id = (
+            str(item.get("temporary_id") or "")
+            if target_id.strip().lower() == "new"
+            else ""
+        )
         return "|".join(
-            str(item.get(key) or "")
-            for key in ("paper_id", "target_type", "target_id", "field_name", "decision", "corrected_value")
+            [
+                str(item.get("paper_id") or ""),
+                str(item.get("target_type") or ""),
+                target_id,
+                str(item.get("field_name") or ""),
+                temporary_id,
+                str(item.get("decision") or ""),
+                str(item.get("corrected_value") or ""),
+            ]
         )
 
     @staticmethod

@@ -567,7 +567,7 @@ class ExternalAnalysisMaterializationMixin:
         from app.services.dft_review_bundle_service import DFTReviewBundleService
 
         dft_candidates = [candidate for candidate in candidates if self._is_dft_import_candidate(candidate)]
-        self._validate_dft_import_json(run, dft_candidates)
+        validation = self._validate_dft_import_json(run, dft_candidates)
         expected_snapshot = self._dft_import_expected_completed_snapshot(run, dft_candidates)
         bundle_service = DFTReviewBundleService(self.session, self.settings)
         state = bundle_service.get_review_state(run.paper_id)["review_gate"]
@@ -577,28 +577,53 @@ class ExternalAnalysisMaterializationMixin:
             state,
             expected_completed_snapshot_fingerprint=expected_snapshot,
         )
+        validated_request = validation.get("import_analysis_request") or {}
+        validated_raw_payload = (
+            validated_request.get("raw_payload")
+            if isinstance(validated_request.get("raw_payload"), dict)
+            else {}
+        )
+        server_audits = validated_raw_payload.get("object_review_audits") or []
+        server_audits_by_key = {
+            self._dft_audit_identity(audit): audit
+            for audit in server_audits
+            if isinstance(audit, dict)
+        }
         missing_local_verification: list[str] = []
+        verification_failures: list[str] = []
         for candidate in dft_candidates:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            if self._payload_has_local_ai_verification(payload):
+            server_audit = server_audits_by_key.get(self._dft_audit_identity(payload))
+            required_checks = (
+                server_audit.get("required_evidence_checks")
+                if isinstance(server_audit, dict)
+                else []
+            )
+            failures = self._local_ai_verification_failures(payload, required_checks)
+            if server_audit is None:
+                failures.append("server_verification_requirements_missing")
+            if not failures:
                 continue
             candidate.status = "requires_resolution"
-            candidate.mapping_reason = "local_ai_pdf_verification_required"
+            candidate.mapping_reason = "local_ai_pdf_verification_required:" + ",".join(failures)
             self.session.add(candidate)
             missing_local_verification.append(str(candidate.id))
+            verification_failures.extend(failures)
         if missing_local_verification:
             self.session.flush()
             raise ValueError(
                 "local_ai_pdf_verification_required:"
-                "DFT import_analysis requires per-audit local_ai_verification. "
-                "Local AI must call get_codex_item and read_paper_page before final writeback."
+                "DFT import_analysis requires complete server-derived evidence and source-page coverage per audit. "
+                "Identical evidence_id and (source_paper_id, page) reads may be reused, but each audit must record "
+                "its own checked_evidence_ids, checked_pages, required tools, and verification_note. failures="
+                + ",".join(sorted(set(verification_failures)))
             )
 
     def _validate_dft_import_json(
         self,
         run: ExternalAnalysisRun,
         candidates: list[ExternalAnalysisCandidate],
-    ) -> None:
+    ) -> dict[str, Any]:
         from app.services.dft_review_bundle_service import DFTReviewBundleService
 
         raw_payload = run.raw_payload if isinstance(run.raw_payload, dict) else {}
@@ -666,6 +691,7 @@ class ExternalAnalysisMaterializationMixin:
                 "dft_json_validation_failed:"
                 + json.dumps(validation.get("errors") or [], ensure_ascii=False, default=str)
             )
+        return validation
 
     @staticmethod
     def _dft_import_expected_completed_snapshot(
@@ -720,15 +746,38 @@ class ExternalAnalysisMaterializationMixin:
             raise ValueError("invalid_chart_run_id") from exc
 
     @staticmethod
-    def _payload_has_local_ai_verification(payload: dict[str, Any]) -> bool:
+    def _dft_audit_identity(payload: dict[str, Any]) -> tuple[str, str, str | None]:
+        target_id = str(payload.get("target_id") or "").strip()
+        field_name = str(payload.get("field_name") or "dft_results").strip()
+        temporary_id = (
+            str(payload.get("temporary_id") or "").strip() or None
+            if target_id.lower() == "new"
+            else None
+        )
+        return target_id, field_name, temporary_id
+
+    @classmethod
+    def _payload_has_local_ai_verification(
+        cls,
+        payload: dict[str, Any],
+        required_evidence_checks: Any = None,
+    ) -> bool:
+        return not cls._local_ai_verification_failures(payload, required_evidence_checks or [])
+
+    @staticmethod
+    def _local_ai_verification_failures(
+        payload: dict[str, Any],
+        required_evidence_checks: Any,
+    ) -> list[str]:
         verification = payload.get("local_ai_verification")
         if not isinstance(verification, dict):
             evidence = payload.get("evidence_location") if isinstance(payload.get("evidence_location"), dict) else {}
             verification = evidence.get("local_ai_verification") if isinstance(evidence, dict) else None
         if not isinstance(verification, dict):
-            return False
+            return ["missing_local_ai_verification"]
+        failures: list[str] = []
         if verification.get("verified_against_pdf") is not True:
-            return False
+            failures.append("verified_against_pdf_not_true")
         used_tools = {
             str(item).strip()
             for item in (
@@ -739,7 +788,50 @@ class ExternalAnalysisMaterializationMixin:
             )
             if str(item).strip()
         }
-        return {"get_codex_item", "read_paper_page"} <= used_tools
+        if not {"get_codex_item", "read_paper_page"} <= used_tools:
+            failures.append("required_tools_missing")
+
+        expected_evidence_ids: set[str] = set()
+        expected_pages: set[tuple[str, int]] = set()
+        for check in required_evidence_checks if isinstance(required_evidence_checks, list) else []:
+            if not isinstance(check, dict):
+                continue
+            evidence_id = str(check.get("evidence_id") or "").strip()
+            source_paper_id = str(check.get("source_paper_id") or "").strip()
+            try:
+                page = int(check.get("page"))
+            except (TypeError, ValueError):
+                continue
+            if evidence_id:
+                expected_evidence_ids.add(evidence_id)
+            if source_paper_id:
+                expected_pages.add((source_paper_id, page))
+
+        checked_evidence_ids = {
+            str(item).strip()
+            for item in (verification.get("checked_evidence_ids") or [])
+            if str(item).strip()
+        }
+        if not expected_evidence_ids <= checked_evidence_ids:
+            failures.append("checked_evidence_ids_incomplete")
+
+        checked_pages: set[tuple[str, int]] = set()
+        for item in verification.get("checked_pages") or []:
+            if not isinstance(item, dict):
+                continue
+            paper_id = str(item.get("paper_id") or item.get("source_paper_id") or "").strip()
+            try:
+                page = int(item.get("page"))
+            except (TypeError, ValueError):
+                continue
+            if paper_id:
+                checked_pages.add((paper_id, page))
+        if not expected_pages <= checked_pages:
+            failures.append("checked_pages_incomplete_or_wrong_source")
+
+        if not str(verification.get("verification_note") or "").strip():
+            failures.append("verification_note_required")
+        return failures
 
     def _dft_import_readback(
         self,

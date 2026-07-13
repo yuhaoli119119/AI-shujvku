@@ -61,6 +61,14 @@ class DFTAuditIssueLifecycleService:
         target_type: str = "dft_results",
         target_id: str | UUID,
     ) -> list[DFTAuditIssue]:
+        batch_issues = self.session.info.get("dft_import_active_issues_by_target")
+        target_id_text = str(target_id)
+        if target_type == "dft_results" and isinstance(batch_issues, dict) and target_id_text in batch_issues:
+            return [
+                issue
+                for issue in batch_issues[target_id_text]
+                if issue.status in DFT_AUDIT_ISSUE_PENDING_STATUSES
+            ]
         return list(
             self.session.scalars(
                 select(DFTAuditIssue)

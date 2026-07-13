@@ -115,6 +115,7 @@ from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.llm_service import LLMService
+from app.services.manual_review_progress import normalize_manual_review_progress
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.services.paper_knowledge_service import PaperKnowledgeService
@@ -176,31 +177,6 @@ def _source_only_translation_notice(text: str) -> str:
         "如需中文译文，请在 IDE AI 中基于原文和证据链整理。】\n\n"
         + text
     )
-
-
-def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, Any]:
-    source = data if isinstance(data, dict) else {}
-    progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
-
-    def normalize_entry(module: str) -> dict[str, Any]:
-        raw = progress.get(module)
-        if isinstance(raw, dict):
-            return {
-                "completed": bool(raw.get("completed")),
-                "updated_at": raw.get("updated_at"),
-                "updated_by": raw.get("updated_by"),
-            }
-        return {
-            "completed": bool(raw),
-            "updated_at": None,
-            "updated_by": None,
-        }
-
-    return {
-        "content": normalize_entry("content"),
-        "figures": normalize_entry("figures"),
-        "dft": normalize_entry("dft"),
-    }
 
 
 def _collect_translation_sources(
@@ -405,7 +381,7 @@ async def settle_ai_dft_reviews(
         and summary.get("need_repair_count", 0) == 0
     ):
         analysis = dict(paper.comprehensive_analysis or {})
-        progress = _manual_review_progress(analysis)
+        progress = normalize_manual_review_progress(analysis)
         progress["dft"] = {
             "completed": True,
             "updated_at": datetime.now(UTC).isoformat(),
@@ -565,7 +541,7 @@ async def set_manual_review_progress(
                 },
             )
     analysis = dict(paper.comprehensive_analysis or {})
-    progress = _manual_review_progress(analysis)
+    progress = normalize_manual_review_progress(analysis)
     progress[module] = {
         "completed": bool(payload.completed),
         "updated_at": datetime.now(UTC).isoformat(),

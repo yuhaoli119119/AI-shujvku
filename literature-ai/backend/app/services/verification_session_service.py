@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -139,7 +140,7 @@ class VerificationSessionService(
             "refresh_materials": refresh_materials,
             "lane_labels": lane_labels,
             "created_by": reviewer,
-            "created_at": datetime.utcnow().isoformat(),
+            "created_at": utcnow().isoformat(),
         }
         preparation_rows: list[dict[str, Any]] = []
         job = WorkflowJob(
@@ -332,7 +333,15 @@ class VerificationSessionService(
             "single_ai": low_risk_summary,
             "object_reviews": {
                 "applied_count": dft_settlement_summary["auto_applied_count"],
-                "applied_items": dft_settlement_summary["auto_applied_items"],
+                "applied_items": [
+                    {
+                        "target_type": "dft_results",
+                        "target_id": item.get("target_id") or item.get("record_id"),
+                        "candidate_id": item.get("candidate_id"),
+                        "action": item.get("action"),
+                    }
+                    for item in dft_settlement_summary["auto_applied_items"]
+                ],
                 "pending_count": (
                     dft_settlement_summary["needs_human_count"]
                     + dft_settlement_summary["need_repair_count"]
@@ -359,7 +368,19 @@ class VerificationSessionService(
                 source=reviewer,
                 target_type="paper",
                 target_id=str(paper_id),
-                payload=summary,
+                payload={
+                    "paper_id": str(paper_id),
+                    "new_dft_materialized_count": new_dft_summary["materialized_count"],
+                    "new_dft_skipped_count": new_dft_summary["skipped_count"],
+                    "dft_auto_applied_count": dft_settlement_summary["auto_applied_count"],
+                    "dft_needs_human_count": dft_settlement_summary["needs_human_count"],
+                    "dft_need_repair_count": dft_settlement_summary["need_repair_count"],
+                    "dft_skipped_count": dft_settlement_summary["skipped_count"],
+                    "dft_exportable_count": dft_settlement_summary["exportable_count"],
+                    "dft_blocked_reason_counts": dft_settlement_summary["blocked_reason_counts"],
+                    "non_dft_applied_count": object_review_summary.get("auto_applied_count", 0),
+                    "write_lock": summary["write_lock"],
+                },
             )
         )
         self.session.flush()
@@ -397,26 +418,36 @@ class VerificationSessionService(
         need_repair: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
 
-        for row in rows:
-            row_id = str(row.id)
-            audits = audits_by_target.get(row_id, [])
-            if not audits:
-                continue
-            row_summary = self._settle_dft_row_from_existing_audits(
-                row=row,
-                audits=audits,
-                reviewer=reviewer,
-                write_lock_tokens=write_lock_tokens,
-            )
-            status = row_summary.pop("status")
-            if status == "auto_applied":
-                auto_applied.append(row_summary)
-            elif status == "needs_human":
-                needs_human.append(row_summary)
-            elif status == "need_repair":
-                need_repair.append(row_summary)
-            else:
-                skipped.append(row_summary)
+        applicable_rows = [row for row in rows if str(row.id) in audits_by_target]
+        from app.services.dft_review_service import DFTResultReviewService
+
+        batch_size = 25
+        for offset in range(0, len(applicable_rows), batch_size):
+            batch_rows = applicable_rows[offset : offset + batch_size]
+            review_service = DFTResultReviewService(self.session)
+            review_service.begin_import_batch(paper_id=paper_id, rows=batch_rows)
+            self._dft_import_review_service = review_service
+            try:
+                for row in batch_rows:
+                    row_summary = self._settle_dft_row_from_existing_audits(
+                        row=row,
+                        audits=audits_by_target[str(row.id)],
+                        reviewer=reviewer,
+                        write_lock_tokens=write_lock_tokens,
+                    )
+                    status = row_summary.pop("status")
+                    if status == "auto_applied":
+                        auto_applied.append(row_summary)
+                    elif status == "needs_human":
+                        needs_human.append(row_summary)
+                    elif status == "need_repair":
+                        need_repair.append(row_summary)
+                    else:
+                        skipped.append(row_summary)
+                self.session.flush()
+            finally:
+                self._dft_import_review_service = None
+                review_service.end_import_batch()
 
         self.session.flush()
         summary = {
@@ -492,16 +523,15 @@ class VerificationSessionService(
         candidate_run_id: UUID | None = None,
     ) -> list[str]:
         stmt = (
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
-            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
+            select(ExternalAnalysisCandidate)
             .where(ExternalAnalysisCandidate.paper_id == paper_id)
             .where(ExternalAnalysisCandidate.status.in_(("candidate", "pending", "requires_resolution")))
         )
         if candidate_run_id is not None:
             stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
-        rows = self.session.execute(stmt).all()
+        rows = self.session.scalars(stmt).all()
         modules: set[str] = set()
-        for candidate, _run in rows:
+        for candidate in rows:
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             if candidate.candidate_type != "object_review_audit":
                 continue
@@ -530,7 +560,7 @@ class VerificationSessionService(
             reviewer=reviewer,
         )
         settlement = {
-            "settled_at": datetime.utcnow().isoformat(),
+            "settled_at": utcnow().isoformat(),
             "scope": scope,
             "low_risk_notes": note_summary,
             "high_risk": high_risk_summary,
@@ -906,7 +936,13 @@ class VerificationSessionService(
         exclude_target_types: set[str] | None = None,
     ) -> dict[str, Any]:
         stmt = (
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            select(
+                ExternalAnalysisCandidate,
+                ExternalAnalysisRun.source,
+                ExternalAnalysisRun.source_label,
+                ExternalAnalysisRun.source_identity,
+                ExternalAnalysisRun.source_identity_verified,
+            )
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
@@ -919,7 +955,13 @@ class VerificationSessionService(
         rows = self.session.execute(stmt).all()
         grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
         skipped: list[dict[str, Any]] = []
-        for candidate, run in rows:
+        for candidate, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
+            run = SimpleNamespace(
+                source=run_source,
+                source_label=run_source_label,
+                source_identity=run_source_identity,
+                source_identity_verified=run_source_identity_verified,
+            )
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             target_type = self._normalize_object_review_target_type(payload.get("target_type"))
             if target_type != "dft_results" and self._is_dft_scoped_external_run(run, payload):

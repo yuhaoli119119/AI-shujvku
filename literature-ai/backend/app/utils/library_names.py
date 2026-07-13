@@ -7,6 +7,8 @@ from sqlalchemy import or_
 
 DEFAULT_LIBRARY_NAME = "默认文献库"
 
+# These exact strings are intentional compatibility keys for historical rows
+# written through broken terminal/encoding paths. Do not use them for new data.
 DEFAULT_LIBRARY_ALIASES = {
     DEFAULT_LIBRARY_NAME,
     "?????",

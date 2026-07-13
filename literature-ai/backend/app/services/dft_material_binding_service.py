@@ -12,6 +12,7 @@ from app.db.models import AuditLog, CatalystSample, DFTResult
 class DFTMaterialBindingService:
     def __init__(self, session: Session) -> None:
         self.session = session
+        self._samples_by_paper: dict[UUID, dict[str, CatalystSample]] = {}
 
     def resolve_or_create_sample(
         self,
@@ -22,15 +23,23 @@ class DFTMaterialBindingService:
         name = self._first_text(material_identity)
         if not name:
             raise ValueError("material_identity is required.")
-        samples = self.session.scalars(
-            select(CatalystSample)
-            .where(CatalystSample.paper_id == paper_id)
-            .order_by(CatalystSample.id.asc())
-        ).all()
         normalized_name = name.casefold()
-        for sample in samples:
-            if str(sample.name or "").strip().casefold() == normalized_name:
-                return sample, False
+        samples_by_name = self._samples_by_paper.get(paper_id)
+        if samples_by_name is None:
+            samples = self.session.scalars(
+                select(CatalystSample)
+                .where(CatalystSample.paper_id == paper_id)
+                .order_by(CatalystSample.id.asc())
+            ).all()
+            samples_by_name = {
+                str(sample.name or "").strip().casefold(): sample
+                for sample in samples
+                if str(sample.name or "").strip()
+            }
+            self._samples_by_paper[paper_id] = samples_by_name
+        existing = samples_by_name.get(normalized_name)
+        if existing is not None:
+            return existing, False
         sample = CatalystSample(
             paper_id=paper_id,
             name=name,
@@ -38,6 +47,7 @@ class DFTMaterialBindingService:
         )
         self.session.add(sample)
         self.session.flush()
+        samples_by_name[normalized_name] = sample
         return sample, True
 
     def ensure_row_binding(

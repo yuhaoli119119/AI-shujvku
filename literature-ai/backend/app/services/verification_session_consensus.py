@@ -32,7 +32,12 @@ class VerificationSessionDFTConsensusMixin:
         candidate_run_id: UUID | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
         stmt = (
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
+            select(
+                ExternalAnalysisCandidate,
+                ExternalAnalysisRun.id,
+                ExternalAnalysisRun.source,
+                ExternalAnalysisRun.source_label,
+            )
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
                 ExternalAnalysisCandidate.paper_id == paper_id,
@@ -45,7 +50,7 @@ class VerificationSessionDFTConsensusMixin:
             stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
 
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for candidate, run in self.session.execute(stmt).all():
+        for candidate, run_id, run_source, run_source_label in self.session.execute(stmt).all():
             payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
             if self._normalize_object_review_target_type(payload.get("target_type")) != "dft_results":
                 continue
@@ -63,7 +68,7 @@ class VerificationSessionDFTConsensusMixin:
                 {
                     "candidate_id": str(candidate.id),
                     "candidate": candidate,
-                    "run_id": str(run.id),
+                    "run_id": str(run_id),
                     "created_at": candidate.created_at,
                     "target_id": target_id,
                     "field_name": str(payload.get("field_name") or "").strip() or "dft_results",
@@ -74,8 +79,8 @@ class VerificationSessionDFTConsensusMixin:
                     "normalized_material": payload.get("normalized_material"),
                     "normalized_material_or_catalyst": payload.get("normalized_material_or_catalyst"),
                     "normalized_energy_type": payload.get("normalized_energy_type"),
-                    "source_label": str(payload.get("source_label") or run.source_label or run.source or "").strip(),
-                    "source": str(payload.get("source") or run.source or "").strip(),
+                    "source_label": str(payload.get("source_label") or run_source_label or run_source or "").strip(),
+                    "source": str(payload.get("source") or run_source or "").strip(),
                     "evidence_payload": payload.get("evidence_location") or payload.get("evidence_payload"),
                     "raw_payload": payload,
                     "status": candidate.status,

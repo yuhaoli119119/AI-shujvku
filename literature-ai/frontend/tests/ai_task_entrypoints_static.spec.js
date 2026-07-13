@@ -1,6 +1,7 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('fs');
 const path = require('path');
+const { readPageSource } = require('./helpers/read-page-source');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
@@ -9,7 +10,7 @@ function readFrontendFile(relativePath) {
 }
 
 test('review center is the formal AI prompt entrypoint surface', () => {
-  const reviewCenter = readFrontendFile('pages/review_center/index.html');
+  const reviewCenter = readPageSource('pages/review_center/index.html');
   const dftReviewerScope = reviewCenter.slice(
     reviewCenter.indexOf('      dft: {'),
     reviewCenter.indexOf('    const conflictState')

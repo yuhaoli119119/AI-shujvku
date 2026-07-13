@@ -4,7 +4,9 @@
   "description": "Front-end smoke tests for Literature AI",
   "scripts": {
     "test": "playwright test",
-    "test:serve": "python -m http.server 8000"
+    "test:fast": "playwright test tests/chart_review_flow_static.spec.js tests/dft_complete_loading.spec.js tests/web_ai_result_return.spec.js tests/review_center_title_metadata_static.spec.js tests/test_infrastructure_static.spec.js --reporter=line",
+    "test:full": "playwright test --workers=4 --reporter=line",
+    "test:serve": "python -m http.server 4173"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0"

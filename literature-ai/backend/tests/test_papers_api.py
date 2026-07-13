@@ -4617,6 +4617,196 @@ def test_upload_pdf_with_existing_full_doi_returns_conflict(setup_test_db, monke
         assert papers[0].pdf_path == "existing.pdf"
 
 
+def test_upload_failure_rolls_back_failed_session_and_preserves_original_error(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    existing_id = uuid4()
+
+    with Session.begin() as session:
+        session.add(Paper(id=existing_id, title="Existing row", pdf_path="existing.pdf"))
+
+    async def fake_ingest_upload(self, **_kwargs):
+        self.session.add(Paper(id=existing_id, title="Duplicate row", pdf_path="duplicate.pdf"))
+        try:
+            self.session.flush()
+        except Exception as exc:
+            raise RuntimeError("original ingest failure after flush") from exc
+        raise AssertionError("duplicate primary key flush unexpectedly succeeded")
+
+    monkeypatch.setattr(papers_api.PaperIngestionService, "ingest_upload", fake_ingest_upload)
+
+    response = TestClient(app).post(
+        "/api/papers/ingest/upload",
+        data={"library_name": "FailureLibrary"},
+        files={"file": ("failed.pdf", io.BytesIO(b"%PDF-1.4 failed"), "application/pdf")},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "message": "original ingest failure after flush",
+        "status": "job_error",
+    }
+
+    with Session() as session:
+        job = session.scalar(
+            select(WorkflowJob)
+            .where(WorkflowJob.type == "local_pdf_upload")
+            .order_by(WorkflowJob.created_at.desc())
+        )
+        assert job is not None
+        assert job.status == "failed"
+        assert job.error == "original ingest failure after flush"
+        assert "PendingRollbackError" not in job.error
+        assert job.payload["filename"] == "failed.pdf"
+
+
+def test_local_path_failure_rolls_back_failed_session_and_preserves_original_error(
+    setup_test_db,
+    monkeypatch,
+    tmp_path,
+):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    existing_id = uuid4()
+    source_pdf = tmp_path / "failed-local.pdf"
+    source_pdf.write_bytes(b"%PDF-1.4 failed local")
+
+    with Session.begin() as session:
+        session.add(Paper(id=existing_id, title="Existing local row", pdf_path="existing-local.pdf"))
+
+    async def fake_ingest_pdf(self, **_kwargs):
+        self.session.add(Paper(id=existing_id, title="Duplicate local row", pdf_path="duplicate-local.pdf"))
+        try:
+            self.session.flush()
+        except Exception as exc:
+            raise RuntimeError("original local-path failure after flush") from exc
+        raise AssertionError("duplicate primary key flush unexpectedly succeeded")
+
+    monkeypatch.setattr(papers_api.PaperIngestionService, "ingest_pdf", fake_ingest_pdf)
+
+    response = TestClient(app).post(
+        "/api/papers/ingest/path",
+        json={"pdf_path": str(source_pdf), "library_name": "FailureLibrary"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "message": "original local-path failure after flush",
+        "status": "job_error",
+    }
+
+    with Session() as session:
+        job = session.scalar(
+            select(WorkflowJob)
+            .where(WorkflowJob.type == "local_pdf_path_ingest")
+            .order_by(WorkflowJob.created_at.desc())
+        )
+        assert job is not None
+        assert job.status == "failed"
+        assert job.error == "original local-path failure after flush"
+        assert "PendingRollbackError" not in job.error
+        assert job.payload["pdf_path"] == str(source_pdf.resolve())
+
+
+def test_attach_pdf_failure_rolls_back_failed_session_and_preserves_original_error(setup_test_db, monkeypatch):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    placeholder_id = uuid4()
+    conflicting_id = uuid4()
+
+    with Session.begin() as session:
+        session.add(
+            Paper(
+                id=placeholder_id,
+                title="Metadata placeholder",
+                library_name="FailureLibrary",
+                pdf_path="",
+                oa_status="metadata_only",
+            )
+        )
+        session.add(Paper(id=conflicting_id, title="Existing attach row", pdf_path="existing-attach.pdf"))
+
+    async def fake_ingest_upload(self, **_kwargs):
+        self.session.add(Paper(id=conflicting_id, title="Duplicate attach row", pdf_path="duplicate-attach.pdf"))
+        try:
+            self.session.flush()
+        except Exception as exc:
+            raise RuntimeError("original attach failure after flush") from exc
+        raise AssertionError("duplicate primary key flush unexpectedly succeeded")
+
+    monkeypatch.setattr(papers_api.PaperIngestionService, "ingest_upload", fake_ingest_upload)
+
+    response = TestClient(app).post(
+        f"/api/papers/{placeholder_id}/attach-pdf",
+        files={"file": ("failed-attach.pdf", io.BytesIO(b"%PDF-1.4 failed attach"), "application/pdf")},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "message": "original attach failure after flush",
+        "status": "job_error",
+    }
+
+    with Session() as session:
+        job = session.scalar(
+            select(WorkflowJob)
+            .where(WorkflowJob.payload["attach_to_paper_id"].as_string() == str(placeholder_id))
+            .order_by(WorkflowJob.created_at.desc())
+        )
+        assert job is not None
+        assert job.status == "failed"
+        assert job.error == "original attach failure after flush"
+        assert "PendingRollbackError" not in job.error
+        assert job.payload["filename"] == "failed-attach.pdf"
+
+
+def test_supplementary_upload_failure_rolls_back_failed_session_and_preserves_original_error(
+    setup_test_db,
+    monkeypatch,
+):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    main_id = uuid4()
+    conflicting_id = uuid4()
+
+    with Session.begin() as session:
+        session.add(Paper(id=main_id, title="Main paper", library_name="FailureLibrary", pdf_path="main.pdf"))
+        session.add(Paper(id=conflicting_id, title="Existing SI row", pdf_path="existing-si.pdf"))
+
+    async def fake_ingest_upload(self, **_kwargs):
+        self.session.add(Paper(id=conflicting_id, title="Duplicate SI row", pdf_path="duplicate-si.pdf"))
+        try:
+            self.session.flush()
+        except Exception as exc:
+            raise RuntimeError("original supplementary failure after flush") from exc
+        raise AssertionError("duplicate primary key flush unexpectedly succeeded")
+
+    monkeypatch.setattr(papers_api.PaperIngestionService, "ingest_upload", fake_ingest_upload)
+
+    response = TestClient(app).post(
+        f"/api/papers/{main_id}/supplementary/upload",
+        files={"file": ("failed-si.pdf", io.BytesIO(b"%PDF-1.4 failed si"), "application/pdf")},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == {
+        "message": "original supplementary failure after flush",
+        "status": "job_error",
+    }
+
+    with Session() as session:
+        job = session.scalar(
+            select(WorkflowJob)
+            .where(WorkflowJob.type == "supplementary_pdf_upload")
+            .order_by(WorkflowJob.created_at.desc())
+        )
+        assert job is not None
+        assert job.status == "failed"
+        assert job.error == "original supplementary failure after flush"
+        assert "PendingRollbackError" not in job.error
+        assert job.payload["supplementary_for_paper_id"] == str(main_id)
+
+
 def test_queue_upload_job_merges_metadata_only_placeholder(setup_test_db, monkeypatch):
     engine = setup_test_db
     Session = sessionmaker(bind=engine)

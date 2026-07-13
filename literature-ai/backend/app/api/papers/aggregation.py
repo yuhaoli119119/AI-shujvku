@@ -353,6 +353,12 @@ async def compare_dft_results(
         display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
         normalized_property_type = _normalized_property_type(dr.property_type)
         taxonomy = get_property_taxonomy(dr.property_type)
+        if normalized_property_type == "binding_energy":
+            taxonomy = {
+                **taxonomy,
+                "canonical_property_type": "adsorption_energy",
+                "property_subtype": "binding",
+            }
         item = {
             "record_id": str(dr.id),
             "paper_id": pid,

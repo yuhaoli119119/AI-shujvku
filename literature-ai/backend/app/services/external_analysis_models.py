@@ -60,6 +60,7 @@ class ExternalObjectReviewAuditModel(BaseModel):
     paper_id: str | None = None
     target_type: str
     target_id: str
+    temporary_id: str | None = None
     field_name: str | None = None
     decision: str | None = None
     adjudication_role: str | None = None
@@ -71,7 +72,9 @@ class ExternalObjectReviewAuditModel(BaseModel):
     adsorbate: str | None = None
     reaction_step: str | None = None
     evidence_checked: bool | None = None
+    evidence_ids: list[str] = Field(default_factory=list)
     evidence_location: dict[str, Any] | list[Any] | str | None = None
+    dedupe_analysis: dict[str, Any] | None = None
     dedupe_signature: str | None = None
     borrowed_from_reference: bool = False
     supporting_evidence: list[Any] = Field(default_factory=list)

@@ -7,6 +7,11 @@ from pathlib import Path
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.db.bootstrap import (
+    BootstrapOutcome,
+    DatabaseBootstrapError,
+    database_bootstrap_lock,
+)
 from app.db.models import Base
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -56,7 +61,23 @@ def get_engine(database_url: str):
     return _engines[database_url]
 
 
-def init_db(database_url: str, *, force: bool = False) -> None:
+def init_db(database_url: str, *, force: bool = False) -> BootstrapOutcome:
+    """Serialize and execute the PostgreSQL schema bootstrap."""
+    if not database_url.strip().lower().startswith("postgresql"):
+        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
+    if not force and database_url in _initialized_urls:
+        logger.debug("init_db: %s already initialized, skipping migrations", _mask_url_internal(database_url))
+        return BootstrapOutcome(initialized=True, skipped=True)
+
+    engine = get_engine(database_url)
+    with database_bootstrap_lock(engine, database_url):
+        # Another process/thread may have completed while this caller waited.
+        if not force and database_url in _initialized_urls:
+            return BootstrapOutcome(initialized=True, skipped=True)
+        return _init_db_locked(database_url, engine=engine)
+
+
+def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
     """Initialize the database schema and run migrations.
 
     Args:
@@ -64,20 +85,14 @@ def init_db(database_url: str, *, force: bool = False) -> None:
         force: If True, re-run migrations even if this URL was already initialized.
                Use after schema changes that need to be applied immediately.
     """
-    if not database_url.strip().lower().startswith("postgresql"):
-        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
-    # Skip redundant initialization — migrations are idempotent but expensive
-    # (each init_db call does ~50 inspector.get_columns() queries on PostgreSQL).
-    if not force and database_url in _initialized_urls:
-        logger.debug("init_db: %s already initialized, skipping migrations", _mask_url_internal(database_url))
-        return
-
-    engine = get_engine(database_url)
+    optional_failures: list[str] = []
+    required_failures: list[str] = []
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
         for extension in ("vector", "pgcrypto", "pg_trgm"):
             try:
                 connection.execute(text(f"CREATE EXTENSION IF NOT EXISTS {extension}"))
             except Exception:
+                optional_failures.append(f"extension:{extension}")
                 logger.warning(
                     "Could not create PostgreSQL extension %s; assuming it is preinstalled or managed externally",
                     extension,
@@ -107,6 +122,7 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 )
             )
         except Exception:
+            optional_failures.append("index:paper_chunks_embedding_hnsw")
             logger.warning("Could not create paper_chunks HNSW index; pgvector may be unavailable")
         connection.execute(
             text(
@@ -129,6 +145,7 @@ def init_db(database_url: str, *, force: bool = False) -> None:
             connection.execute(text(statement))
             return True
         except Exception:
+            required_failures.append(f"{table_name}.{column_name}")
             logger.exception(
                 "Automatic database migration failed for %s.%s using %s",
                 table_name,
@@ -684,20 +701,29 @@ def init_db(database_url: str, *, force: bool = False) -> None:
                 "ALTER TABLE extraction_field_reviews ADD COLUMN IF NOT EXISTS write_version INTEGER NOT NULL DEFAULT 1",
             )
 
-    if should_backfill_paper_codes:
-        try:
-            from app.services.paper_codes import ensure_paper_codes
+    if required_failures:
+        raise DatabaseBootstrapError(required_failures)
 
-            # Run paper_code repair after the schema migration transaction commits.
-            # Otherwise PostgreSQL can block on the outer DDL transaction's table locks.
+    if should_backfill_paper_codes:
+        from app.services.paper_codes import ensure_paper_codes
+
+        # Run paper_code repair after the schema migration transaction commits.
+        # Otherwise PostgreSQL can block on the outer DDL transaction's table locks.
+        try:
             with Session(engine) as backfill_session:
                 ensure_paper_codes(backfill_session)
                 backfill_session.commit()
         except Exception:
-            logger.exception("Automatic database migration failed while backfilling papers.paper_code")
+            logger.exception("Required database bootstrap failed while backfilling papers.paper_code")
+            raise
 
     # Mark this URL as initialized so subsequent init_db() calls can skip
     _initialized_urls.add(database_url)
+    return BootstrapOutcome(
+        initialized=True,
+        required_failures=(),
+        optional_failures=tuple(optional_failures),
+    )
 
 
 def _mask_url_internal(database_url: str) -> str:

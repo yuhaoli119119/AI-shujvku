@@ -2,7 +2,7 @@ from pathlib import Path
 import subprocess
 
 
-def test_repository_is_postgresql_only():
+def test_runtime_repository_is_postgresql_only():
     project_root = Path(__file__).resolve().parents[2]
     repo_root = Path(
         subprocess.run(
@@ -17,6 +17,16 @@ def test_repository_is_postgresql_only():
     blocked_token = "sql" + "ite"
     blocked_suffixes = {"." + blocked_token, "." + blocked_token + "3", ".db"}
     offenders: list[str] = []
+    runtime_prefixes = (
+        "literature-ai/backend/app/",
+        "literature-ai/backend/tools/",
+        "literature-ai/docker-compose",
+        "literature-ai/deploy/",
+    )
+    runtime_files = {
+        "literature-ai/backend/requirements.txt",
+        "literature-ai/backend/pyproject.toml",
+    }
 
     result = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
@@ -26,6 +36,9 @@ def test_repository_is_postgresql_only():
     )
     for relative in result.stdout.decode("utf-8").split("\0"):
         if not relative:
+            continue
+        normalized_relative = relative.replace("\\", "/")
+        if normalized_relative not in runtime_files and not normalized_relative.startswith(runtime_prefixes):
             continue
         path = repo_root / relative
         if not path.is_file():

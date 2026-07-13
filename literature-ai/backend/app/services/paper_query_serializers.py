@@ -35,6 +35,7 @@ from app.schemas.api import (
 )
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_review_queue_service import DFTReviewQueueService
+from app.services.manual_review_progress import normalize_manual_review_progress
 from app.services.paper_query_storage import cached_pdf_size_for_storage
 from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_persisted_artifact_path
@@ -48,6 +49,8 @@ from app.utils.text_cleaning import repair_mojibake_text
 
 
 class PaperQuerySerializationMixin:
+    _manual_review_progress = staticmethod(normalize_manual_review_progress)
+
     @staticmethod
     def _serialize_paper_note(item: PaperNote) -> dict[str, Any]:
         return {
@@ -801,32 +804,6 @@ class PaperQuerySerializationMixin:
 
 
     @staticmethod
-    def _manual_review_progress(data: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-        source = data if isinstance(data, dict) else {}
-        progress = source.get("manual_review_progress") if isinstance(source.get("manual_review_progress"), dict) else {}
-
-        def normalize_entry(module: str) -> dict[str, Any]:
-            raw = progress.get(module)
-            if isinstance(raw, dict):
-                return {
-                    "completed": bool(raw.get("completed")),
-                    "updated_at": raw.get("updated_at"),
-                    "updated_by": raw.get("updated_by"),
-                }
-            return {
-                "completed": bool(raw),
-                "updated_at": None,
-                "updated_by": None,
-            }
-
-        return {
-            "content": normalize_entry("content"),
-            "figures": normalize_entry("figures"),
-            "dft": normalize_entry("dft"),
-        }
-
-
-    @staticmethod
     def _serialize_relationship(item: PaperRelationship, related_paper: Paper | None) -> PaperRelationshipItemResponse:
         return PaperRelationshipItemResponse(
             id=item.id,
@@ -840,7 +817,7 @@ class PaperQuerySerializationMixin:
             related_paper_code=related_paper.paper_code if related_paper is not None else None,
             related_paper_title=related_paper.title if related_paper is not None else None,
             related_manual_review_progress=(
-                PaperQuerySerializationMixin._manual_review_progress(related_paper.comprehensive_analysis)
+                normalize_manual_review_progress(related_paper.comprehensive_analysis)
                 if related_paper is not None
                 else {}
             ),

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -10,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import AuditLog, ContentEvidenceItem, ContentReviewBundle, ExternalAnalysisRun, Paper
+from app.db.models import AuditLog, ContentEvidenceItem, ContentReviewBundle, ExternalAnalysisRun, Paper, utcnow
 from app.services.task_log_service import TaskLogService
 from app.utils.artifact_paths import resolve_paper_pdf_path
 
@@ -157,7 +156,7 @@ class ContentReviewBundleService:
                 if not self._has_real_pdf_evidence(paper, item, action):
                     raise ValueError(f"citable_requires_real_pdf_evidence:{item.id}")
             item.reviewer = reviewer
-            item.reviewed_at = datetime.utcnow()
+            item.reviewed_at = utcnow()
             if decision == "approve_citable":
                 item.review_status, item.citation_status = "validated", "citable"
             elif decision == "writing_only":

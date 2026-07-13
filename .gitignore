@@ -30,6 +30,9 @@ literature-ai/outputs/tmp/**
 literature-ai/outputs/exports/**
 !literature-ai/outputs/exports/
 !literature-ai/outputs/exports/.gitkeep
+literature-ai/outputs/B*.json
+literature-ai/outputs/B*.zip
+literature-ai/tmp/
 /local/**
 !/local/
 !/local/README.md
@@ -81,6 +84,7 @@ literature-ai/storage/docling_cache/
 
 # Local backup & patches
 *backup*/
+literature-ai/backend/reports/*backup*/
 literature-ai_code_backup_*
 patch*.py
 diff.txt

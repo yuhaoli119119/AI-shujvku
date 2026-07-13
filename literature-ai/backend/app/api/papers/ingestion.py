@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+import re
 from uuid import UUID, uuid4
 
 from typing import Any
@@ -10,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
-from app.db.models import Paper
+from app.db.models import Paper, WorkflowJob
 from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
@@ -29,6 +31,49 @@ from app.services.workflow_jobs import (
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_DOCLING_PAPER_ID_PATTERN = re.compile(
+    r"docling_parse_failed:\s*([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+)
+
+
+def _record_ingest_failure(session: Session, job_id: str, exc: Exception) -> str:
+    """Recover a failed transaction and persist the original ingest failure."""
+    error_text = str(exc)
+    paper_id_match = _DOCLING_PAPER_ID_PATTERN.search(error_text)
+    try:
+        session.rollback()
+        job = session.get(WorkflowJob, job_id)
+        if job is None:
+            logger.error(
+                "Cannot record ingest failure because workflow job %s no longer exists; original error: %s",
+                job_id,
+                error_text,
+            )
+            return error_text
+
+        payload = dict(job.payload or {})
+        if paper_id_match is not None:
+            payload["paper_id"] = paper_id_match.group(1)
+        job.payload = payload
+        job.status = "failed"
+        job.error = error_text
+        job.progress = {
+            **dict(job.progress or {}),
+            "phase": "failed",
+            **({"paper_id": paper_id_match.group(1)} if paper_id_match is not None else {}),
+        }
+        session.add(job)
+        session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception(
+            "Failed to persist workflow job %s failure; preserving original ingest error: %s",
+            job_id,
+            error_text,
+        )
+    return error_text
 
 
 def _validated_local_pdf(path: str, settings: Settings) -> Path:
@@ -163,6 +208,7 @@ async def ingest_from_path(
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在解析本地 PDF 文件"},
     )
+    job_id = str(job.job_id)
     try:
         paper = await service.ingest_pdf(
             source_path=source_path,
@@ -187,17 +233,7 @@ async def ingest_from_path(
         update_job(session, job.job_id, status="failed", error=f"doi_conflict: {exc}")
         _raise_already_exists(exc)
     except Exception as exc:
-        err_str = str(exc)
-        if "docling_parse_failed:" in err_str:
-            try:
-                parts = err_str.split(":", 2)
-                paper_id_str = parts[1].split()[0].strip()
-                job.payload = {**job.payload, "paper_id": paper_id_str}
-                session.add(job)
-                session.commit()
-            except Exception:
-                pass
-        update_job(session, job.job_id, status="failed", error=err_str)
+        err_str = _record_ingest_failure(session, job_id, exc)
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
@@ -231,6 +267,7 @@ async def ingest_upload(
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在解析上传的 PDF 文件"},
     )
+    job_id = str(job.job_id)
     
     try:
         paper = await service.ingest_upload(
@@ -243,17 +280,7 @@ async def ingest_upload(
         update_job(session, job.job_id, status="failed", error=f"doi_conflict: {exc}")
         _raise_already_exists(exc)
     except Exception as exc:
-        err_str = str(exc)
-        if "docling_parse_failed:" in err_str:
-            try:
-                parts = err_str.split(":", 2)
-                paper_id_str = parts[1].split()[0].strip()
-                job.payload = {**job.payload, "paper_id": paper_id_str}
-                session.add(job)
-                session.commit()
-            except Exception:
-                pass
-        update_job(session, job.job_id, status="failed", error=err_str)
+        err_str = _record_ingest_failure(session, job_id, exc)
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
         
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
@@ -335,6 +362,7 @@ async def upload_supplementary_pdf(
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在上传支撑文献 PDF"},
     )
+    job_id = str(job.job_id)
 
     try:
         paper = await service.ingest_upload(
@@ -345,8 +373,7 @@ async def upload_supplementary_pdf(
         )
         update_job(session, job.job_id, status="completed", progress={"phase": "completed", "message": "支撑文献上传成功", "ingested": 1})
     except Exception as exc:
-        err_str = str(exc)
-        update_job(session, job.job_id, status="failed", error=err_str)
+        err_str = _record_ingest_failure(session, job_id, exc)
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
@@ -436,6 +463,7 @@ async def attach_pdf_to_existing_paper(
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在附加 PDF 文件"},
     )
+    job_id = str(job.job_id)
     
     try:
         paper = await service.ingest_upload(
@@ -453,17 +481,7 @@ async def attach_pdf_to_existing_paper(
         update_job(session, job.job_id, status="failed", error=f"doi_conflict: {exc}")
         _raise_already_exists(exc)
     except Exception as exc:
-        err_str = str(exc)
-        if "docling_parse_failed:" in err_str:
-            try:
-                parts = err_str.split(":", 2)
-                paper_id_str = parts[1].split()[0].strip()
-                job.payload = {**job.payload, "paper_id": paper_id_str}
-                session.add(job)
-                session.commit()
-            except Exception:
-                pass
-        update_job(session, job.job_id, status="failed", error=err_str)
+        err_str = _record_ingest_failure(session, job_id, exc)
         raise HTTPException(status_code=500, detail={"message": err_str, "status": "job_error"}) from exc
         
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))

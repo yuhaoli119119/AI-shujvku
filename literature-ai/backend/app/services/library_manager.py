@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
 
+from app.db.models import utcnow
 from app.utils.library_names import (
     DEFAULT_LIBRARY_ALIASES,
     DEFAULT_LIBRARY_NAME,
@@ -102,7 +102,7 @@ class LibraryManager:
         if self._find_entry(registry, library_name) is not None:
             raise ValueError(f"Library '{library_name}' already exists")
 
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utcnow().isoformat()
         self.init_library_structure(root, storage_mode=SHARED_STORAGE_MODE)
         self._write_library_meta(
             root=root,
@@ -161,7 +161,7 @@ class LibraryManager:
             library_kind=self._resolve_library_kind(root, meta, storage_mode),
             meta=meta,
         )
-        updated_meta["last_accessed"] = datetime.utcnow().isoformat()
+        updated_meta["last_accessed"] = utcnow().isoformat()
         self._best_effort_write_library_meta(root, updated_meta)
         if storage_mode == SHARED_STORAGE_MODE:
             self._best_effort_ensure_shared_project_config(root, normalized_name)
@@ -243,7 +243,7 @@ class LibraryManager:
         if self._find_entry(registry, name) is not None:
             raise ValueError(f"Library '{name}' already exists for path {root}")
 
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utcnow().isoformat()
 
         registry.setdefault("libraries", []).append(
             {
@@ -304,7 +304,7 @@ class LibraryManager:
                             "name": DEFAULT_LIBRARY_NAME,
                             "root_path": str(self.default_library_root()),
                             "description": DEFAULT_LIBRARY_NAME,
-                            "created_at": datetime.utcnow().isoformat(),
+                            "created_at": utcnow().isoformat(),
                         }
                     ],
                 }
@@ -319,7 +319,7 @@ class LibraryManager:
                     "name": DEFAULT_LIBRARY_NAME,
                     "root_path": str(self.default_library_root()),
                     "description": DEFAULT_LIBRARY_NAME,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": utcnow().isoformat(),
                 },
             )
             registry["active_library"] = DEFAULT_LIBRARY_NAME
@@ -417,7 +417,7 @@ class LibraryManager:
                     "name": DEFAULT_LIBRARY_NAME,
                     "root_path": str(cls.default_library_root()),
                     "description": DEFAULT_LIBRARY_NAME,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": utcnow().isoformat(),
                 },
             )
         if cls._find_entry(normalized, normalized.get("active_library")) is None:
@@ -488,6 +488,8 @@ class LibraryManager:
             return True
 
         normalized = text.replace("\\", "/").lower()
+        # The final markers are intentional fingerprints of historical malformed
+        # Windows paths; they identify residues and are never emitted as UI text.
         historical_markers = (
             "backend/data/libraries/default",
             "literature-ai/backend/data/libraries/default",
@@ -595,7 +597,7 @@ class LibraryManager:
         meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         existing = dict(meta or {})
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utcnow().isoformat()
         created_value = created_at or existing.get("created_at") or now_iso
         return {
             "name": name,
@@ -619,7 +621,7 @@ class LibraryManager:
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / "project_config.json"
         payload = dict(project_config or {})
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = utcnow().isoformat()
         payload["project_name"] = project_name
         payload.setdefault("created_at", now_iso)
         payload["last_opened"] = now_iso

@@ -28,6 +28,7 @@ class DFTImportedOpinionMixin:
         expected_write_versions: dict[str, int] | None = None,
         write_lock_tokens: list[str] | None = None,
         commit: bool = True,
+        compact_result: bool = False,
     ) -> dict[str, Any]:
         row = self.session.get(DFTResult, result_id)
         if row is None or row.paper_id != paper_id:
@@ -120,6 +121,7 @@ class DFTImportedOpinionMixin:
             verification_actor_type="ai",
             source_label=source_label,
             commit=False,
+            compact_result=compact_result,
         )
         audit = AuditLog(
             paper_id=paper_id,
@@ -142,16 +144,21 @@ class DFTImportedOpinionMixin:
             self.session.commit()
         else:
             self.session.flush()
-        self.session.refresh(audit)
-        return {
+        result = {
             "paper_id": str(paper_id),
             "dft_result_id": str(result_id),
             "action": "verify",
             "source_label": source_label,
-            "applied_corrections": applied_corrections,
             "review_result": verified,
             "audit_log_id": str(audit.id),
         }
+        if compact_result:
+            result["applied_correction_fields"] = [
+                str(item.get("field_name") or "") for item in applied_corrections
+            ]
+        else:
+            result["applied_corrections"] = applied_corrections
+        return result
 
     def _approve_dft_correction(
         self,

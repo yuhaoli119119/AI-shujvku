@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob
+from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob, utcnow
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.extraction_review_service import ExtractionReviewService
@@ -39,6 +38,29 @@ class DFTResultReviewService(
         self.review_service = ExtractionReviewService(session)
         self.issue_lifecycle = DFTAuditIssueLifecycleService(session)
 
+    def begin_import_batch(self, *, paper_id: UUID, rows: list[DFTResult]) -> None:
+        self.review_service.begin_dft_import_batch(paper_id=paper_id, rows=rows)
+
+    def end_import_batch(self) -> None:
+        self.review_service.end_dft_import_batch()
+
+    def current_review_versions(self, *, paper_id: UUID, result_id: UUID) -> dict[str, int]:
+        target_id = str(result_id)
+        if target_id in self.review_service._batch_target_ids:
+            return {
+                field_name: int(review.write_version or 1)
+                for (cached_target_id, field_name), review in self.review_service._batch_reviews.items()
+                if cached_target_id == target_id
+            }
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == target_id,
+            )
+        ).all()
+        return {str(review.field_name): int(review.write_version or 1) for review in reviews}
+
     def verify_result(
         self,
         *,
@@ -54,6 +76,7 @@ class DFTResultReviewService(
         verification_actor_type: str = "human",
         source_label: str | None = None,
         commit: bool = True,
+        compact_result: bool = False,
     ) -> dict[str, Any]:
         if not confirm_reviewed_against_pdf:
             raise ValueError("Explicit PDF/evidence review confirmation is required.")
@@ -83,25 +106,10 @@ class DFTResultReviewService(
                     reviewer_note=verification_note,
                 ),
                 commit=False,
+                verification_actor_type=verification_actor_type,
+                source_label=source_label,
+                imported_evidence_payload=evidence_payload,
             )
-            if self._has_anchor(evidence_payload):
-                self._attach_imported_evidence_payload(
-                    paper_id=paper_id,
-                    result_id=result_id,
-                    field_names=selected_fields,
-                    evidence_payload=evidence_payload,
-                )
-            if verification_actor_type != "human":
-                reviews = self._rewrite_verified_review_payloads(
-                    paper_id=paper_id,
-                    result_id=result_id,
-                    field_names=selected_fields,
-                    reviewer=reviewer or "codex_review",
-                    reviewer_note=verification_note,
-                    evidence_payload=evidence_payload,
-                    verification_actor_type=verification_actor_type,
-                    source_label=source_label,
-                )
         except ValueError as exc:
             if "missing_evidence_reference" not in str(exc) or not self._has_anchor(evidence_payload):
                 raise
@@ -164,7 +172,7 @@ class DFTResultReviewService(
         reviewer_name = reviewer or "codex_review"
         if verification_actor_type == "ai":
             row.candidate_status = "ai_verified_ml_ready"
-            row.ml_ready_at = datetime.utcnow()
+            row.ml_ready_at = utcnow()
             row.ml_ready_source = source_label or reviewer_name
             row.local_ai_verification_payload = {
                 "reviewer": reviewer_name,
@@ -180,7 +188,7 @@ class DFTResultReviewService(
         if gate.eligible:
             row.candidate_status = "ai_verified_ml_ready" if verification_actor_type == "ai" else "ML_Ready"
             if verification_actor_type == "ai" and row.ml_ready_at is None:
-                row.ml_ready_at = datetime.utcnow()
+                row.ml_ready_at = utcnow()
                 row.ml_ready_source = source_label or reviewer_name
         else:
             row.candidate_status = (
@@ -235,17 +243,20 @@ class DFTResultReviewService(
             self.session.commit()
         else:
             self.session.flush()
-        self.session.refresh(audit)
-        return {
+        result = {
             "paper_id": str(paper_id),
             "dft_result_id": str(result_id),
             "field_names": selected_fields,
-            "reviews": [item.model_dump(mode="json") for item in reviews],
             "export_safety": self._gate_payload(row, gate),
             "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
             "actor_type": verification_actor_type,
             "audit_log_id": str(audit.id),
         }
+        if compact_result:
+            result["review_ids"] = [str(item.id) for item in reviews]
+        else:
+            result["reviews"] = [item.model_dump(mode="json") for item in reviews]
+        return result
 
     def _rewrite_verified_review_payloads(
         self,

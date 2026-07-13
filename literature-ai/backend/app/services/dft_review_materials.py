@@ -51,7 +51,12 @@ class DFTMaterialBindingMixin:
     def _existing_material_binding_matches(self, *, row: DFTResult, material_identity: str) -> bool:
         if not row.catalyst_sample_id:
             return False
-        sample = self.session.get(CatalystSample, row.catalyst_sample_id)
+        catalyst_cache = self.session.info.get("dft_import_catalysts_by_id")
+        sample = (
+            catalyst_cache.get(str(row.catalyst_sample_id))
+            if isinstance(catalyst_cache, dict)
+            else self.session.get(CatalystSample, row.catalyst_sample_id)
+        )
         if sample is None:
             return False
         return existing_material_binding_name_matches(sample.name, material_identity)

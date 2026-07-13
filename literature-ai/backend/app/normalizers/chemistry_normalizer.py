@@ -256,6 +256,11 @@ def property_type_filter_aliases(raw: str | None) -> tuple[str, ...]:
     if not normalized:
         return ()
     aliases = {raw_text, normalized, normalized.replace("_", " ")}
+    # Historical extraction used generic binding_energy for adsorbate binding.
+    # An adsorption-energy filter must keep those rows visible, while an
+    # explicit binding-energy filter remains narrow.
+    if normalized == "adsorption_energy":
+        aliases.update({"binding_energy", "binding energy"})
     taxonomy = _PROPERTY_TAXONOMY_MAP.get(normalized)
     if taxonomy and taxonomy.canonical_property_type == normalized:
         for key, item in _PROPERTY_TAXONOMY_MAP.items():

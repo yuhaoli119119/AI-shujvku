@@ -1804,7 +1804,10 @@ def compare_papers(
 
 @mcp_server.tool(
     name="read_paper_page",
-    description="Read the exact full layout of a specific page or range of pages from a paper. Returns all sections, tables, and figures whose page range overlaps with the requested pages.",
+    description=(
+        "Read the stored database layout for a specific paper page or page range. Returns parsed sections, tables, "
+        "and figures whose recorded page range overlaps the request; it does not reopen or reparse the source PDF."
+    ),
 )
 def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None) -> dict[str, Any]:
     require_mcp_capability("read_papers")

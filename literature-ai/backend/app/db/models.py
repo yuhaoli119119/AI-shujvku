@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
@@ -16,7 +16,8 @@ from app.config import DATABASE_V1_EMBEDDING_DIMENSION
 
 
 def utcnow() -> datetime:
-    return datetime.utcnow()
+    """Return naive UTC for existing TIMESTAMP WITHOUT TIME ZONE columns."""
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):

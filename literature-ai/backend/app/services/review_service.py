@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -24,6 +23,7 @@ from app.db.models import (
     PaperSection,
     PaperTable,
     WritingCard,
+    utcnow,
 )
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -226,7 +226,7 @@ class ReviewService:
 
         correction.status = "approved"
         correction.reviewed_by = reviewer
-        correction.reviewed_at = datetime.utcnow()
+        correction.reviewed_at = utcnow()
         try:
             self._apply_correction(correction)
         except Exception:
@@ -380,7 +380,7 @@ class ReviewService:
             reason=str(reason).strip(),
             evidence_payload=payload,
             status="approved",
-            reviewed_at=datetime.utcnow(),
+            reviewed_at=utcnow(),
             reviewed_by=reviewer,
         )
         self.session.add(correction)
@@ -418,7 +418,7 @@ class ReviewService:
 
         correction.status = "rejected"
         correction.reviewed_by = reviewer
-        correction.reviewed_at = datetime.utcnow()
+        correction.reviewed_at = utcnow()
         self.session.add(correction)
         self.session.add(
             AuditLog(
@@ -578,7 +578,7 @@ class ReviewService:
 
             correction.status = "approved"
             correction.reviewed_by = reviewer
-            correction.reviewed_at = datetime.utcnow()
+            correction.reviewed_at = utcnow()
             correction.evidence_payload = {
                 **dict(correction.evidence_payload or {}),
                 "recrop_result": {
@@ -946,7 +946,7 @@ class ReviewService:
         for row in rows:
             row.status = "rejected"
             row.reviewed_by = reviewer
-            row.reviewed_at = datetime.utcnow()
+            row.reviewed_at = utcnow()
             payload = dict(row.evidence_payload or {}) if isinstance(row.evidence_payload, dict) else {}
             payload["superseded_by_direct_delete"] = {
                 "figure_id": str(figure_id),

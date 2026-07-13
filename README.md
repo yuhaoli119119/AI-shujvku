@@ -8,7 +8,7 @@
 
 系统默认不把任何 AI 输出当作最终事实。
 
-## 当前稳定基线（2026-06-27）
+## 当前稳定基线（2026-07-13）
 
 - **数据库**：`PostgreSQL + pgvector` 是唯一且默认的活跃业务数据源。
 - **MCP 协作面**：MCP 是 IDE AI 的首选受控协作入口；HTTP MCP 必须使用配置好的 Bearer key。
@@ -16,6 +16,8 @@
 - **服务暴露**：Docker 默认暴露本机 `8000` Owner 网关，以及 `8080` 只读分享网关；数据库和内部服务不直接暴露到 LAN。
 - **DFT / project-library**：DFT 抽取结果默认只是候选，必须经过证据、审核、材料绑定和导出安全门。
 - **本地产物边界**：`local/`、`literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/` 和临时 scratch 脚本不属于源码，不应作为正式提交内容。
+- **启动与恢复**：核心容器带健康检查；后端与 worker 只在 PostgreSQL、Redis、MinIO、GROBID 就绪后启动。数据库初始化使用 PostgreSQL advisory lock（咨询锁）串行化，失败可重试。
+- **测试边界**：后端数据库测试使用独立随机 schema；前端 Playwright 使用 `4173`，不会复用 Owner 网关 `8000`。
 
 ## 快速启动
 
@@ -28,6 +30,17 @@ curl http://localhost:8000/api/health
 ```
 
 主工作台：<http://localhost:8000/pages/literature_library/index.html>
+
+## 验证入口
+
+在仓库根目录运行：
+
+```bash
+python scripts/verify.py fast
+python scripts/verify.py full
+```
+
+`fast` 用于日常改动，包含仓库结构、Python 编译、关键后端回归和前端重点流程；`full` 在此基础上运行全部 pytest 与 Playwright。两者都不会连接或改写真实业务 schema。
 
 ## 主要目录
 
@@ -61,6 +74,7 @@ AI-shujvku/
 | [literature-ai/AGENTS.md](./literature-ai/AGENTS.md) | AI 协作者规则、数据安全边界、文档同步原则 |
 | [literature-ai/docs/README.md](./literature-ai/docs/README.md) | 当前文档索引、有效基线和历史文档边界 |
 | [literature-ai/docs/mcp/MCP_API.md](./literature-ai/docs/mcp/MCP_API.md) | MCP API 与工具说明 |
+| [literature-ai/docs/ARCHITECTURE.md](./literature-ai/docs/ARCHITECTURE.md) | 当前架构、模块边界、启动与测试边界 |
 | [literature-ai/README.md](./literature-ai/README.md) | `literature-ai/` 目录落点说明；不再承载完整主说明 |
 
 如果这些文档出现冲突，以本文件、`literature-ai/AGENTS.md`、当前代码行为和测试结果为准。
@@ -68,7 +82,7 @@ AI-shujvku/
 ## 运行与提交边界
 
 - 不要提交本地 token、数据库连接串、临时探针脚本或本地调试输出。
-- 根目录下的 `local/` 与 `literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/` 默认按“可清理或本地保留产物”处理。
+- 根目录下的 `local/` 与 `literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/`、`backend/reports/*backup*/` 默认按“可清理或本地保留产物”处理。
 - 如 IDE 会话缺少 MCP 工具，优先走仓库内受控后备路径，不要绕过权限边界直接操作 service、session、model 或数据库。
 
 ## 给新协作者的提醒

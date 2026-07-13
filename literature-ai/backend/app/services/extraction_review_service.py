@@ -12,8 +12,10 @@ from sqlalchemy.orm.exc import StaleDataError
 from app.db.models import (
     CatalystSample,
     DFTResult,
+    DFTAuditIssue,
     DFTSetting,
     ElectrochemicalPerformance,
+    EvidenceLocator,
     ExtractionFieldReview,
     MechanismClaim,
 )
@@ -97,6 +99,104 @@ class ExtractionReviewService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.resolver = ReviewTargetResolver(session)
+        self._batch_target_ids: set[str] = set()
+        self._batch_targets: dict[str, Any] = {}
+        self._batch_reviews: dict[tuple[str, str], ExtractionFieldReview] = {}
+        self._previous_review_safety_cache: Any = None
+        self._previous_evidence_safety_cache: Any = None
+        self._previous_catalyst_cache: Any = None
+        self._previous_issue_cache: Any = None
+
+    def begin_dft_import_batch(self, *, paper_id: UUID, rows: list[DFTResult]) -> None:
+        """Prime the hot DFT-review lookups for one bounded import batch."""
+        self._batch_targets = {str(row.id): row for row in rows}
+        self._batch_target_ids = set(self._batch_targets)
+        self._batch_reviews = {}
+        if self._batch_target_ids:
+            for review in self.session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_type == "dft_results",
+                    ExtractionFieldReview.target_id.in_(self._batch_target_ids),
+                )
+            ).all():
+                self._batch_reviews[(str(review.target_id), str(review.field_name))] = review
+
+        reviews_by_target = {
+            (str(paper_id), "dft_results", target_id): []
+            for target_id in self._batch_target_ids
+        }
+        for (target_id, _field_name), review in self._batch_reviews.items():
+            reviews_by_target[(str(paper_id), "dft_results", target_id)].append(review)
+
+        evidence_reference_ids: set[tuple[str, str, str]] = set()
+        if self._batch_target_ids:
+            for target_id in self.session.scalars(
+                select(EvidenceLocator.target_id).where(
+                    EvidenceLocator.paper_id == paper_id,
+                    EvidenceLocator.target_type == "dft_results",
+                    EvidenceLocator.target_id.in_(self._batch_target_ids),
+                    EvidenceLocator.evidence_text.is_not(None),
+                    EvidenceLocator.evidence_text != "",
+                )
+            ).all():
+                evidence_reference_ids.add((str(paper_id), "dft_results", str(target_id)))
+
+        catalyst_ids = {row.catalyst_sample_id for row in rows if row.catalyst_sample_id is not None}
+        catalysts_by_id = {}
+        if catalyst_ids:
+            catalysts_by_id = {
+                str(sample.id): sample
+                for sample in self.session.scalars(
+                    select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))
+                ).all()
+            }
+
+        active_issues_by_target = {target_id: [] for target_id in self._batch_target_ids}
+        if self._batch_target_ids:
+            for issue in self.session.scalars(
+                select(DFTAuditIssue).where(
+                    DFTAuditIssue.paper_id == paper_id,
+                    DFTAuditIssue.target_type == "dft_results",
+                    DFTAuditIssue.target_id.in_(self._batch_target_ids),
+                    DFTAuditIssue.status.in_(("open", "needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai")),
+                )
+            ).all():
+                active_issues_by_target.setdefault(str(issue.target_id), []).append(issue)
+
+        self._previous_review_safety_cache = self.session.info.get("dft_import_reviews_by_target")
+        self._previous_evidence_safety_cache = self.session.info.get("dft_import_evidence_reference_ids")
+        self._previous_catalyst_cache = self.session.info.get("dft_import_catalysts_by_id")
+        self._previous_issue_cache = self.session.info.get("dft_import_active_issues_by_target")
+        self.session.info["dft_import_reviews_by_target"] = reviews_by_target
+        self.session.info["dft_import_evidence_reference_ids"] = evidence_reference_ids
+        self.session.info["dft_import_catalysts_by_id"] = catalysts_by_id
+        self.session.info["dft_import_active_issues_by_target"] = active_issues_by_target
+
+    def end_dft_import_batch(self) -> None:
+        if self._previous_review_safety_cache is None:
+            self.session.info.pop("dft_import_reviews_by_target", None)
+        else:
+            self.session.info["dft_import_reviews_by_target"] = self._previous_review_safety_cache
+        if self._previous_evidence_safety_cache is None:
+            self.session.info.pop("dft_import_evidence_reference_ids", None)
+        else:
+            self.session.info["dft_import_evidence_reference_ids"] = self._previous_evidence_safety_cache
+        if self._previous_catalyst_cache is None:
+            self.session.info.pop("dft_import_catalysts_by_id", None)
+        else:
+            self.session.info["dft_import_catalysts_by_id"] = self._previous_catalyst_cache
+        if self._previous_issue_cache is None:
+            self.session.info.pop("dft_import_active_issues_by_target", None)
+        else:
+            self.session.info["dft_import_active_issues_by_target"] = self._previous_issue_cache
+        self._batch_target_ids.clear()
+        self._batch_targets.clear()
+        self._batch_reviews.clear()
+        self._previous_review_safety_cache = None
+        self._previous_evidence_safety_cache = None
+        self._previous_catalyst_cache = None
+        self._previous_issue_cache = None
 
     def list_reviews(self, paper_id: UUID) -> list[ExtractionFieldReviewResponse]:
         rows = self.session.scalars(
@@ -247,6 +347,9 @@ class ExtractionReviewService:
         payload: ExtractionReviewMarkVerifiedRequest,
         *,
         commit: bool = True,
+        verification_actor_type: str = "human",
+        source_label: str | None = None,
+        imported_evidence_payload: dict[str, Any] | list[Any] | None = None,
     ) -> list[ExtractionFieldReviewResponse]:
         canonical_type = self.canonical_target_type(payload.target_type)
         target = self.get_target_or_raise(paper_id, canonical_type, payload.target_id)
@@ -303,6 +406,8 @@ class ExtractionReviewService:
             writable.append((field_name, field_snapshot, review))
 
         saved: list[ExtractionFieldReviewResponse] = []
+        deferred_reviews: list[ExtractionFieldReview] = []
+        defer_batch_flush = canonical_type == "dft_results" and payload.target_id in self._batch_target_ids
         for field_name, field_snapshot, review in writable:
             review.original_value = field_snapshot["value"]
             if review.reviewed_value is None:
@@ -312,21 +417,32 @@ class ExtractionReviewService:
             review.reviewer_status = "verified"
             review.reviewer = payload.reviewer
             review.reviewer_note = payload.reviewer_note
+            verification_key = "human_verification" if verification_actor_type == "human" else "ai_verification"
             review.review_payload = {
-                "human_verification": {
+                verification_key: {
                     "reviewer": payload.reviewer,
                     "reviewer_note": payload.reviewer_note,
                     "decision": "verified",
                     "writes_final_truth": True,
+                    "verification_actor_type": verification_actor_type,
+                    "source_label": source_label,
                 }
             }
+            if imported_evidence_payload is not None:
+                review.review_payload["imported_evidence_payload"] = imported_evidence_payload
             review.target_resolution_status = "active"
             review.remapped_from_target_id = None
             review.last_resolved_target_id = payload.target_id
             self.resolver._refresh_review_identity(review, canonical_type, target)
             self.session.add(review)
+            if not defer_batch_flush:
+                self._flush_review_write()
+                saved.append(self._serialize(review))
+            else:
+                deferred_reviews.append(review)
+        if defer_batch_flush:
             self._flush_review_write()
-            saved.append(self._serialize(review))
+            saved.extend(self._serialize(review) for review in deferred_reviews)
         if commit:
             self.session.commit()
         else:
@@ -342,6 +458,10 @@ class ExtractionReviewService:
         return canonical_target_type(value)
 
     def get_target_or_raise(self, paper_id: UUID, canonical_type: str, target_id: str):
+        if canonical_type == "dft_results" and target_id in self._batch_targets:
+            target = self._batch_targets[target_id]
+            if target.paper_id == paper_id:
+                return target
         model = TARGET_TYPE_MODELS[canonical_type]
         normalized_target_id = UUID(str(target_id))
         row = self.session.scalar(select(model).where(model.paper_id == paper_id, model.id == normalized_target_id))
@@ -353,6 +473,27 @@ class ExtractionReviewService:
         return FIELD_SNAPSHOT_BUILDERS[canonical_type](row)
 
     def _get_or_create_review(self, paper_id: UUID, canonical_type: str, target_id: str, field_name: str) -> ExtractionFieldReview:
+        batch_key = (str(target_id), str(field_name))
+        if canonical_type == "dft_results" and str(target_id) in self._batch_target_ids:
+            cached = self._batch_reviews.get(batch_key)
+            if cached is not None:
+                cached._created_by_get_or_create = False
+                return cached
+            review = ExtractionFieldReview(
+                paper_id=paper_id,
+                target_type=canonical_type,
+                target_id=str(target_id),
+                field_name=field_name,
+                target_resolution_status="active",
+                last_resolved_target_id=str(target_id),
+            )
+            self.session.add(review)
+            review._created_by_get_or_create = True
+            self._batch_reviews[batch_key] = review
+            safety_cache = self.session.info.get("dft_import_reviews_by_target")
+            if isinstance(safety_cache, dict):
+                safety_cache.setdefault((str(paper_id), "dft_results", str(target_id)), []).append(review)
+            return review
         identity_filter = (
             ExtractionFieldReview.paper_id == paper_id,
             ExtractionFieldReview.target_type == canonical_type,
@@ -409,6 +550,8 @@ class ExtractionReviewService:
         target_id: str,
         field_name: str,
     ) -> ExtractionFieldReview | None:
+        if canonical_type == "dft_results" and str(target_id) in self._batch_target_ids:
+            return self._batch_reviews.get((str(target_id), str(field_name)))
         return self.session.scalar(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == paper_id,

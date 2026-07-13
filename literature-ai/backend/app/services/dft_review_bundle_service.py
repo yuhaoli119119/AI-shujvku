@@ -24,7 +24,6 @@ from app.db.models import (
     EvidenceLocator,
     Paper,
     PaperFigure,
-    PaperRelationship,
     PaperSection,
     PaperTable,
 )
@@ -33,6 +32,7 @@ from app.services.evidence_review_bundle_service import EvidenceReviewBundleServ
 from app.services.figure_table_snapshot_service import compute_figure_table_snapshot
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
+from app.services.review_bundle_shared import compact_figure_artifact, linked_source_papers
 from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_pdf_evidence_anchor
@@ -151,6 +151,8 @@ def _optional_uuid(value: Any) -> UUID | None:
 
 
 class DFTReviewBundleService:
+    _bundle_figure_artifact = staticmethod(compact_figure_artifact)
+
     """Build and validate small, temporary, offline DFT review packages."""
 
     def __init__(self, session: Session, settings: Settings) -> None:
@@ -311,7 +313,7 @@ class DFTReviewBundleService:
                 if figure_file_count >= MAX_FIGURE_FILES:
                     figure_warnings.append("figure_file_limit_reached")
                     break
-                data, suffix, compacted = self._bundle_figure_artifact(artifact)
+                data, suffix, compacted = compact_figure_artifact(artifact)
                 if figure_bytes_total + len(data) > MAX_TOTAL_FIGURE_BYTES:
                     figure_warnings.append("figure_byte_limit_reached")
                     continue
@@ -565,6 +567,17 @@ class DFTReviewBundleService:
                 materials=materials,
             ):
                 add_error(error["code"], error["message"], audit_index=index)
+            required_evidence_checks: list[dict[str, Any]] = []
+            for evidence_item in evidence_items:
+                try:
+                    required_evidence_checks.append(self._evidence_verification_requirement(evidence_item))
+                except ValueError as exc:
+                    add_error(
+                        "unexecutable_evidence_verification_requirement",
+                        str(exc),
+                        audit_index=index,
+                    )
+            required_page_checks = self._unique_page_checks(required_evidence_checks)
             primary = self._best_pdf_evidence_item(evidence_items) or evidence_items[0]
             quote_item = self._best_quote_evidence_item(evidence_items) or primary
             primary_table = (
@@ -596,8 +609,11 @@ class DFTReviewBundleService:
                     "field_name": audit.field_name,
                     "decision": audit.decision,
                     "evidence_checked": audit.evidence_checked,
+                    "evidence_ids": audit.evidence_ids,
                     "evidence_location": evidence_location,
                     "supporting_evidence": [self._compact_evidence(item) for item in evidence_items[1:]],
+                    "required_evidence_checks": required_evidence_checks,
+                    "required_page_checks": required_page_checks,
                     "blocking_errors": audit.blocking_errors,
                     "recommended_action": audit.recommended_action,
                     "dedupe_analysis": audit.dedupe_analysis,
@@ -611,9 +627,15 @@ class DFTReviewBundleService:
                     "local_ai_verification": {
                         "verified_against_pdf": False,
                         "required_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+                        "checked_evidence_ids": [],
+                        "checked_pages": [],
+                        "verification_note": None,
                         "instruction": (
-                            "Local AI must call get_codex_item for this target and read_paper_page for each cited "
-                            "page/evidence before changing verified_against_pdf to true."
+                            "Cover every required_evidence_checks item with get_codex_item and every unique "
+                            "(source_paper_id, page) with read_paper_page. A successful evidence-object or page "
+                            "read may be reused across audits that require the same key. read_paper_page returns "
+                            "stored database page layout; the PDF judgment must also use the source PDF/page "
+                            "evidence included in the review bundle."
                         ),
                     },
                     "reason": audit.reason,
@@ -703,6 +725,12 @@ class DFTReviewBundleService:
 
         import_request = None
         if not errors:
+            unique_evidence_checks = self._unique_evidence_checks(
+                check
+                for audit in normalized_audits
+                for check in audit.get("required_evidence_checks", [])
+            )
+            unique_page_checks = self._unique_page_checks(unique_evidence_checks)
             review_notes = [
                 {
                     "content": note,
@@ -732,7 +760,18 @@ class DFTReviewBundleService:
                         "web_ai_review_source": result.review_source.model_dump(mode="json"),
                         "local_ai_verification_required": True,
                         "required_local_ai_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+                        "local_ai_verification_reuse_policy": (
+                            "Each audit must record complete coverage. One successful get_codex_item result may "
+                            "be reused for the same evidence_id, and one successful read_paper_page result may "
+                            "be reused for the same (source_paper_id, page)."
+                        ),
                         "review_source": result.review_source.model_dump(mode="json"),
+                    },
+                    "local_ai_verification_plan": {
+                        "unique_evidence_checks": unique_evidence_checks,
+                        "unique_page_checks": unique_page_checks,
+                        "evidence_check_count": len(unique_evidence_checks),
+                        "page_check_count": len(unique_page_checks),
                     },
                     "coverage_acknowledgement": (
                         result.coverage_acknowledgement.model_dump(mode="json")
@@ -761,9 +800,10 @@ class DFTReviewBundleService:
                 "writes_database": False,
                 "writes_final_truth": False,
                 "next_step": (
-                    "Local AI must verify each object_review_audit with get_codex_item and read_paper_page, "
-                    "set local_ai_verification.verified_against_pdf=true with the used tools, then call authenticated "
-                    "import_analysis with the returned request."
+                    "Local AI must cover every audit's required evidence objects and source-paper pages. Identical "
+                    "evidence_id and identical (source_paper_id, page) checks may reuse one successful tool result. "
+                    "Each audit must still record checked_evidence_ids, checked_pages, used_tools, a verification_note, "
+                    "and verified_against_pdf=true before authenticated import_analysis."
                 ),
             },
             "local_ai_writeback_contract": self._local_ai_writeback_contract(),
@@ -789,7 +829,11 @@ class DFTReviewBundleService:
                 paper_id,
                 run_id=chart_run_id,
             )
-        source_papers = self._source_papers(paper)
+        source_papers = linked_source_papers(
+            self.session,
+            paper,
+            relationship_types=SUPPLEMENTARY_RELATIONSHIP_TYPES,
+        )
         source_documents = []
         for item in source_papers:
             source = item["paper"]
@@ -1062,37 +1106,6 @@ class DFTReviewBundleService:
                 continue
             selected.append(row)
         return selected, terminal_main
-
-    def _source_papers(self, paper: Paper) -> list[dict[str, Any]]:
-        relationships = self.session.scalars(
-            select(PaperRelationship).where(
-                PaperRelationship.source_paper_id == paper.id,
-                PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
-            )
-        ).all()
-        sources = [
-            {
-                "paper": paper,
-                "prefix": "main",
-                "source_document_type": "main_text",
-                "relationship_id": None,
-            }
-        ]
-        seen = {paper.id}
-        for relationship in sorted(relationships, key=lambda item: str(item.target_paper_id)):
-            related = self.session.get(Paper, relationship.target_paper_id)
-            if related is None or related.id in seen:
-                continue
-            seen.add(related.id)
-            sources.append(
-                {
-                    "paper": related,
-                    "prefix": "si",
-                    "source_document_type": "supplementary_information",
-                    "relationship_id": str(relationship.id),
-                }
-            )
-        return sources
 
     def _reviewed_evidence_aggregate(
         self,
@@ -2362,45 +2375,111 @@ class DFTReviewBundleService:
         )
 
     @staticmethod
-    def _bundle_figure_artifact(artifact: Path) -> tuple[bytes, str, bool]:
-        """Create a compact AI-reading copy without changing the persisted source image."""
+    def _evidence_item_type(item: dict[str, Any]) -> str:
+        evidence_kind = str(item.get("evidence_kind") or "").strip().lower()
+        if evidence_kind in {"figure", "table"}:
+            return evidence_kind
+        source_record_type = str(item.get("source_record_type") or "").strip().lower()
+        if source_record_type == "paper_section":
+            return "section"
+        if source_record_type == "dft_result_candidate_evidence":
+            return "dft_result"
+        raise ValueError(
+            f"Evidence '{item.get('evidence_id') or '-'}' has no supported get_codex_item mapping."
+        )
 
-        original = artifact.read_bytes()
-        original_suffix = artifact.suffix.lower() or ".png"
+    @classmethod
+    def _evidence_verification_requirement(cls, item: dict[str, Any]) -> dict[str, Any]:
+        evidence_id = str(item.get("evidence_id") or "").strip()
+        source_paper_id = str(item.get("source_paper_id") or "").strip()
+        source_paper_code = str(item.get("source_paper_code") or "").strip()
+        source_record_id = str(item.get("source_record_id") or "").strip()
+        source_document_type = str(item.get("source_document_type") or "").strip()
+        anchor = first_pdf_evidence_anchor(item) or {}
+        page = anchor.get("page")
+        missing = [
+            name
+            for name, value in (
+                ("evidence_id", evidence_id),
+                ("source_paper_id", source_paper_id),
+                ("source_paper_code", source_paper_code),
+                ("source_record_id", source_record_id),
+                ("page", page),
+                ("source_document_type", source_document_type),
+            )
+            if value in (None, "")
+        ]
+        if missing:
+            raise ValueError(
+                f"Evidence '{evidence_id or '-'}' cannot be verified directly; missing: {', '.join(missing)}."
+            )
         try:
-            from PIL import Image
+            normalized_page = int(page)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Evidence '{evidence_id}' has an invalid PDF page: {page!r}.") from exc
+        return {
+            "evidence_id": evidence_id,
+            "source_paper_id": source_paper_id,
+            "source_paper_code": source_paper_code,
+            "source_record_id": source_record_id,
+            "item_type": cls._evidence_item_type(item),
+            "page": normalized_page,
+            "source_document_type": source_document_type,
+        }
 
-            with Image.open(BytesIO(original)) as source:
-                source.load()
-                if source.mode == "RGBA":
-                    image = Image.new("RGB", source.size, "white")
-                    image.paste(source, mask=source.getchannel("A"))
-                elif source.mode not in {"RGB", "L"}:
-                    image = source.convert("RGB")
-                else:
-                    image = source.copy()
-                if image.mode == "L":
-                    image = image.convert("RGB")
-                output = BytesIO()
-                image.save(output, format="WEBP", quality=92, method=6)
-                compact = output.getvalue()
-            if compact and len(compact) < len(original):
-                return compact, ".webp", True
-        except Exception:
-            # Invalid/unsupported legacy assets stay readable in their original form.
-            pass
-        return original, original_suffix, False
+    @staticmethod
+    def _unique_evidence_checks(checks: Any) -> list[dict[str, Any]]:
+        unique: dict[str, dict[str, Any]] = {}
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            evidence_id = str(check.get("evidence_id") or "").strip()
+            if evidence_id and evidence_id not in unique:
+                unique[evidence_id] = dict(check)
+        return [unique[evidence_id] for evidence_id in sorted(unique)]
+
+    @staticmethod
+    def _unique_page_checks(checks: Any) -> list[dict[str, Any]]:
+        unique: dict[tuple[str, int], dict[str, Any]] = {}
+        for check in checks:
+            if not isinstance(check, dict):
+                continue
+            paper_id = str(check.get("source_paper_id") or check.get("paper_id") or "").strip()
+            try:
+                page = int(check.get("page"))
+            except (TypeError, ValueError):
+                continue
+            key = (paper_id, page)
+            if not paper_id or key in unique:
+                continue
+            unique[key] = {
+                "source_paper_id": paper_id,
+                "source_paper_code": check.get("source_paper_code"),
+                "page": page,
+                "source_document_type": check.get("source_document_type"),
+            }
+        return [unique[key] for key in sorted(unique)]
 
     @staticmethod
     def _local_ai_writeback_contract() -> dict[str, Any]:
         return {
             "dft_web_ai_is_suggestion_only": True,
-            "required_per_audit_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+            "required_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+            "reuse_policy": {
+                "get_codex_item": "one successful result may be reused for the same evidence_id",
+                "read_paper_page": "one successful result may be reused for the same (source_paper_id, page)",
+                "per_audit_coverage_record_still_required": True,
+            },
             "required_local_ai_verification": {
                 "verified_against_pdf": True,
                 "used_tools_include": list(LOCAL_AI_REQUIRED_TOOLS),
-                "must_read_each_target": "get_codex_item",
-                "must_read_each_cited_page": "read_paper_page",
+                "checked_evidence_ids_cover": "all server-derived evidence_ids for this audit",
+                "checked_pages_cover": "all server-derived (source_paper_id, page) pairs for this audit",
+                "verification_note_required": True,
+                "pdf_evidence_semantics": (
+                    "read_paper_page reads stored database layout. verified_against_pdf also requires judgment "
+                    "against the source PDF/page evidence included in the review bundle."
+                ),
             },
             "writeback": {
                 "tool": "import_analysis",
