@@ -21,6 +21,8 @@ from app.db.models import (
     Paper,
 )
 from app.main import app
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+from app.services.dft_review_service import DFTResultReviewService
 
 
 def _seed_paper(session: Session, *, title: str, library_name: str, parsed: bool = True) -> Paper:
@@ -51,6 +53,8 @@ def _seed_dft(
     evidence_payload: dict | None = None,
     with_setting: bool = True,
 ) -> DFTResult:
+    evidence_payload = dict(evidence_payload or {})
+    evidence_text = str(evidence_payload.get("source_text") or evidence_text)
     if catalyst is None:
         catalyst = CatalystSample(
             paper_id=paper.id,
@@ -101,6 +105,27 @@ def _seed_dft(
     if with_setting:
         session.add(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
     return row
+
+
+def _verify_dft_ready(session: Session, row: DFTResult) -> None:
+    verification = DFTResultReviewService(session).verify_result(
+        paper_id=row.paper_id,
+        result_id=row.id,
+        confirm_reviewed_against_pdf=True,
+        reviewer="project_library_quality_test",
+        reviewer_note="Verified against the tabular test evidence.",
+        expected_write_versions={"value": 1},
+        evidence_payload={"page": 5, "quoted_text": row.evidence_text},
+        verification_actor_type="ai",
+        source_label="project_library_quality_test",
+        commit=False,
+    )
+    assert verification["export_safety"]["eligible"] is True
+    lifecycle = DFTAuditIssueLifecycleService(session)
+    identity = lifecycle.identity_for_result(row)
+    assert identity.observation_key is not None
+    lifecycle.apply_result_identity(row, identity)
+    session.flush()
 
 
 def _seed_external_run(session: Session, *, paper: Paper) -> ExternalAnalysisRun:
@@ -879,10 +904,11 @@ def test_project_library_v4_export_reuses_tabular_lis_task_aliases(setup_test_db
                 adsorbate=None,
                 reaction_step="optimized M-N bond",
                 value=1.91,
-                unit="A",
+                unit="Å",
                 evidence_payload={
                     "active_site_instance_key": "alias:structure",
-                    "source_text": "M-N is 1.91 A.",
+                    "atom_pair": "Fe-N",
+                    "source_text": "Fe-N is 1.91 Å.",
                     "source_table_id": "si:table:002",
                     "source_row_index": 3,
                     "source_column_index": 4,
@@ -897,10 +923,11 @@ def test_project_library_v4_export_reuses_tabular_lis_task_aliases(setup_test_db
                 adsorbate=None,
                 reaction_step="optimized M-S bond",
                 value=2.18,
-                unit="A",
+                unit="Å",
                 evidence_payload={
                     "active_site_instance_key": "alias:structure",
-                    "source_text": "M-S is 2.18 A.",
+                    "atom_pair": "Fe-S",
+                    "source_text": "Fe-S is 2.18 Å.",
                     "source_table_id": "si:table:002",
                     "source_row_index": 4,
                     "source_column_index": 4,
@@ -942,6 +969,8 @@ def test_project_library_v4_export_reuses_tabular_lis_task_aliases(setup_test_db
                 with_setting=False,
             ),
         ]
+        for row in rows:
+            _verify_dft_ready(session, row)
         session.commit()
         row_ids_by_property = {row.property_type: str(row.id) for row in rows}
 

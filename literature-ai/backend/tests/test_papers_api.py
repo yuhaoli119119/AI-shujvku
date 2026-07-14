@@ -19,6 +19,8 @@ from app.db.session import get_db_session
 from app.schemas.documents import UnifiedPaperDocument, UnifiedSection
 from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+from app.services.dft_review_service import DFTResultReviewService
 import app.api.papers as papers_api
 
 
@@ -50,6 +52,27 @@ def _add_object_review_audit(session, row: DFTResult, *, source: str = "local_ai
             status="ai_reviewed",
         )
     )
+
+
+def _verify_dft_ready(session, row: DFTResult, *, page: int) -> None:
+    verification = DFTResultReviewService(session).verify_result(
+        paper_id=row.paper_id,
+        result_id=row.id,
+        confirm_reviewed_against_pdf=True,
+        reviewer="correlation_test",
+        reviewer_note="Verified against the exact-page test evidence.",
+        expected_write_versions={"value": 1},
+        evidence_payload={"page": page, "quoted_text": row.evidence_text},
+        verification_actor_type="ai",
+        source_label="correlation_test",
+        commit=False,
+    )
+    assert verification["export_safety"]["eligible"] is True
+    lifecycle = DFTAuditIssueLifecycleService(session)
+    identity = lifecycle.identity_for_result(row)
+    assert identity.observation_key is not None
+    lifecycle.apply_result_identity(row, identity)
+    session.flush()
 
 def test_papers_status_and_stream(setup_test_db, monkeypatch):
     engine = setup_test_db
@@ -3098,6 +3121,7 @@ def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
                     unit="eV",
                     reaction_step="H reaction barrier",
                     evidence_text=f"The reaction barrier is {reaction_barrier} eV.",
+                    evidence_payload={"state_context": "transition_state"},
                 ),
                 DFTResult(
                     paper_id=paper.id,
@@ -3154,6 +3178,7 @@ def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
                     )
                 )
                 _add_object_review_audit(session, result_row)
+                _verify_dft_ready(session, result_row, page=index)
         session.commit()
 
     client = TestClient(app)
@@ -3293,6 +3318,7 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
                 reaction_step="Bader charge analysis",
                 source_section="Discussion",
                 evidence_text=f"The Bader charge is {bader_charge} e.",
+                evidence_payload={"site_label": "Fe active site"},
                 confidence=0.95,
             )
             session.add_all([target, descriptor])
@@ -3595,7 +3621,12 @@ def test_visuals_correlation_summary_prefetches_reviewed_dft_once(setup_test_db)
                     adsorbate="H",
                     value=-1.0 - index / 100,
                     unit="eV",
+                    reaction_step="H adsorption",
                     evidence_text="Exploratory target evidence.",
+                    evidence_payload={
+                        "active_site_instance_key": f"site:Fe-GDY-{index}",
+                        "site_label": "Fe active site",
+                    },
                 ),
                 DFTResult(
                     paper_id=paper.id,
@@ -3604,7 +3635,13 @@ def test_visuals_correlation_summary_prefetches_reviewed_dft_once(setup_test_db)
                     adsorbate=None,
                     value=0.1 + index / 100,
                     unit="e",
+                    reaction_step="H adsorption",
                     evidence_text="Exploratory descriptor evidence.",
+                    evidence_payload={
+                        "descriptor_target_context": "adsorption_energy",
+                        "active_site_instance_key": f"site:Fe-GDY-{index}",
+                        "site_label": "Fe active site",
+                    },
                 ),
             ]
             session.add_all(result_rows)
@@ -3641,6 +3678,7 @@ def test_visuals_correlation_summary_prefetches_reviewed_dft_once(setup_test_db)
                     )
                 )
                 _add_object_review_audit(session, result_row)
+                _verify_dft_ready(session, result_row, page=index + 1)
         session.commit()
 
     statements = []

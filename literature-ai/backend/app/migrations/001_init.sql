@@ -756,6 +756,58 @@ CREATE TABLE dft_audit_issues (
 );
 
 
+CREATE TABLE dft_audit_issue_sources (
+	issue_id UUID NOT NULL,
+	candidate_id UUID NOT NULL,
+	created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	PRIMARY KEY (issue_id, candidate_id),
+	FOREIGN KEY(issue_id) REFERENCES dft_audit_issues (id) ON DELETE CASCADE,
+	FOREIGN KEY(candidate_id) REFERENCES external_analysis_candidates (id) ON DELETE RESTRICT
+);
+
+
+CREATE TABLE source_snapshot_reconciliations (
+	id UUID NOT NULL,
+	paper_id UUID NOT NULL,
+	discovery_run_id UUID NOT NULL,
+	historical_fingerprint VARCHAR(64) NOT NULL,
+	historical_algorithm_version VARCHAR(128) NOT NULL,
+	historical_manifest JSONB NOT NULL,
+	current_fingerprint VARCHAR(64) NOT NULL,
+	current_algorithm_version VARCHAR(128) NOT NULL,
+	current_manifest JSONB NOT NULL,
+	comparison JSONB NOT NULL,
+	reason TEXT NOT NULL,
+	actor VARCHAR(128),
+	executed_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+	PRIMARY KEY (id),
+	CONSTRAINT uq_source_snapshot_reconciliation_identity UNIQUE (paper_id, discovery_run_id, historical_fingerprint, current_fingerprint, current_algorithm_version),
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE CASCADE,
+	FOREIGN KEY(discovery_run_id) REFERENCES external_analysis_runs (id) ON DELETE CASCADE
+);
+
+
+CREATE TABLE external_analysis_candidate_recoveries (
+	candidate_id UUID NOT NULL,
+	paper_id UUID NOT NULL,
+	run_id UUID NOT NULL,
+	issue_ids JSONB NOT NULL,
+	audit_log_ids JSONB NOT NULL,
+	source_audit_index INTEGER NOT NULL,
+	recovery_version VARCHAR(128) NOT NULL,
+	payload_sha256 VARCHAR(64) NOT NULL,
+	match_manifest JSONB NOT NULL,
+	restored_state JSONB NOT NULL,
+	reason TEXT NOT NULL,
+	actor VARCHAR(128),
+	executed_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+	PRIMARY KEY (candidate_id),
+	FOREIGN KEY(candidate_id) REFERENCES external_analysis_candidates (id) ON DELETE RESTRICT,
+	FOREIGN KEY(paper_id) REFERENCES papers (id) ON DELETE RESTRICT,
+	FOREIGN KEY(run_id) REFERENCES external_analysis_runs (id) ON DELETE RESTRICT
+);
+
+
 CREATE TABLE content_evidence_items (
 	id UUID NOT NULL,
 	paper_id UUID NOT NULL,
@@ -813,6 +865,13 @@ CREATE INDEX ix_dft_audit_issues_issue_type ON dft_audit_issues (issue_type);
 CREATE INDEX ix_dft_audit_issues_severity ON dft_audit_issues (severity);
 CREATE INDEX ix_dft_audit_issues_status ON dft_audit_issues (status);
 CREATE INDEX ix_dft_audit_issues_fingerprint ON dft_audit_issues (fingerprint);
+CREATE INDEX ix_dft_audit_issue_sources_issue_id ON dft_audit_issue_sources (issue_id);
+CREATE INDEX ix_dft_audit_issue_sources_candidate_id ON dft_audit_issue_sources (candidate_id);
+CREATE INDEX ix_source_snapshot_reconciliations_paper_id ON source_snapshot_reconciliations (paper_id);
+CREATE INDEX ix_source_snapshot_reconciliations_discovery_run_id ON source_snapshot_reconciliations (discovery_run_id);
+CREATE INDEX ix_external_analysis_candidate_recoveries_paper_id ON external_analysis_candidate_recoveries (paper_id);
+CREATE INDEX ix_external_analysis_candidate_recoveries_run_id ON external_analysis_candidate_recoveries (run_id);
+CREATE INDEX ix_external_analysis_candidate_recoveries_paper_run ON external_analysis_candidate_recoveries (paper_id, run_id, executed_at);
 
 CREATE INDEX ix_content_evidence_items_paper_id ON content_evidence_items (paper_id);
 CREATE INDEX ix_content_evidence_items_run_id ON content_evidence_items (run_id);

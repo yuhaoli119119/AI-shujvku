@@ -63,6 +63,12 @@ def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
     events: list[str] = []
     state = {"migration_open": False}
 
+    class FakeResult(list):
+        rowcount = 0
+
+        def mappings(self):
+            return self
+
     class FakeConnection:
         def execution_options(self, **_: object):
             return self
@@ -73,12 +79,38 @@ def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def execute(self, *_args, **_kwargs):
-            return None
+        def execute(self, statement, *_args, **_kwargs):
+            sql = str(statement).lower()
+            if "pg_constraint" in sql:
+                return FakeResult(
+                    [
+                        {
+                            "constraint_name": "dft_audit_issue_sources_candidate_id_fkey",
+                            "definition": "FOREIGN KEY (candidate_id) REFERENCES external_analysis_candidates(id) ON DELETE RESTRICT",
+                        }
+                    ]
+                )
+            if "pg_attribute" in sql:
+                return FakeResult(
+                    [(name,) for name in ("archived_at", "archived_by", "archive_reason", "archive_context")]
+                )
+            return FakeResult()
+
+        def scalar(self, statement, *_args, **_kwargs):
+            sql = str(statement).lower()
+            if "current_schema" in sql:
+                return "public"
+            if "pg_namespace" in sql:
+                return True
+            if "pg_class" in sql or "pg_constraint" in sql:
+                return True
+            return False
 
     class FakeEngine:
         def __init__(self):
-            self.dialect = type("Dialect", (), {"name": "postgresql"})()
+            from sqlalchemy.dialects.postgresql import dialect
+
+            self.dialect = dialect()
 
         def connect(self):
             return FakeConnection()
@@ -117,6 +149,7 @@ def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
             events.append("session_commit")
 
     fake_engine = FakeEngine()
+    FakeConnection.dialect = fake_engine.dialect
     monkeypatch.setattr(db_session, "get_engine", lambda _url: fake_engine)
     monkeypatch.setattr(db_session.Base.metadata, "create_all", lambda _engine: events.append("create_all"))
     monkeypatch.setattr(db_session, "inspect", lambda _engine: FakeInspector())
