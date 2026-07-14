@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper
+from app.services.dft_identity_service import build_dft_identity_v2
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.module_write_lock_service import ModuleWriteLockService
 
@@ -33,7 +34,10 @@ def _complete_local_ai_audit(
     page = 5 + (index % 10)
     evidence_id = f"main:table:{index:03d}"
     source_record_id = f"00000000-0000-0000-0001-{index:012d}"
-    material = f"FeN4P{index % 10},{index % 4}-DG"
+    # Each entry represents a distinct FeN4 catalyst environment. The scale
+    # profile must exercise scientific identity, rather than make provenance
+    # fields such as evidence_id or page number artificially unique.
+    material = f"FeN4@graphene-vacancy-{index:03d}"
     adsorbate = ("S8", "Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S")[index % 6]
     property_type = (
         "adsorption_energy",
@@ -43,13 +47,23 @@ def _complete_local_ai_audit(
         "bader_charge_transfer",
         "bond_length",
     )[index % 6]
-    unit = "Å" if property_type == "bond_length" else "e" if property_type == "bader_charge_transfer" else "eV"
-    value = round(-5.0 + index * 0.013, 6)
+    value, unit = {
+        "adsorption_energy": (round(-0.45 - 0.01 * (index % 31), 4), "eV"),
+        "gibbs_free_energy_change": (round(-0.30 + 0.02 * (index % 21), 4), "eV"),
+        "zero_point_energy_correction": (round(0.03 + 0.002 * (index % 16), 4), "eV"),
+        "entropy_correction_TS": (round(0.12 + 0.003 * (index % 18), 4), "eV"),
+        "bader_charge_transfer": (round(0.08 + 0.01 * (index % 15), 4), "e"),
+        "bond_length": (round(2.16 + 0.01 * (index % 18), 4), "Å"),
+    }[property_type]
+    atom_pair = "Fe-S" if property_type == "bond_length" else None
+    measurement_label = (
+        f"{atom_pair} bond length" if atom_pair else property_type.replace("_", " ")
+    )
     evidence_location = {
         "source_document_type": "main_text",
         "page": page,
         "table": f"Table {1 + index % 6}",
-        "quoted_text": f"{material} {adsorbate} {value} {unit}",
+        "quoted_text": f"{material} {adsorbate} {measurement_label} {value} {unit}",
         "evidence_ids": [evidence_id],
         "bundle_fingerprint": "b" * 64,
         "figure_table_completed_snapshot_fingerprint": "s" * 64,
@@ -73,6 +87,7 @@ def _complete_local_ai_audit(
             "source_document_type": "main_text",
             "source_page": page,
             "source_table": evidence_location["table"],
+            **({"atom_pair": atom_pair} if atom_pair else {}),
         },
         "confidence": 0.95,
         "reason": "The structured table cell and source PDF page report this material, property, value, and unit.",
@@ -265,6 +280,20 @@ def test_large_dft_import_memory_profile_is_b0102_scale(setup_test_db, monkeypat
                     for index in range(1, import_size + 1)
                 ],
             }
+            identities = [
+                build_dft_identity_v2({"paper_id": str(paper.id), **audit})
+                for audit in raw_payload["object_review_audits"]
+            ]
+            assert len(identities) == import_size
+            assert all(not identity.error_codes for identity in identities)
+            assert all(identity.dedupe_allowed for identity in identities)
+            assert all(identity.observation_key for identity in identities)
+            assert len({identity.subject_key for identity in identities}) == import_size
+            assert len({identity.observation_key for identity in identities}) == import_size
+            assert all(
+                "missing_atom_pair_identity" not in identity.error_codes
+                for identity in identities
+            )
             settings = get_settings()
             service = ExternalAnalysisService(session, settings)
             monkeypatch.setattr(service, "_guard_dft_import_prerequisites", lambda _run, _candidates: None)
