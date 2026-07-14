@@ -16,12 +16,13 @@ if str(ROOT) not in sys.path:
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
-from sqlalchemy import delete, select
+from sqlalchemy import select
 
 from app.config import get_settings
 from app.db.models import ExternalAnalysisCandidate, ExternalAnalysisRun
 from app.db.session import session_scope
 from app.mcp.auth import parse_mcp_api_keys
+from app.services.external_analysis_service import ExternalAnalysisService
 
 
 SMOKE_SOURCE = "mcp_ai_workflow_smoke"
@@ -87,8 +88,7 @@ def _cleanup_run(run_id: str | None) -> bool:
             return False
         if run.source != SMOKE_SOURCE:
             raise RuntimeError(f"Refusing to delete non-smoke run {run_id} from source {run.source}")
-        session.execute(delete(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id))
-        session.delete(run)
+        ExternalAnalysisService(session, settings).delete_run(run.id)
         session.commit()
         return True
 

@@ -20,6 +20,9 @@ from app.schemas.external_analysis import (
     ExternalAnalysisRunResponse,
 )
 from app.services.external_analysis_service import ExternalAnalysisService
+from app.services.external_analysis_candidate_retention_service import (
+    ReferencedExternalAnalysisCandidateError,
+)
 from app.services.task_log_service import TaskLogService
 from app.services.external_analysis_identity import UNTRUSTED_HTTP_SOURCE_IDENTITY
 
@@ -190,6 +193,9 @@ async def delete_external_analysis_run(
         run = service.delete_run(run_id)
         session.commit()
         return {"deleted": True, "run_id": str(run.id)}
+    except ReferencedExternalAnalysisCandidateError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=exc.api_detail()) from exc
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc

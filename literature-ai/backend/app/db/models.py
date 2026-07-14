@@ -521,7 +521,7 @@ class DFTAuditIssueSource(Base):
         sa.ForeignKey("dft_audit_issues.id", ondelete="CASCADE"), primary_key=True
     )
     candidate_id: Mapped[uuid.UUID] = mapped_column(
-        sa.ForeignKey("external_analysis_candidates.id", ondelete="CASCADE"),
+        sa.ForeignKey("external_analysis_candidates.id", ondelete="RESTRICT"),
         primary_key=True,
     )
     created_at: Mapped[datetime] = mapped_column(
@@ -955,7 +955,48 @@ class ExternalAnalysisCandidate(Base):
     status: Mapped[str] = mapped_column(sa.String(32), default="pending")
     materialized_target_type: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     materialized_target_id: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=False), nullable=True, index=True
+    )
+    archived_by: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    archive_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    archive_context: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+
+class ExternalAnalysisCandidateRecovery(Base):
+    __tablename__ = "external_analysis_candidate_recoveries"
+
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("external_analysis_candidates.id", ondelete="RESTRICT"), primary_key=True
+    )
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("external_analysis_runs.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    issue_ids: Mapped[list] = mapped_column(json_type(), default=list)
+    audit_log_ids: Mapped[list] = mapped_column(json_type(), default=list)
+    source_audit_index: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    recovery_version: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    payload_sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    match_manifest: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    restored_state: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    actor: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, server_default=sa.func.current_timestamp()
+    )
+
+    __table_args__ = (
+        sa.Index(
+            "ix_external_analysis_candidate_recoveries_paper_run",
+            "paper_id",
+            "run_id",
+            "executed_at",
+        ),
+    )
 
 
 class ReferenceEntry(Base):

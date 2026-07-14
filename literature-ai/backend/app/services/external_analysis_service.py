@@ -4,7 +4,7 @@ import json
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
@@ -15,6 +15,9 @@ from app.db.models import (
     Paper,
 )
 from app.services.external_analysis_candidates import ExternalAnalysisCandidatePersistenceMixin
+from app.services.external_analysis_candidate_retention_service import (
+    ExternalAnalysisCandidateRetentionService,
+)
 from app.services.external_analysis_materialization import ExternalAnalysisMaterializationMixin
 from app.services.external_analysis_models import (
     ExternalAnalysisNormalizedModel,
@@ -211,28 +214,32 @@ class ExternalAnalysisService(
 
     def delete_run(self, run_id: UUID) -> ExternalAnalysisRun:
         run = self.get_run(run_id)
-        self.session.execute(
-            delete(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id)
-        )
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id == run.id)
+        ).all()
+        ExternalAnalysisCandidateRetentionService(self.session).assert_deletable(candidates)
         self.session.delete(run)
         self.session.flush()
         return run
 
     def delete_runs_for_paper_source(self, paper_id: UUID, source: str) -> int:
-        run_ids = self.session.scalars(
-            select(ExternalAnalysisRun.id).where(
+        runs = self.session.scalars(
+            select(ExternalAnalysisRun).where(
                 ExternalAnalysisRun.paper_id == paper_id,
                 ExternalAnalysisRun.source == source,
             )
         ).all()
-        if not run_ids:
+        if not runs:
             return 0
-        self.session.execute(
-            delete(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id.in_(run_ids))
-        )
-        self.session.execute(delete(ExternalAnalysisRun).where(ExternalAnalysisRun.id.in_(run_ids)))
+        run_ids = [run.id for run in runs]
+        candidates = self.session.scalars(
+            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.run_id.in_(run_ids))
+        ).all()
+        ExternalAnalysisCandidateRetentionService(self.session).assert_deletable(candidates)
+        for run in runs:
+            self.session.delete(run)
         self.session.flush()
-        return len(run_ids)
+        return len(runs)
 
     def list_candidates(self, run_id: UUID) -> list[ExternalAnalysisCandidate]:
         return self.session.scalars(

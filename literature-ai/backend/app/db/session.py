@@ -17,6 +17,9 @@ from app.migrations.dft_audit_issue_source_backfill_v1 import (
     upgrade as upgrade_dft_audit_issue_source_backfill_v1,
 )
 from app.migrations.dft_identity_v2 import upgrade as upgrade_dft_identity_v2
+from app.migrations.external_analysis_candidate_retention_v1 import (
+    upgrade as upgrade_external_analysis_candidate_retention_v1,
+)
 from app.migrations.source_snapshot_reconciliation_v1 import upgrade as upgrade_source_snapshot_reconciliation_v1
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -105,6 +108,7 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
         upgrade_dft_identity_v2(connection)
+        upgrade_external_analysis_candidate_retention_v1(connection)
         source_backfill = upgrade_dft_audit_issue_source_backfill_v1(
             connection,
             block_on_errors=False,

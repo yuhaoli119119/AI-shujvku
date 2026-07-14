@@ -114,6 +114,9 @@ from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+from app.services.external_analysis_candidate_retention_service import (
+    ExternalAnalysisCandidateRetentionService,
+)
 from app.services.llm_service import LLMService
 from app.services.manual_review_progress import normalize_manual_review_progress
 from app.services.paper_ingestion import PaperIngestionService
@@ -405,6 +408,7 @@ async def reset_dft_ai_reviews(
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    reviewer = str(payload.reviewer or "literature_library_dft").strip() or "literature_library_dft"
 
     dft_result_ids = [
         str(row_id)
@@ -428,6 +432,7 @@ async def reset_dft_ai_reviews(
         select(ExternalAnalysisCandidate).where(
             ExternalAnalysisCandidate.paper_id == paper_id,
             ExternalAnalysisCandidate.candidate_type.in_(("object_review_audit", "external_audit_opinion")),
+            ExternalAnalysisCandidate.archived_at.is_(None),
         )
     ).all()
     dft_object_review_ids = []
@@ -443,14 +448,26 @@ async def reset_dft_ai_reviews(
         ):
             dft_object_review_ids.append(candidate.id)
 
-    deleted_object_review_candidates = 0
+    retention_summary = {
+        "archived_referenced_candidates": 0,
+        "deleted_unreferenced_candidates": 0,
+        "already_archived_candidates": 0,
+        "archived_candidate_ids": [],
+        "deleted_candidate_ids": [],
+        "references": {},
+    }
     if dft_object_review_ids:
-        result = session.execute(
-            delete(ExternalAnalysisCandidate).where(
-                ExternalAnalysisCandidate.id.in_(dft_object_review_ids)
-            )
+        selected_candidates = [
+            candidate for candidate in object_review_rows if candidate.id in dft_object_review_ids
+        ]
+        retention_summary = ExternalAnalysisCandidateRetentionService(
+            session
+        ).archive_referenced_delete_unreferenced(
+            selected_candidates,
+            actor=reviewer,
+            reason="reset_dft_ai_reviews",
+            context={"paper_id": str(paper_id)},
         )
-        deleted_object_review_candidates = int(result.rowcount or 0)
 
     reset_dft_results = 0
     if dft_result_ids:
@@ -461,10 +478,13 @@ async def reset_dft_ai_reviews(
         )
         reset_dft_results = int(result.rowcount or 0)
 
-    reviewer = str(payload.reviewer or "literature_library_dft").strip() or "literature_library_dft"
     summary = {
         "paper_id": str(paper_id),
-        "deleted_object_review_candidates": deleted_object_review_candidates,
+        "deleted_object_review_candidates": retention_summary["deleted_unreferenced_candidates"],
+        "archived_referenced_candidates": retention_summary["archived_referenced_candidates"],
+        "already_archived_candidates": retention_summary["already_archived_candidates"],
+        "archived_candidate_ids": retention_summary["archived_candidate_ids"],
+        "deleted_candidate_ids": retention_summary["deleted_candidate_ids"],
         "deleted_field_reviews": deleted_field_reviews,
         "reset_dft_results": reset_dft_results,
         "kept_dft_candidates": bool(payload.keep_dft_candidates),

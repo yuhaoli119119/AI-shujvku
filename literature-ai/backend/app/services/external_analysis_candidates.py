@@ -15,6 +15,68 @@ from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.protocol_tracking import protocol_snapshot
 
 
+def build_object_review_candidate_values(
+    run: ExternalAnalysisRun,
+    audit: ExternalObjectReviewAuditModel,
+) -> dict[str, Any]:
+    """Build the deterministic persisted representation of one run audit."""
+
+    payload = audit.model_dump(mode="json")
+    payload.update(
+        {
+            "paper_id": str(run.paper_id),
+            "run_id": str(run.id),
+            "source": audit.source or run.source,
+            "source_label": audit.source_label or run.source_label,
+            "source_identity": run.source_identity,
+            "source_identity_verified": bool(run.source_identity_verified),
+            "candidate_type": "object_review_audit",
+            "status": "candidate",
+            "verification_status": "unverified",
+            "writes_final_truth": False,
+            "confirmation_required": True,
+        }
+    )
+    evidence_payload = {
+        "source": payload.get("source"),
+        "source_label": payload.get("source_label"),
+        "source_identity": run.source_identity,
+        "source_identity_verified": bool(run.source_identity_verified),
+        "target_type": payload.get("target_type"),
+        "target_id": payload.get("target_id"),
+        "field_name": payload.get("field_name"),
+        "decision": payload.get("decision"),
+        "evidence_checked": payload.get("evidence_checked"),
+        "evidence_location": payload.get("evidence_location"),
+        "source_document_type": normalize_source_document_type(
+            (payload.get("evidence_location") or {}).get("source_document_type")
+            if isinstance(payload.get("evidence_location"), dict)
+            else None
+        ),
+        "dedupe_signature": payload.get("dedupe_signature"),
+        "supporting_evidence": payload.get("supporting_evidence") or [],
+        "borrowed_from_reference": bool(payload.get("borrowed_from_reference")),
+        "blocking_errors": payload.get("blocking_errors") or [],
+        "recommended_action": payload.get("recommended_action"),
+        "verification_status": "unverified",
+        "raw_payload": payload.get("raw_payload"),
+        "protocol": protocol_snapshot("gemini_audit_protocol"),
+        "writes_final_truth": False,
+        "confirmation_required": True,
+    }
+    return {
+        "run_id": run.id,
+        "paper_id": run.paper_id,
+        "candidate_type": "object_review_audit",
+        "normalized_payload": payload,
+        "confidence": audit.confidence,
+        "mapping_reason": audit.mapping_reason
+        or "Imported object-level external review audit candidate",
+        "evidence_payload": evidence_payload,
+        "status": "candidate",
+    }
+
+
 class ExternalAnalysisCandidatePersistenceMixin:
     def _external_audit_precondition(self, paper: Paper) -> dict[str, Any]:
         artifact_status = build_paper_artifact_status(paper, settings=self.settings)
@@ -99,61 +161,7 @@ class ExternalAnalysisCandidatePersistenceMixin:
             )
 
     def _create_object_review_candidate(self, run: ExternalAnalysisRun, audit: ExternalObjectReviewAuditModel) -> None:
-        payload = audit.model_dump(mode="json")
-        payload.update(
-            {
-                "paper_id": str(run.paper_id),
-                "run_id": str(run.id),
-                "source": audit.source or run.source,
-                "source_label": audit.source_label or run.source_label,
-                "source_identity": run.source_identity,
-                "source_identity_verified": bool(run.source_identity_verified),
-                "candidate_type": "object_review_audit",
-                "status": "candidate",
-                "verification_status": "unverified",
-                "writes_final_truth": False,
-                "confirmation_required": True,
-            }
-        )
-        evidence_payload = {
-            "source": payload.get("source"),
-            "source_label": payload.get("source_label"),
-            "source_identity": run.source_identity,
-            "source_identity_verified": bool(run.source_identity_verified),
-            "target_type": payload.get("target_type"),
-            "target_id": payload.get("target_id"),
-            "field_name": payload.get("field_name"),
-            "decision": payload.get("decision"),
-            "evidence_checked": payload.get("evidence_checked"),
-            "evidence_location": payload.get("evidence_location"),
-            "source_document_type": normalize_source_document_type(
-                (payload.get("evidence_location") or {}).get("source_document_type")
-                if isinstance(payload.get("evidence_location"), dict)
-                else None
-            ),
-            "dedupe_signature": payload.get("dedupe_signature"),
-            "supporting_evidence": payload.get("supporting_evidence") or [],
-            "borrowed_from_reference": bool(payload.get("borrowed_from_reference")),
-            "blocking_errors": payload.get("blocking_errors") or [],
-            "recommended_action": payload.get("recommended_action"),
-            "verification_status": "unverified",
-            "raw_payload": payload.get("raw_payload"),
-            "protocol": protocol_snapshot("gemini_audit_protocol"),
-            "writes_final_truth": False,
-            "confirmation_required": True,
-        }
-        self.session.add(
-            ExternalAnalysisCandidate(
-                run_id=run.id,
-                paper_id=run.paper_id,
-                candidate_type="object_review_audit",
-                normalized_payload=payload,
-                confidence=audit.confidence,
-                mapping_reason=audit.mapping_reason or "Imported object-level external review audit candidate",
-                evidence_payload=evidence_payload,
-                status="candidate",
-            )
-        )
+        self.session.add(ExternalAnalysisCandidate(**build_object_review_candidate_values(run, audit)))
 
     def _create_external_audit_candidate(self, run: ExternalAnalysisRun, opinion: ExternalAuditOpinionModel) -> None:
         payload = opinion.model_dump(mode="json")

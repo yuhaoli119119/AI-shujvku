@@ -98,6 +98,7 @@ class DFTCompletenessService:
                 select(ExternalAnalysisCandidate).where(
                     ExternalAnalysisCandidate.paper_id == paper_id,
                     ExternalAnalysisCandidate.candidate_type == "object_review_audit",
+                    ExternalAnalysisCandidate.archived_at.is_(None),
                 )
             ).all()
             if self._is_discovered_dft_candidate(candidate)
