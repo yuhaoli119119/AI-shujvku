@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
+from app.migrations.schema_target import MigrationSchema, resolve_migration_schema
+
 
 MIGRATION_VERSION = "007_dft_audit_issue_source_backfill_v1"
 
@@ -18,15 +20,31 @@ class DFTAuditIssueSourceBackfillError(RuntimeError):
         self.report = report
 
 
-def _table_exists(connection: Connection) -> bool:
+def _table_exists(connection: Connection, schema: MigrationSchema) -> bool:
     return bool(
         connection.scalar(
-            text("SELECT to_regclass('dft_audit_issue_sources') IS NOT NULL")
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_class AS relation
+                    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                    WHERE namespace.nspname = :schema
+                      AND relation.relname = 'dft_audit_issue_sources'
+                      AND relation.relkind IN ('r', 'p')
+                )
+                """
+            ),
+            {"schema": schema.name},
         )
     )
 
 
-def _issue_rows(connection: Connection, paper_id: UUID | None) -> list[dict[str, Any]]:
+def _issue_rows(
+    connection: Connection,
+    schema: MigrationSchema,
+    paper_id: UUID | None,
+) -> list[dict[str, Any]]:
     paper_filter = ""
     parameters: dict[str, Any] = {}
     if paper_id is not None:
@@ -38,8 +56,8 @@ def _issue_rows(connection: Connection, paper_id: UUID | None) -> list[dict[str,
             text(
                 f"""
                 SELECT i.id, i.paper_id, p.paper_code, i.source_candidate_ids
-                FROM dft_audit_issues AS i
-                JOIN papers AS p ON p.id = i.paper_id
+                FROM {schema.table(connection, 'dft_audit_issues')} AS i
+                JOIN {schema.table(connection, 'papers')} AS p ON p.id = i.paper_id
                 WHERE i.source_candidate_ids IS NOT NULL
                   AND i.source_candidate_ids <> '[]'::jsonb
                   {paper_filter}
@@ -51,14 +69,18 @@ def _issue_rows(connection: Connection, paper_id: UUID | None) -> list[dict[str,
     ]
 
 
-def _candidate_papers(connection: Connection, candidate_ids: set[str]) -> dict[str, str]:
+def _candidate_papers(
+    connection: Connection,
+    schema: MigrationSchema,
+    candidate_ids: set[str],
+) -> dict[str, str]:
     if not candidate_ids:
         return {}
     rows = connection.execute(
         text(
-            """
+            f"""
             SELECT id::text AS candidate_id, paper_id::text AS paper_id
-            FROM external_analysis_candidates
+            FROM {schema.table(connection, 'external_analysis_candidates')}
             WHERE id::text = ANY(CAST(:candidate_ids AS text[]))
             """
         ),
@@ -69,15 +91,16 @@ def _candidate_papers(connection: Connection, candidate_ids: set[str]) -> dict[s
 
 def _existing_relations(
     connection: Connection,
+    schema: MigrationSchema,
     issue_ids: set[str],
 ) -> set[tuple[str, str]]:
-    if not issue_ids or not _table_exists(connection):
+    if not issue_ids or not _table_exists(connection, schema):
         return set()
     rows = connection.execute(
         text(
-            """
+            f"""
             SELECT issue_id::text AS issue_id, candidate_id::text AS candidate_id
-            FROM dft_audit_issue_sources
+            FROM {schema.table(connection, 'dft_audit_issue_sources')}
             WHERE issue_id::text = ANY(CAST(:issue_ids AS text[]))
             """
         ),
@@ -86,10 +109,15 @@ def _existing_relations(
     return {(row["issue_id"], row["candidate_id"]) for row in rows}
 
 
-def analyze(connection: Connection, *, paper_id: UUID | None = None) -> dict[str, Any]:
+def _analyze(
+    connection: Connection,
+    schema: MigrationSchema,
+    *,
+    paper_id: UUID | None = None,
+) -> dict[str, Any]:
     """Build a read-only, itemized comparison of legacy JSON and normalized relations."""
 
-    issues = _issue_rows(connection, paper_id)
+    issues = _issue_rows(connection, schema, paper_id)
     parsed: list[dict[str, str]] = []
     errors: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
@@ -153,6 +181,7 @@ def analyze(connection: Connection, *, paper_id: UUID | None = None) -> dict[str
 
     candidate_papers = _candidate_papers(
         connection,
+        schema,
         {row["candidate_id"] for row in parsed},
     )
     eligible: set[tuple[str, str]] = set()
@@ -174,7 +203,7 @@ def analyze(connection: Connection, *, paper_id: UUID | None = None) -> dict[str
             eligible.add((row["issue_id"], row["candidate_id"]))
 
     issue_ids = {str(row["id"]) for row in issues}
-    existing = _existing_relations(connection, issue_ids)
+    existing = _existing_relations(connection, schema, issue_ids)
     unexpected = existing - eligible
     for issue_id, candidate_id in sorted(unexpected):
         issue_paper_id = paper_for_issue[issue_id]
@@ -240,7 +269,8 @@ def analyze(connection: Connection, *, paper_id: UUID | None = None) -> dict[str
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "dry_run",
         "scope": {"paper_id": str(paper_id) if paper_id else None},
-        "relation_table_present": _table_exists(connection),
+        "target_schema": schema.name,
+        "relation_table_present": _table_exists(connection, schema),
         "issues_with_sources": len(issues),
         "expected_source_relations": raw_reference_count,
         "eligible_source_relations": len(eligible),
@@ -266,6 +296,18 @@ def analyze(connection: Connection, *, paper_id: UUID | None = None) -> dict[str
     return report
 
 
+def analyze(
+    connection: Connection,
+    *,
+    paper_id: UUID | None = None,
+    target_schema: str | None = None,
+) -> dict[str, Any]:
+    """Build a read-only comparison inside one explicitly resolved schema."""
+
+    schema = resolve_migration_schema(connection, expected_schema=target_schema)
+    return _analyze(connection, schema, paper_id=paper_id)
+
+
 def _public_report(report: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in report.items() if not key.startswith("_")}
 
@@ -274,17 +316,19 @@ def upgrade(
     connection: Connection,
     *,
     paper_id: UUID | None = None,
+    target_schema: str | None = None,
     block_on_errors: bool = True,
     fault_after_insert: bool = False,
 ) -> dict[str, Any]:
     """Backfill one validated scope atomically; the caller owns the transaction."""
 
-    if not _table_exists(connection):
-        report = analyze(connection, paper_id=paper_id)
+    schema = resolve_migration_schema(connection, expected_schema=target_schema)
+    if not _table_exists(connection, schema):
+        report = _analyze(connection, schema, paper_id=paper_id)
         report["mode"] = "apply"
         raise DFTAuditIssueSourceBackfillError("relation_table_not_installed", _public_report(report))
 
-    report = analyze(connection, paper_id=paper_id)
+    report = _analyze(connection, schema, paper_id=paper_id)
     report["mode"] = "apply"
     if report["errors"]:
         report["status"] = "blocked"
@@ -298,8 +342,8 @@ def upgrade(
     if pairs:
         result = connection.execute(
             text(
-                """
-                INSERT INTO dft_audit_issue_sources (issue_id, candidate_id)
+                f"""
+                INSERT INTO {schema.table(connection, 'dft_audit_issue_sources')} (issue_id, candidate_id)
                 SELECT source.issue_id, source.candidate_id
                 FROM unnest(
                     CAST(:issue_ids AS uuid[]),
@@ -317,7 +361,7 @@ def upgrade(
     if fault_after_insert:
         raise RuntimeError("injected_fault:after_source_relation_insert")
 
-    verified = analyze(connection, paper_id=paper_id)
+    verified = _analyze(connection, schema, paper_id=paper_id)
     if verified["errors"] or verified["missing_relations"]:
         raise DFTAuditIssueSourceBackfillError(
             "source_relation_postcondition_failed",

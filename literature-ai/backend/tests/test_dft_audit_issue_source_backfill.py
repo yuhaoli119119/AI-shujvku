@@ -4,7 +4,8 @@ from copy import deepcopy
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -20,6 +21,84 @@ from app.migrations.dft_audit_issue_source_backfill_v1 import (
     upgrade,
 )
 from app.migrations.dft_identity_v2 import upgrade as install_dft_identity_v2
+
+
+def _public_source_state(database_url: str) -> dict:
+    parsed = make_url(database_url)
+    query = dict(parsed.query)
+    query["options"] = "-csearch_path=public"
+    engine = create_engine(parsed.set(query=query).render_as_string(hide_password=False), future=True)
+    try:
+        with engine.connect() as connection:
+            exists = bool(
+                connection.scalar(
+                    text(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_class AS relation
+                            JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                            WHERE namespace.nspname = 'public'
+                              AND relation.relname = 'dft_audit_issue_sources'
+                              AND relation.relkind IN ('r', 'p')
+                        )
+                        """
+                    )
+                )
+            )
+            if not exists:
+                return {"exists": False}
+            return {
+                "exists": True,
+                "row_count": int(
+                    connection.scalar(text("SELECT count(*) FROM public.dft_audit_issue_sources"))
+                ),
+                "columns": [
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT column_name, data_type, is_nullable, column_default
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'dft_audit_issue_sources'
+                            ORDER BY ordinal_position
+                            """
+                        )
+                    ).all()
+                ],
+                "constraints": [
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT con.conname, con.contype,
+                                   pg_get_constraintdef(con.oid, true)
+                            FROM pg_constraint AS con
+                            JOIN pg_class AS relation ON relation.oid = con.conrelid
+                            JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                            WHERE namespace.nspname = 'public'
+                              AND relation.relname = 'dft_audit_issue_sources'
+                            ORDER BY con.conname
+                            """
+                        )
+                    ).all()
+                ],
+                "indexes": [
+                    tuple(row)
+                    for row in connection.execute(
+                        text(
+                            """
+                            SELECT indexname, indexdef FROM pg_indexes
+                            WHERE schemaname = 'public'
+                              AND tablename = 'dft_audit_issue_sources'
+                            ORDER BY indexname
+                            """
+                        )
+                    ).all()
+                ],
+            }
+    finally:
+        engine.dispose()
 
 
 def _paper_and_run(session: Session, code: str) -> tuple[Paper, ExternalAnalysisRun]:
@@ -72,11 +151,20 @@ def _issue(
     return row
 
 
-def test_real_upgrade_order_backfills_multiple_sources_and_preserves_json(setup_test_db):
+def test_real_upgrade_order_backfills_multiple_sources_and_preserves_json(
+    setup_test_db,
+    shared_test_database,
+):
+    public_before = _public_source_state(shared_test_database.url)
+    assert public_before["exists"] is True
     with setup_test_db.begin() as connection:
         schema = connection.scalar(text("SELECT current_schema()"))
         assert str(schema).startswith("pytest_")
-        connection.execute(text(f'DROP TABLE "{schema}".dft_audit_issue_sources'))
+        target = connection.dialect.identifier_preparer.quote_schema(schema)
+        table = connection.dialect.identifier_preparer.quote_identifier(
+            "dft_audit_issue_sources"
+        )
+        connection.execute(text(f"DROP TABLE {target}.{table}"))
     with Session(setup_test_db) as session:
         paper, run = _paper_and_run(session, "B9101")
         candidates = [_candidate(session, paper, run), _candidate(session, paper, run)]
@@ -85,9 +173,20 @@ def test_real_upgrade_order_backfills_multiple_sources_and_preserves_json(setup_
         paper_id, issue_id = paper.id, issue.id
         session.commit()
 
+    with setup_test_db.connect() as connection:
+        transaction = connection.begin()
+        preflight = analyze(connection, paper_id=paper_id, target_schema=schema)
+        assert preflight["target_schema"] == schema
+        assert preflight["relation_table_present"] is False
+        assert preflight["existing_relations"] == 0
+        with pytest.raises(DFTAuditIssueSourceBackfillError, match="relation_table_not_installed"):
+            upgrade(connection, paper_id=paper_id, target_schema=schema)
+        transaction.rollback()
+    assert _public_source_state(shared_test_database.url) == public_before
+
     with setup_test_db.begin() as connection:
-        install_dft_identity_v2(connection)
-        report = upgrade(connection, paper_id=paper_id)
+        install_dft_identity_v2(connection, target_schema=schema)
+        report = upgrade(connection, paper_id=paper_id, target_schema=schema)
 
     assert report["migration_version"] == "007_dft_audit_issue_source_backfill_v1"
     assert report["expected_source_relations"] == 2
@@ -95,6 +194,7 @@ def test_real_upgrade_order_backfills_multiple_sources_and_preserves_json(setup_
     with Session(setup_test_db) as session:
         assert session.get(DFTAuditIssue, issue_id).source_candidate_ids == original
         assert session.query(DFTAuditIssueSource).count() == 2
+    assert _public_source_state(shared_test_database.url) == public_before
 
 
 def test_identity_split_parent_and_children_are_all_backfilled(setup_test_db):

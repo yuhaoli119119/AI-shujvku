@@ -33,6 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--dry-run", action="store_true")
     action.add_argument("--apply", action="store_true")
     parser.add_argument("--paper-id", type=UUID)
+    parser.add_argument("--target-schema", default="public")
     parser.add_argument("--report", required=True, type=Path)
     args = parser.parse_args(argv)
 
@@ -43,7 +44,11 @@ def main(argv: list[str] | None = None) -> int:
                 transaction = connection.begin()
                 try:
                     connection.exec_driver_sql("SET TRANSACTION READ ONLY")
-                    report = analyze(connection, paper_id=args.paper_id)
+                    report = analyze(
+                        connection,
+                        paper_id=args.paper_id,
+                        target_schema=args.target_schema,
+                    )
                     transaction.rollback()
                 except BaseException:
                     if transaction.is_active:
@@ -51,7 +56,11 @@ def main(argv: list[str] | None = None) -> int:
                     raise
         else:
             with engine.begin() as connection:
-                report = upgrade(connection, paper_id=args.paper_id)
+                report = upgrade(
+                    connection,
+                    paper_id=args.paper_id,
+                    target_schema=args.target_schema,
+                )
         _write_report(args.report, report)
         print(
             json.dumps(
