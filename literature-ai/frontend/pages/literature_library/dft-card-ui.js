@@ -260,6 +260,16 @@ function dftAiOpinionMeta(item) {
     );
     const hasUnresolvedConflicts = Number(item && item.conflict_count || 0) > 0 ||
         Boolean(item && Array.isArray(item.field_conflicts) && item.field_conflicts.length);
+    const hasLifecycleOnlyAudits = audits.length > 0 && audits.every(function(audit) {
+        return String(audit && audit.decision || "").trim().toUpperCase() === "NEW_CANDIDATE";
+    });
+    if (exportable && hasLifecycleOnlyAudits) {
+        return {
+            label: "AI 核验已完成",
+            className: "ok",
+            title: "这条记录已通过导出安全门；new_candidate 只是历史创建动作，不代表仍有 AI 意见待判定。"
+        };
+    }
     if (hasUnresolvedConflicts && hasProposed) {
         return {
             label: "AI 已提修正",
@@ -341,6 +351,7 @@ function dftAiReviewDisplayFallbackLabel(status) {
     const value = String(status || "").trim();
     return {
         no_ai_opinion: "无 AI 意见",
+        exportable_lifecycle_only: "AI 核验已完成",
         exportable_with_historical_reject: "AI 意见已收敛",
         converged_adopted: "已采纳 AI 修正",
         pass_exportable: "AI 字段通过",
@@ -357,7 +368,7 @@ function dftAiReviewDisplayFallbackLabel(status) {
 function dftAiReviewDisplayFallbackClass(status) {
     const value = String(status || "").trim();
     if (["conflict", "rejected", "reject_suggested"].includes(value)) return "failed";
-    if (["exportable_with_historical_reject", "converged_adopted", "pass_exportable", "pass_partial", "no_ai_opinion"].includes(value)) return "ok";
+    if (["exportable_lifecycle_only", "exportable_with_historical_reject", "converged_adopted", "pass_exportable", "pass_partial", "no_ai_opinion"].includes(value)) return "ok";
     return "meta";
 }
 

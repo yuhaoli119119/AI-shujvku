@@ -3834,6 +3834,22 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     }));
     expect(exportableFallbackDisplay.label).toBe('AI 意见已收敛');
     expect(exportableFallbackDisplay.className).toBe('ok');
+    const lifecycleOnlyDisplay = await page.evaluate(() => dftAiOpinionMeta({
+      is_exportable: true,
+      object_review_audits: [
+        { source_label: 'local-ai', decision: 'new_candidate' },
+      ],
+    }));
+    expect(lifecycleOnlyDisplay.label).toBe('AI 核验已完成');
+    expect(lifecycleOnlyDisplay.className).toBe('ok');
+    const authoritativeLifecycleDisplay = await page.evaluate(() => dftAiOpinionMeta({
+      ai_review_display_status: 'exportable_lifecycle_only',
+      object_review_audits: [
+        { source_label: 'local-ai', decision: 'new_candidate' },
+      ],
+    }));
+    expect(authoritativeLifecycleDisplay.label).toBe('AI 核验已完成');
+    expect(authoritativeLifecycleDisplay.className).toBe('ok');
     await expect(page.locator('#dftContent')).not.toContainText('AI 意见待判定');
     await expect(page.locator('#dftContent')).not.toContainText('无 AI 意见');
   });

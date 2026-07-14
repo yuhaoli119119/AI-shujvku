@@ -80,6 +80,23 @@ def test_ai_review_display_status_matrix_matches_export_gate_authority():
     assert exportable_proposed["status"] == "converged_adopted"
     assert exportable_proposed["label"] == "已采纳 AI 修正"
 
+    exportable_new_candidate = DFTReviewQueueService.build_ai_review_display_status(
+        gate=_gate(True),
+        object_review_audits=[_audit("local-ai", "new_candidate")],
+        conflicts=[],
+    )
+    assert exportable_new_candidate["status"] == "exportable_lifecycle_only"
+    assert exportable_new_candidate["label"] == "AI 核验已完成"
+    assert exportable_new_candidate["class_name"] == "ok"
+
+    blocked_new_candidate = DFTReviewQueueService.build_ai_review_display_status(
+        gate=_gate(False),
+        object_review_audits=[_audit("local-ai", "new_candidate")],
+        conflicts=[],
+    )
+    assert blocked_new_candidate["status"] == "unknown"
+    assert blocked_new_candidate["label"] == "AI 意见待判定"
+
 
 def test_dft_queue_does_not_use_authenticated_identity_as_an_admission_vote():
     anchor = {"page": 5, "quoted_text": "reported value"}

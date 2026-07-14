@@ -680,6 +680,9 @@ class DFTReviewQueueService:
         has_proposed = any(decision == "PROPOSED" for decision in decisions)
         has_pass = any(decision == "PASS" for decision in decisions)
         has_needs_human = any(decision == "NEEDS_HUMAN" for decision in decisions)
+        has_lifecycle_only_audits = bool(decisions) and all(
+            decision == "NEW_CANDIDATE" for decision in decisions
+        )
 
         if exportable:
             if has_reject:
@@ -704,6 +707,16 @@ class DFTReviewQueueService:
                     "status": "pass_exportable",
                     "label": "AI 字段通过",
                     "reason": "AI review audits are non-negative and the export safety gate is eligible.",
+                    "class_name": "ok",
+                }
+            if has_lifecycle_only_audits:
+                return {
+                    "status": "exportable_lifecycle_only",
+                    "label": "AI 核验已完成",
+                    "reason": (
+                        "The authoritative export safety gate is eligible; NEW_CANDIDATE is import lifecycle "
+                        "history, not a pending AI review opinion."
+                    ),
                     "class_name": "ok",
                 }
 
