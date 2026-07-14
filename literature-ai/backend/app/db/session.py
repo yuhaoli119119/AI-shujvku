@@ -14,6 +14,7 @@ from app.db.bootstrap import (
 )
 from app.db.models import Base
 from app.migrations.dft_identity_v2 import upgrade as upgrade_dft_identity_v2
+from app.migrations.source_snapshot_reconciliation_v1 import upgrade as upgrade_source_snapshot_reconciliation_v1
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATABASE: This project uses PostgreSQL (with pgvector extension) as its
@@ -101,6 +102,7 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
     Base.metadata.create_all(engine)
     with engine.begin() as connection:
         upgrade_dft_identity_v2(connection)
+        upgrade_source_snapshot_reconciliation_v1(connection)
     with engine.begin() as connection:
         # A snapshot may be exported to both web AI and IDE AI; bundles are
         # distinct audit records even when they start from the same snapshot.

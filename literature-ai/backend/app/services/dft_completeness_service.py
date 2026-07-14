@@ -18,6 +18,7 @@ from app.db.models import (
 from app.services.dft_audit_issue_lifecycle_service import DFT_AUDIT_ISSUE_PENDING_STATUSES
 from app.services.dft_review_bundle_service import DFTReviewBundleService, FIGURE_TABLE_REVIEW_READY_STATUSES
 from app.services.evidence_review_bundle_service import FINALIZED_REVIEW_STATUSES
+from app.services.source_snapshot_reconciliation_service import SourceSnapshotReconciliationService
 
 
 class DFTCompletenessService:
@@ -116,6 +117,17 @@ class DFTCompletenessService:
                 select(DFTAuditIssueSource).where(DFTAuditIssueSource.candidate_id.in_(candidate_ids))
             ).all():
                 source_issue_ids[source.candidate_id].add(source.issue_id)
+        # Identity-v2 introduced a junction table, but already-closed papers
+        # retain their auditable candidate bindings in the historical JSONB
+        # column.  Read that immutable legacy representation as a fallback;
+        # do not rewrite closed DFT rows merely to satisfy a new schema.
+        for issue in issues:
+            legacy_ids = issue.source_candidate_ids if isinstance(issue.source_candidate_ids, list) else []
+            for candidate_id in legacy_ids:
+                try:
+                    source_issue_ids[UUID(str(candidate_id))].add(issue.id)
+                except (TypeError, ValueError, AttributeError):
+                    continue
 
         unhandled_ids: list[str] = []
         materialized_unbound_ids: list[str] = []
@@ -224,6 +236,11 @@ class DFTCompletenessService:
             "missing_si_paper_ids": missing_si,
             "omitted_paper_ids": omitted,
         }
+        details["source_snapshot"] = {
+            "fingerprint": fingerprint,
+            "algorithm_version": snapshot.get("source_snapshot_algorithm_version"),
+            "manifest": snapshot.get("source_snapshot_manifest"),
+        }
 
         gate = snapshot.get("review_gate") if isinstance(snapshot.get("review_gate"), dict) else {}
         stage = str(gate.get("stage_status") or "").strip()
@@ -257,14 +274,26 @@ class DFTCompletenessService:
                 blockers.append("dft_gap_discovery_not_current")
             discovery_fingerprint = str(metadata.get("bundle_fingerprint") or "").strip()
             discovery_chart = str(metadata.get("figure_table_completed_snapshot_fingerprint") or "").strip()
+            reconciled = False
             if not fingerprint or discovery_fingerprint != fingerprint:
-                blockers.append("source_snapshot_mismatch")
+                reconciled = bool(
+                    fingerprint
+                    and SourceSnapshotReconciliationService(self.session, get_settings()).has_current_reconciliation(
+                        paper_id=paper_id,
+                        discovery_run_id=UUID(str(discovery["run_id"])),
+                        historical_fingerprint=discovery_fingerprint,
+                        current_fingerprint=fingerprint,
+                    )
+                )
+                if not reconciled:
+                    blockers.append("source_snapshot_mismatch")
             if completed_chart and discovery_chart != completed_chart:
                 blockers.append("source_snapshot_mismatch")
             details["dft_gap_discovery"] = {
                 "run_id": discovery["run_id"],
                 "bundle_fingerprint": discovery_fingerprint or None,
                 "missing_data_search_complete": coverage.get("missing_data_search_complete") is True,
+                "source_snapshot_reconciled": reconciled,
             }
         return {
             "review_scope_blockers": list(dict.fromkeys(blockers)),

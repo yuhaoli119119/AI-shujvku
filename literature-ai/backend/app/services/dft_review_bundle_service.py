@@ -205,13 +205,28 @@ class DFTReviewBundleService:
         """
 
         materials = self._build_materials(paper_id, enforce_figure_table_gate=False)
+        # Do not reuse the full offline-package fingerprint here: it also
+        # contains transient DFT candidate lifecycle state.  Completeness must
+        # compare only the versioned scientific source/review-scope manifest.
+        from app.services.source_snapshot_reconciliation_service import build_source_snapshot_manifest
+
+        source_snapshot = build_source_snapshot_manifest(
+            source_documents=materials["source_documents"],
+            source_pdf_inventory=materials["source_pdf_inventory"],
+            extracted_figures=materials["extracted_figures"],
+            extracted_tables=materials["extracted_tables"],
+            text_snippets=materials["text_snippets"],
+            review_gate=materials["curated_evidence_snapshot"]["review_gate"],
+        )
         return {
             "paper_id": materials["paper_metadata"]["paper_id"],
             "paper_code": materials["paper_metadata"]["paper_code"],
             "review_mode": materials["review_mode"],
             "source_pdf_inventory": materials["paper_metadata"]["source_pdf_inventory"],
             "review_gate": materials["curated_evidence_snapshot"]["review_gate"],
-            "source_snapshot_fingerprint": materials["bundle_fingerprint"],
+            "source_snapshot_fingerprint": source_snapshot["fingerprint"],
+            "source_snapshot_manifest": source_snapshot["manifest"],
+            "source_snapshot_algorithm_version": source_snapshot["manifest"]["schema_version"],
         }
 
     def _resolve_chart_run_id(

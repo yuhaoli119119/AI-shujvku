@@ -737,6 +737,41 @@ class ContentReviewBundle(Base):
     )
 
 
+class SourceSnapshotReconciliation(Base):
+    """Auditable proof that a legacy review bundle matches a canonical source snapshot."""
+
+    __tablename__ = "source_snapshot_reconciliations"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    discovery_run_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("external_analysis_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    historical_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    historical_algorithm_version: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    historical_manifest: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    current_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    current_algorithm_version: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    current_manifest: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    comparison: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    actor: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    executed_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "paper_id",
+            "discovery_run_id",
+            "historical_fingerprint",
+            "current_fingerprint",
+            "current_algorithm_version",
+            name="uq_source_snapshot_reconciliation_identity",
+        ),
+    )
+
+
 class PaperCorrection(Base):
     __tablename__ = "paper_corrections"
 

@@ -156,6 +156,55 @@ def test_ai_applied_candidates_use_existing_finalized_status_contract(setup_test
         assert lifecycle["lifecycle_blockers"] == []
 
 
+def test_closed_legacy_candidate_binding_remains_valid_without_junction_backfill(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Legacy candidate binding")
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", mapping_status="mapped")
+        session.add(run)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            candidate_status="ai_verified_ml_ready",
+        )
+        session.add(row)
+        session.flush()
+        candidate = ExternalAnalysisCandidate(
+            run_id=run.id,
+            paper_id=paper.id,
+            candidate_type="object_review_audit",
+            normalized_payload=_new_candidate_payload(),
+            status="ai_applied",
+            materialized_target_type="dft_results",
+            materialized_target_id=str(row.id),
+        )
+        session.add(candidate)
+        session.flush()
+        session.add(
+            DFTAuditIssue(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                result_id=row.id,
+                issue_type="missing_dft_result",
+                severity="high",
+                status="closed",
+                fingerprint="legacy-source-candidate-ids",
+                source_candidate_ids=[str(candidate.id)],
+                resolution_code="verified",
+            )
+        )
+        session.flush()
+
+        lifecycle = DFTCompletenessService(session)._evaluate_lifecycle(paper.id)
+
+        assert lifecycle["lifecycle_blockers"] == []
+        assert lifecycle["lifecycle_counts"]["materialized_unbound_count"] == 0
+
+
 @pytest.mark.parametrize("status", ["pending", "candidate", "requires_resolution"])
 def test_nonfinalized_candidate_status_remains_unhandled(setup_test_db, status):
     with Session(setup_test_db) as session:
