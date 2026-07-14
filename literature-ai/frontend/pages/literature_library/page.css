@@ -1179,8 +1179,15 @@ details.section-card:not([open]) summary {
 .dft-catalyst-base-info summary {
     gap: 10px;
 }
-.dft-catalyst-base-info summary .btn {
+.dft-catalyst-base-actions {
     margin-left: auto;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.dft-catalyst-base-info summary .dft-catalyst-base-actions .btn {
+    margin-left: 0;
 }
 @media (max-width: 640px) {
     .dft-sample-group-body {
@@ -1286,12 +1293,68 @@ details.section-card:not([open]) summary {
     border-radius: var(--radius);
     background: var(--color-primary-bg);
 }
+.dft-group-rebind-form {
+    display: grid;
+    gap: 10px;
+    margin: 6px 0 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    background: var(--color-surface-alt);
+}
+.dft-group-rebind-form[hidden] {
+    display: none;
+}
+.dft-group-rebind-form label {
+    display: grid;
+    gap: 6px;
+    color: var(--color-text);
+    font-size: 12px;
+    font-weight: 700;
+}
+.dft-group-rebind-form select,
+.dft-group-rebind-form textarea {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--color-border-strong);
+    border-radius: var(--radius);
+    background: var(--color-surface);
+    color: var(--color-text);
+}
+.dft-group-rebind-full-id {
+    overflow-wrap: anywhere;
+    color: var(--color-text-muted);
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 11px;
+}
+.dft-group-rebind-warning,
+.dft-group-rebind-error {
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    font-size: 12px;
+}
+.dft-group-rebind-warning {
+    background: var(--color-warning-bg, #fff7df);
+    color: var(--color-warning-text, #7a5200);
+}
+.dft-group-rebind-error {
+    background: var(--color-danger-bg, #fff0f0);
+    color: var(--color-danger, #b42318);
+    overflow-wrap: anywhere;
+}
 @media (max-width: 1100px) {
     .dft-basic-info-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .dft-basic-info-span-3 {
         grid-column: span 2;
+    }
+}
+@media (max-width: 640px) {
+    .dft-catalyst-base-actions {
+        width: 100%;
+        margin-left: 0;
+        justify-content: flex-start;
     }
 }
 @media (max-width: 700px) {

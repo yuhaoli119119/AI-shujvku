@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.settings import sync_writer_settings_from_session
@@ -29,6 +30,8 @@ from app.schemas.api import (
     CodexItemContextResponse,
     DFTResultCorrectionProposalRequest,
     DFTResultCorrectionProposalResponse,
+    DFTResultGroupRebindRequest,
+    DFTResultGroupRebindResponse,
     DFTResultManualUpdateRequest,
     DFTResultManualUpdateResponse,
     DFTResultRejectRequest,
@@ -1009,7 +1012,50 @@ async def manually_update_dft_result(
         session.rollback()
         status_code = 409 if str(exc).startswith("write_conflict") else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="write_conflict:dft_identity_observation_key_conflict",
+        ) from exc
     return DFTResultManualUpdateResponse.model_validate(result)
+
+
+@router.post(
+    "/{paper_id}/catalyst-samples/{source_sample_id}/rebind-dft-results",
+    response_model=DFTResultGroupRebindResponse,
+)
+async def rebind_catalyst_sample_dft_results(
+    paper_id: UUID,
+    source_sample_id: UUID,
+    payload: DFTResultGroupRebindRequest,
+    session: Session = Depends(get_db_session),
+) -> DFTResultGroupRebindResponse:
+    try:
+        result = DFTResultReviewService(session).rebind_result_group(
+            paper_id=paper_id,
+            source_sample_id=source_sample_id,
+            target_sample_id=payload.target_sample_id,
+            dft_result_ids=payload.dft_result_ids,
+            expected_result_count=payload.expected_result_count,
+            confirm_rebind=payload.confirm_rebind,
+            reason=payload.reason,
+            reviewer=payload.reviewer,
+        )
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="write_conflict:dft_identity_observation_key_conflict",
+        ) from exc
+    return DFTResultGroupRebindResponse.model_validate(result)
 
 
 @router.post("/{paper_id}/dft-results/{result_id}/apply-imported-opinion")

@@ -598,6 +598,30 @@ class DFTResultManualUpdateResponse(BaseModel):
     audit_log_id: UUID | None = None
 
 
+class DFTResultGroupRebindRequest(BaseModel):
+    target_sample_id: UUID
+    dft_result_ids: list[UUID] = Field(min_length=1)
+    expected_result_count: int = Field(ge=1)
+    confirm_rebind: bool = False
+    reason: str
+    reviewer: str | None = "literature_library_user"
+
+
+class DFTResultGroupRebindResponse(BaseModel):
+    status: str
+    source_sample_id: UUID
+    target_sample_id: UUID
+    rebound_result_ids: list[UUID] = Field(default_factory=list)
+    rebound_result_count: int
+    requires_reverification: bool = True
+    audit_log_id: UUID | None = None
+    result_audit_log_ids: list[UUID] = Field(default_factory=list)
+    correction_ids: list[UUID] = Field(default_factory=list)
+    invalidated_review_ids: list[UUID] = Field(default_factory=list)
+    reverification_task_ids: list[str] = Field(default_factory=list)
+    remaining_dft_result_count: int
+
+
 class RAGWriteResponse(BaseModel):
     topic: str
     query: str

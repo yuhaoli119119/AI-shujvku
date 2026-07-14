@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
+import json
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob, utcnow
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+from app.services.dft_identity_service import DFTIdentityV2
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.dft_review_fields import DFT_CORRECTION_FIELD_ALIASES, DFT_REVIEW_FIELD_ALIASES
 from app.services.dft_review_imported import DFTImportedOpinionMixin
@@ -776,6 +779,9 @@ class DFTResultReviewService(
         reason: str,
         reviewer: str | None = None,
         evidence_payload: dict[str, Any] | list[Any] | None = None,
+        commit: bool = True,
+        prepared_identity: DFTIdentityV2 | None = None,
+        identity_conflict_exclude_ids: set[UUID] | None = None,
     ) -> dict[str, Any]:
         if not confirm_manual_update:
             raise ValueError("Explicit manual DFT update confirmation is required.")
@@ -784,7 +790,9 @@ class DFTResultReviewService(
         if not isinstance(updates, dict) or not updates:
             raise ValueError("At least one DFT result field update is required.")
 
-        row = self.session.get(DFTResult, result_id)
+        row = self.session.scalar(
+            select(DFTResult).where(DFTResult.id == result_id).with_for_update()
+        )
         if row is None or row.paper_id != paper_id:
             raise LookupError("DFT result not found for this paper.")
 
@@ -813,6 +821,18 @@ class DFTResultReviewService(
         if not changed_updates:
             raise ValueError("The submitted DFT values are unchanged.")
 
+        target_sample_id = changed_updates.get("catalyst_sample_id")
+        if target_sample_id is not None:
+            target_sample = self.session.scalar(
+                select(CatalystSample)
+                .where(CatalystSample.id == target_sample_id)
+                .with_for_update()
+            )
+            if target_sample is None:
+                raise LookupError("Target catalyst sample not found.")
+            if target_sample.paper_id != paper_id:
+                raise ValueError("Target catalyst sample must belong to the same paper as the DFT result.")
+
         reviewer_name = str(reviewer or "literature_library_user").strip() or "literature_library_user"
         correction_evidence = self._manual_update_evidence(row, evidence_payload)
         corrections: list[PaperCorrection] = []
@@ -837,6 +857,19 @@ class DFTResultReviewService(
                     reviewer="human",
                 )
             )
+
+        self.session.flush()
+        self.session.refresh(row)
+        identity = prepared_identity or self.issue_lifecycle.build_identity(
+            paper_id=paper_id,
+            payload=self.issue_lifecycle.authoritative_payload_for_result(row),
+        )
+        self._assert_identity_observation_keys_available(
+            paper_id=paper_id,
+            identities={row.id: identity},
+            exclude_ids=identity_conflict_exclude_ids or {row.id},
+        )
+        self.issue_lifecycle.apply_result_identity(row, identity)
 
         invalidated_reviews = self.session.scalars(
             select(ExtractionFieldReview).where(
@@ -886,7 +919,7 @@ class DFTResultReviewService(
             },
         )
         self.session.add(audit)
-        self._add_workflow_job(
+        workflow_job_id = self._add_workflow_job(
             paper_id=paper_id,
             action="manual_update_dft_result",
             payload={
@@ -897,7 +930,9 @@ class DFTResultReviewService(
                 "blocked_reasons": list(gate.reasons),
             },
         )
-        self.session.commit()
+        self.session.flush()
+        if commit:
+            self.session.commit()
         self.session.refresh(audit)
         return {
             "paper_id": str(paper_id),
@@ -907,6 +942,322 @@ class DFTResultReviewService(
             "invalidated_review_ids": [str(item.id) for item in invalidated_reviews],
             "export_safety": self._gate_payload(row, gate),
             "audit_log_id": str(audit.id),
+            "reverification_task_id": workflow_job_id,
+        }
+
+    def rebind_result_group(
+        self,
+        *,
+        paper_id: UUID,
+        source_sample_id: UUID,
+        target_sample_id: UUID,
+        dft_result_ids: list[UUID],
+        expected_result_count: int,
+        confirm_rebind: bool,
+        reason: str,
+        reviewer: str | None = None,
+    ) -> dict[str, Any]:
+        if not confirm_rebind:
+            raise ValueError("Explicit DFT group rebind confirmation is required.")
+        reason_text = str(reason or "").strip()
+        if not reason_text:
+            raise ValueError("A DFT group rebind reason is required.")
+        if source_sample_id == target_sample_id:
+            raise ValueError("Source and target catalyst samples must be different.")
+        requested_ids = list(dft_result_ids or [])
+        requested_id_set = set(requested_ids)
+        if not requested_ids:
+            raise ValueError("At least one DFT result ID is required.")
+        if len(requested_ids) != len(requested_id_set):
+            raise ValueError("dft_result_ids must not contain duplicates.")
+
+        samples = self.session.scalars(
+            select(CatalystSample)
+            .where(CatalystSample.id.in_([source_sample_id, target_sample_id]))
+            .order_by(CatalystSample.id.asc())
+            .with_for_update()
+        ).all()
+        samples_by_id = {sample.id: sample for sample in samples}
+        source_sample = samples_by_id.get(source_sample_id)
+        target_sample = samples_by_id.get(target_sample_id)
+        if source_sample is None or source_sample.paper_id != paper_id:
+            raise LookupError("Source catalyst sample not found for this paper.")
+        if target_sample is None:
+            raise LookupError("Target catalyst sample not found.")
+        if target_sample.paper_id != paper_id or target_sample.paper_id != source_sample.paper_id:
+            raise ValueError("Source and target catalyst samples must belong to the same paper.")
+
+        request_fingerprint = self._rebind_request_fingerprint(
+            source_sample_id=source_sample_id,
+            target_sample_id=target_sample_id,
+            dft_result_ids=requested_ids,
+            expected_result_count=expected_result_count,
+        )
+        current_rows = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id == source_sample_id,
+            )
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+        ).all()
+        if not current_rows:
+            previous_audit = self._find_successful_rebind_audit(
+                paper_id=paper_id,
+                source_sample_id=source_sample_id,
+                request_fingerprint=request_fingerprint,
+            )
+            if previous_audit is not None:
+                rebound_rows = self.session.scalars(
+                    select(DFTResult)
+                    .where(DFTResult.id.in_(requested_ids))
+                    .order_by(DFTResult.id.asc())
+                    .with_for_update()
+                ).all()
+                if (
+                    len(rebound_rows) == len(requested_ids)
+                    and all(
+                        row.paper_id == paper_id and row.catalyst_sample_id == target_sample_id
+                        for row in rebound_rows
+                    )
+                ):
+                    return self._rebind_response_from_audit(previous_audit, status="already_rebound")
+
+        actual_count = len(current_rows)
+        if expected_result_count != actual_count:
+            raise ValueError(
+                "DFT group result count is stale: "
+                f"expected {expected_result_count}, found {actual_count}."
+            )
+        current_id_set = {row.id for row in current_rows}
+        if requested_id_set != current_id_set:
+            missing = sorted(str(row_id) for row_id in current_id_set - requested_id_set)
+            unexpected = sorted(str(row_id) for row_id in requested_id_set - current_id_set)
+            raise ValueError(
+                "dft_result_ids must exactly cover every DFT result currently bound to the source sample; "
+                f"missing={missing}, unexpected={unexpected}."
+            )
+
+        identities = {
+            row.id: self.issue_lifecycle.build_identity(
+                paper_id=paper_id,
+                payload=self.issue_lifecycle.authoritative_payload_for_result(
+                    row,
+                    catalyst_sample=target_sample,
+                ),
+            )
+            for row in current_rows
+        }
+        self._assert_identity_observation_keys_available(
+            paper_id=paper_id,
+            identities=identities,
+            exclude_ids=current_id_set,
+        )
+
+        for row in current_rows:
+            self.issue_lifecycle.clear_result_observation_key_for_rekey(row)
+        self.session.flush()
+
+        reviewer_name = str(reviewer or "literature_library_user").strip() or "literature_library_user"
+        update_results: list[dict[str, Any]] = []
+        for result_id in requested_ids:
+            update_results.append(
+                self.manually_update_result(
+                    paper_id=paper_id,
+                    result_id=result_id,
+                    confirm_manual_update=True,
+                    updates={"catalyst_sample_id": target_sample_id},
+                    reason=reason_text,
+                    reviewer=reviewer_name,
+                    commit=False,
+                    prepared_identity=identities[result_id],
+                    identity_conflict_exclude_ids=current_id_set,
+                )
+            )
+
+        remaining_count = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(DFTResult)
+                .where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.catalyst_sample_id == source_sample_id,
+                )
+            )
+            or 0
+        )
+        correction_ids = [
+            str(correction["id"])
+            for result in update_results
+            for correction in result.get("corrections", [])
+        ]
+        invalidated_review_ids = [
+            str(review_id)
+            for result in update_results
+            for review_id in result.get("invalidated_review_ids", [])
+        ]
+        result_audit_log_ids = [str(result["audit_log_id"]) for result in update_results]
+        reverification_task_ids = [
+            str(result["reverification_task_id"])
+            for result in update_results
+            if result.get("reverification_task_id")
+        ]
+        rebound_result_ids = [str(result_id) for result_id in requested_ids]
+        audit_payload = {
+            "request_fingerprint": request_fingerprint,
+            "source_sample_id": str(source_sample_id),
+            "target_sample_id": str(target_sample_id),
+            "binding_change": {
+                "from_catalyst_sample_id": str(source_sample_id),
+                "to_catalyst_sample_id": str(target_sample_id),
+            },
+            "rebound_result_ids": rebound_result_ids,
+            "rebound_result_count": len(rebound_result_ids),
+            "expected_result_count": expected_result_count,
+            "reason": reason_text,
+            "requires_reverification": True,
+            "result_audit_log_ids": result_audit_log_ids,
+            "correction_ids": correction_ids,
+            "invalidated_review_ids": invalidated_review_ids,
+            "reverification_task_ids": reverification_task_ids,
+            "remaining_dft_result_count": remaining_count,
+        }
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="rebind_dft_result_group",
+            source=reviewer_name,
+            target_type="catalyst_samples",
+            target_id=str(source_sample_id),
+            payload=audit_payload,
+        )
+        self.session.add(audit)
+        self.session.flush()
+        self.session.commit()
+        self.session.refresh(audit)
+        return {
+            "status": "rebound",
+            "source_sample_id": str(source_sample_id),
+            "target_sample_id": str(target_sample_id),
+            "rebound_result_ids": rebound_result_ids,
+            "rebound_result_count": len(rebound_result_ids),
+            "requires_reverification": True,
+            "audit_log_id": str(audit.id),
+            "result_audit_log_ids": result_audit_log_ids,
+            "correction_ids": correction_ids,
+            "invalidated_review_ids": invalidated_review_ids,
+            "reverification_task_ids": reverification_task_ids,
+            "remaining_dft_result_count": remaining_count,
+        }
+
+    def _assert_identity_observation_keys_available(
+        self,
+        *,
+        paper_id: UUID,
+        identities: dict[UUID, DFTIdentityV2],
+        exclude_ids: set[UUID],
+    ) -> None:
+        result_ids_by_key: dict[str, list[UUID]] = {}
+        for result_id, identity in identities.items():
+            if identity.observation_key:
+                result_ids_by_key.setdefault(identity.observation_key, []).append(result_id)
+        internal_conflicts = {
+            key: result_ids
+            for key, result_ids in result_ids_by_key.items()
+            if len(result_ids) > 1
+        }
+        if internal_conflicts:
+            key, result_ids = sorted(internal_conflicts.items())[0]
+            raise ValueError(
+                "write_conflict:dft_identity_batch_observation_key_conflict:"
+                f"{key}:{','.join(sorted(str(result_id) for result_id in result_ids))}"
+            )
+        observation_keys = sorted(result_ids_by_key)
+        if not observation_keys:
+            return
+        conflicts = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.identity_version == 2,
+                DFTResult.observation_key.in_(observation_keys),
+                DFTResult.id.notin_(exclude_ids),
+            )
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+        ).all()
+        if conflicts:
+            conflict = conflicts[0]
+            raise ValueError(
+                "write_conflict:dft_identity_observation_key_conflict:"
+                f"{conflict.observation_key}:{conflict.id}"
+            )
+
+    def _find_successful_rebind_audit(
+        self,
+        *,
+        paper_id: UUID,
+        source_sample_id: UUID,
+        request_fingerprint: str,
+    ) -> AuditLog | None:
+        audits = self.session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.paper_id == paper_id,
+                AuditLog.action == "rebind_dft_result_group",
+                AuditLog.target_type == "catalyst_samples",
+                AuditLog.target_id == str(source_sample_id),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .with_for_update()
+        ).all()
+        return next(
+            (
+                audit
+                for audit in audits
+                if isinstance(audit.payload, dict)
+                and audit.payload.get("request_fingerprint") == request_fingerprint
+            ),
+            None,
+        )
+
+    @staticmethod
+    def _rebind_request_fingerprint(
+        *,
+        source_sample_id: UUID,
+        target_sample_id: UUID,
+        dft_result_ids: list[UUID],
+        expected_result_count: int,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "source_sample_id": str(source_sample_id),
+                "target_sample_id": str(target_sample_id),
+                "dft_result_ids": sorted(str(result_id) for result_id in dft_result_ids),
+                "expected_result_count": expected_result_count,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _rebind_response_from_audit(audit: AuditLog, *, status: str) -> dict[str, Any]:
+        payload = audit.payload if isinstance(audit.payload, dict) else {}
+        return {
+            "status": status,
+            "source_sample_id": payload.get("source_sample_id"),
+            "target_sample_id": payload.get("target_sample_id"),
+            "rebound_result_ids": list(payload.get("rebound_result_ids") or []),
+            "rebound_result_count": int(payload.get("rebound_result_count") or 0),
+            "requires_reverification": bool(payload.get("requires_reverification", True)),
+            "audit_log_id": str(audit.id),
+            "result_audit_log_ids": list(payload.get("result_audit_log_ids") or []),
+            "correction_ids": list(payload.get("correction_ids") or []),
+            "invalidated_review_ids": list(payload.get("invalidated_review_ids") or []),
+            "reverification_task_ids": list(payload.get("reverification_task_ids") or []),
+            "remaining_dft_result_count": int(payload.get("remaining_dft_result_count") or 0),
         }
 
     @staticmethod
@@ -953,21 +1304,21 @@ class DFTResultReviewService(
             base["quoted_text"] = row.evidence_text
         return base or None
 
-    def _add_workflow_job(self, *, paper_id: UUID, action: str, payload: dict[str, Any]) -> None:
+    def _add_workflow_job(self, *, paper_id: UUID, action: str, payload: dict[str, Any]) -> str:
         paper = self.session.get(Paper, paper_id)
-        self.session.add(
-            WorkflowJob(
-                job_id=str(uuid4()),
-                type="dft_review_gate",
-                status="completed",
-                library_name=getattr(paper, "library_name", None) or "默认文献库",
-                payload={
-                    "action": action,
-                    "paper_id": str(paper_id),
-                    "title": getattr(paper, "title", None),
-                    **payload,
-                },
-                progress={"completed": True},
-                result={"status": "recorded"},
-            )
+        job = WorkflowJob(
+            job_id=str(uuid4()),
+            type="dft_review_gate",
+            status="completed",
+            library_name=getattr(paper, "library_name", None) or "默认文献库",
+            payload={
+                "action": action,
+                "paper_id": str(paper_id),
+                "title": getattr(paper, "title", None),
+                **payload,
+            },
+            progress={"completed": True},
+            result={"status": "recorded"},
         )
+        self.session.add(job)
+        return job.job_id

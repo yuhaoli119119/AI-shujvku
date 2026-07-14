@@ -24,9 +24,13 @@ function makePaper() {
     figures: [],
     tables: [],
     dft_settings_items: [],
+    catalyst_samples_items: [
+      { id: '11111111-1111-4111-8111-111111111111', name: 'Wrong catalyst 30' },
+      { id: '22222222-2222-4222-8222-222222222222', name: 'Correct catalyst 15' },
+    ],
     dft_results_items: [
       { id: 'dft-other', catalyst: 'Fe-N4', property_type: 'adsorption_energy', value: -1.1, unit: 'eV' },
-      { id: 'dft-target', catalyst: 'Co-N4', property_type: 'adsorption_energy', adsorbate: 'Li2S4', value: -1.8, unit: 'eV' },
+      { id: 'dft-target', catalyst_sample_id: '11111111-1111-4111-8111-111111111111', catalyst: 'Co-N4', property_type: 'adsorption_energy', adsorbate: 'Li2S4', value: -1.8, unit: 'eV' },
     ],
     electrochemical_performance_items: [],
     mechanism_claims_items: [],
@@ -118,7 +122,7 @@ test('paper detail edits one DFT row through the audited manual update API', asy
       return jsonResponse(route, {
         paper_id: 'paper-1',
         dft_result_id: 'dft-target',
-        changed_fields: ['value', 'reaction_step'],
+        changed_fields: ['catalyst_sample_id', 'value', 'reaction_step'],
         corrections: [],
         invalidated_review_ids: [],
         export_safety: { is_exportable: false, blocked_reasons: ['unsafe_review'] },
@@ -134,6 +138,14 @@ test('paper detail edits one DFT row through the audited manual update API', asy
   await card.getByRole('button', { name: '修改数据' }).click();
   await expect(page.locator('#dftEditOverlay')).toBeVisible();
   await expect(page.locator('#dftEditLocator')).toContainText('dft_result_id=dft-target');
+  await expect(page.locator('#dftEditCatalystSample option')).toContainText([
+    '未关联催化剂样本',
+    'Wrong catalyst 30 · 11111111',
+    'Correct catalyst 15 · 22222222',
+  ]);
+  await expect(page.locator('#dftEditCatalystSampleFullId')).toContainText('11111111-1111-4111-8111-111111111111');
+  await page.locator('#dftEditCatalystSample').selectOption('22222222-2222-4222-8222-222222222222');
+  await expect(page.locator('#dftEditCatalystSampleFullId')).toContainText('22222222-2222-4222-8222-222222222222');
   await page.locator('#dftEditValue').fill('-1.95');
   await page.locator('#dftEditReactionStep').fill('Li2S4 adsorption');
   await page.locator('#dftEditReason').fill('对照原 PDF 表格修正。');
@@ -145,11 +157,12 @@ test('paper detail edits one DFT row through the audited manual update API', asy
     reviewer: 'paper_detail_user',
     reason: '对照原 PDF 表格修正。',
     updates: {
+      catalyst_sample_id: '22222222-2222-4222-8222-222222222222',
       value: -1.95,
       reaction_step: 'Li2S4 adsorption',
     },
   });
-  expect(Object.keys(updatePayload.updates).sort()).toEqual(['reaction_step', 'value']);
+  expect(Object.keys(updatePayload.updates).sort()).toEqual(['catalyst_sample_id', 'reaction_step', 'value']);
   await expect(page.locator('#dftEditOverlay')).toBeHidden();
 });
 

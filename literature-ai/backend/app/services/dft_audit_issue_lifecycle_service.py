@@ -185,13 +185,22 @@ class DFTAuditIssueLifecycleService:
             payload=self.authoritative_payload_for_result(row),
         )
 
-    def authoritative_payload_for_result(self, row: DFTResult) -> dict[str, Any]:
+    def authoritative_payload_for_result(
+        self,
+        row: DFTResult,
+        *,
+        catalyst_sample: CatalystSample | None = None,
+    ) -> dict[str, Any]:
         evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
         material_identity = self._text_or_none(evidence.get("material_identity"))
-        if row.catalyst_sample_id:
+        if catalyst_sample is not None:
+            sample = catalyst_sample
+        elif row.catalyst_sample_id:
             sample = self.session.get(CatalystSample, row.catalyst_sample_id)
-            if sample is not None and str(sample.name or "").strip():
-                material_identity = str(sample.name).strip()
+        else:
+            sample = None
+        if sample is not None and str(sample.name or "").strip():
+            material_identity = str(sample.name).strip()
         return {
             "corrected_value": {
                 "material_identity": material_identity,
@@ -229,6 +238,12 @@ class DFTAuditIssueLifecycleService:
         row.subject_key = identity.subject_key
         row.observation_key = identity.observation_key
         row.identity_payload = identity.identity_payload
+
+    def clear_result_observation_key_for_rekey(self, row: DFTResult) -> None:
+        """Temporarily release the v2 observation key before an atomic batch rekey."""
+
+        row.observation_key = None
+        self.session.add(row)
 
     def classify_result_identity(
         self,

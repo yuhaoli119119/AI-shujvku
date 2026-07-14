@@ -248,7 +248,7 @@
         <button class="btn ghost small" type="button" onclick="closeDftEditDialog()">关闭</button>
       </div>
       <div class="dft-edit-grid">
-        <label>关联催化剂样本<select id="dftEditCatalystSample"></select></label>
+        <label>关联催化剂样本<select id="dftEditCatalystSample" onchange="updateDftEditCatalystSampleId()"></select><small id="dftEditCatalystSampleFullId">完整 UUID：未关联</small></label>
         <label>吸附物<input id="dftEditAdsorbate" type="text"></label>
         <label>性质/能量类型<input id="dftEditPropertyType" type="text"></label>
         <label>数值<input id="dftEditValue" type="number" step="any"></label>
@@ -825,13 +825,20 @@
       select.innerHTML = '<option value="">未关联催化剂样本</option>' + samples.map(sample => {
         const sampleId = String(sample.id || "");
         const label = sample.name || sample.catalyst || sample.material_identity || sampleId;
-        return `<option value="${esc(sampleId)}">${esc(label)}</option>`;
+        return `<option value="${esc(sampleId)}">${esc(label + " · " + sampleId.slice(0, 8))}</option>`;
       }).join("");
       select.value = currentId;
       if (currentId && select.value !== currentId) {
-        select.insertAdjacentHTML("beforeend", `<option value="${esc(currentId)}">${esc(currentId)}</option>`);
+        select.insertAdjacentHTML("beforeend", `<option value="${esc(currentId)}">${esc("当前关联样本 · " + currentId.slice(0, 8))}</option>`);
         select.value = currentId;
       }
+      updateDftEditCatalystSampleId();
+    }
+
+    function updateDftEditCatalystSampleId() {
+      const select = document.getElementById("dftEditCatalystSample");
+      const output = document.getElementById("dftEditCatalystSampleFullId");
+      if (output) output.textContent = "完整 UUID：" + (select && select.value ? select.value : "未关联");
     }
 
     function openDftEditDialog(itemId) {
