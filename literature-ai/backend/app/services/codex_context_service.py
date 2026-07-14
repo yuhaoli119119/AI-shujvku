@@ -31,6 +31,7 @@ from app.utils.evidence_anchors import (
     has_material_correction_anchor,
 )
 from app.utils.figure_reliability import build_figure_image_review
+from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 
@@ -1346,7 +1347,7 @@ class CodexContextService:
             gate = gate_by_id.get(str(row.id))
             if gate is None:
                 continue
-            if str(row.candidate_status or "").strip().lower() == "rejected":
+            if str(row.candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES:
                 rejected_count += 1
             else:
                 active_gates.append(gate)

@@ -36,6 +36,7 @@ from app.db.models import (
 from app.db.session import get_db_session
 from app.main import app
 from app.services.dft_review_service import DFTResultReviewService
+from app.services.codex_context_service import CodexContextService
 from app.services.gemini_audit_service import GeminiAuditService
 from app.services.paper_query import PaperQueryService
 from app.services.paper_workbench_service import PaperWorkbenchService
@@ -2464,6 +2465,130 @@ def test_review_center_suppresses_duplicate_system_candidate_when_finalized_row_
     assert row_payload["dft_candidate_count"] == 2
     assert row_payload["has_active_dft_candidates"] is False
     assert row_payload["active_dft_candidate_count"] == 0
+
+
+def test_review_center_excludes_terminal_statuses_in_full_and_summary_modes(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="Terminal DFT status summary", pdf_path="terminal-statuses.pdf")
+        supplementary = Paper(title="Terminal DFT SI", pdf_path="terminal-statuses-si.pdf")
+        session.add_all([paper, supplementary])
+        session.flush()
+        session.add(
+            PaperRelationship(
+                source_paper_id=paper.id,
+                target_paper_id=supplementary.id,
+                relationship_type="supplementary",
+            )
+        )
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=supplementary.id,
+                    property_type="adsorption_energy",
+                    adsorbate=f"A{index}",
+                    value=float(index),
+                    unit="eV",
+                    candidate_status="AI_Verified_ML_Ready",
+                )
+                for index in range(375)
+            ]
+            + [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    adsorbate=f"R{index}",
+                    value=-float(index),
+                    unit="eV",
+                    candidate_status="Rejected",
+                )
+                for index in range(2)
+            ]
+        )
+        session.commit()
+        paper_id = paper.id
+
+    with Session() as session:
+        service = PaperWorkbenchService(session, get_settings())
+        full_row = service.review_center(limit=10, paper_ids=[paper_id])["rows"][0]
+        summary_row = service.review_center(limit=10, summary_only=True, paper_ids=[paper_id])["rows"][0]
+
+    for row in (full_row, summary_row):
+        assert row["dft_candidate_count"] == 375
+        assert row["has_active_dft_candidates"] is False
+        assert row["active_dft_candidate_count"] == 0
+        group = row["supplementary_group"]
+        assert group["dft_candidate_count"] == 377
+        assert group["active_dft_candidate_count"] == 0
+        assert group["main_active_dft_candidate_count"] == 0
+        assert group["support_active_dft_candidate_count"] == 0
+        assert group["ready_dft_count"] == 375
+        assert group["exportable_dft_count"] == 375
+        assert group["main_exportable_dft_count"] == 0
+        assert group["exportable_dft_count_is_status_summary"] is True
+        assert group["main_exportable_dft_count_is_status_summary"] is True
+
+    assert summary_row["dft_audit"]["ready_dft_count"] == 375
+    assert summary_row["dft_audit"]["exportable_dft_count"] == 0
+    assert summary_row["dft_audit"]["export_gate_evaluated"] is False
+
+
+def test_lightweight_dft_audit_uses_all_rejected_statuses_and_never_overwrites_gate_zero(workbench_env):
+    audit = PaperWorkbenchService._lightweight_dft_audit(
+        Paper(title="Rejected status summary"),
+        parsed_count=2,
+        exportable_count=0,
+        blocked_count=0,
+        candidate_status_counts={"AI_Rejected": 1, "rejected_by_local_ai": 1},
+    )
+    assert audit["coverage_status"] == "Human_Complete"
+    assert audit["ready_dft_count"] == 0
+    assert audit["exportable_dft_count"] == 0
+    assert audit["export_gate_evaluated"] is True
+
+    gate_zero_audit = PaperWorkbenchService._lightweight_dft_audit(
+        Paper(title="Ready status summary"),
+        parsed_count=1,
+        exportable_count=0,
+        blocked_count=0,
+        candidate_status_counts={"ML_Ready": 1},
+    )
+    assert gate_zero_audit["ready_dft_count"] == 1
+    assert gate_zero_audit["exportable_dft_count"] == 0
+    assert gate_zero_audit["export_gate_evaluated"] is True
+
+
+def test_codex_context_counts_all_shared_rejected_statuses_as_non_active(workbench_env):
+    _, _, Session = workbench_env
+    with Session() as session:
+        paper = Paper(title="All rejected status context", pdf_path="all-rejected.pdf")
+        session.add(paper)
+        session.flush()
+        session.add_all(
+            [
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    value=-1.0,
+                    unit="eV",
+                    candidate_status="AI_Rejected",
+                ),
+                DFTResult(
+                    paper_id=paper.id,
+                    property_type="adsorption_energy",
+                    value=-2.0,
+                    unit="eV",
+                    candidate_status="rejected_by_local_ai",
+                ),
+            ]
+        )
+        session.commit()
+        context = CodexContextService(session, get_settings()).build_context(paper.id)
+
+    readiness = context.context["dft_export_readiness"]
+    assert readiness["total_candidates"] == 2
+    assert readiness["active_candidates"] == 0
+    assert readiness["rejected_count"] == 2
 
 
 def _seed_object_review_audit(

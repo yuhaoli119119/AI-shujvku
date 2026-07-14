@@ -844,4 +844,68 @@ test.describe('Review Center Conflict Modal', () => {
     await expect(page.locator('#rows .chip.subtle[title*="历史上出现过 DFT 冲突"]')).toContainText('已处理冲突 2');
     await expect(page.locator('#rows [data-action="open-conflicts"]')).toHaveCount(0);
   });
+
+  test('renders zero pending DFT items when the API reports terminal candidates only', async ({ page }) => {
+    await page.route('**/api/**', async route => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === '/api/workbench/review-center') {
+        return jsonResponse(route, {
+          metadata: { returned: 1, quality_counts: { A_text_readable: 1 } },
+          rows: [{
+            paper_id: 'terminal-dft-paper',
+            title: 'Terminal DFT Paper',
+            year: 2026,
+            journal: 'Journal E',
+            workflow_status: 'Parsed_Material_Ready',
+            pdf_quality_status: 'A_text_readable',
+            pdf_artifact_status: { pdf_exists: true, pdf_path_kind: 'stored', pdf_file_size: 120, blocking_errors: [] },
+            has_dft_candidates: true,
+            has_active_dft_candidates: false,
+            active_dft_candidate_count: 0,
+            dft_candidate_count: 377,
+            dft_candidate_status_counts: { AI_Verified_ML_Ready: 375, Rejected: 2 },
+            dft_audit: { status_label: 'Ready', detected_signal_count: 377, parsed_dft_count: 377, suspected_missing_count: 0 },
+            dft_completeness_status: 'DB_Ready',
+            dft_completeness_label: 'DB_Ready',
+            suspected_missing_dft_count: 0,
+            figure_count: 0,
+            figure_crop_status_counts: {},
+            figure_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+            figure_issue_count: 0,
+            figure_issue_counts: {},
+            top_figure_issues: [],
+            table_count: 0,
+            evidence_count: 0,
+            locator_reliability: { status: 'reliable', issue_count: 0, issue_counts: {}, top_issues: [] },
+            locator_issue_count: 0,
+            locator_issue_counts: {},
+            top_locator_issues: [],
+            external_audit_count: 0,
+            external_audit_opinions: [],
+            object_review_audit_count: 0,
+            object_review_audits: [],
+            paper_note_count: 0,
+            latest_paper_notes: [],
+            review_conflict_count: 0,
+            review_conflict_total_count: 0,
+            dft_review_conflict_count: 0,
+            dft_review_conflict_total_count: 0,
+          }],
+        });
+      }
+      if (pathname === '/api/libraries') return jsonResponse(route, []);
+      if (pathname === '/api/system/agent-guide') {
+        return jsonResponse(route, { version: 'test', review_prompts: { templates: {}, composite_templates: {} } });
+      }
+      if (pathname === '/api/workbench/review-conflicts') {
+        return jsonResponse(route, { rows: [], adjudication_summary: { auto: 0, suggest: 0, manual: 0 } });
+      }
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+    });
+
+    await page.goto(`${BASE_URL}/pages/review_center/index.html`);
+
+    await expect(page.locator('#rows')).toContainText('已审 DFT');
+    await expect(page.locator('#rows')).not.toContainText('待处理 375');
+  });
 });

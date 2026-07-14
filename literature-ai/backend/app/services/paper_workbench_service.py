@@ -694,8 +694,8 @@ class PaperWorkbenchService(
                 if summary_only
                 else dict(Counter(row.candidate_status or "system_candidate" for row in dft_rows))
             )
-            exportable_count = exportable_counts.get(paper.id, 0)
-            blocked_count = blocked_counts.get(paper.id, 0)
+            exportable_count = exportable_counts.get(paper.id) if not summary_only else None
+            blocked_count = blocked_counts.get(paper.id) if not summary_only else None
             dft_audit = dft_audits.get(str(paper.id)) or self._lightweight_dft_audit(
                 paper,
                 parsed_count=dft_count,

@@ -17,18 +17,7 @@ from app.services.supplementary_dft_lifecycle_service import (
     CLOSED_SUPPORT_DFT_LIFECYCLE_STATUSES,
     OPEN_SUPPORT_DFT_LIFECYCLE_STATUSES,
 )
-
-
-FINALIZED_DFT_CANDIDATE_STATUSES = {
-    "ML_Ready",
-    "Rejected",
-    "human_reviewed_needs_evidence",
-    "Gemini_Verified",
-    "Human_Confirmed",
-    "Citation_Ready",
-    "verified",
-    "human_verified",
-}
+from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES, is_status_ready, is_terminal
 
 
 class PaperWorkbenchReviewCenterMixin:
@@ -38,8 +27,7 @@ class PaperWorkbenchReviewCenterMixin:
 
     @staticmethod
     def _is_active_dft_candidate(status: Any) -> bool:
-        normalized = str(status or "system_candidate").strip()
-        return normalized not in FINALIZED_DFT_CANDIDATE_STATUSES
+        return not is_terminal(status)
 
     @classmethod
     def _count_active_dft_candidates(cls, rows: list[DFTResult]) -> int:
@@ -76,18 +64,12 @@ class PaperWorkbenchReviewCenterMixin:
         )
 
     @staticmethod
-    def _exportable_count_from_status_counts(candidate_status_counts: dict[str, int]) -> int:
-        exportable_statuses = {
-            "ml_ready",
-            "human_confirmed",
-            "citation_ready",
-            "verified",
-            "human_verified",
-        }
+    def _ready_count_from_status_counts(candidate_status_counts: dict[str, int]) -> int:
+        """Count display-ready statuses; this is not an export-gate result."""
         return sum(
             int(count or 0)
             for candidate_status, count in candidate_status_counts.items()
-            if str(candidate_status or "").strip().lower() in exportable_statuses
+            if is_status_ready(candidate_status)
         )
 
     @staticmethod
@@ -155,10 +137,15 @@ class PaperWorkbenchReviewCenterMixin:
             "member_paper_ids": [str(member_id) for member_id in member_ids],
             "dft_candidate_count": sum(int(count or 0) for count in group_status_counts.values()),
             "active_dft_candidate_count": cls._active_count_from_status_counts(dict(group_status_counts)),
-            "exportable_dft_count": cls._exportable_count_from_status_counts(dict(group_status_counts)),
+            # Compatibility fields remain status summaries, not export-gate results.
+            "exportable_dft_count": cls._ready_count_from_status_counts(dict(group_status_counts)),
+            "exportable_dft_count_is_status_summary": True,
+            "ready_dft_count": cls._ready_count_from_status_counts(dict(group_status_counts)),
             "main_dft_candidate_count": sum(int(count or 0) for count in main_counts.values()),
             "main_active_dft_candidate_count": cls._active_count_from_status_counts(main_counts),
-            "main_exportable_dft_count": cls._exportable_count_from_status_counts(main_counts),
+            "main_exportable_dft_count": cls._ready_count_from_status_counts(main_counts),
+            "main_exportable_dft_count_is_status_summary": True,
+            "main_ready_dft_count": cls._ready_count_from_status_counts(main_counts),
             "support_dft_candidate_count": sum(int(count or 0) for count in support_status_counts.values()),
             "support_active_dft_candidate_count": support_active_count,
             "support_dft_lifecycle_state": support_lifecycle_state,
@@ -311,41 +298,34 @@ class PaperWorkbenchReviewCenterMixin:
         paper: Paper,
         *,
         parsed_count: int,
-        exportable_count: int,
-        blocked_count: int,
+        exportable_count: int | None,
+        blocked_count: int | None,
         candidate_status_counts: dict[str, int],
     ) -> dict[str, Any]:
         rejected_count = sum(
             int(count or 0)
             for candidate_status, count in candidate_status_counts.items()
-            if str(candidate_status or "").strip().lower() == "rejected"
+            if str(candidate_status or "").strip().lower() in DFT_REJECTED_STATUSES
         )
-        exportable_statuses = {
-            "ml_ready",
-            "human_confirmed",
-            "citation_ready",
-            "verified",
-            "human_verified",
-        }
-        finalized_statuses = {status.lower() for status in FINALIZED_DFT_CANDIDATE_STATUSES}
-        derived_exportable_count = sum(
+        derived_ready_count = sum(
             int(count or 0)
             for candidate_status, count in candidate_status_counts.items()
-            if str(candidate_status or "").strip().lower() in exportable_statuses
+            if is_status_ready(candidate_status)
         )
         derived_active_count = sum(
             int(count or 0)
             for candidate_status, count in candidate_status_counts.items()
-            if str(candidate_status or "").strip().lower() not in finalized_statuses
+            if not is_terminal(candidate_status)
         )
-        effective_exportable_count = int(exportable_count or 0) or derived_exportable_count
-        effective_blocked_count = int(blocked_count or 0) or derived_active_count
+        export_gate_evaluated = exportable_count is not None and blocked_count is not None
+        actual_exportable_count = int(exportable_count or 0) if export_gate_evaluated else 0
+        actual_blocked_count = int(blocked_count or 0) if export_gate_evaluated else 0
         all_candidates_rejected = parsed_count > 0 and rejected_count == parsed_count
         status = "Unparsed"
         if all_candidates_rejected:
             status = "Human_Complete"
         elif parsed_count > 0:
-            status = "DB_Ready" if effective_exportable_count > 0 and effective_blocked_count == 0 else "Initial_Parsed"
+            status = "DB_Ready" if derived_ready_count > 0 and derived_active_count == 0 else "Initial_Parsed"
         if str(paper.workflow_status or "") == "Suspected_Missing":
             status = "Suspected_Missing"
         return {
@@ -363,10 +343,12 @@ class PaperWorkbenchReviewCenterMixin:
             "detected_tables": 0,
             "detected_figures": 0,
             "parsed_dft_count": parsed_count,
-            "exportable_dft_count": effective_exportable_count,
-            "blocked_dft_count": effective_blocked_count,
+            "exportable_dft_count": actual_exportable_count,
+            "blocked_dft_count": actual_blocked_count,
+            "export_gate_evaluated": export_gate_evaluated,
+            "ready_dft_count": derived_ready_count,
             "suspected_missing_count": 1 if status == "Suspected_Missing" else 0,
-            "coverage_ratio": 1.0 if parsed_count and effective_blocked_count == 0 else 0.0,
+            "coverage_ratio": 1.0 if parsed_count and derived_active_count == 0 else 0.0,
             "unique_candidate_count": parsed_count,
             "duplicate_evidence_count": 0,
             "rescan_recommended": status == "Suspected_Missing",

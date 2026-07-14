@@ -26,6 +26,7 @@ from app.services.dft_identity_service import (
     resolve_atom_pair_identity,
 )
 from app.services.dft_audit_issue_lifecycle_service import DFT_AUDIT_ISSUE_PENDING_STATUSES
+from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES
 
 
 SAFE_REVIEWER_STATUS = "verified"
@@ -33,7 +34,6 @@ SAFE_TARGET_RESOLUTION_STATUSES = {"active", "remapped"}
 UNSAFE_REVIEWER_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "pending", ""}
 UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", ""}
 
-DFT_REJECTED_STATUSES = {"rejected", "ai_rejected", "rejected_by_local_ai"}
 DFT_RESULT_CONFLICT_ISSUE_TYPES = {"duplicate_suspected", "negative_consensus"}
 DFT_RESULT_CONFLICT_CODES = {"binding_conflict", "scientific_conflict", "identity_conflict"}
 MISSING_UNIT_MARKERS = {
