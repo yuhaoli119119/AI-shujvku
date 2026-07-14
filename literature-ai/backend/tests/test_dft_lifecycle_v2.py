@@ -3,10 +3,12 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -26,6 +28,8 @@ from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycl
 from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_identity_service import build_dft_identity_v2
+from app.services.dft_import_batch_context import DFTImportBatchContext
+from app.services.dft_material_binding_service import DFTMaterialBindingService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 
@@ -752,3 +756,233 @@ def test_entrypoints_delegate_v2_writes_to_unified_lifecycle_service():
         assert ".identity_version = 2" not in source
         assert "row.subject_key =" not in source
         assert "row.observation_key =" not in source
+
+
+def test_import_batch_overlay_discards_rolled_back_issue_and_source_cache(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Batch overlay rollback")
+        candidate = _candidate(
+            session,
+            paper,
+            corrected={
+                "material": "Fe-GDY",
+                "adsorbate": "Li2S4",
+                "property_type": "adsorption_energy",
+                "reaction_step": "Li2S4 adsorption",
+                "value": -1.2,
+                "unit": "eV",
+            },
+        )
+        run = session.get(ExternalAnalysisRun, candidate.run_id)
+        payload = dict(candidate.normalized_payload)
+        issue_service = DFTAuditIssueService(session)
+        issue_type, fingerprint, *_ = issue_service.missing_issue_batch_key(
+            paper_id=paper.id,
+            candidate=candidate,
+            payload=payload,
+        )
+        context = issue_service.begin_import_batch(
+            paper_id=paper.id,
+            issue_fingerprints={(issue_type, fingerprint)},
+            candidates_by_id={candidate.id: candidate},
+        )
+        context.locked_candidate_ids.add(candidate.id)
+        materializer = VerificationSessionService(session, get_settings())
+
+        relation_key = None
+        with pytest.raises(RuntimeError, match="rollback_overlay"):
+            with materializer._dft_import_savepoint(context):
+                issue = issue_service.create_or_update_missing_issue(
+                    paper_id=paper.id,
+                    candidate=candidate,
+                    run=run,
+                    payload=payload,
+                )
+                relation_key = (issue.id, candidate.id)
+                assert context.issue_by_fingerprint((issue_type, fingerprint)) is issue
+                assert context.source_relation_exists(relation_key)
+                raise RuntimeError("rollback_overlay")
+
+        assert context.overlay is None
+        assert context.issue_by_fingerprint((issue_type, fingerprint)) is None
+        assert relation_key is not None and not context.source_relation_exists(relation_key)
+        assert session.scalar(
+            sa.select(sa.func.count()).select_from(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper.id)
+        ) == 0
+        assert session.scalar(sa.select(sa.func.count()).select_from(DFTAuditIssueSource)) == 0
+
+        with materializer._dft_import_savepoint(context):
+            issue = issue_service.create_or_update_missing_issue(
+                paper_id=paper.id,
+                candidate=candidate,
+                run=run,
+                payload=payload,
+            )
+            lifecycle = DFTAuditIssueLifecycleService(session, batch_context=context)
+            assert lifecycle.bind_source_candidate(issue, candidate) is False
+
+        assert context.issue_by_fingerprint((issue_type, fingerprint)) is issue
+        assert context.source_relation_exists((issue.id, candidate.id))
+        assert session.scalar(sa.select(sa.func.count()).select_from(DFTAuditIssueSource)) == 1
+        issue_service.end_import_batch()
+
+
+def test_batch_and_nonbatch_missing_issue_upserts_keep_same_semantics(setup_test_db):
+    with Session(setup_test_db) as session:
+        rows = []
+        for title in ("Nonbatch semantics", "Batch semantics"):
+            paper = _paper(session, title)
+            candidate = _candidate(
+                session,
+                paper,
+                corrected={
+                    "material": "Fe-GDY",
+                    "adsorbate": "Li2S4",
+                    "property_type": "adsorption_energy",
+                    "reaction_step": "Li2S4 adsorption",
+                    "value": -1.2,
+                    "unit": "eV",
+                },
+            )
+            rows.append((paper, candidate, session.get(ExternalAnalysisRun, candidate.run_id)))
+
+        nonbatch_paper, nonbatch_candidate, nonbatch_run = rows[0]
+        nonbatch_issue = DFTAuditIssueService(session).create_or_update_missing_issue(
+            paper_id=nonbatch_paper.id,
+            candidate=nonbatch_candidate,
+            run=nonbatch_run,
+            payload=dict(nonbatch_candidate.normalized_payload),
+        )
+
+        batch_paper, batch_candidate, batch_run = rows[1]
+        batch_service = DFTAuditIssueService(session)
+        batch_payload = dict(batch_candidate.normalized_payload)
+        issue_type, fingerprint, *_ = batch_service.missing_issue_batch_key(
+            paper_id=batch_paper.id,
+            candidate=batch_candidate,
+            payload=batch_payload,
+        )
+        context = batch_service.begin_import_batch(
+            paper_id=batch_paper.id,
+            issue_fingerprints={(issue_type, fingerprint)},
+            candidates_by_id={batch_candidate.id: batch_candidate},
+        )
+        with VerificationSessionService(session, get_settings())._dft_import_savepoint(context):
+            batch_issue = batch_service.create_or_update_missing_issue(
+                paper_id=batch_paper.id,
+                candidate=batch_candidate,
+                run=batch_run,
+                payload=batch_payload,
+            )
+
+        assert (
+            batch_issue.issue_type,
+            batch_issue.status,
+            batch_issue.severity,
+            batch_issue.lifecycle_version,
+            batch_issue.lifecycle_stage,
+            batch_issue.resolution_note,
+        ) == (
+            nonbatch_issue.issue_type,
+            nonbatch_issue.status,
+            nonbatch_issue.severity,
+            nonbatch_issue.lifecycle_version,
+            nonbatch_issue.lifecycle_stage,
+            nonbatch_issue.resolution_note,
+        )
+        assert batch_issue.source_candidate_ids == [str(batch_candidate.id)]
+        assert nonbatch_issue.source_candidate_ids == [str(nonbatch_candidate.id)]
+        batch_service.end_import_batch()
+
+
+def test_batch_materialization_reuses_concurrent_observation_winner(setup_test_db, monkeypatch):
+    with Session(setup_test_db) as setup_session:
+        paper = _paper(setup_session, "Concurrent observation winner")
+        candidate = _candidate(
+            setup_session,
+            paper,
+            corrected={
+                "material": "Fe-GDY",
+                "adsorbate": "Li2S4",
+                "property_type": "adsorption_energy",
+                "reaction_step": "Li2S4 adsorption",
+                "value": -1.2,
+                "unit": "eV",
+            },
+        )
+        paper_id = paper.id
+        candidate_id = candidate.id
+        setup_session.commit()
+
+    winner_id = None
+
+    def concurrent_insert_then_conflict(self, *, paper_id, candidate_item, source_label):
+        nonlocal winner_id
+        with Session(setup_test_db) as concurrent_session:
+            winner = DFTResult(
+                paper_id=paper_id,
+                adsorbate=candidate_item["adsorbate"],
+                property_type=candidate_item["property_type"],
+                value=candidate_item["value"],
+                unit=candidate_item["unit"],
+                reaction_step=candidate_item["reaction_step"],
+                candidate_status="new_candidate",
+                evidence_payload=candidate_item["evidence_payload"],
+                candidate_identity=f"concurrent-winner:{uuid4()}",
+            )
+            DFTAuditIssueLifecycleService.apply_result_identity(winner, candidate_item["identity_v2"])
+            concurrent_session.add(winner)
+            concurrent_session.commit()
+            winner_id = winner.id
+        original = RuntimeError("concurrent observation")
+        original.diag = SimpleNamespace(constraint_name="uq_dft_results_identity_v2_observation")
+        raise IntegrityError("concurrent observation", {}, original)
+
+    monkeypatch.setattr(
+        VerificationSessionService,
+        "_insert_new_dft_candidate_in_current_savepoint",
+        concurrent_insert_then_conflict,
+    )
+
+    with Session(setup_test_db) as session:
+        result = VerificationSessionService(session, get_settings())._materialize_new_dft_candidates(
+            paper_id=paper_id,
+            reviewer="pytest-ai",
+            candidate_ids={candidate_id},
+        )
+        assert result["materialized_count"] == 1
+        assert result["materialized_items"][0]["action"] == "deduplicated"
+        assert result["materialized_items"][0]["dft_result_id"] == str(winner_id)
+        assert session.scalar(
+            sa.select(sa.func.count()).select_from(DFTResult).where(DFTResult.paper_id == paper_id)
+        ) == 1
+
+
+def test_material_binding_cache_discards_savepoint_rollback(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Material cache rollback")
+        context = DFTImportBatchContext(paper_id=paper.id)
+        binding = DFTMaterialBindingService(session)
+        materializer = VerificationSessionService(session, get_settings())
+
+        with pytest.raises(RuntimeError, match="rollback_material"):
+            with materializer._dft_import_savepoint(context, binding):
+                sample, created = binding.resolve_or_create_sample(
+                    paper_id=paper.id,
+                    material_identity="Fe-GDY",
+                )
+                assert created and sample.id is not None
+                raise RuntimeError("rollback_material")
+
+        assert session.scalar(
+            sa.select(sa.func.count()).select_from(CatalystSample).where(CatalystSample.paper_id == paper.id)
+        ) == 0
+        with materializer._dft_import_savepoint(context, binding):
+            sample, created = binding.resolve_or_create_sample(
+                paper_id=paper.id,
+                material_identity="Fe-GDY",
+            )
+            assert created
+        assert session.scalar(
+            sa.select(sa.func.count()).select_from(CatalystSample).where(CatalystSample.paper_id == paper.id)
+        ) == 1

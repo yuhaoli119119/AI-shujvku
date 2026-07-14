@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -22,6 +23,7 @@ from app.services.dft_identity_service import (
     DFTIdentityV2,
     build_dft_identity_v2,
 )
+from app.services.dft_import_batch_context import DFTImportBatchContext
 
 
 DFT_AUDIT_ISSUE_PENDING_STATUSES = {
@@ -93,8 +95,9 @@ class DFTAuditIssueLifecycleService:
         "evidence_payload",
     )
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, *, batch_context: DFTImportBatchContext | None = None):
         self.session = session
+        self.batch_context = batch_context
 
     def active_issues_for_target(
         self,
@@ -345,12 +348,20 @@ class DFTAuditIssueLifecycleService:
             legacy_ids.append(str(candidate.id))
             issue.source_candidate_ids = legacy_ids
             self.session.add(issue)
-        key = {"issue_id": issue.id, "candidate_id": candidate.id}
-        if self.session.get(DFTAuditIssueSource, key) is not None:
+        relation_key = (issue.id, candidate.id)
+        if self.batch_context is not None and self.batch_context.source_relation_exists(relation_key):
             return False
-        self.session.add(DFTAuditIssueSource(**key))
-        self.session.flush()
-        return True
+        inserted_candidate_id = self.session.scalar(
+            pg_insert(DFTAuditIssueSource)
+            .values(issue_id=issue.id, candidate_id=candidate.id)
+            .on_conflict_do_nothing(
+                index_elements=[DFTAuditIssueSource.issue_id, DFTAuditIssueSource.candidate_id]
+            )
+            .returning(DFTAuditIssueSource.candidate_id)
+        )
+        if self.batch_context is not None:
+            self.batch_context.register_source_relation(relation_key)
+        return inserted_candidate_id is not None
 
     def bind_known_source_candidates(self, issue: DFTAuditIssue) -> int:
         candidate_ids: list[UUID] = []
@@ -361,12 +372,20 @@ class DFTAuditIssueLifecycleService:
                 continue
         if not candidate_ids:
             return 0
-        candidates = self.session.scalars(
-            select(ExternalAnalysisCandidate).where(
-                ExternalAnalysisCandidate.id.in_(candidate_ids),
-                ExternalAnalysisCandidate.paper_id == issue.paper_id,
-            )
-        ).all()
+        if self.batch_context is not None:
+            candidates = [
+                self.batch_context.candidates_by_id[candidate_id]
+                for candidate_id in candidate_ids
+                if candidate_id in self.batch_context.candidates_by_id
+                and self.batch_context.candidates_by_id[candidate_id].paper_id == issue.paper_id
+            ]
+        else:
+            candidates = self.session.scalars(
+                select(ExternalAnalysisCandidate).where(
+                    ExternalAnalysisCandidate.id.in_(candidate_ids),
+                    ExternalAnalysisCandidate.paper_id == issue.paper_id,
+                )
+            ).all()
         return sum(1 for candidate in candidates if self.bind_source_candidate(issue, candidate))
 
     def reconcile_candidate_binding(
@@ -414,14 +433,22 @@ class DFTAuditIssueLifecycleService:
     ) -> tuple[ExternalAnalysisCandidate, DFTAuditIssue]:
         """Lock and revalidate the pre-parsed candidate snapshot before writes."""
 
-        locked_candidate = self.session.scalar(
-            select(ExternalAnalysisCandidate)
-            .where(ExternalAnalysisCandidate.id == candidate.id)
-            .with_for_update()
-        )
-        locked_issue = self.session.scalar(
-            select(DFTAuditIssue).where(DFTAuditIssue.id == issue.id).with_for_update()
-        )
+        if self.batch_context is not None:
+            if candidate.id not in self.batch_context.locked_candidate_ids:
+                raise ValueError("dft_candidate_snapshot_drift")
+            if not self.batch_context.issue_lock_is_held(issue.id):
+                raise ValueError("dft_issue_lock_not_held")
+            locked_candidate = self.batch_context.candidates_by_id.get(candidate.id)
+            locked_issue = issue
+        else:
+            locked_candidate = self.session.scalar(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.id == candidate.id)
+                .with_for_update()
+            )
+            locked_issue = self.session.scalar(
+                select(DFTAuditIssue).where(DFTAuditIssue.id == issue.id).with_for_update()
+            )
         if locked_candidate is None or locked_issue is None:
             raise ValueError("dft_binding_snapshot_drift")
         if candidate_payload_snapshot is not None:

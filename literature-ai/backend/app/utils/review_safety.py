@@ -75,6 +75,7 @@ LOCATOR_PAYLOAD_KEYS = {
 _TABLE_NAMES_BY_BIND: dict[int, set[str]] = {}
 _BATCH_REVIEWS_CACHE_KEY = "dft_import_reviews_by_target"
 _BATCH_EVIDENCE_CACHE_KEY = "dft_import_evidence_reference_ids"
+_BATCH_CONFLICT_CACHE_KEY = "dft_import_open_conflict_ids"
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,9 @@ def _open_dft_result_conflict_ids(session: Session, rows: list[DFTResult]) -> se
         return set()
     paper_ids = {row.paper_id for row in rows}
     target_ids = {str(row.id) for row in rows}
+    batch_cache = session.info.get(_BATCH_CONFLICT_CACHE_KEY)
+    if isinstance(batch_cache, dict) and target_ids <= set(batch_cache.get("target_ids") or set()):
+        return target_ids & set(batch_cache.get("conflict_ids") or set())
     result_ids = {row.id for row in rows}
     issues = session.scalars(
         select(DFTAuditIssue).where(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections import defaultdict
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
@@ -84,14 +85,9 @@ class VerificationSessionDFTCandidateMixin:
         materialized: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         issue_service = DFTAuditIssueService(self.session)
-        issue_lifecycle = DFTAuditIssueLifecycleService(self.session)
         existing_by_observation: dict[str, DFTResult] = {}
         existing_by_subject: dict[str, list[DFTResult]] = defaultdict(list)
-        for existing_row in existing_dft_rows:
-            existing_identity = issue_lifecycle.identity_for_result(existing_row)
-            if existing_identity.observation_key:
-                existing_by_observation.setdefault(existing_identity.observation_key, existing_row)
-                existing_by_subject[existing_identity.subject_key].append(existing_row)
+        prepared: list[dict[str, Any]] = []
         for candidate, run_id, run_source, run_source_label, run_source_identity, run_source_identity_verified in rows:
             run = SimpleNamespace(
                 id=run_id,
@@ -106,35 +102,77 @@ class VerificationSessionDFTCandidateMixin:
             target_id = str(payload.get("target_id") or "").strip().lower()
             if target_type != "dft_results" or (decision != "new_candidate" and target_id != "new"):
                 continue
-            if bool(payload.get("borrowed_from_reference")):
-                skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
-                self._persist_new_dft_candidate_failure(
+            if bool(payload.get("borrowed_from_reference")) or self._is_supporting_reference_dft_payload(payload):
+                candidate_item, reason = None, "borrowed_supporting_reference"
+            else:
+                candidate_item, reason = self._new_dft_candidate_item(
+                    payload,
                     paper_id=paper_id,
-                    candidate=candidate,
                     run=run,
-                    payload=payload,
-                    reason="borrowed_supporting_reference",
-                    needs_user_decision=False,
+                    candidate_id=candidate.id,
                 )
-                continue
-            if self._is_supporting_reference_dft_payload(payload):
-                skipped.append({"candidate_id": str(candidate.id), "reason": "borrowed_supporting_reference"})
-                self._persist_new_dft_candidate_failure(
-                    paper_id=paper_id,
-                    candidate=candidate,
-                    run=run,
-                    payload=payload,
-                    reason="borrowed_supporting_reference",
-                    needs_user_decision=False,
-                )
-                continue
-            # Identity/PDF parsing is deliberately outside the write savepoint.
-            candidate_item, reason = self._new_dft_candidate_item(
-                payload,
-                paper_id=paper_id,
-                run=run,
-                candidate_id=candidate.id,
+            prepared.append(
+                {
+                    "candidate": candidate,
+                    "run": run,
+                    "payload": payload,
+                    "snapshot": self._dft_candidate_import_snapshot(candidate, payload),
+                    "candidate_item": candidate_item,
+                    "reason": reason,
+                }
             )
+
+        prepared_candidate_ids = {item["candidate"].id for item in prepared}
+        locked_candidates = []
+        if prepared_candidate_ids:
+            locked_candidates = self.session.scalars(
+                select(ExternalAnalysisCandidate)
+                .where(ExternalAnalysisCandidate.id.in_(prepared_candidate_ids))
+                .order_by(ExternalAnalysisCandidate.id.asc())
+                .with_for_update(of=ExternalAnalysisCandidate)
+                .execution_options(populate_existing=True)
+            ).all()
+        locked_by_id = {candidate.id: candidate for candidate in locked_candidates}
+        if set(locked_by_id) != prepared_candidate_ids:
+            raise ValueError("dft_binding_snapshot_drift")
+        issue_fingerprints = {
+            issue_service.missing_issue_batch_key(
+                paper_id=paper_id,
+                candidate=item["candidate"],
+                payload=item["payload"],
+            )[:2]
+            for item in prepared
+        }
+        batch_context = issue_service.begin_import_batch(
+            paper_id=paper_id,
+            issue_fingerprints=issue_fingerprints,
+            candidates_by_id=locked_by_id,
+        )
+        batch_context.locked_candidate_ids = set(locked_by_id)
+        batch_context.candidate_snapshots = {
+            item["candidate"].id: item["snapshot"]
+            for item in prepared
+        }
+        for item in prepared:
+            candidate = locked_by_id[item["candidate"].id]
+            live_payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            if batch_context.candidate_snapshots[candidate.id] != self._dft_candidate_import_snapshot(candidate, live_payload):
+                raise ValueError("dft_candidate_snapshot_drift")
+            item["candidate"] = candidate
+
+        issue_lifecycle = DFTAuditIssueLifecycleService(self.session, batch_context=batch_context)
+        material_binding_service = DFTMaterialBindingService(self.session)
+        for existing_row in existing_dft_rows:
+            existing_identity = issue_lifecycle.identity_for_result(existing_row)
+            if existing_identity.observation_key:
+                existing_by_observation.setdefault(existing_identity.observation_key, existing_row)
+                existing_by_subject[existing_identity.subject_key].append(existing_row)
+        for prepared_item in prepared:
+            candidate = prepared_item["candidate"]
+            run = prepared_item["run"]
+            payload = prepared_item["payload"]
+            candidate_item = prepared_item["candidate_item"]
+            reason = prepared_item["reason"]
             if candidate_item is None:
                 skipped.append({"candidate_id": str(candidate.id), "reason": reason})
                 self._persist_new_dft_candidate_failure(
@@ -144,6 +182,9 @@ class VerificationSessionDFTCandidateMixin:
                     payload=payload,
                     reason=reason,
                     needs_user_decision=reason == "conflicting_atom_pair_aliases",
+                    issue_service=issue_service,
+                    issue_lifecycle=issue_lifecycle,
+                    batch_context=batch_context,
                 )
                 continue
             identity_v2: DFTIdentityV2 = candidate_item["identity_v2"]
@@ -154,7 +195,7 @@ class VerificationSessionDFTCandidateMixin:
             )
             outcome: dict[str, Any] | None = None
             try:
-                with self.session.begin_nested():
+                with self._dft_import_savepoint(batch_context, material_binding_service):
                     issue = issue_service.create_or_update_missing_issue(
                         paper_id=paper_id,
                         candidate=candidate,
@@ -208,7 +249,7 @@ class VerificationSessionDFTCandidateMixin:
                             action = "created" if created else "deduplicated"
                         else:
                             action = "deduplicated"
-                        material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                        material_binding = material_binding_service.ensure_row_binding(
                             row=existing,
                             material_identity=candidate_item["material_identity"],
                         )
@@ -235,10 +276,10 @@ class VerificationSessionDFTCandidateMixin:
                             "material_binding": material_binding,
                             "support_lifecycle": support_lifecycle,
                         }
-            except IntegrityError:
+            except IntegrityError as exc:
                 # A concurrent valid v2 observation must deterministically reuse
                 # the committed winner. Invalid identities never enter this path.
-                if not identity_v2.observation_key:
+                if not identity_v2.observation_key or not self._is_dft_observation_conflict(exc):
                     raise
                 existing = self.session.scalar(
                     select(DFTResult).where(
@@ -249,7 +290,7 @@ class VerificationSessionDFTCandidateMixin:
                 )
                 if existing is None:
                     raise
-                with self.session.begin_nested():
+                with self._dft_import_savepoint(batch_context, material_binding_service):
                     issue = issue_service.create_or_update_missing_issue(
                         paper_id=paper_id,
                         candidate=candidate,
@@ -269,7 +310,7 @@ class VerificationSessionDFTCandidateMixin:
                             "issue_id": str(issue.id),
                         }
                     else:
-                        material_binding = DFTMaterialBindingService(self.session).ensure_row_binding(
+                        material_binding = material_binding_service.ensure_row_binding(
                             row=existing,
                             material_identity=candidate_item["material_identity"],
                         )
@@ -307,6 +348,9 @@ class VerificationSessionDFTCandidateMixin:
                     payload=payload,
                     reason=reason,
                     needs_user_decision=True,
+                    issue_service=issue_service,
+                    issue_lifecycle=issue_lifecycle,
+                    batch_context=batch_context,
                 )
                 continue
             if outcome is not None and outcome.get("skipped"):
@@ -348,12 +392,56 @@ class VerificationSessionDFTCandidateMixin:
                 )
             )
         self.session.flush()
+        issue_service.end_import_batch()
         return {
             "materialized_count": len(materialized),
             "materialized_items": materialized,
             "skipped_count": len(skipped),
             "skipped_items": skipped,
         }
+
+    @contextmanager
+    def _dft_import_savepoint(self, batch_context, material_binding_service=None):
+        batch_context.begin_savepoint()
+        if material_binding_service is not None:
+            material_binding_service.begin_savepoint()
+        try:
+            with self.session.begin_nested():
+                yield
+        except BaseException:
+            batch_context.rollback_savepoint()
+            if material_binding_service is not None:
+                material_binding_service.rollback_savepoint()
+            raise
+        else:
+            batch_context.commit_savepoint()
+            if material_binding_service is not None:
+                material_binding_service.commit_savepoint()
+
+    @staticmethod
+    def _is_dft_observation_conflict(exc: IntegrityError) -> bool:
+        diagnostic = getattr(getattr(exc, "orig", None), "diag", None)
+        constraint_name = str(getattr(diagnostic, "constraint_name", "") or "")
+        return constraint_name in {
+            "uq_dft_results_identity_v2_observation",
+            "uq_dft_result_candidate_identity",
+        }
+
+    @staticmethod
+    def _dft_candidate_import_snapshot(
+        candidate: ExternalAnalysisCandidate,
+        payload: dict[str, Any],
+    ) -> str:
+        return DFTAuditIssueLifecycleService._canonical_json(
+            {
+                "id": str(candidate.id),
+                "paper_id": str(candidate.paper_id),
+                "run_id": str(candidate.run_id),
+                "candidate_type": str(candidate.candidate_type),
+                "status": str(candidate.status),
+                "normalized_payload": payload,
+            }
+        )
 
     def _same_bound_dft_result(
         self,
@@ -641,18 +729,6 @@ class VerificationSessionDFTCandidateMixin:
     ) -> tuple[DFTResult, bool]:
         identity_v2: DFTIdentityV2 = candidate_item["identity_v2"]
         identity = self._new_dft_identity(candidate_item["signature"])
-        if identity_v2.observation_key:
-            existing = self.session.scalar(
-                select(DFTResult).where(
-                    DFTResult.paper_id == paper_id,
-                    DFTResult.identity_version == 2,
-                    DFTResult.observation_key == identity_v2.observation_key,
-                )
-            )
-        else:
-            existing = None
-        if existing is not None:
-            return existing, False
         row = DFTResult(
             paper_id=paper_id,
             adsorbate=candidate_item["adsorbate"],
@@ -698,15 +774,14 @@ class VerificationSessionDFTCandidateMixin:
         payload: dict[str, Any],
         reason: str,
         needs_user_decision: bool,
+        issue_service: DFTAuditIssueService,
+        issue_lifecycle: DFTAuditIssueLifecycleService,
+        batch_context,
     ) -> None:
         """Persist one isolated failure after pre-parse, without partial bindings."""
 
-        with self.session.begin_nested():
-            locked_candidate = self.session.scalar(
-                select(ExternalAnalysisCandidate)
-                .where(ExternalAnalysisCandidate.id == candidate.id)
-                .with_for_update()
-            )
+        with self._dft_import_savepoint(batch_context):
+            locked_candidate = batch_context.candidates_by_id.get(candidate.id)
             if locked_candidate is None:
                 raise ValueError("dft_candidate_snapshot_drift")
             live_payload = (
@@ -716,7 +791,7 @@ class VerificationSessionDFTCandidateMixin:
             )
             if DFTAuditIssueLifecycleService._canonical_json(live_payload) != DFTAuditIssueLifecycleService._canonical_json(payload):
                 raise ValueError("dft_candidate_snapshot_drift")
-            issue = DFTAuditIssueService(self.session).create_or_update_missing_issue(
+            issue = issue_service.create_or_update_missing_issue(
                 paper_id=paper_id,
                 candidate=locked_candidate,
                 run=run,
@@ -724,7 +799,7 @@ class VerificationSessionDFTCandidateMixin:
             )
             if needs_user_decision:
                 self._hold_new_dft_candidate_for_decision(locked_candidate, reason=reason)
-                DFTAuditIssueLifecycleService(self.session).mark_pending(
+                issue_lifecycle.mark_pending(
                     issue,
                     status="needs_user_decision",
                     note=reason,

@@ -4,7 +4,7 @@ from datetime import UTC
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
@@ -33,6 +33,8 @@ from app.services.review_target_resolver import (
     ReviewTargetResolver,
 )
 from app.utils.review_safety import (
+    DFT_RESULT_CONFLICT_CODES,
+    DFT_RESULT_CONFLICT_ISSUE_TYPES,
     can_manual_review_mark_verified,
     has_required_evidence_reference,
     is_safe_verified_review,
@@ -106,6 +108,7 @@ class ExtractionReviewService:
         self._previous_evidence_safety_cache: Any = None
         self._previous_catalyst_cache: Any = None
         self._previous_issue_cache: Any = None
+        self._previous_conflict_cache: Any = None
 
     def begin_dft_import_batch(self, *, paper_id: UUID, rows: list[DFTResult]) -> None:
         """Prime the hot DFT-review lookups for one bounded import batch."""
@@ -153,25 +156,45 @@ class ExtractionReviewService:
             }
 
         active_issues_by_target = {target_id: [] for target_id in self._batch_target_ids}
+        open_conflict_ids: set[str] = set()
         if self._batch_target_ids:
             for issue in self.session.scalars(
                 select(DFTAuditIssue).where(
                     DFTAuditIssue.paper_id == paper_id,
-                    DFTAuditIssue.target_type == "dft_results",
-                    DFTAuditIssue.target_id.in_(self._batch_target_ids),
+                    or_(
+                        DFTAuditIssue.result_id.in_([row.id for row in rows]),
+                        and_(
+                            DFTAuditIssue.result_id.is_(None),
+                            DFTAuditIssue.target_type == "dft_results",
+                            DFTAuditIssue.target_id.in_(self._batch_target_ids),
+                        ),
+                    ),
                     DFTAuditIssue.status.in_(("open", "needs_primary_ai", "needs_user_decision", "fixed_by_primary_ai")),
                 )
             ).all():
-                active_issues_by_target.setdefault(str(issue.target_id), []).append(issue)
+                target_id = str(issue.result_id) if issue.result_id is not None else str(issue.target_id)
+                active_issues_by_target.setdefault(target_id, []).append(issue)
+                if (
+                    issue.issue_type in DFT_RESULT_CONFLICT_ISSUE_TYPES
+                    or issue.lifecycle_stage in DFT_RESULT_CONFLICT_CODES
+                    or issue.resolution_code in DFT_RESULT_CONFLICT_CODES
+                    or issue.last_error_code in DFT_RESULT_CONFLICT_CODES
+                ):
+                    open_conflict_ids.add(target_id)
 
         self._previous_review_safety_cache = self.session.info.get("dft_import_reviews_by_target")
         self._previous_evidence_safety_cache = self.session.info.get("dft_import_evidence_reference_ids")
         self._previous_catalyst_cache = self.session.info.get("dft_import_catalysts_by_id")
         self._previous_issue_cache = self.session.info.get("dft_import_active_issues_by_target")
+        self._previous_conflict_cache = self.session.info.get("dft_import_open_conflict_ids")
         self.session.info["dft_import_reviews_by_target"] = reviews_by_target
         self.session.info["dft_import_evidence_reference_ids"] = evidence_reference_ids
         self.session.info["dft_import_catalysts_by_id"] = catalysts_by_id
         self.session.info["dft_import_active_issues_by_target"] = active_issues_by_target
+        self.session.info["dft_import_open_conflict_ids"] = {
+            "target_ids": set(self._batch_target_ids),
+            "conflict_ids": open_conflict_ids,
+        }
 
     def end_dft_import_batch(self) -> None:
         if self._previous_review_safety_cache is None:
@@ -190,6 +213,10 @@ class ExtractionReviewService:
             self.session.info.pop("dft_import_active_issues_by_target", None)
         else:
             self.session.info["dft_import_active_issues_by_target"] = self._previous_issue_cache
+        if self._previous_conflict_cache is None:
+            self.session.info.pop("dft_import_open_conflict_ids", None)
+        else:
+            self.session.info["dft_import_open_conflict_ids"] = self._previous_conflict_cache
         self._batch_target_ids.clear()
         self._batch_targets.clear()
         self._batch_reviews.clear()
@@ -197,6 +224,7 @@ class ExtractionReviewService:
         self._previous_evidence_safety_cache = None
         self._previous_catalyst_cache = None
         self._previous_issue_cache = None
+        self._previous_conflict_cache = None
 
     def list_reviews(self, paper_id: UUID) -> list[ExtractionFieldReviewResponse]:
         rows = self.session.scalars(

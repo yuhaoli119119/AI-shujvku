@@ -421,14 +421,12 @@ class VerificationSessionService(
         applicable_rows = [row for row in rows if str(row.id) in audits_by_target]
         from app.services.dft_review_service import DFTResultReviewService
 
-        batch_size = 25
-        for offset in range(0, len(applicable_rows), batch_size):
-            batch_rows = applicable_rows[offset : offset + batch_size]
-            review_service = DFTResultReviewService(self.session)
-            review_service.begin_import_batch(paper_id=paper_id, rows=batch_rows)
+        review_service = DFTResultReviewService(self.session)
+        review_service.begin_import_batch(paper_id=paper_id, rows=applicable_rows)
+        if applicable_rows:
             self._dft_import_review_service = review_service
             try:
-                for row in batch_rows:
+                for row in applicable_rows:
                     row_summary = self._settle_dft_row_from_existing_audits(
                         row=row,
                         audits=audits_by_target[str(row.id)],
@@ -448,6 +446,8 @@ class VerificationSessionService(
             finally:
                 self._dft_import_review_service = None
                 review_service.end_import_batch()
+        else:
+            review_service.end_import_batch()
 
         self.session.flush()
         summary = {

@@ -13,6 +13,22 @@ class DFTMaterialBindingService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self._samples_by_paper: dict[UUID, dict[str, CatalystSample]] = {}
+        self._savepoint_overlay: dict[UUID, dict[str, CatalystSample]] | None = None
+
+    def begin_savepoint(self) -> None:
+        if self._savepoint_overlay is not None:
+            raise RuntimeError("dft_material_savepoint_overlay_already_active")
+        self._savepoint_overlay = {}
+
+    def commit_savepoint(self) -> None:
+        if self._savepoint_overlay is None:
+            raise RuntimeError("dft_material_savepoint_overlay_not_active")
+        for paper_id, samples_by_name in self._savepoint_overlay.items():
+            self._samples_by_paper.setdefault(paper_id, {}).update(samples_by_name)
+        self._savepoint_overlay = None
+
+    def rollback_savepoint(self) -> None:
+        self._savepoint_overlay = None
 
     def resolve_or_create_sample(
         self,
@@ -37,7 +53,12 @@ class DFTMaterialBindingService:
                 if str(sample.name or "").strip()
             }
             self._samples_by_paper[paper_id] = samples_by_name
-        existing = samples_by_name.get(normalized_name)
+        overlay_samples = (
+            self._savepoint_overlay.setdefault(paper_id, {})
+            if self._savepoint_overlay is not None
+            else None
+        )
+        existing = (overlay_samples or {}).get(normalized_name) or samples_by_name.get(normalized_name)
         if existing is not None:
             return existing, False
         sample = CatalystSample(
@@ -47,7 +68,10 @@ class DFTMaterialBindingService:
         )
         self.session.add(sample)
         self.session.flush()
-        samples_by_name[normalized_name] = sample
+        if overlay_samples is not None:
+            overlay_samples[normalized_name] = sample
+        else:
+            samples_by_name[normalized_name] = sample
         return sample, True
 
     def ensure_row_binding(

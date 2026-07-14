@@ -7,17 +7,25 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import DFTAuditIssue, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, utcnow
+from app.db.models import (
+    DFTAuditIssue,
+    DFTAuditIssueSource,
+    DFTResult,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    utcnow,
+)
 from app.services.dft_audit_issue_lifecycle_service import (
     DFT_AUDIT_ISSUE_PENDING_STATUSES,
     DFTAuditIssueLifecycleService,
 )
 from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity, normalize_source_document_type
 from app.services.dft_identity_service import DFTIdentityV2
+from app.services.dft_import_batch_context import DFTImportBatchContext
 from app.services.external_analysis_identity import (
     UNTRUSTED_LEGACY_SOURCE_IDENTITY,
     review_source_identity,
@@ -82,15 +90,73 @@ class DFTAuditIssueService:
 
     def __init__(self, session: Session):
         self.session = session
-        self._batch_issues: dict[tuple[str, str, str, str], DFTAuditIssue] | None = None
+        self.batch_context: DFTImportBatchContext | None = None
 
-    def begin_import_batch(self, *, paper_id: UUID) -> None:
-        self._batch_issues = {
-            (str(issue.target_type), str(issue.target_id), str(issue.issue_type), str(issue.fingerprint)): issue
-            for issue in self.session.scalars(
-                select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)
+    def begin_import_batch(
+        self,
+        *,
+        paper_id: UUID,
+        issue_fingerprints: set[tuple[str, str]],
+        candidates_by_id: dict[UUID, ExternalAnalysisCandidate],
+    ) -> DFTImportBatchContext:
+        """Lock and index only issues and source relations touched by this batch."""
+
+        context = DFTImportBatchContext(paper_id=paper_id)
+        context.candidates_by_id.update(candidates_by_id)
+        candidate_ids = set(candidates_by_id)
+        if issue_fingerprints:
+            issues = self.session.scalars(
+                select(DFTAuditIssue)
+                .where(DFTAuditIssue.paper_id == paper_id)
+                .where(tuple_(DFTAuditIssue.issue_type, DFTAuditIssue.fingerprint).in_(sorted(issue_fingerprints)))
+                .order_by(DFTAuditIssue.created_at.asc(), DFTAuditIssue.id.asc())
+                .with_for_update(of=DFTAuditIssue)
             ).all()
-        }
+            for issue in issues:
+                identity_key = (
+                    str(issue.target_type),
+                    str(issue.target_id),
+                    str(issue.issue_type),
+                    str(issue.fingerprint),
+                )
+                fingerprint_key = (str(issue.issue_type), str(issue.fingerprint))
+                context.issues_by_identity.setdefault(identity_key, issue)
+                context.issues_by_fingerprint.setdefault(fingerprint_key, issue)
+                context.locked_issue_ids.add(issue.id)
+
+        referenced_candidate_ids = set(candidate_ids)
+        for issue in context.issues_by_fingerprint.values():
+            for value in issue.source_candidate_ids or []:
+                try:
+                    referenced_candidate_ids.add(UUID(str(value)))
+                except ValueError:
+                    continue
+        missing_candidate_ids = referenced_candidate_ids - set(context.candidates_by_id)
+        if missing_candidate_ids:
+            for candidate in self.session.scalars(
+                select(ExternalAnalysisCandidate).where(
+                    ExternalAnalysisCandidate.id.in_(missing_candidate_ids),
+                    ExternalAnalysisCandidate.paper_id == paper_id,
+                )
+            ).all():
+                context.candidates_by_id[candidate.id] = candidate
+
+        issue_ids = set(context.locked_issue_ids)
+        if issue_ids and referenced_candidate_ids:
+            relations = self.session.execute(
+                select(DFTAuditIssueSource.issue_id, DFTAuditIssueSource.candidate_id).where(
+                    DFTAuditIssueSource.issue_id.in_(issue_ids),
+                    DFTAuditIssueSource.candidate_id.in_(referenced_candidate_ids),
+                )
+            ).all()
+            context.source_relations.update((issue_id, candidate_id) for issue_id, candidate_id in relations)
+        self.batch_context = context
+        return context
+
+    def end_import_batch(self) -> None:
+        if self.batch_context is not None and self.batch_context.overlay is not None:
+            raise RuntimeError("dft_import_savepoint_overlay_still_active")
+        self.batch_context = None
 
     def upsert_issue(
         self,
@@ -122,8 +188,22 @@ class DFTAuditIssueService:
             raise ValueError("DFT audit issue fingerprint is required.")
 
         issue_key = (target_type, target_id, issue_type, fingerprint)
-        existing = self._batch_issues.get(issue_key) if self._batch_issues is not None else None
-        if self._batch_issues is None:
+        existing = self.batch_context.issue_by_identity(issue_key) if self.batch_context is not None else None
+        if existing is None and self.batch_context is not None:
+            fingerprint_match = self.batch_context.issue_by_fingerprint((issue_type, fingerprint))
+            if (
+                fingerprint_match is not None
+                and str(fingerprint_match.target_type) == target_type
+                and str(fingerprint_match.target_id) == target_id
+            ):
+                existing = fingerprint_match
+                self.batch_context.register_issue(
+                    identity_key=issue_key,
+                    fingerprint_key=(issue_type, fingerprint),
+                    issue=existing,
+                    owned=False,
+                )
+        if self.batch_context is None:
             existing = self.session.scalar(
                 select(DFTAuditIssue).where(
                     DFTAuditIssue.paper_id == paper_id,
@@ -157,11 +237,9 @@ class DFTAuditIssueService:
                     identity=identity,
                     row=result_row,
                 )
-            if self._batch_issues is not None:
-                self.session.add(existing)
-                self.session.flush()
-                self._batch_issues[issue_key] = existing
-            else:
+            if existing in self.session:
+                self.session.expunge(existing)
+            if self.batch_context is None:
                 try:
                     with self.session.begin_nested():
                         self.session.add(existing)
@@ -180,6 +258,32 @@ class DFTAuditIssueService:
                         raise
                     existing = winner
                     existing_was_found = True
+            else:
+                try:
+                    with self.session.begin_nested():
+                        self.session.add(existing)
+                        self.session.flush()
+                except IntegrityError:
+                    winner = self.session.scalar(
+                        select(DFTAuditIssue).where(
+                            DFTAuditIssue.paper_id == paper_id,
+                            DFTAuditIssue.target_type == target_type,
+                            DFTAuditIssue.target_id == target_id,
+                            DFTAuditIssue.issue_type == issue_type,
+                            DFTAuditIssue.fingerprint == fingerprint,
+                        ).with_for_update(of=DFTAuditIssue)
+                    )
+                    if winner is None:
+                        raise
+                    existing = winner
+                    existing_was_found = True
+                    self.batch_context.locked_issue_ids.add(winner.id)
+                self.batch_context.register_issue(
+                    identity_key=issue_key,
+                    fingerprint_key=(issue_type, fingerprint),
+                    issue=existing,
+                    owned=not existing_was_found,
+                )
         if existing_was_found and existing.status in {"closed", "false_positive"}:
             return existing
         changed = False
@@ -231,9 +335,16 @@ class DFTAuditIssueService:
             except ValueError:
                 candidate_uuid = None
             if candidate_uuid is not None:
-                candidate = self.session.get(ExternalAnalysisCandidate, candidate_uuid)
+                candidate = (
+                    self.batch_context.candidates_by_id.get(candidate_uuid)
+                    if self.batch_context is not None
+                    else self.session.get(ExternalAnalysisCandidate, candidate_uuid)
+                )
                 if candidate is not None:
-                    DFTAuditIssueLifecycleService(self.session).bind_source_candidate(existing, candidate)
+                    DFTAuditIssueLifecycleService(
+                        self.session,
+                        batch_context=self.batch_context,
+                    ).bind_source_candidate(existing, candidate)
         return existing
 
     def create_or_update_consensus_issue(
@@ -293,27 +404,18 @@ class DFTAuditIssueService:
     ) -> DFTAuditIssue:
         corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
         evidence = payload.get("evidence_location") or payload.get("evidence_payload") or candidate.evidence_payload
-        is_supporting_reference = self._is_supporting_reference_payload(payload, corrected, evidence)
-        ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
-        is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
-        issue_type = "source_scope_error" if is_supporting_reference or is_ml_predicted else "missing_dft_result"
+        issue_type, fingerprint, is_supporting_reference, is_ml_predicted = self.missing_issue_batch_key(
+            paper_id=paper_id,
+            candidate=candidate,
+            payload=payload,
+        )
         status = "closed" if is_supporting_reference else "needs_user_decision" if is_ml_predicted else "needs_primary_ai"
         suggested_dft = self._suggested_dft_from_payload(payload)
-        fingerprint = self.fingerprint_missing_issue(
-            paper_id=paper_id,
-            payload=payload,
-            issue_type=issue_type,
-            candidate_id=str(candidate.id),
-        )
         existing = self._missing_issue_by_fingerprint(
             paper_id=paper_id,
             issue_type=issue_type,
             fingerprint=fingerprint,
         )
-        if existing is not None and self._batch_issues is not None:
-            self._batch_issues[
-                (str(existing.target_type), str(existing.target_id), str(existing.issue_type), str(existing.fingerprint))
-            ] = existing
         identity = DFTAuditIssueLifecycleService.build_identity(
             paper_id=paper_id,
             payload=payload,
@@ -342,6 +444,27 @@ class DFTAuditIssueService:
             ),
             identity=identity,
         )
+
+    def missing_issue_batch_key(
+        self,
+        *,
+        paper_id: UUID,
+        candidate: ExternalAnalysisCandidate,
+        payload: dict[str, Any],
+    ) -> tuple[str, str, bool, bool]:
+        corrected = payload.get("corrected_value") if isinstance(payload.get("corrected_value"), dict) else {}
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload") or candidate.evidence_payload
+        is_supporting_reference = self._is_supporting_reference_payload(payload, corrected, evidence)
+        ml_predicted = payload.get("ml_predicted", corrected.get("ml_predicted"))
+        is_ml_predicted = ml_predicted is True or str(ml_predicted or "").strip().lower() in {"1", "true", "yes"}
+        issue_type = "source_scope_error" if is_supporting_reference or is_ml_predicted else "missing_dft_result"
+        fingerprint = self.fingerprint_missing_issue(
+            paper_id=paper_id,
+            payload=payload,
+            issue_type=issue_type,
+            candidate_id=str(candidate.id),
+        )
+        return issue_type, fingerprint, is_supporting_reference, is_ml_predicted
 
     def close_issue(self, issue_id: UUID, *, status: str, resolved_by: str, resolution_note: str | None = None) -> DFTAuditIssue:
         status = self._checked(status, {"fixed_by_primary_ai", "false_positive", "closed"}, "status")
@@ -613,19 +736,8 @@ class DFTAuditIssueService:
         issue_type: str,
         fingerprint: str,
     ) -> DFTAuditIssue | None:
-        if self._batch_issues is not None:
-            match = next(
-                (
-                    issue
-                    for issue in self._batch_issues.values()
-                    if issue.paper_id == paper_id
-                    and issue.issue_type == issue_type
-                    and issue.fingerprint == fingerprint
-                ),
-                None,
-            )
-            if match is not None:
-                return match
+        if self.batch_context is not None:
+            return self.batch_context.issue_by_fingerprint((issue_type, fingerprint))
         return self.session.scalar(
             select(DFTAuditIssue)
             .where(DFTAuditIssue.paper_id == paper_id)
