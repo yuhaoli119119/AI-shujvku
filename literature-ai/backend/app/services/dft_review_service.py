@@ -971,6 +971,18 @@ class DFTResultReviewService(
         if len(requested_ids) != len(requested_id_set):
             raise ValueError("dft_result_ids must not contain duplicates.")
 
+        source_rows_stmt = (
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id == source_sample_id,
+            )
+            .order_by(DFTResult.id.asc())
+        )
+        # Single-row edits lock DFTResult before CatalystSample. Use the same
+        # order here, then refresh membership after the sample locks are held.
+        self.session.scalars(source_rows_stmt.with_for_update()).all()
+
         samples = self.session.scalars(
             select(CatalystSample)
             .where(CatalystSample.id.in_([source_sample_id, target_sample_id]))
@@ -994,13 +1006,7 @@ class DFTResultReviewService(
             expected_result_count=expected_result_count,
         )
         current_rows = self.session.scalars(
-            select(DFTResult)
-            .where(
-                DFTResult.paper_id == paper_id,
-                DFTResult.catalyst_sample_id == source_sample_id,
-            )
-            .order_by(DFTResult.id.asc())
-            .with_for_update()
+            source_rows_stmt.with_for_update().execution_options(populate_existing=True)
         ).all()
         if not current_rows:
             previous_audit = self._find_successful_rebind_audit(
