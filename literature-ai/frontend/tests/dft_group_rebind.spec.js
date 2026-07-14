@@ -3,6 +3,7 @@ const { test, expect } = require('@playwright/test');
 const BASE_URL = process.env.TEST_BASE_URL || 'http://127.0.0.1:8000';
 const SOURCE_ID = '11111111-1111-4111-8111-111111111111';
 const TARGET_ID = '22222222-2222-4222-8222-222222222222';
+const UNNAMED_TARGET_ID = '33333333-3333-4333-8333-333333333333';
 
 function jsonResponse(route, payload, status = 200) {
   return route.fulfill({
@@ -62,6 +63,7 @@ function paperDetail(rebound = false) {
     catalyst_samples_items: [
       { id: SOURCE_ID, name: 'Wrong catalyst 30', catalyst_type: 'unknown', metal_centers: [] },
       { id: TARGET_ID, name: 'Correct catalyst 15', catalyst_type: 'unknown', metal_centers: [] },
+      { id: UNNAMED_TARGET_ID, name: null, catalyst_type: 'unknown', metal_centers: [] },
     ],
     dft_results_items: items,
     dft_results_page: { offset: 0, limit: 100, returned: items.length, total: items.length, has_more: false },
@@ -142,7 +144,9 @@ test('group rebind collects every active-site subgroup and removes the empty sou
   await page.goto(`${BASE_URL}/pages/literature_library/index.html?library_name=Default%20Library&paper_id=paper-rebind&tab=dft`);
   const form = await openFirstSourceRebindForm(page);
   await expect(form).toContainText('3 条 DFT 数据');
+  await expect(form.locator('option')).toHaveCount(2);
   await expect(form.locator('option')).toContainText(['请选择目标样本', 'Correct catalyst 15 · 22222222']);
+  await expect(form.locator(`option[value="${UNNAMED_TARGET_ID}"]`)).toHaveCount(0);
   await form.locator('[data-field="target_sample_id"]').selectOption(TARGET_ID);
   await expect(form.locator('[data-role="selected-target-id"]')).toContainText(TARGET_ID);
   await form.locator('[data-field="reason"]').fill('来源样本命名错误，应整组改绑到样本 15。');

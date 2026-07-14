@@ -998,6 +998,8 @@ class DFTResultReviewService(
             raise LookupError("Target catalyst sample not found.")
         if target_sample.paper_id != paper_id or target_sample.paper_id != source_sample.paper_id:
             raise ValueError("Source and target catalyst samples must belong to the same paper.")
+        if not str(target_sample.name or "").strip():
+            raise ValueError("Target catalyst sample must have a non-empty name before DFT group rebind.")
 
         request_fingerprint = self._rebind_request_fingerprint(
             source_sample_id=source_sample_id,

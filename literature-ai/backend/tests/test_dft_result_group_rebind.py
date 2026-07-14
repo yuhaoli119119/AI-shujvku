@@ -27,6 +27,7 @@ def _create_rebind_case(
     result_count: int = 2,
     duplicate_planned_identity: bool = False,
     add_target_conflict: bool = False,
+    target_name: str | None = "Correct catalyst 15",
 ) -> dict[str, object]:
     SessionLocal = sessionmaker(bind=engine, future=True)
     with SessionLocal() as session:
@@ -35,7 +36,7 @@ def _create_rebind_case(
         session.add_all([paper, other_paper])
         session.flush()
         source = CatalystSample(paper_id=paper.id, name="Wrong catalyst 30")
-        target = CatalystSample(paper_id=paper.id, name="Correct catalyst 15")
+        target = CatalystSample(paper_id=paper.id, name=target_name)
         other_sample = CatalystSample(paper_id=other_paper.id, name="Cross-paper catalyst")
         session.add_all([source, target, other_sample])
         session.flush()
@@ -287,6 +288,21 @@ def test_rebind_rejects_same_cross_paper_incomplete_and_mixed_sets(setup_test_db
     mixed = _post_rebind(client, mixed_case, _payload(mixed_case, dft_result_ids=mixed_ids))
     assert mixed.status_code == 400
     assert "unexpected=" in mixed.text
+
+
+def test_rebind_rejects_unnamed_target_without_writes(setup_test_db):
+    case = _create_rebind_case(setup_test_db, target_name=None)
+    response = _post_rebind(TestClient(app), case)
+
+    assert response.status_code == 400
+    assert "non-empty name" in response.text
+
+    SessionLocal = sessionmaker(bind=setup_test_db, future=True)
+    with SessionLocal() as session:
+        rows = session.scalars(select(DFTResult).where(DFTResult.id.in_(case["result_ids"]))).all()
+        assert {row.catalyst_sample_id for row in rows} == {case["source_id"]}
+        assert session.scalar(select(func.count()).select_from(AuditLog)) == 0
+        assert session.scalar(select(func.count()).select_from(PaperCorrection)) == 0
 
 
 @pytest.mark.parametrize("conflict_kind", ["batch", "database"])

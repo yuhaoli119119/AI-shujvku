@@ -95,7 +95,9 @@ function renderDftGroupRebindForm(group, allItems, catalystSamplesById) {
     const targetSamples = Object.keys(catalystSamplesById || {}).map(function(sampleId) {
         return catalystSamplesById[sampleId];
     }).filter(function(sample) {
-        return sample && String(sample.id || "") !== sourceSampleId;
+        return sample &&
+            String(sample.id || "") !== sourceSampleId &&
+            Boolean(String(sample.name || "").trim());
     }).sort(function(left, right) {
         return catalystSampleSelectLabel(left).localeCompare(catalystSampleSelectLabel(right), "zh-CN");
     });
@@ -117,7 +119,7 @@ function renderDftGroupRebindForm(group, allItems, catalystSamplesById) {
                 '<button type="button" class="btn primary small" data-role="rebind-submit" onclick="submitDftGroupRebind(\'' + escAttr(editorKey) + '\')"' + (targetSamples.length ? "" : " disabled") + '>确认整组重新关联</button>' +
                 '<button type="button" class="btn ghost small" onclick="toggleDftGroupRebindEditor(\'' + escAttr(editorKey) + '\')">取消</button>' +
             '</div>' +
-            (targetSamples.length ? "" : '<div class="subtle">当前文献没有其他可选催化剂样本。</div>') +
+            (targetSamples.length ? "" : '<div class="subtle">当前文献没有其他已命名的可选催化剂样本。</div>') +
         '</div>';
 }
 
