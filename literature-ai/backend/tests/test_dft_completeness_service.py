@@ -205,6 +205,62 @@ def test_closed_legacy_candidate_binding_remains_valid_without_junction_backfill
         assert lifecycle["lifecycle_counts"]["materialized_unbound_count"] == 0
 
 
+def test_partial_normalized_sources_do_not_fall_back_to_extra_json_ids(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Canonical normalized candidate binding")
+        run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", mapping_status="mapped")
+        session.add(run)
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.2,
+            unit="eV",
+            candidate_status="ai_verified_ml_ready",
+        )
+        session.add(row)
+        session.flush()
+        candidates = [
+            ExternalAnalysisCandidate(
+                run_id=run.id,
+                paper_id=paper.id,
+                candidate_type="object_review_audit",
+                normalized_payload=_new_candidate_payload(),
+                status="ai_applied",
+                materialized_target_type="dft_results",
+                materialized_target_id=str(row.id),
+            )
+            for _index in range(2)
+        ]
+        session.add_all(candidates)
+        session.flush()
+        issue = DFTAuditIssue(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            result_id=row.id,
+            issue_type="missing_dft_result",
+            severity="high",
+            status="closed",
+            fingerprint="partial-normalized-sources",
+            source_candidate_ids=[str(candidate.id) for candidate in candidates],
+            resolution_code="verified",
+        )
+        session.add(issue)
+        session.flush()
+        session.add(DFTAuditIssueSource(issue_id=issue.id, candidate_id=candidates[0].id))
+        session.flush()
+
+        lifecycle = DFTCompletenessService(session)._evaluate_lifecycle(paper.id)
+
+        assert lifecycle["lifecycle_counts"]["materialized_unbound_count"] == 1
+        assert lifecycle["lifecycle_ids"]["materialized_unbound_candidate_ids"] == [
+            str(candidates[1].id)
+        ]
+        assert "materialized_dft_candidates_unbound" in lifecycle["lifecycle_blockers"]
+
+
 @pytest.mark.parametrize("status", ["pending", "candidate", "requires_resolution"])
 def test_nonfinalized_candidate_status_remains_unhandled(setup_test_db, status):
     with Session(setup_test_db) as session:

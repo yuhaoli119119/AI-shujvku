@@ -111,17 +111,20 @@ class DFTCompletenessService:
         )
         issue_by_id = {issue.id: issue for issue in issues}
         source_issue_ids: dict[UUID, set[UUID]] = defaultdict(set)
+        normalized_issue_ids: set[UUID] = set()
         candidate_ids = [candidate.id for candidate in candidates]
         if candidate_ids:
             for source in self.session.scalars(
                 select(DFTAuditIssueSource).where(DFTAuditIssueSource.candidate_id.in_(candidate_ids))
             ).all():
                 source_issue_ids[source.candidate_id].add(source.issue_id)
-        # Identity-v2 introduced a junction table, but already-closed papers
-        # retain their auditable candidate bindings in the historical JSONB
-        # column.  Read that immutable legacy representation as a fallback;
-        # do not rewrite closed DFT rows merely to satisfy a new schema.
+                normalized_issue_ids.add(source.issue_id)
+        # The junction table is canonical once an issue has any normalized
+        # source relation. Issues with no relation at all may still use the
+        # immutable JSONB field as a legacy compatibility fallback.
         for issue in issues:
+            if issue.id in normalized_issue_ids:
+                continue
             legacy_ids = issue.source_candidate_ids if isinstance(issue.source_candidate_ids, list) else []
             for candidate_id in legacy_ids:
                 try:

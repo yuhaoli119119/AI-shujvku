@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -39,6 +39,7 @@ from app.services.dft_identity_dry_run_service import (
 )
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
+from app.migrations.dft_audit_issue_source_backfill_v1 import upgrade as backfill_issue_sources
 from scripts.dft_b0102_reconciliation import build_parser
 
 
@@ -831,6 +832,26 @@ def test_full_reconciliation_rolls_back_fault_applies_and_is_idempotent(
             "reconciled_materialized_verified_result_v2": 368,
         }
         session.commit()
+
+    with setup_test_db.begin() as connection:
+        connection.execute(delete(DFTAuditIssueSource))
+    with Session(setup_test_db) as session:
+        failed = DFTB0102ReconciliationService(session).readback(require_final=False)
+        assert failed["split_lineage"]["valid"] is False
+        assert failed["is_exact_final_state"] is False
+    with setup_test_db.begin() as connection:
+        backfill = backfill_issue_sources(
+            connection,
+            paper_id=UUID("0ed01979-08b6-4fa2-9d24-81ef54c71aef"),
+        )
+    assert backfill["expected_source_relations"] == 374
+    assert backfill["distinct_candidates"] == 370
+    assert backfill["inserted_relations"] == 374
+    with Session(setup_test_db) as session:
+        restored = DFTB0102ReconciliationService(session).readback(require_final=True)
+        assert restored["split_lineage"]["valid"] is True
+        assert restored["is_exact_final_state"] is True
+
     with Session(setup_test_db) as session:
         before_counts = (
             session.query(DFTResult).count(),
