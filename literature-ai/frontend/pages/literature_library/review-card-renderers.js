@@ -652,6 +652,11 @@ function renderDftCompactReadableCard(item, index, title, keys) {
         ? '<button class="btn ghost small" type="button" data-role="copy-dft-locator" onclick="copyDftLocator(event, \'' + escAttr(resultId) + '\', ' + index + ')">复制 ID</button>'
         : "";
     const action = codexItemActionHtml(itemType, item);
+    const terminalDecisionActions = typeof isFinalizedDftResult === "function" &&
+        typeof renderDftDecisionActions === "function" &&
+        isFinalizedDftResult(item, isDftItemExportable(item))
+        ? renderDftDecisionActions(item, isDftItemExportable(item))
+        : "";
     const catalyst = dftCompactCatalystLabel(item);
     const adsorbate = dftCompactReadableValue(item && item.adsorbate, "吸附物未记录");
     const propertyType = dftCompactReadableValue(item && (item.property_type || item.energy_type), "性质未记录");
@@ -680,13 +685,14 @@ function renderDftCompactReadableCard(item, index, title, keys) {
         dftCompactTableRow("状态", summaryChips || "-", { html: true, className: "dft-table-status" })
     ].join("");
     const focusClass = isPendingNavigationItem(itemType, item) ? " deep-link-focus" : "";
-    return '<div class="section-card readable-card dft-compact-card' + focusClass + '"' + itemTypeAttr + targetIdAttr + '>' +
+    return '<div class="section-card readable-card dft-compact-card' + focusClass + '"' + itemTypeAttr + targetIdAttr +
+        (resultId ? ' data-dft-result-id="' + escAttr(resultId) + '"' : "") + '>' +
         '<div class="dft-compact-head">' +
             '<button class="dft-compact-expand" type="button" onclick="openDftDetailDialog(event, \'' + escAttr(resultId) + '\', ' + index + ')">' +
                 renderDftRecordLocator(item, index) +
                 '<span class="dft-compact-expand-hint">详情</span>' +
             '</button>' +
-            '<div class="dft-compact-actions">' + copyButton + action + '</div>' +
+            '<div class="dft-compact-actions">' + copyButton + action + terminalDecisionActions + '</div>' +
         '</div>' +
         '<div class="dft-record-table" data-role="dft-record-table">' + tableRows + '</div>' +
     '</div>';

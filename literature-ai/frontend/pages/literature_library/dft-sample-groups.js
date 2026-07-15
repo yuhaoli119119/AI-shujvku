@@ -3,6 +3,10 @@ function isDftCandidateCardTitle(title) {
     return title === "候选 DFT 数据" || title === "DFT 候选结果";
 }
 
+function dftInlineJsArg(value) {
+    return escAttr(JSON.stringify(String(value == null ? "" : value)));
+}
+
 function nestedReadableValue(item, path) {
     const parts = String(path || "").split(".");
     let value = item;
@@ -76,28 +80,70 @@ function shortCatalystSampleId(value) {
     return text ? text.slice(0, 8) : "";
 }
 
+async function copyCatalystSampleId(event, sampleId) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const value = String(sampleId || "").trim();
+    if (!value) {
+        showToast("当前催化剂样本没有系统 ID。", "error");
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(value);
+        showToast("催化剂样本完整 UUID 已复制。", "success");
+    } catch (error) {
+        showToast("复制催化剂样本 UUID 失败：" + error.message, "error");
+    }
+}
+
+function renderCatalystSampleShortId(sampleId) {
+    const value = String(sampleId || "").trim();
+    if (!value) return "";
+    return '<code class="dft-sample-id-value" data-role="catalyst-sample-id" data-catalyst-sample-id="' + escAttr(value) + '" title="catalyst_sample_id：' + escAttr(value) + '">' + esc(shortCatalystSampleId(value)) + '</code>';
+}
+
+function renderCatalystSampleIdCopyButton(sampleId) {
+    const value = String(sampleId || "").trim();
+    if (!value) return "";
+    return '<button class="btn ghost small dft-sample-id-copy" type="button" title="复制完整 catalyst_sample_id UUID" aria-label="复制完整 catalyst_sample_id UUID" data-role="copy-catalyst-sample-id" data-catalyst-sample-id="' + escAttr(value) + '" onclick="copyCatalystSampleId(event, ' + dftInlineJsArg(value) + ')">复制 ID</button>';
+}
+
 function catalystSampleSelectLabel(sample) {
     sample = sample || {};
     const sampleId = String(sample.id || "").trim();
-    const name = firstNestedReadableValue(sample, ["name", "material_identity", "catalyst"]) || "名称待补";
+    const name = String(sample.name || "").trim() || "名称待补";
     return name + " · " + shortCatalystSampleId(sampleId);
+}
+
+function dftResultIdsForCatalystSample(allItems, catalystSampleId) {
+    const sampleId = String(catalystSampleId || "").trim();
+    const seen = {};
+    if (!sampleId) return [];
+    return (allItems || []).filter(function(item) {
+        return String(dftSampleGroupMeta(item).catalystSampleId || "") === sampleId;
+    }).map(function(item) {
+        return String(item && item.id || "").trim();
+    }).filter(function(resultId) {
+        if (!resultId || seen[resultId]) return false;
+        seen[resultId] = true;
+        return true;
+    });
 }
 
 function renderDftGroupRebindForm(group, allItems, catalystSamplesById) {
     const sourceSampleId = String(group && group.meta && group.meta.catalystSampleId || "").trim();
     if (!sourceSampleId) return "";
     const editorKey = "rebind:" + group.key;
-    const resultIds = (allItems || []).filter(function(item) {
-        return String(dftSampleGroupMeta(item).catalystSampleId || "") === sourceSampleId;
-    }).map(function(item) {
-        return String(item && item.id || "").trim();
-    }).filter(Boolean);
+    const resultIds = dftResultIdsForCatalystSample(allItems, sourceSampleId);
     const targetSamples = Object.keys(catalystSamplesById || {}).map(function(sampleId) {
         return catalystSamplesById[sampleId];
     }).filter(function(sample) {
         return sample &&
             String(sample.id || "") !== sourceSampleId &&
-            Boolean(String(sample.name || "").trim());
+            Boolean(String(sample.name || "").trim()) &&
+            dftResultIdsForCatalystSample(allItems, sample.id).length > 0;
     }).sort(function(left, right) {
         return catalystSampleSelectLabel(left).localeCompare(catalystSampleSelectLabel(right), "zh-CN");
     });
@@ -108,7 +154,7 @@ function renderDftGroupRebindForm(group, allItems, catalystSamplesById) {
             ' data-source-sample-id="' + escAttr(sourceSampleId) + '"' +
             ' data-dft-result-ids="' + escAttr(resultIds.join(",")) + '" hidden>' +
             '<div class="subtle">将改绑当前催化剂样本在所有活性位点子组中的 <strong>' + resultIds.length + '</strong> 条 DFT 数据。</div>' +
-            '<label><span>目标催化剂样本</span><select data-field="target_sample_id" onchange="updateDftGroupRebindTarget(\'' + escAttr(editorKey) + '\')">' +
+            '<label><span>目标催化剂样本</span><select data-field="target_sample_id" onchange="updateDftGroupRebindTarget(' + dftInlineJsArg(editorKey) + ')">' +
                 '<option value="">请选择目标样本</option>' + options +
             '</select></label>' +
             '<div class="dft-group-rebind-full-id" data-role="selected-target-id">完整 UUID：未选择</div>' +
@@ -116,10 +162,58 @@ function renderDftGroupRebindForm(group, allItems, catalystSamplesById) {
             '<div class="dft-group-rebind-warning">提交后，整组数据会恢复为 system_candidate，并重新进入待复核流程。</div>' +
             '<div class="dft-group-rebind-error" data-role="rebind-error" hidden></div>' +
             '<div class="filter-actions">' +
-                '<button type="button" class="btn primary small" data-role="rebind-submit" onclick="submitDftGroupRebind(\'' + escAttr(editorKey) + '\')"' + (targetSamples.length ? "" : " disabled") + '>确认整组重新关联</button>' +
-                '<button type="button" class="btn ghost small" onclick="toggleDftGroupRebindEditor(\'' + escAttr(editorKey) + '\')">取消</button>' +
+                '<button type="button" class="btn primary small" data-role="rebind-submit" onclick="submitDftGroupRebind(' + dftInlineJsArg(editorKey) + ')"' + (targetSamples.length ? "" : " disabled") + '>确认整组重新关联</button>' +
+                '<button type="button" class="btn ghost small" onclick="toggleDftGroupRebindEditor(' + dftInlineJsArg(editorKey) + ')">取消</button>' +
             '</div>' +
-            (targetSamples.length ? "" : '<div class="subtle">当前文献没有其他已命名的可选催化剂样本。</div>') +
+            (targetSamples.length ? "" : '<div class="subtle">当前文献没有其他正在使用且已命名的可选催化剂样本。</div>') +
+        '</div>';
+}
+
+function renderDftDuplicateMergeForm(group, allItems, catalystSamplesById) {
+    const targetSampleId = String(group && group.meta && group.meta.catalystSampleId || "").trim();
+    const targetSample = targetSampleId && catalystSamplesById ? catalystSamplesById[targetSampleId] : null;
+    const targetName = String(targetSample && targetSample.name || "").trim();
+    if (!targetSampleId || !targetName) return "";
+    const editorKey = "merge:" + group.key;
+    const sourceSamples = Object.keys(catalystSamplesById || {}).map(function(sampleId) {
+        const sample = catalystSamplesById[sampleId];
+        const name = String(sample && sample.name || "").trim();
+        if (!sample || String(sample.id || "") === targetSampleId || !name) return null;
+        return {
+            id: String(sample.id || ""),
+            name: name,
+            resultIds: dftResultIdsForCatalystSample(allItems, sample.id),
+        };
+    }).filter(Boolean).sort(function(left, right) {
+        return catalystSampleSelectLabel(left).localeCompare(catalystSampleSelectLabel(right), "zh-CN");
+    });
+    const options = sourceSamples.map(function(source) {
+        return '<label data-role="merge-source-option">' +
+            '<span><input type="checkbox" data-field="source_sample"' +
+                ' data-source-sample-id="' + escAttr(source.id) + '"' +
+                ' data-source-name="' + escAttr(source.name) + '"' +
+                ' data-dft-result-ids="' + escAttr(source.resultIds.join(",")) + '"' +
+                ' onchange="updateDftDuplicateMergeSelection(' + dftInlineJsArg(editorKey) + ')"> ' +
+                esc(catalystSampleSelectLabel(source)) + '</span>' +
+            '<span class="subtle">' + source.resultIds.length + ' 条 DFT · 完整 UUID：' + esc(source.id) + '</span>' +
+        '</label>';
+    }).join("");
+    return '<div class="dft-group-rebind-form dft-duplicate-merge-form" data-editor-key="' + escAttr(editorKey) + '"' +
+            ' data-target-sample-id="' + escAttr(targetSampleId) + '"' +
+            ' data-target-name="' + escAttr(targetName) + '" hidden>' +
+            '<div class="subtle">当前卡片为主样本：<strong>' + esc(catalystSampleSelectLabel(targetSample)) + '</strong></div>' +
+            '<div class="subtle">选择实际表示同一个物理催化剂的重复样本；0 条 DFT 的空样本也可勾选清理。</div>' +
+            '<div data-role="merge-source-options">' + options + '</div>' +
+            '<div class="dft-group-rebind-full-id" data-role="merge-selection-summary">已选择 0 个重复样本，共 0 条 DFT。</div>' +
+            '<label><span>合并原因（必填）</span><textarea data-field="reason" rows="2" placeholder="说明这些记录为何是同一个物理催化剂"></textarea></label>' +
+            '<div class="dft-group-rebind-warning">合并只用于系统误拆的同一物理催化剂。Identity v2 将同步更新，已有核验状态和可导出状态保持不变。</div>' +
+            '<div class="subtle">如果金属中心、载体、配位结构或实际样本不同，请使用“整组重新关联”。</div>' +
+            '<div class="dft-group-rebind-error" data-role="merge-error" hidden></div>' +
+            '<div class="filter-actions">' +
+                '<button type="button" class="btn primary small" data-role="merge-submit" onclick="submitDftDuplicateMerge(' + dftInlineJsArg(editorKey) + ')"' + (sourceSamples.length ? "" : " disabled") + '>确认合并重复样本</button>' +
+                '<button type="button" class="btn ghost small" onclick="toggleDftDuplicateMergeEditor(' + dftInlineJsArg(editorKey) + ')">取消</button>' +
+            '</div>' +
+            (sourceSamples.length ? "" : '<div class="subtle">当前文献没有其他已命名的催化剂样本可合并。</div>') +
         '</div>';
 }
 
@@ -200,26 +294,35 @@ function renderDftCatalystDescriptorSummary(sample) {
     return parts.join("；");
 }
 
-function renderDftCatalystBasicInfoForm(sample, group) {
+function dftCatalystBasicInfoEditorKey(group) {
+    return "basic-info:" + String(group && group.key || "");
+}
+
+function renderDftCatalystBasicInfoForm(sample, group, allItems) {
     sample = sample || {};
     const sampleId = sample.id ? String(sample.id) : "";
-    const editorKey = sampleId || group.key;
-    const dftResultIds = group.entries
-        .map(function(entry) { return entry && entry.item && entry.item.id ? String(entry.item.id) : ""; })
-        .filter(Boolean);
+    const editorKey = dftCatalystBasicInfoEditorKey(group);
+    const dftResultIds = sampleId
+        ? dftResultIdsForCatalystSample(allItems, sampleId)
+        : group.entries.map(function(entry) {
+            return entry && entry.item && entry.item.id ? String(entry.item.id) : "";
+        }).filter(Boolean);
     const supportValue = sample.support_normalized || sample.support || "";
     const catalystType = sample.catalyst_type || "unknown";
     const metalCenters = Array.isArray(sample.metal_centers) ? sample.metal_centers.join(", ") : "";
     const rawGroupLabel = group && group.meta ? String(group.meta.catalystLabel || "") : "";
     const fallbackSampleLabel = sampleId ? ("CatalystSample " + sampleId) : "";
-    const sampleName = sample.name || (rawGroupLabel === fallbackSampleLabel ? "" : rawGroupLabel);
+    const sampleName = sampleId
+        ? String(sample.name || "")
+        : (rawGroupLabel === fallbackSampleLabel ? "" : rawGroupLabel);
     return '<div class="dft-basic-info-form" data-editor-key="' + escAttr(editorKey) + '"' +
         ' data-mode="' + (sampleId ? "update" : "create") + '"' +
         ' data-catalyst-sample-id="' + escAttr(sampleId) + '"' +
+        ' data-original-name="' + escAttr(sampleName) + '"' +
         ' data-dft-result-ids="' + escAttr(dftResultIds.join(",")) + '" hidden>' +
         (!sampleId ? '<div class="subtle dft-basic-info-edit-note">保存后系统会自动创建基础信息记录，并关联本框内的 DFT 数据；无需先去其他页面绑定。</div>' : '') +
         '<div class="dft-basic-info-grid">' +
-            '<label class="dft-basic-info-field"><span>名称</span><input type="text" data-field="name" value="' + escAttr(sampleName) + '"></label>' +
+            '<label class="dft-basic-info-field"><span>名称</span><input type="text" data-field="name" oninput="updateCatalystNameChangeState(' + dftInlineJsArg(editorKey) + ')" value="' + escAttr(sampleName) + '"></label>' +
             '<label class="dft-basic-info-field"><span>催化剂类型</span><select data-field="catalyst_type">' + CATALYST_BASIC_INFO_TYPES.map(function(value) { return renderCatalystBasicInfoOption(value, catalystType, CATALYST_BASIC_INFO_TYPE_LABELS); }).join("") + '</select></label>' +
             '<label class="dft-basic-info-field"><span>金属中心</span><input type="text" data-field="metal_centers" placeholder="例如：Fe, Co" autocomplete="off" spellcheck="false" value="' + escAttr(metalCenters) + '"><small>请填元素符号；多个推荐用逗号分隔</small></label>' +
             '<label class="dft-basic-info-field"><span>载体/基底</span><select data-field="support">' + CATALYST_BASIC_INFO_SUPPORTS.map(function(value) { return renderCatalystBasicInfoOption(value, supportValue, CATALYST_BASIC_INFO_SUPPORT_LABELS); }).join("") + '</select></label>' +
@@ -228,9 +331,15 @@ function renderDftCatalystBasicInfoForm(sample, group) {
             '<label class="dft-basic-info-field"><span>证据页码</span><input type="text" data-field="evidence_page" placeholder="选填" value=""></label>' +
             '<label class="dft-basic-info-field dft-basic-info-span-3"><span>证据原文</span><input type="text" data-field="evidence_text" placeholder="选填，可粘贴对应原文" value=""></label>' +
         '</div>' +
+        '<div class="dft-catalyst-name-change" data-role="name-change-confirmation" hidden>' +
+            '<div class="dft-catalyst-name-change-warning">将同步更新 <strong data-role="affected-dft-count">' + dftResultIds.length + '</strong> 条 DFT 数据的 Identity v2，已有核验状态和可导出状态保持不变。</div>' +
+            '<div class="dft-catalyst-name-change-boundary">此操作仅适用于同一催化剂的名称修正；如果数据实际属于另一个催化剂，请取消并使用‘整组重新关联’。</div>' +
+            '<label><span>名称修改原因（必填）</span><textarea data-field="name_change_reason" rows="2" placeholder="说明名称写错的原因和修正依据"></textarea></label>' +
+        '</div>' +
+        '<div class="dft-basic-info-error" data-role="basic-info-error" hidden></div>' +
         '<div class="filter-actions dft-basic-info-actions">' +
-            '<button type="button" class="btn primary small" onclick="saveCatalystBasicInfo(\'' + escAttr(editorKey) + '\')">' + (sampleId ? "保存基础信息" : "创建并关联") + '</button>' +
-            '<button type="button" class="btn ghost small" onclick="toggleCatalystBasicInfoEditor(\'' + escAttr(editorKey) + '\')">取消</button>' +
+            '<button type="button" class="btn primary small" onclick="saveCatalystBasicInfo(' + dftInlineJsArg(editorKey) + ')">' + (sampleId ? "保存基础信息" : "创建并关联") + '</button>' +
+            '<button type="button" class="btn ghost small" onclick="toggleCatalystBasicInfoEditor(' + dftInlineJsArg(editorKey) + ')">取消</button>' +
         '</div>' +
     '</div>';
 }
@@ -238,8 +347,9 @@ function renderDftCatalystBasicInfoForm(sample, group) {
 function renderDftCatalystBaseInfo(group, catalystSample, allItems, catalystSamplesById) {
     const sample = catalystSample || {};
     const sourceSampleId = String(group && group.meta && group.meta.catalystSampleId || "").trim();
-    const basicInfoEditorKey = sample && sample.id ? String(sample.id) : group.key;
+    const basicInfoEditorKey = dftCatalystBasicInfoEditorKey(group);
     const rebindEditorKey = "rebind:" + group.key;
+    const mergeEditorKey = "merge:" + group.key;
     const catalystLabel = dftSampleGroupCatalystLabel(group, sample);
     const activeSiteLabel = dftSampleGroupActiveSiteLabel(group, catalystLabel);
     const metalCenters = readableValue(sample.metal_centers || firstGroupReadableValue(group, [
@@ -294,20 +404,27 @@ function renderDftCatalystBaseInfo(group, catalystSample, allItems, catalystSamp
         ]), "由金属中心自动生成")
     ];
     const rebindButton = sourceSampleId
-        ? '<button type="button" class="btn ghost small" onclick="event.stopPropagation(); toggleDftGroupRebindEditor(\'' + escAttr(rebindEditorKey) + '\')">整组重新关联</button>'
+        ? '<button type="button" class="btn ghost small" onclick="event.stopPropagation(); toggleDftGroupRebindEditor(' + dftInlineJsArg(rebindEditorKey) + ')">整组重新关联</button>'
         : "";
+    const mergeButton = sourceSampleId && String(sample.name || "").trim()
+        ? '<button type="button" class="btn ghost small" onclick="event.stopPropagation(); toggleDftDuplicateMergeEditor(' + dftInlineJsArg(mergeEditorKey) + ')">合并重复样本</button>'
+        : "";
+    const copySampleIdButton = renderCatalystSampleIdCopyButton(sourceSampleId);
     return '<details class="section-card readable-card dft-catalyst-base-info">' +
         '<summary><h3 style="margin:0;">催化剂基础信息</h3><span class="subtle">证据可选填；字段会标准化</span>' +
             '<span class="dft-catalyst-base-actions">' +
+                copySampleIdButton +
                 rebindButton +
-                '<button type="button" class="btn ghost small" onclick="event.stopPropagation(); toggleCatalystBasicInfoEditor(\'' + escAttr(basicInfoEditorKey) + '\')">' +
+                mergeButton +
+                '<button type="button" class="btn ghost small" onclick="event.stopPropagation(); toggleCatalystBasicInfoEditor(' + dftInlineJsArg(basicInfoEditorKey) + ')">' +
                     (sample && sample.id ? "编辑基础信息" : "补充基础信息") +
                 '</button>' +
             '</span>' +
         '</summary>' +
         renderDftGroupRebindForm(group, allItems, catalystSamplesById) +
+        renderDftDuplicateMergeForm(group, allItems, catalystSamplesById) +
         '<div class="readable-grid compact-readable-grid" style="margin-top:8px;">' + fields.join("") + '</div>' +
-        renderDftCatalystBasicInfoForm(sample, group) +
+        renderDftCatalystBasicInfoForm(sample, group, allItems) +
     '</details>';
 }
 
@@ -399,9 +516,16 @@ function renderDftSampleGroups(items, renderItem, options) {
             (group.meta.catalystSampleId && isPendingNavigationItem("catalyst_sample", { id: group.meta.catalystSampleId })) ||
             group.entries.some(function(entry) { return isPendingNavigationItem("dft_result", entry.item); })
         ) ? " open" : "";
-        return '<details class="section-card dft-sample-group" data-role="dft-sample-group" data-dft-sample-key="' + escAttr(group.key) + '"' + catalystNavigationAttrs + groupOpenAttr + '>' +
+        return '<details class="section-card dft-sample-group" data-role="dft-sample-group" data-dft-sample-key="' + escAttr(group.key) + '"' +
+            (group.meta.catalystSampleId ? ' data-catalyst-sample-id="' + escAttr(String(group.meta.catalystSampleId)) + '"' : "") +
+            catalystNavigationAttrs + groupOpenAttr + '>' +
             '<summary><div class="dft-sample-summary">' +
-                '<div><h3>' + esc(groupTitle) + '</h3><div class="subtle">' + esc(summaryLabels.join(" / ")) + '</div></div>' +
+                '<div class="dft-sample-title-block">' +
+                    '<div class="dft-sample-heading-row"><h3>' + esc(groupTitle) + '</h3>' +
+                        renderCatalystSampleShortId(group.meta.catalystSampleId) +
+                        '<div class="subtle dft-sample-identity-label">' + esc(summaryLabels.join(" / ")) + '</div>' +
+                    '</div>' +
+                '</div>' +
                 '<div class="dft-sample-meta">' +
                     '<span class="status-chip">DFT ' + group.entries.length + ' 条</span>' +
                     '<span class="status-chip ' + (readyCount ? 'ok' : 'meta') + '">可导出 ' + readyCount + '</span>' +
@@ -513,11 +637,134 @@ async function submitDftGroupRebind(editorKey) {
     }
 }
 
+function dftDuplicateMergeForm(editorKey) {
+    const escaped = window.CSS && typeof window.CSS.escape === "function"
+        ? window.CSS.escape(String(editorKey || ""))
+        : String(editorKey || "").replace(/["\\]/g, "\\$&");
+    return document.querySelector('.dft-duplicate-merge-form[data-editor-key="' + escaped + '"]');
+}
+
+function toggleDftDuplicateMergeEditor(editorKey) {
+    const form = dftDuplicateMergeForm(editorKey);
+    if (!form) {
+        showToast("当前重复样本合并表单不可用。", "error");
+        return;
+    }
+    form.hidden = !form.hidden;
+    if (!form.hidden) {
+        const basicInfoCard = form.closest("details.dft-catalyst-base-info");
+        if (basicInfoCard) basicInfoCard.open = true;
+    }
+}
+
+function selectedDftDuplicateMergeSources(form) {
+    return Array.from(form ? form.querySelectorAll('[data-field="source_sample"]:checked') : []).map(function(input) {
+        const resultIds = String(input.dataset.dftResultIds || "").split(",").map(function(value) {
+            return value.trim();
+        }).filter(Boolean);
+        return {
+            source_sample_id: String(input.dataset.sourceSampleId || "").trim(),
+            expected_current_name: String(input.dataset.sourceName || "").trim(),
+            dft_result_ids: resultIds,
+            expected_dft_result_count: resultIds.length,
+        };
+    }).filter(function(source) {
+        return source.source_sample_id && source.expected_current_name;
+    });
+}
+
+function updateDftDuplicateMergeSelection(editorKey) {
+    const form = dftDuplicateMergeForm(editorKey);
+    if (!form) return;
+    const sources = selectedDftDuplicateMergeSources(form);
+    const resultCount = sources.reduce(function(total, source) {
+        return total + source.expected_dft_result_count;
+    }, 0);
+    const summary = form.querySelector('[data-role="merge-selection-summary"]');
+    if (summary) summary.textContent = "已选择 " + sources.length + " 个重复样本，共 " + resultCount + " 条 DFT。";
+}
+
+async function submitDftDuplicateMerge(editorKey) {
+    const form = dftDuplicateMergeForm(editorKey);
+    if (!form || !state.selectedPaperId) {
+        showToast("当前文献或重复样本合并表单不可用。", "error");
+        return;
+    }
+    const reasonInput = form.querySelector('[data-field="reason"]');
+    const errorBox = form.querySelector('[data-role="merge-error"]');
+    const submitButton = form.querySelector('[data-role="merge-submit"]');
+    const reason = String(reasonInput && reasonInput.value || "").trim();
+    const sources = selectedDftDuplicateMergeSources(form);
+    if (!sources.length) {
+        showToast("请至少选择一个重复催化剂样本。", "error");
+        return;
+    }
+    if (!reason) {
+        showToast("请填写合并重复样本的原因。", "error");
+        return;
+    }
+    const resultCount = sources.reduce(function(total, source) {
+        return total + source.expected_dft_result_count;
+    }, 0);
+    const confirmed = window.confirm(
+        "请确认：所选 " + sources.length + " 个记录与主样本“" + form.dataset.targetName +
+        "”确实是同一个物理催化剂。将合并 " + resultCount + " 条 DFT 数据，已有核验状态保持不变。"
+    );
+    if (!confirmed) return;
+    if (errorBox) {
+        errorBox.hidden = true;
+        errorBox.textContent = "";
+    }
+    if (submitButton) submitButton.disabled = true;
+    try {
+        const response = await fetchJSON(
+            API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
+            "/catalyst-samples/" + encodeURIComponent(form.dataset.targetSampleId) +
+            "/merge-duplicates",
+            {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    expected_target_name: form.dataset.targetName,
+                    sources: sources,
+                    confirm_same_physical_catalyst: true,
+                    reason: reason,
+                    reviewer: "literature_library_user",
+                }),
+            }
+        );
+        if (!response || response.requires_reverification !== false || response.review_state_preserved !== true) {
+            throw new Error("服务端未确认保留原核验状态，页面未刷新，请检查后重试。");
+        }
+        showToast(response.status === "already_merged" ? "这些重复样本已经合并。" : "重复催化剂样本已合并，原核验状态保持不变。", "success");
+        await refreshSelectedPaperDetail({
+            reason: "merge_duplicate_catalyst_samples",
+            mode: "dft",
+            forceRefresh: true,
+            invalidateCache: true,
+        });
+    } catch (error) {
+        const message = error && error.message ? error.message : String(error || "未知错误");
+        if (errorBox) {
+            errorBox.textContent = message;
+            errorBox.hidden = false;
+        }
+        showToast("合并重复样本失败：" + message, "error");
+    } finally {
+        if (submitButton && document.body.contains(submitButton)) submitButton.disabled = false;
+    }
+}
+
 window.shortCatalystSampleId = shortCatalystSampleId;
+window.copyCatalystSampleId = copyCatalystSampleId;
 window.catalystSampleSelectLabel = catalystSampleSelectLabel;
+window.dftResultIdsForCatalystSample = dftResultIdsForCatalystSample;
 window.toggleDftGroupRebindEditor = toggleDftGroupRebindEditor;
 window.updateDftGroupRebindTarget = updateDftGroupRebindTarget;
 window.submitDftGroupRebind = submitDftGroupRebind;
+window.toggleDftDuplicateMergeEditor = toggleDftDuplicateMergeEditor;
+window.updateDftDuplicateMergeSelection = updateDftDuplicateMergeSelection;
+window.submitDftDuplicateMerge = submitDftDuplicateMerge;
 
 const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
     "DFT 设置": "dft_setting",

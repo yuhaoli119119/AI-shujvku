@@ -489,13 +489,25 @@ async function rejectDftResult(itemId) {
         showToast("当前 DFT 记录无法拒绝。", "error");
         return;
     }
-    const ok = window.confirm("确认拒绝这条 DFT 数据吗？");
+    const item = selectedDftItemById(itemId);
+    const resultId = dftResultId(item) || String(itemId);
+    if (!item) {
+        showToast("未找到这条 DFT 数据，无法拒绝。", "error");
+        return;
+    }
+    const currentStatus = String(item.dft_workflow_label || item.candidate_status || item.dft_workflow_state || "未标注").trim();
+    const ok = window.confirm(
+        "确认拒绝并撤销导出这条 DFT 数据吗？\n\n" +
+        "目标 DFT UUID：" + resultId + "\n" +
+        "当前状态：" + currentStatus + "\n\n" +
+        "影响：不会物理删除这条 DFT 数据，只会阻止导出。"
+    );
     if (!ok) return;
     try {
         showToast("正在写入 DFT 拒绝结果...", "info");
         await fetchJSON(
             API_BASE + "/" + encodeURIComponent(state.selectedPaperId) +
-            "/dft-results/" + encodeURIComponent(itemId) + "/reject",
+            "/dft-results/" + encodeURIComponent(resultId) + "/reject",
             {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -510,7 +522,7 @@ async function rejectDftResult(itemId) {
             ? state.selectedPaper.dft_results_items
             : [];
         detailItems.forEach(function(item) {
-            if (dftResultId(item) !== String(itemId)) return;
+            if (dftResultId(item) !== resultId) return;
             item.candidate_status = "Rejected";
             item.dft_workflow_state = "rejected";
             item.dft_workflow_label = "已拒绝";
@@ -519,9 +531,14 @@ async function rejectDftResult(itemId) {
             if (item.export_safety) item.export_safety.review_status = "rejected";
         });
         rerenderSelectedDetail(state.selectedPaperId);
-        showToast("这条 DFT 已拒绝。", "success");
+        showToast("这条 DFT 已拒绝并撤销导出。", "success");
         if (typeof closeDftDetailDialog === "function") closeDftDetailDialog();
-        await refreshSelectedPaperDetail({ reason: "reject_dft_result", mode: "dft" });
+        await refreshSelectedPaperDetail({
+            reason: "reject_dft_result",
+            mode: "dft",
+            forceRefresh: true,
+            invalidateCache: true,
+        });
     } catch (error) {
         showToast("拒绝失败：" + error.message, "error");
     }
