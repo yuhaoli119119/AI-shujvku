@@ -350,14 +350,23 @@ def _candidate_groups(field: str, rows: list[_ReadyRow]) -> list[list[_Candidate
 
 
 def _candidate_payload(candidate: _Candidate) -> dict[str, Any]:
+    subject = _identity_subject(candidate.ready.row)
+    property_context = subject.get("property_context") if isinstance(subject.get("property_context"), dict) else {}
+    pathway = property_context.get("pathway") or candidate.ready.row.reaction_step
     return {
         "value": candidate.value,
         "unit": candidate.unit,
+        "property_type": candidate.ready.row.property_type,
+        "reaction_step": candidate.ready.row.reaction_step,
+        "pathway": pathway,
         "source_record_id": candidate.record_id,
         "source_record_ids": list(candidate.source_ids),
         "paper_id": str(candidate.ready.paper.id),
         "paper_code": candidate.ready.paper.paper_code,
+        "paper": _paper_payload(candidate.ready.paper),
         "context": candidate.context,
+        "selected_for_summary": False,
+        "selected_for_regression": False,
     }
 
 
@@ -374,6 +383,11 @@ def _resolve_group(field: str, group: list[_Candidate]) -> tuple[dict[str, Any] 
             if math.isclose(item.value, maximum, rel_tol=1e-12, abs_tol=1e-12)
             for source_id in item.source_ids
         ]
+        selected_id_set = set(selected_ids)
+        for candidate, item in zip(candidates, group):
+            selected = bool(selected_id_set.intersection(item.source_ids))
+            candidate["selected_for_summary"] = selected
+            candidate["selected_for_regression"] = selected
         return {
             "value": maximum,
             "unit": group[0].unit,

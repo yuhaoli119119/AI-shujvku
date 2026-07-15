@@ -16,6 +16,7 @@ from app.services.catalyst_analysis_service import (
     _field_matches,
     _is_li2s_barrier,
     _is_li2s_charge_transfer,
+    _resolve_group,
     _stats,
 )
 
@@ -122,6 +123,16 @@ def test_barrier_max_bond_max_and_duplicate_provenance_are_deterministic():
     groups = _candidate_groups("li2s_dissociation_barrier", [barrier_a, barrier_b])
     assert len(groups) == 1
     assert _field_matches("li2s_dissociation_barrier", barrier_a)
+    selected, reason, _ = _resolve_group("li2s_dissociation_barrier", groups[0])
+    assert reason is None
+    assert selected["value"] == 1.8
+    candidates_by_path = {item["reaction_step"]: item for item in selected["candidates"]}
+    assert candidates_by_path["Li2S dissociation path A"]["property_type"] == "reaction_barrier"
+    assert candidates_by_path["Li2S dissociation path A"]["paper"]["paper_id"] == str(paper.id)
+    assert candidates_by_path["Li2S dissociation path A"]["selected_for_summary"] is False
+    assert candidates_by_path["Li2S dissociation path A"]["selected_for_regression"] is False
+    assert candidates_by_path["Li2S dissociation path B"]["selected_for_summary"] is True
+    assert candidates_by_path["Li2S dissociation path B"]["selected_for_regression"] is True
     max_groups = _candidate_groups("li_s_bond_max", [li1, li2])
     assert len(max_groups) == 1
     assert max_groups[0][0].value == 2.4
