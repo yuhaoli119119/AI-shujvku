@@ -148,7 +148,8 @@
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
                         <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">候选 DFT 数据</button>
-                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">文字审核</button>
+                        <button class="tab-btn" data-tab="mechanism" onclick="switchTab('mechanism')">机理知识</button>
+                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">正文审核</button>
                         <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
                         <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI任务中心</button>
@@ -165,6 +166,10 @@
                     <section id="tab-dft" class="tab-panel">
                         <div id="dftContent"></div>
                         <div id="aggregateResult"></div>
+                    </section>
+
+                    <section id="tab-mechanism" class="tab-panel">
+                        <div id="mechanismContent"></div>
                     </section>
 
                     <section id="tab-sections" class="tab-panel">

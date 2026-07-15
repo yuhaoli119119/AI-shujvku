@@ -90,6 +90,7 @@ test.describe('Review Center Conflict Modal', () => {
               figure_table: 'FIGURE TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
+              text_review: 'TEXT REVIEW TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
             },
             composite_templates: {},
             reaction_profile_templates: {},
@@ -150,6 +151,11 @@ test.describe('Review Center Conflict Modal', () => {
     expect(figureTablePrompt).toContain('paper_id: main-paper');
     expect(figureTablePrompt).toContain('role: main_paper');
     expect(figureTablePrompt).toContain('一次审核该主文全部图表、与 DFT 明确相关或可能相关的 SI 图片');
+
+    await page.selectOption('#promptCopySelect', 'text_review');
+    await expect.poll(() => page.evaluate(() => window.__clipboardText)).toContain('TEXT REVIEW TEMPLATE');
+    const textReviewPrompt = await page.evaluate(() => window.__clipboardText);
+    expect(textReviewPrompt).toContain('<agent_name>_text_review_');
   });
 
   test('links grouped conflicts to read-only evidence preview', async ({ page }) => {

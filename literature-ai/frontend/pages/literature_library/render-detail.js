@@ -280,6 +280,7 @@ function renderDetail(detail, audit) {
     const sectionsEl = $("sectionsContent");
     const figuresEl = $("figuresContent");
     const dftEl = $("dftContent");
+    const mechanismEl = $("mechanismContent");
     const writingEl = $("writingContent");
     const translationEl = $("translationContent");
     const aggregateEl = $("aggregateResult");
@@ -360,6 +361,7 @@ function renderDetail(detail, audit) {
     }
     if (sectionsEl && activeTab === "sections") {
         sectionsEl.innerHTML =
+            renderContentKnowledgeLinkCard(detail, "正文审核入口", "正文、章节和摘要的证据核对入口；此处的人工浏览标记不等于审核通过。") +
             renderManualReviewCompletionCard(detail, "content", "内容解析进度", "当摘要、章节和详情页展示内容都核对完毕后，再手动标记完成。若之后重新补解析，可随时取消。") +
             sectionCards +
             referenceCards +
@@ -368,6 +370,14 @@ function renderDetail(detail, audit) {
             '</div>' +
             renderJSONCards("出向关系", detail.outgoing_relationships || []) +
             renderJSONCards("入向关系", detail.incoming_relationships || []);
+    }
+    if (mechanismEl && activeTab === "mechanism") {
+        const mechanismItems = detail.mechanism_claims_items || [];
+        mechanismEl.innerHTML =
+            renderContentKnowledgeLinkCard(detail, "机理知识审核", "机理声明仍需结合正文、图表和 PDF 证据审核；详情页不把原始候选对象改写成审核状态。", "mechanism_evidence") +
+            (mechanismItems.length
+                ? renderJSONCards("机理知识", mechanismItems)
+                : renderPendingReviewCard("机理知识", "当前没有可展示的机理知识候选。可先到知识审核入口查看或补充。"));
     }
     if (figuresEl && activeTab === "figures") {
         figuresEl.innerHTML =
@@ -395,8 +405,7 @@ function renderDetail(detail, audit) {
             renderJSONCards("DFT 设置", detail.dft_settings_items || []) +
             catalystSampleCards +
             completeCandidateCards +
-            renderJSONCards("电化学性能", detail.electrochemical_performance_items || []) +
-            renderJSONCards("机理声明", detail.mechanism_claims_items || []);
+            renderJSONCards("电化学性能", detail.electrochemical_performance_items || []);
         decorateDftReadinessPanel(detail);
     }
     if (writingEl && activeTab === "writing") {
@@ -405,9 +414,9 @@ function renderDetail(detail, audit) {
             const reviewNotice = isAiVerifiedStatus(writingCardsReviewStatus)
                 ? ""
                 : '<div class="section-card figure-audit-note"><h3>\u5199\u4f5c\u5361\u72b6\u6001</h3><div class="subtle">\u8fd9\u6279\u5199\u4f5c\u5361\u8fd8\u6ca1\u8fdb\u5165 safe_verified\uff0c\u4f46\u73b0\u5728\u53ef\u4ee5\u76f4\u63a5\u67e5\u770b\u7814\u7a76\u7a7a\u767d\u3001\u62df\u89e3\u51b3\u65b9\u6848\u3001\u6838\u5fc3\u5047\u8bbe\u3001\u8bc1\u636e\u94fe\u548c\u5f53\u524d\u963b\u585e\u9879\u3002</div></div>';
-            writingEl.innerHTML = reviewNotice + renderJSONCards("写作卡片", writingItems);
+            writingEl.innerHTML = renderContentKnowledgeLinkCard(detail, "写作卡知识审核", "写作卡需要基于正文和 PDF 证据审核后再作为写作依据。", "writing_material") + reviewNotice + renderJSONCards("写作卡片", writingItems);
         } else {
-            writingEl.innerHTML = renderPendingReviewCard("写作卡片", "\u5f53\u524d\u8fd8\u6ca1\u6709\u5199\u4f5c\u5361\u5185\u5bb9\u3002");
+            writingEl.innerHTML = renderContentKnowledgeLinkCard(detail, "写作卡知识审核", "当前没有写作卡，也可以先到知识审核入口查看写作材料。", "writing_material") + renderPendingReviewCard("写作卡片", "当前还没有写作卡内容。");
         }
     }
     if (translationEl && activeTab === "translation") {

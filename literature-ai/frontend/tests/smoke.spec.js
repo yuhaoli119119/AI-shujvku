@@ -4818,19 +4818,17 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
     await page.click('.paper-row');
-    await page.click('button[data-tab="dft"]');
+    await page.click('button[data-tab="mechanism"]');
 
-    const dft = page.locator('#dftContent');
-    await expect(dft).toContainText('Object audits 1');
-    await expect(dft).toContainText('Conflicts 1');
-    await expect(dft).toContainText('Evidence status: present');
-    await expect(dft).toContainText('Locator: text only');
-    await expect(dft).toContainText('Confidence: medium');
-    await expect(dft).toContainText('Latest audit: GLM mechanism audit');
-    await expect(dft).toContainText('decision=FLAG');
-    await expect(dft).toContainText('verification=unverified');
+    const mechanism = page.locator('#mechanismContent');
+    await expect(mechanism).toContainText('机理类型');
+    await expect(mechanism).toContainText('evidence statuspresent');
+    await expect(mechanism).toContainText('locator statustext_only');
+    await expect(mechanism).toContainText('置信度0.71');
+    await expect(mechanism).toContainText('object review audit count1');
+    await expect(mechanism).toContainText('机理描述');
+    await expect(mechanism).toContainText('证据原文');
 
-    await page.locator('#dftContent button:has-text("复制审核提示")').last().click();
     await expect.poll(() => unsafeWrites.length).toBe(0);
   });
 
@@ -4930,7 +4928,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/review_center/index.html`);
     await page.waitForTimeout(500);
 
-    await expect(page.locator('#promptCopySelect option')).toHaveCount(3);
+    await expect(page.locator('#promptCopySelect option')).toHaveCount(4);
     await expect(page.locator('#promptCopySelect option[value="figure_table"]')).toHaveText('整篇主文+DFT相关SI图表审核提示词');
     await expect(page.locator('#promptCopySelect option[value="dft"]')).toHaveText('DFT 数据审核与入库提示词');
     await expect(page.locator('#promptCopySelect option[value="dft_primary"]')).toHaveCount(0);

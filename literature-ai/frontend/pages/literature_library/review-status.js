@@ -207,10 +207,11 @@ function renderManualReviewCompletionCard(detail, module, title, message) {
                 : blocked
                     ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表待审核或存在风险项。") + '">需先复核</button>'
                 : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
-                    esc(status ? '取消已完成' : '标记已完成') +
+                    esc(status ? '取消人工浏览标记' : '人工浏览标记为已完成') +
                   '</button>') +
         '</div>' +
         '<div class="subtle">' + esc(message) + '</div>' +
+        '<div class="status-chip warn" style="display:inline-flex;margin-top:8px;">人工浏览标记不等于审核通过</div>' +
         chartReviewScopeSummary(detail) +
         (module === "figures" ? figureReviewBlockingNote(detail) : "") +
         inheritedNote +
@@ -232,7 +233,7 @@ function renderManualReviewCompletionControls(detail, module) {
             : blocked
                 ? '<button class="btn ghost small" type="button" disabled title="' + escAttr("仍有图表待审核或存在风险项。") + '">需先复核</button>'
             : '<button class="btn ' + (status ? 'ghost' : 'primary') + ' small" type="button" onclick="setManualReviewProgress(\'' + escAttr(module) + '\', ' + (status ? 'false' : 'true') + ')">' +
-                esc(status ? '取消已完成' : '标记已完成') +
+                esc(status ? '取消人工浏览标记' : '人工浏览标记为已完成') +
               '</button>');
 }
 

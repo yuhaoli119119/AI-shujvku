@@ -44,6 +44,27 @@ function renderWorkspaceHeader(paper) {
     if (topicEl) topicEl.value = paper.title_zh || paper.title || "";
 }
 
+function contentKnowledgeHref(detail, category) {
+    const paperCode = String(detail && detail.paper_code || "").trim();
+    if (!paperCode) return "";
+    const params = new URLSearchParams();
+    params.set("paper_id", paperCode);
+    if (category) params.set("category", category);
+    return "/pages/content_knowledge/index.html?" + params.toString();
+}
+
+function renderContentKnowledgeLinkCard(detail, title, description, category) {
+    const href = contentKnowledgeHref(detail, category);
+    const action = href
+        ? '<a class="btn primary small" href="' + escAttr(href) + '" target="_blank" rel="noopener">去知识审核</a>'
+        : '<span class="status-chip warn" title="当前详情缺少 paper_code，不能安全生成知识审核链接。">缺少文献短号</span>';
+    return '<div class="section-card figure-audit-note content-knowledge-entry">' +
+        '<h3>' + esc(title) + '</h3>' +
+        '<div class="subtle" style="margin:6px 0 10px;">' + esc(description) + '</div>' +
+        action +
+    '</div>';
+}
+
 function renderListBlock(title, items, formatter, titleFormatter) {
     if (!items || !items.length) {
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';

@@ -221,8 +221,8 @@ function applyQueryParams() {
             electrochemical_performance: { itemType: "electrochemical_performance", tab: "dft" },
             writing_card: { itemType: "writing_card", tab: "writing" },
             writing_cards: { itemType: "writing_card", tab: "writing" },
-            mechanism_claim: { itemType: "mechanism_claim", tab: "dft" },
-            mechanism_claims: { itemType: "mechanism_claim", tab: "dft" },
+            mechanism_claim: { itemType: "mechanism_claim", tab: "mechanism" },
+            mechanism_claims: { itemType: "mechanism_claim", tab: "mechanism" },
             table: { itemType: "table", tab: "figures" },
             tables: { itemType: "table", tab: "figures" },
             figure: { itemType: "figure", tab: "figures" },
@@ -257,6 +257,7 @@ function applyQueryParams() {
         sections: "sections",
         figures: "figures",
         dft: "dft",
+        mechanism: "mechanism",
         writing: "writing",
         translation: "translation",
         review: "review"
@@ -284,7 +285,7 @@ function syncQueryParams() {
 }
 
 function switchTab(tab) {
-    if (!["summary", "sections", "figures", "dft", "writing", "translation", "review"].includes(tab)) {
+    if (!["summary", "sections", "figures", "dft", "mechanism", "writing", "translation", "review"].includes(tab)) {
         tab = "summary";
     }
     state.currentTab = tab;

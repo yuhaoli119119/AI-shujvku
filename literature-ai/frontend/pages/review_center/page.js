@@ -92,6 +92,13 @@
           "- 一份证据合格的 AI 意见即可通过受控入口直接确认、修正、拒绝或新增；NEEDS_HUMAN 留待用户判断。",
           "- 不需要第二 AI、主 AI 或按 AI 身份计票。"
         ].join("\n")
+      },
+      text_review: {
+        kind: "text_review",
+        sourceKind: "text_review",
+        label: "正文、机理与写作审核提示词",
+        targetScope: "main",
+        scopeNote: "目标：只审核当前唯一主文献的正文、机理知识和写作卡；请按 PDF 证据核对后，通过后端支持的 text_review 任务回写。"
       }
     };
     const conflictState = {
