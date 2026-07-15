@@ -24,6 +24,54 @@
     return params;
   }
 
+  function downloadFilename(response, fallback) {
+    const disposition = response.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    return match ? match[1] : fallback;
+  }
+
+  async function downloadDataset(kind) {
+    const isCsv = kind === "csv";
+    const button = $(isCsv ? "exportCatalystCsv" : "downloadCatalystJson");
+    const label = isCsv ? "催化剂宽表 CSV" : "审计 JSON";
+    const endpoint = isCsv ? "/api/dft/catalyst-dataset.csv" : "/api/dft/catalyst-dataset";
+    button.disabled = true;
+    $("exportStatus").textContent = "正在准备" + label + "…";
+    try {
+      const params = visualParams(new URLSearchParams());
+      const response = await fetch(endpoint + "?" + params.toString(), {
+        headers: { Accept: isCsv ? "text/csv" : "application/json" },
+      });
+      if (!response.ok) {
+        let detail = "";
+        try {
+          const payload = await response.json();
+          detail = payload.detail ? "：" + payload.detail : "";
+        } catch (_error) {
+          detail = "";
+        }
+        throw new Error("请求失败（" + response.status + "）" + detail);
+      }
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = downloadFilename(
+        response,
+        isCsv ? "dft_catalyst_dataset_v1.csv" : "dft_catalyst_dataset_v1.json",
+      );
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(objectUrl);
+      $("exportStatus").textContent = label + "已开始下载。";
+    } catch (error) {
+      $("exportStatus").textContent = label + "下载失败：" + error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function setOverview(summary) {
     const values = [
       ["metricDftTotal", summary.total_dft_rows],
@@ -213,6 +261,8 @@
       $("relationStatus").textContent = "可分析字段读取失败：" + error.message;
     }
     ["xField", "yField", "minN"].forEach((id) => $(id).addEventListener("change", loadCorrelation));
+    $("exportCatalystCsv").addEventListener("click", () => downloadDataset("csv"));
+    $("downloadCatalystJson").addEventListener("click", () => downloadDataset("json"));
     $("quickChargeBond").addEventListener("click", () => {
       if (state.fields.some((field) => field.key === DEFAULTS.quickX) && state.fields.some((field) => field.key === DEFAULTS.quickY)) {
         $("xField").value = DEFAULTS.quickX;

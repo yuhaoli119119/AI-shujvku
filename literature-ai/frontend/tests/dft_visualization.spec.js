@@ -178,4 +178,50 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(page.locator(".fit-line")).toHaveCount(0);
     await expect(page.locator("#fitNotice")).toContainText("样本数 3 小于最少样本数 5");
   });
+
+  test("offers fixed catalyst CSV and audit JSON downloads with library scope and clear errors", async ({ page }) => {
+    const correlationRequests = [];
+    const exportRequests = [];
+    await installVisualMocks(page, correlationRequests);
+    await page.route("**/api/dft/catalyst-dataset.csv*", (route) => {
+      exportRequests.push(new URL(route.request().url()));
+      return route.fulfill({
+        status: 200,
+        contentType: "text/csv; charset=utf-8",
+        headers: { "Content-Disposition": 'attachment; filename="dft_catalyst_dataset_v1.csv"' },
+        body: "\ufeffcatalyst_name,catalyst_sample_id\r\nFe-N-C,sample-1\r\n",
+      });
+    });
+    await page.route("**/api/dft/catalyst-dataset?*", (route) => {
+      exportRequests.push(new URL(route.request().url()));
+      return route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "Exports are disabled by server policy" }),
+      });
+    });
+    await page.goto(BASE_URL + "/pages/visuals/index.html?library_name=Selected%20Library");
+
+    await expect(page.getByRole("button", { name: "导出催化剂宽表 CSV" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "下载审计 JSON" })).toBeVisible();
+    await expect(page.locator(".export-panel")).toContainText("pandas、随机森林、XGBoost");
+    await expect(page.locator(".export-panel")).toContainText("不是直接训练表");
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByRole("button", { name: "导出催化剂宽表 CSV" }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("dft_catalyst_dataset_v1.csv");
+    await expect(page.locator("#exportStatus")).toContainText("催化剂宽表 CSV已开始下载");
+
+    await page.getByRole("button", { name: "下载审计 JSON" }).click();
+    await expect(page.locator("#exportStatus")).toContainText("审计 JSON下载失败：请求失败（403）");
+    await expect(page.locator("#exportStatus")).toContainText("Exports are disabled by server policy");
+
+    await expect.poll(() => exportRequests.length).toBe(2);
+    expect(exportRequests.map((url) => url.pathname)).toEqual([
+      "/api/dft/catalyst-dataset.csv",
+      "/api/dft/catalyst-dataset",
+    ]);
+    expect(exportRequests.every((url) => url.searchParams.get("library_name") === "Selected Library")).toBe(true);
+  });
 });

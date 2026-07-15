@@ -78,10 +78,12 @@ def shared_test_database():
 
 
 @pytest.fixture(autouse=True)
-def default_test_database_mode(request, shared_test_database):
+def default_test_database_mode(request):
     if request.node.get_closest_marker("no_test_database"):
         yield
         return
+
+    shared_test_database = request.getfixturevalue("shared_test_database")
 
     from app.config import get_settings
     from app.db.models import Base

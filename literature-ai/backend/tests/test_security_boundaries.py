@@ -230,6 +230,8 @@ def test_exports_default_off_blocks_remote_non_owner_but_not_owner_http_access(m
     assert local_v3.json()["manifest"]["schema_version"] == "dft_results_ml_v3"
 
     for export_path in (
+        "/api/dft/catalyst-dataset",
+        "/api/dft/catalyst-dataset.csv",
         "/api/dft/ml-dataset-v3.csv?task=adsorption_energy",
         "/api/dft/ml-dataset-v3/manifest?task=adsorption_energy",
         "/api/dft/project-library-ml-export?task=adsorption_energy",

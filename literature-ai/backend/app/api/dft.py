@@ -18,6 +18,10 @@ from app.schemas.project_library import (
     ProjectLibraryUserSubmitRequest,
     ProjectLibraryUserSubmitResultPayload,
 )
+from app.services.catalyst_analysis_service import (
+    CATALYST_WIDE_CSV_FILENAME,
+    CatalystAnalysisService,
+)
 from app.services.dft_export_service import build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
 from app.services.dft_audit_report_service import DFTAuditReportService
 from app.services.dft_audit_issue_service import DFT_AUDIT_ISSUE_OPEN_STATUSES, DFTAuditIssueService
@@ -37,6 +41,33 @@ router = APIRouter()
 def _v3_filename(task: str, suffix: str) -> str:
     safe_task = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in task).strip("_")
     return f"dft_ml_dataset_v3_{safe_task or 'task'}.{suffix}"
+
+
+@router.get("/catalyst-dataset")
+def get_catalyst_dataset(
+    library_name: str | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return CatalystAnalysisService(session).catalyst_dataset(library_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/catalyst-dataset.csv")
+def get_catalyst_dataset_csv(
+    library_name: str | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    try:
+        csv_text, _payload = CatalystAnalysisService(session).catalyst_dataset_csv(library_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(
+        content=csv_text,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{CATALYST_WIDE_CSV_FILENAME}"'},
+    )
 
 
 @router.get("/audit-issues")

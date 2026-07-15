@@ -32,6 +32,18 @@
       <article class="metric"><strong id="metricPapers">-</strong><span>贡献论文</span></article>
     </section>
 
+    <section class="panel export-panel" aria-labelledby="export-title">
+      <div>
+        <h2 id="export-title">催化剂级数据导出</h2>
+        <p>CSV：给 pandas、随机森林、XGBoost 使用；缺失或冲突值为空。JSON：用于来源追溯和 AI 核验，不是直接训练表。</p>
+      </div>
+      <div class="export-actions">
+        <button id="exportCatalystCsv" class="btn btn-primary" type="button">导出催化剂宽表 CSV</button>
+        <button id="downloadCatalystJson" class="btn btn-secondary" type="button">下载审计 JSON</button>
+      </div>
+      <p id="exportStatus" class="status" aria-live="polite"></p>
+    </section>
+
     <section class="panel relation-panel" aria-labelledby="relation-title">
       <div class="panel-head">
         <div>

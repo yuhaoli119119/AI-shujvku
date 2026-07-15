@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-from dataclasses import dataclass
+import csv
+import io
 import json
 import math
 import re
+from collections import Counter, defaultdict
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
@@ -18,6 +20,8 @@ from app.utils.review_safety import bulk_export_gate_results
 
 
 SCHEMA_VERSION = "dft_catalyst_correlation_v1"
+CATALYST_WIDE_SCHEMA_VERSION = "dft_catalyst_wide_v1"
+CATALYST_WIDE_CSV_FILENAME = "dft_catalyst_dataset_v1.csv"
 _ADSORBATES = ("S8", "Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S")
 _RDS_MARKERS = re.compile(r"rds|rate[- ]determining|rate determining|limiting step|决速步骤", re.I)
 _LI2S_DISSOCIATION_MARKERS = re.compile(r"li\s*2\s*s|lithium\s+sulfide|锂硫化物", re.I)
@@ -49,8 +53,8 @@ def _field(
 _FIELD_REGISTRY: tuple[dict[str, Any], ...] = (
     _field("catalyst_name", "催化剂名称", None, "string", "来自明确绑定的 catalyst_sample；不做名称合并", category="metadata"),
     _field("catalyst_sample_id", "催化剂样品 ID", None, "uuid", "必须来自 DFTResult.catalyst_sample_id；缺失即排除", category="metadata"),
-    _field("paper_id", "论文 ID", None, "uuid", "来自 DFT 来源记录所属论文", category="metadata"),
     _field("paper_code", "论文编号", None, "string", "来自 Paper.paper_code；不以 UUID 替代", category="metadata"),
+    _field("paper_id", "论文 ID", None, "uuid", "来自 DFT 来源记录所属论文", category="metadata"),
     _field("doi", "DOI", None, "string", "来自 Paper.doi", category="metadata"),
     _field("catalyst_type", "催化剂类型", None, "string", "来自 catalyst_sample；上下文不一致时不猜测", category="metadata"),
     _field("metal_centers", "金属中心", None, "array[string]", "来自 catalyst_sample；保留原样并排序展示", category="metadata"),
@@ -89,6 +93,10 @@ _FIELD_REGISTRY: tuple[dict[str, Any], ...] = (
 )
 FIELD_REGISTRY = {item["field"]: item for item in _FIELD_REGISTRY}
 FIELD_ALIASES = {"li2s_decomposition_barrier": "li2s_dissociation_barrier"}
+CATALYST_WIDE_COLUMNS = tuple(item["field"] for item in _FIELD_REGISTRY)
+CATALYST_WIDE_NUMERIC_FIELDS = tuple(
+    item["field"] for item in _FIELD_REGISTRY if item["type"] == "number"
+)
 
 
 @dataclass
@@ -340,11 +348,15 @@ def _candidate_groups(field: str, rows: list[_ReadyRow]) -> list[list[_Candidate
         groups: list[list[_Candidate]] = []
         for left_group in left:
             for right_group in right:
-                left_context = {key: value for key, value in left_group[0].context.items() if key != "canonical_atom_pair"} if left_group else {}
-                right_context = {key: value for key, value in right_group[0].context.items() if key != "canonical_atom_pair"} if right_group else {}
+                left_context = _pairing_context(left_group[0].context) if left_group else {}
+                right_context = _pairing_context(right_group[0].context) if right_group else {}
                 if not left_group or not right_group or not _contexts_compatible(left_context, right_context):
                     continue
-                values = [max(left_group[0].value, right_group[0].value)]
+                selected_left, left_reason, _left_candidates = _resolve_group("li1_s_bond_length", left_group)
+                selected_right, right_reason, _right_candidates = _resolve_group("li2_s_bond_length", right_group)
+                if left_reason or right_reason or selected_left is None or selected_right is None:
+                    continue
+                values = [max(selected_left["value"], selected_right["value"])]
                 context = {**left_context, **right_context}
                 representative = _Candidate(
                     left_group[0].ready,
@@ -352,7 +364,12 @@ def _candidate_groups(field: str, rows: list[_ReadyRow]) -> list[list[_Candidate
                     "Å",
                     context,
                     _context_key(context),
-                    source_record_ids=tuple(sorted(set(left_group[0].source_ids + right_group[0].source_ids))),
+                    source_record_ids=tuple(
+                        sorted(
+                            set(selected_left["source_record_ids"])
+                            | set(selected_right["source_record_ids"])
+                        )
+                    ),
                 )
                 groups.append([representative])
         return groups
@@ -421,6 +438,18 @@ def _resolve_group(field: str, group: list[_Candidate]) -> tuple[dict[str, Any] 
             "context": _pairing_context(group[0].context),
             "candidates": candidates,
         }, None, candidates
+    if field == "li_s_bond_max":
+        for candidate in candidates:
+            candidate["selected_for_summary"] = True
+            candidate["selected_for_regression"] = True
+        return {
+            "value": values[0],
+            "unit": group[0].unit,
+            "source_record_ids": sorted({source_id for item in group for source_id in item.source_ids}),
+            "selection_reason": "maximum_of_selected_li_s_bonds",
+            "context": group[0].context,
+            "candidates": candidates,
+        }, None, candidates
     if all(math.isclose(value, values[0], rel_tol=1e-12, abs_tol=1e-12) for value in values[1:]):
         reason = "unique_comparable_value" if len(group) == 1 else "deduplicated_equal_values"
         return {
@@ -470,6 +499,41 @@ def _catalyst_payload(catalyst: CatalystSample) -> dict[str, Any]:
         "coordination": catalyst.coordination,
         "support": catalyst.support,
     }
+
+
+def _manifest_field(
+    field: str,
+    *,
+    selected_value: Any = None,
+    unit: str | None = None,
+    selection_reason: str | None = None,
+    source_record_ids: list[str] | tuple[str, ...] | None = None,
+    candidates: list[dict[str, Any]] | None = None,
+    exclusion_reason: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "field": field,
+        "selected_value": selected_value,
+        "unit": unit,
+        "selection_rule": FIELD_REGISTRY[field]["selection_rule"],
+        "selection_reason": selection_reason,
+        "candidates": candidates or [],
+        "source_record_ids": sorted(set(source_record_ids or [])),
+        "conflict": exclusion_reason in {
+            "conflicting_values",
+            "incomparable_contexts",
+            "incompatible_row_contexts",
+        },
+        "exclusion_reason": exclusion_reason,
+    }
+
+
+def _csv_cell(value: Any) -> Any:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return value
 
 
 def _rank(values: list[float]) -> list[float]:
@@ -588,6 +652,9 @@ class CatalystAnalysisService:
             if row_paper is None:
                 continue
             row, paper = row_paper
+            gate = gates.get(record_id)
+            if gate is None or not gate.eligible:
+                continue
             if row.identity_version != 2:
                 continue
             if not bool(record.get("is_ml_ready")):
@@ -620,6 +687,251 @@ class CatalystAnalysisService:
             "excluded_counts": dict(sorted(exclusions.items())),
             "analysis_policy": "Only safety-gate-eligible, identity_version=2, is_ml_ready rows with explicit catalyst_sample_id are eligible.",
         }
+
+    def catalyst_dataset(self, library_name: str | None = None) -> dict[str, Any]:
+        """Build the fixed-width catalyst dataset and its field-level audit manifest."""
+        ready, source_exclusions, source_counts = self._load_ready_rows(library_name)
+        exclusions = Counter(source_exclusions)
+        field_exclusions: Counter[str] = Counter()
+        by_catalyst: dict[str, list[_ReadyRow]] = defaultdict(list)
+        for item in ready:
+            by_catalyst[str(item.catalyst.id)].append(item)
+
+        rows: list[dict[str, Any]] = []
+        catalyst_manifest: dict[str, dict[str, Any]] = {}
+        for catalyst_id in sorted(by_catalyst):
+            catalyst_rows = sorted(by_catalyst[catalyst_id], key=lambda item: str(item.row.id))
+            paper_ids = {str(item.paper.id) for item in catalyst_rows}
+            if len(paper_ids) != 1:
+                exclusions["multiple_papers_for_catalyst_sample"] += 1
+                continue
+
+            representative = catalyst_rows[0]
+            catalyst = representative.catalyst
+            paper = representative.paper
+            metal_centers = sorted(
+                {_text(value) for value in (catalyst.metal_centers or []) if _text(value)},
+                key=str.casefold,
+            )
+            row: dict[str, Any] = {
+                "catalyst_name": catalyst.name,
+                "catalyst_sample_id": catalyst_id,
+                "paper_code": paper.paper_code,
+                "paper_id": str(paper.id),
+                "doi": paper.doi,
+                "catalyst_type": catalyst.catalyst_type,
+                "metal_centers": metal_centers,
+                "coordination": catalyst.coordination,
+                "support": catalyst.support,
+                "functional": None,
+            }
+            fields: dict[str, dict[str, Any]] = {
+                "catalyst_name": _manifest_field(
+                    "catalyst_name",
+                    selected_value=catalyst.name,
+                    selection_reason="catalyst_sample_metadata",
+                    exclusion_reason=None if catalyst.name is not None else "missing_metadata",
+                ),
+                "catalyst_sample_id": _manifest_field(
+                    "catalyst_sample_id",
+                    selected_value=catalyst_id,
+                    selection_reason="explicit_catalyst_sample_binding",
+                ),
+                "paper_code": _manifest_field(
+                    "paper_code",
+                    selected_value=paper.paper_code,
+                    selection_reason="paper_metadata",
+                    exclusion_reason=None if paper.paper_code is not None else "missing_metadata",
+                ),
+                "paper_id": _manifest_field(
+                    "paper_id",
+                    selected_value=str(paper.id),
+                    selection_reason="paper_metadata",
+                ),
+                "doi": _manifest_field(
+                    "doi",
+                    selected_value=paper.doi,
+                    selection_reason="paper_metadata",
+                    exclusion_reason=None if paper.doi is not None else "missing_metadata",
+                ),
+                "catalyst_type": _manifest_field(
+                    "catalyst_type",
+                    selected_value=catalyst.catalyst_type,
+                    selection_reason="catalyst_sample_metadata",
+                    exclusion_reason=None if catalyst.catalyst_type is not None else "missing_metadata",
+                ),
+                "metal_centers": _manifest_field(
+                    "metal_centers",
+                    selected_value=metal_centers,
+                    selection_reason="sorted_catalyst_sample_metadata",
+                    exclusion_reason=None if metal_centers else "missing_metadata",
+                ),
+                "coordination": _manifest_field(
+                    "coordination",
+                    selected_value=catalyst.coordination,
+                    selection_reason="catalyst_sample_metadata",
+                    exclusion_reason=None if catalyst.coordination is not None else "missing_metadata",
+                ),
+                "support": _manifest_field(
+                    "support",
+                    selected_value=catalyst.support,
+                    selection_reason="catalyst_sample_metadata",
+                    exclusion_reason=None if catalyst.support is not None else "missing_metadata",
+                ),
+            }
+
+            selected_by_field: dict[str, dict[str, Any]] = {}
+            candidates_by_field: dict[str, list[dict[str, Any]]] = {}
+            reason_by_field: dict[str, str | None] = {}
+            for field in CATALYST_WIDE_NUMERIC_FIELDS:
+                selected, reason, candidates = _resolve_field(
+                    field,
+                    _candidate_groups(field, catalyst_rows),
+                )
+                selected_by_field[field] = selected or {}
+                candidates_by_field[field] = candidates
+                reason_by_field[field] = reason
+
+            selected_fields = [field for field, selected in selected_by_field.items() if selected]
+            incompatible_fields: set[str] = set()
+            for index, left_field in enumerate(selected_fields):
+                for right_field in selected_fields[index + 1 :]:
+                    if not _pairing_contexts_compatible(
+                        selected_by_field[left_field].get("context") or {},
+                        selected_by_field[right_field].get("context") or {},
+                    ):
+                        incompatible_fields.update((left_field, right_field))
+            for field in incompatible_fields:
+                selected_by_field[field] = {}
+                reason_by_field[field] = "incompatible_row_contexts"
+
+            for field in CATALYST_WIDE_NUMERIC_FIELDS:
+                selected = selected_by_field[field]
+                reason = reason_by_field[field]
+                candidate_source_ids = sorted(
+                    {
+                        str(source_id)
+                        for candidate in candidates_by_field[field]
+                        for source_id in (candidate.get("source_record_ids") or [candidate.get("source_record_id")])
+                        if source_id
+                    }
+                )
+                row[field] = selected.get("value") if selected else None
+                if reason:
+                    field_exclusions[reason] += 1
+                fields[field] = _manifest_field(
+                    field,
+                    selected_value=selected.get("value") if selected else None,
+                    unit=selected.get("unit") if selected else FIELD_REGISTRY[field]["unit"],
+                    selection_reason=selected.get("selection_reason") if selected else None,
+                    source_record_ids=selected.get("source_record_ids") if selected else candidate_source_ids,
+                    candidates=candidates_by_field[field],
+                    exclusion_reason=reason,
+                )
+
+            functional_candidates: dict[str, set[str]] = defaultdict(set)
+            for selected in selected_by_field.values():
+                if not selected:
+                    continue
+                functional = _text((selected.get("context") or {}).get("functional"))
+                if functional:
+                    functional_candidates[functional].update(selected.get("source_record_ids") or [])
+            if not functional_candidates:
+                for item in catalyst_rows:
+                    functional = _text(_context(item).get("functional"))
+                    if functional:
+                        functional_candidates[functional].add(str(item.row.id))
+            if len(functional_candidates) == 1:
+                functional, functional_sources = next(iter(functional_candidates.items()))
+                row["functional"] = functional
+                fields["functional"] = _manifest_field(
+                    "functional",
+                    selected_value=functional,
+                    selection_reason="unique_explicit_dft_setting_functional",
+                    source_record_ids=sorted(functional_sources),
+                )
+            else:
+                functional_reason = "missing_metadata" if not functional_candidates else "ambiguous_dft_setting_functional"
+                fields["functional"] = _manifest_field(
+                    "functional",
+                    candidates=[
+                        {
+                            "value": functional,
+                            "unit": None,
+                            "source_record_ids": sorted(source_ids),
+                            "paper": _paper_payload(paper),
+                        }
+                        for functional, source_ids in sorted(functional_candidates.items())
+                    ],
+                    exclusion_reason=functional_reason,
+                )
+                field_exclusions[functional_reason] += 1
+
+            ordered_row = {field: row.get(field) for field in CATALYST_WIDE_COLUMNS}
+            rows.append(ordered_row)
+            catalyst_manifest[catalyst_id] = {
+                "catalyst_sample_id": catalyst_id,
+                "paper": _paper_payload(paper),
+                "warnings": ["incompatible_row_contexts"] if incompatible_fields else [],
+                "fields": {field: fields[field] for field in CATALYST_WIDE_COLUMNS},
+            }
+
+        paper_ids = sorted({str(row["paper_id"]) for row in rows if row.get("paper_id")})
+        paper_codes = sorted({str(row["paper_code"]) for row in rows if row.get("paper_code")})
+        scoped_library_name = normalize_library_name(library_name) if library_name is not None else None
+        warnings: list[str] = []
+        if field_exclusions.get("missing_value") or field_exclusions.get("missing_metadata"):
+            warnings.append("missing_fields_left_blank")
+        if field_exclusions.get("conflicting_values"):
+            warnings.append("conflicting_fields_left_blank")
+        if field_exclusions.get("incomparable_contexts") or field_exclusions.get("ambiguous_dft_setting_functional"):
+            warnings.append("incomparable_context_fields_left_blank")
+        if field_exclusions.get("incompatible_row_contexts"):
+            warnings.append("incompatible_row_contexts")
+        if not rows:
+            warnings.append("no_catalyst_rows")
+        excluded = {
+            "source_row_reasons": dict(sorted(exclusions.items())),
+            "source_row_reason_count": sum(exclusions.values()),
+            "field_reasons": dict(sorted(field_exclusions.items())),
+            "field_reason_count": sum(field_exclusions.values()),
+        }
+        manifest = {
+            "schema_version": CATALYST_WIDE_SCHEMA_VERSION,
+            "library_name": scoped_library_name,
+            "row_count": len(rows),
+            "paper_count": len(paper_ids),
+            "paper_ids": paper_ids,
+            "paper_codes": paper_codes,
+            "selection_policy": (
+                "One row per catalyst_sample_id. Only export-gate-eligible Identity V2 ML-ready rows "
+                "with explicit catalyst and calculation setting are considered. Ordinary conflicts and "
+                "incompatible contexts stay null; only comparable Li2S paths use the approved maximum rule."
+            ),
+            "catalysts": catalyst_manifest,
+        }
+        return {
+            "schema_version": CATALYST_WIDE_SCHEMA_VERSION,
+            "library_name": scoped_library_name,
+            "columns": list(CATALYST_WIDE_COLUMNS),
+            "field_definitions": self.field_registry(),
+            "row_count": len(rows),
+            "paper_count": len(paper_ids),
+            "rows": rows,
+            "manifest": manifest,
+            "warnings": warnings,
+            "excluded": excluded,
+            "source_counts": source_counts,
+        }
+
+    def catalyst_dataset_csv(self, library_name: str | None = None) -> tuple[str, dict[str, Any]]:
+        payload = self.catalyst_dataset(library_name)
+        stream = io.StringIO(newline="")
+        writer = csv.DictWriter(stream, fieldnames=list(CATALYST_WIDE_COLUMNS), lineterminator="\r\n")
+        writer.writeheader()
+        for row in payload["rows"]:
+            writer.writerow({field: _csv_cell(row.get(field)) for field in CATALYST_WIDE_COLUMNS})
+        return "\ufeff" + stream.getvalue(), payload
 
     def correlation(self, *, library_name: str | None, x_field: str, y_field: str, min_n: int = 3) -> dict[str, Any]:
         x_field = FIELD_ALIASES.get(x_field, x_field)

@@ -23,6 +23,8 @@ def _is_export_path(path: str) -> bool:
         or path == "/api/dft/ml-dataset-v3"
         or path == "/api/dft/ml-dataset-v3.csv"
         or path == "/api/dft/ml-dataset-v3/manifest"
+        or path == "/api/dft/catalyst-dataset"
+        or path == "/api/dft/catalyst-dataset.csv"
         or path == "/api/dft/project-library-ml-export"
         or path == "/api/dft/project-library-ml-export.csv"
         or path == "/api/writing/export"
