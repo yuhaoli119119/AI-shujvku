@@ -76,11 +76,21 @@ test('AI task center main log stays batch-oriented', () => {
 
 test('content knowledge page exposes unified safe retrieval surface', () => {
   const topnav = readFrontendFile('shared/topnav.js');
-  const page = readFrontendFile('pages/content_knowledge/index.html');
+  const page = [
+    'pages/content_knowledge/index.html',
+    'pages/content_knowledge/api.js',
+    'pages/content_knowledge/page.js',
+    'pages/content_knowledge/review-actions.js',
+  ].map(readFrontendFile).join('\n');
 
   expect(topnav).toContain('id: "content-knowledge"');
   expect(topnav).toContain('label: "内容知识"');
   expect(page).toContain('/api/content-knowledge?');
+  expect(page).toContain('/api/content-knowledge/sync?');
+  expect(page).toContain('/validate');
+  expect(page).toContain('/apply');
+  expect(page).toContain('/finalize');
+  expect(page).toContain('先同步索引后审核');
   expect(page).toContain('mechanism_evidence');
   expect(page).toContain('writing_material');
   expect(page).toContain('citation_policy');
