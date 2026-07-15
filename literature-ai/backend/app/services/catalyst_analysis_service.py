@@ -265,6 +265,33 @@ def _contexts_compatible(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return True
 
 
+# These are the calculation/structure dimensions that are meaningful when
+# pairing two different properties.  Reaction/path/state/atom-pair fields
+# describe the property itself and may still be used for candidate grouping,
+# but must not make (for example) adsorption and dissociation incomparable.
+PAIRING_CONTEXT_KEYS = frozenset(
+    {
+        "dft_setting_id",
+        "functional",
+        "dispersion_correction",
+        "configuration",
+        "active_site_instance_key",
+        "site_label",
+        "facet",
+        "coverage",
+        "termination",
+    }
+)
+
+
+def _pairing_context(context: dict[str, Any]) -> dict[str, Any]:
+    return {key: context[key] for key in PAIRING_CONTEXT_KEYS if key in context}
+
+
+def _pairing_contexts_compatible(left: dict[str, Any], right: dict[str, Any]) -> bool:
+    return _contexts_compatible(_pairing_context(left), _pairing_context(right))
+
+
 def _numeric_value(record: dict[str, Any], row: DFTResult, field: str) -> tuple[float, str | None] | None:
     target = record.get("target") if isinstance(record.get("target"), dict) else {}
     value = target.get("normalized_value")
@@ -339,12 +366,9 @@ def _candidate_groups(field: str, rows: list[_ReadyRow]) -> list[list[_Candidate
             continue
         value, unit = normalized
         context = _context(ready)
-        if field == "li2s_dissociation_barrier":
-            # Different Li2S dissociation paths are the candidates for the
-            # approved max rule; calculation context remains comparable.
-            context.pop("reaction_step", None)
-        grouped[_context_key(context)].append(
-            _Candidate(ready, value, FIELD_REGISTRY[field]["unit"] or unit, context, _context_key(context))
+        grouping_context = _pairing_context(context) if field == "li2s_dissociation_barrier" else context
+        grouped[_context_key(grouping_context)].append(
+            _Candidate(ready, value, FIELD_REGISTRY[field]["unit"] or unit, context, _context_key(grouping_context))
         )
     return list(grouped.values())
 
@@ -365,6 +389,7 @@ def _candidate_payload(candidate: _Candidate) -> dict[str, Any]:
         "paper_code": candidate.ready.paper.paper_code,
         "paper": _paper_payload(candidate.ready.paper),
         "context": candidate.context,
+        "pairing_context": _pairing_context(candidate.context),
         "selected_for_summary": False,
         "selected_for_regression": False,
     }
@@ -393,7 +418,7 @@ def _resolve_group(field: str, group: list[_Candidate]) -> tuple[dict[str, Any] 
             "unit": group[0].unit,
             "source_record_ids": sorted(selected_ids),
             "selection_reason": "maximum_of_comparable_li2s_paths",
-            "context": group[0].context,
+            "context": _pairing_context(group[0].context),
             "candidates": candidates,
         }, None, candidates
     if all(math.isclose(value, values[0], rel_tol=1e-12, abs_tol=1e-12) for value in values[1:]):
@@ -629,7 +654,7 @@ class CatalystAnalysisService:
                     (x_group, y_group)
                     for x_group in x_groups
                     for y_group in y_groups
-                    if x_group and y_group and _contexts_compatible(x_group[0].context, y_group[0].context)
+                    if x_group and y_group and _pairing_contexts_compatible(x_group[0].context, y_group[0].context)
                 ]
                 if len(compatible) != 1:
                     reason = "context_mismatch" if not compatible else "multiple_comparable_contexts"

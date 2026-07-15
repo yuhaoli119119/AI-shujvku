@@ -16,6 +16,7 @@ from app.services.catalyst_analysis_service import (
     _field_matches,
     _is_li2s_barrier,
     _is_li2s_charge_transfer,
+    _pairing_contexts_compatible,
     _resolve_group,
     _stats,
 )
@@ -34,7 +35,18 @@ def _ready(
     reaction_step: str | None = None,
     atom_pair: str | None = None,
     record_id=None,
+    setting_id: str = "setting-1",
+    active_site_instance_key: str | None = None,
+    site_label: str | None = None,
+    property_context: dict | None = None,
 ):
+    subject = {"canonical_atom_pair": atom_pair} if atom_pair else {}
+    if active_site_instance_key is not None:
+        subject["active_site_instance_key"] = active_site_instance_key
+    if site_label is not None:
+        subject["site_label"] = site_label
+    if property_context is not None:
+        subject["property_context"] = property_context
     row = DFTResult(
         id=record_id or uuid4(),
         paper_id=paper.id,
@@ -48,14 +60,14 @@ def _ready(
         identity_version=2,
         identity_payload={
             "identity_version": 2,
-            "subject": {"canonical_atom_pair": atom_pair} if atom_pair else {},
+            "subject": subject,
         },
     )
     record = {
         "record_id": str(row.id),
         "is_ml_ready": True,
         "target": {"normalized_value": value, "normalized_unit": row.unit},
-        "linked_dft_setting": {"dft_setting_id": "setting-1", "functional": "PBE"},
+        "linked_dft_setting": {"dft_setting_id": setting_id, "functional": "PBE"},
     }
     return _ReadyRow(row=row, paper=paper, record=record, catalyst=catalyst)
 
@@ -139,6 +151,75 @@ def test_barrier_max_bond_max_and_duplicate_provenance_are_deterministic():
     assert set(max_groups[0][0].source_ids) == {str(li1.row.id), str(li2.row.id)}
 
 
+def test_barrier_paths_group_by_pairing_context_and_select_maximum():
+    paper, catalyst = _paper_and_catalyst(2)
+    path_a = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="reaction_barrier",
+        value=1.2,
+        adsorbate="Li2S",
+        reaction_step="Li2S dissociation A",
+        active_site_instance_key="site-1",
+        site_label="bridge",
+        property_context={"pathway": "pathway A", "initial_state": "Li2S", "transition_state": "TS-A", "final_state": "2LiS"},
+    )
+    path_b = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="reaction_barrier",
+        value=1.8,
+        adsorbate="Li2S",
+        reaction_step="Li2S dissociation B",
+        active_site_instance_key="site-1",
+        site_label="bridge",
+        property_context={"pathway": "pathway B", "initial_state": "Li2S", "transition_state": "TS-B", "final_state": "2LiS"},
+    )
+    groups = _candidate_groups("li2s_dissociation_barrier", [path_a, path_b])
+    assert len(groups) == 1
+    selected, reason, candidates = _resolve_group("li2s_dissociation_barrier", groups[0])
+    assert reason is None
+    assert selected["value"] == 1.8
+    assert selected["context"] == {
+        "dft_setting_id": "setting-1",
+        "functional": "PBE",
+        "active_site_instance_key": "site-1",
+        "site_label": "bridge",
+    }
+    by_path = {candidate["pathway"]: candidate for candidate in candidates}
+    assert by_path["pathway A"]["selected_for_summary"] is False
+    assert by_path["pathway A"]["selected_for_regression"] is False
+    assert by_path["pathway B"]["selected_for_summary"] is True
+    assert by_path["pathway B"]["selected_for_regression"] is True
+    assert by_path["pathway A"]["context"]["transition_state"] == "TS-A"
+
+    different_setting = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="reaction_barrier",
+        value=2.0,
+        adsorbate="Li2S",
+        reaction_step="Li2S dissociation C",
+        setting_id="setting-2",
+        active_site_instance_key="site-1",
+        site_label="bridge",
+        property_context={"pathway": "pathway C"},
+    )
+    different_site = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="reaction_barrier",
+        value=2.1,
+        adsorbate="Li2S",
+        reaction_step="Li2S dissociation D",
+        active_site_instance_key="site-2",
+        site_label="top",
+        property_context={"pathway": "pathway D"},
+    )
+    assert len(_candidate_groups("li2s_dissociation_barrier", [path_a, different_setting])) == 2
+    assert len(_candidate_groups("li2s_dissociation_barrier", [path_a, different_site])) == 2
+
+
 def test_correlation_pairs_only_same_catalyst_and_keeps_conflicts_out():
     ready = []
     exclusions = Counter({"safety_gate:missing_review": 1, "identity_v2_required": 1})
@@ -175,6 +256,148 @@ def test_correlation_pairs_only_same_catalyst_and_keeps_conflicts_out():
     assert payload["statistics"]["intercept"] == 0.0
     assert payload["excluded_reasons"]["context_mismatch"] >= 2
     assert payload["excluded_reasons"]["conflicting_values"] == 1
+    small_payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy", min_n=4)
+    assert small_payload["n_catalysts"] == 3
+    assert small_payload["n_papers"] == 3
+    assert "min_n_not_reached" in small_payload["warnings"]
+    assert small_payload["statistics"]["pearson"] is None
+
+
+def test_cross_field_pairing_ignores_property_state_but_requires_setting_and_site():
+    paper, catalyst = _paper_and_catalyst(20)
+    adsorption = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="adsorption_energy",
+        value=-1.0,
+        adsorbate="Li2S",
+        reaction_step="Li2S adsorption",
+        active_site_instance_key="site-1",
+        site_label="bridge",
+    )
+    barrier = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="reaction_barrier",
+        value=1.5,
+        adsorbate="Li2S",
+        reaction_step="Li2S dissociation",
+        active_site_instance_key="site-1",
+        site_label="bridge",
+    )
+    service = CatalystAnalysisService(None)
+    service._load_ready_rows = lambda _library: ([adsorption, barrier], Counter(), {})
+    payload = service.correlation(
+        library_name="unit",
+        x_field="li2s_adsorption_energy",
+        y_field="li2s_dissociation_barrier",
+        min_n=3,
+    )
+    assert payload["n_catalysts"] == 1
+    assert payload["excluded_reasons"].get("context_mismatch", 0) == 0
+
+    for changed in (
+        {"setting_id": "setting-2", "active_site_instance_key": "site-1", "site_label": "bridge"},
+        {"setting_id": "setting-1", "active_site_instance_key": "site-2", "site_label": "top"},
+    ):
+        incompatible_barrier = _ready(
+            catalyst=catalyst,
+            paper=paper,
+            property_type="reaction_barrier",
+            value=1.5,
+            adsorbate="Li2S",
+            reaction_step="Li2S dissociation",
+            **changed,
+        )
+        service._load_ready_rows = lambda _library, incompatible_barrier=incompatible_barrier: (
+            [adsorption, incompatible_barrier],
+            Counter(),
+            {},
+        )
+        incompatible = service.correlation(
+            library_name="unit",
+            x_field="li2s_adsorption_energy",
+            y_field="li2s_dissociation_barrier",
+            min_n=3,
+        )
+        assert incompatible["n_catalysts"] == 0
+        assert incompatible["excluded_reasons"]["context_mismatch"] == 1
+
+
+def test_equal_duplicates_dedupe_and_keep_all_source_ids():
+    paper, catalyst = _paper_and_catalyst(30)
+    first = _ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=1.0)
+    duplicate = _ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=1.0)
+    y_value = _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-1.0, adsorbate="Li2S")
+    service = CatalystAnalysisService(None)
+    service._load_ready_rows = lambda _library: ([first, duplicate, y_value], Counter(), {})
+    payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy")
+    assert payload["n_catalysts"] == 1
+    point = payload["points"][0]
+    assert set(point["x_source_record_ids"]) == {str(first.row.id), str(duplicate.row.id)}
+    assert point["x"]["selection_reason"] == "deduplicated_equal_values"
+
+
+def test_multiple_comparable_contexts_do_not_form_cartesian_product():
+    paper, catalyst = _paper_and_catalyst(31)
+    ready = [
+        _ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=1.0, setting_id="setting-1"),
+        _ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=2.0, setting_id="setting-2"),
+        _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-1.0, adsorbate="Li2S", setting_id="setting-1"),
+        _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-2.0, adsorbate="Li2S", setting_id="setting-2"),
+    ]
+    service = CatalystAnalysisService(None)
+    service._load_ready_rows = lambda _library: (ready, Counter(), {})
+    payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy")
+    assert payload["n_catalysts"] == 0
+    assert payload["excluded_reasons"]["multiple_comparable_contexts"] == 1
+    assert len(payload["excluded_details"][0]["x_candidates"]) == 2
+    assert len(payload["excluded_details"][0]["y_candidates"]) == 2
+
+
+def test_pairing_context_excludes_property_state_fields():
+    assert _pairing_contexts_compatible(
+        {
+            "dft_setting_id": "setting-1",
+            "active_site_instance_key": "site-1",
+            "reaction_step": "Li2S adsorption",
+            "initial_state": "adsorbed",
+        },
+        {
+            "dft_setting_id": "setting-1",
+            "active_site_instance_key": "site-1",
+            "reaction_step": "Li2S dissociation",
+            "transition_state": "saddle",
+        },
+    )
+
+
+def test_metadata_analysis_field_is_rejected_as_nonnumeric():
+    service = CatalystAnalysisService(None)
+    with pytest.raises(ValueError, match="numeric"):
+        service.correlation(library_name=None, x_field="catalyst_name", y_field="d_band_center")
+
+
+def test_overview_keeps_exportable_and_correlation_ready_counts_distinct():
+    paper, catalyst = _paper_and_catalyst(32)
+    ready = [_ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=1.0)]
+    service = CatalystAnalysisService(None)
+    service._load_ready_rows = lambda _library: (
+        ready,
+        Counter(),
+        {
+            "total_dft_rows": 5,
+            "exportable_dft_rows": 4,
+            "v2_row_ready_numeric_rows": 1,
+            "distinct_exportable_catalysts": 2,
+        },
+    )
+    overview = service.overview_counts(None)
+    assert overview["total_dft_rows"] == 5
+    assert overview["exportable_dft_rows"] == 4
+    assert overview["v2_row_ready_numeric_rows"] == 1
+    assert overview["distinct_exportable_catalysts"] == 2
+    assert overview["contributing_papers"] == 1
 
 
 def test_invalid_analysis_field_is_clear():
