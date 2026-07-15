@@ -210,10 +210,16 @@ def _is_li2s_charge_transfer(row: DFTResult) -> bool:
 
 def _bond_atom_pair(row: DFTResult) -> str:
     pair = _atom_pair(row)
-    text = _row_text(row).replace("-", "_")
-    if pair in {"li1_s", "s_li1", "li_1_s", "s_li_1"} or re.search(r"li\s*_?1\s*_?s", text):
+    if pair:
+        if pair in {"li1_s", "s_li1", "li_1_s", "s_li_1"}:
+            return "li1_s"
+        if pair in {"li2_s", "s_li2", "li_2_s", "s_li_2"}:
+            return "li2_s"
+        return ""
+    text = _row_text(row)
+    if re.search(r"\bli\s*_?1\s*(?:[-–—−_]|\s+)\s*s\b", text):
         return "li1_s"
-    if pair in {"li2_s", "s_li2", "li_2_s", "s_li_2"} or re.search(r"li\s*_?2\s*_?s", text):
+    if re.search(r"\bli\s*_?2\s*(?:[-–—−_]|\s+)\s*s\b", text):
         return "li2_s"
     return ""
 
@@ -335,7 +341,7 @@ def _pair_analysis_record_exclusion(row: DFTResult, record: dict[str, Any]) -> s
     if not math.isfinite(number):
         return "pair_analysis_invalid_numeric_target"
     normalization_status = _norm(target.get("normalization_status"))
-    if normalization_status not in {"", "normalized"}:
+    if normalization_status not in {"", "normalized", "identity"}:
         return "pair_analysis_target_not_normalized"
     if record.get("setting_link_status") != "clear_primary" or not record.get("linked_dft_setting"):
         return "missing_or_ambiguous_calculation_context"

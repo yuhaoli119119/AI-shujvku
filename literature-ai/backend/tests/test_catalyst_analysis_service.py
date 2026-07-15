@@ -103,6 +103,9 @@ def test_pair_analysis_accepts_reviewed_legacy_numeric_target_without_generic_de
     ready.record["setting_link_status"] = "clear_primary"
     assert _pair_analysis_record_exclusion(ready.row, ready.record) is None
 
+    ready.record["target"]["normalization_status"] = "identity"
+    assert _pair_analysis_record_exclusion(ready.row, ready.record) is None
+
     ready.record["setting_link_status"] = "ambiguous"
     assert _pair_analysis_record_exclusion(ready.row, ready.record) == "missing_or_ambiguous_calculation_context"
     ready.record["setting_link_status"] = "clear_primary"
@@ -147,6 +150,38 @@ def test_li2s_barrier_and_charge_rules_are_species_specific():
     assert _is_li2s_charge_transfer(li2s_charge.row)
     assert not _is_li2s_charge_transfer(s8_charge.row)
     assert _bond_atom_pair(bond.row) == "li1_s"
+
+
+def test_bond_atom_pair_never_treats_li2s_formula_as_li2_s_bond():
+    paper, catalyst = _paper_and_catalyst(98)
+    explicit_fe_s = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="bond_length",
+        value=2.2,
+        adsorbate="Li2S",
+        atom_pair="Fe-S",
+    )
+    formula_only = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="bond_length",
+        value=2.3,
+        adsorbate="Li2S",
+    )
+    legacy_li2_s = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="bond_length",
+        value=2.4,
+        adsorbate="Li2S",
+        reaction_step="Li2-S bond length",
+    )
+
+    assert _bond_atom_pair(explicit_fe_s.row) == ""
+    assert not _field_matches("li2_s_bond_length", explicit_fe_s)
+    assert _bond_atom_pair(formula_only.row) == ""
+    assert _bond_atom_pair(legacy_li2_s.row) == "li2_s"
 
 
 def test_barrier_max_bond_max_and_duplicate_provenance_are_deterministic():
