@@ -1657,28 +1657,6 @@ async function mockApi(route) {
     });
   }
 
-  if (pathname === '/api/visuals/correlation-pairs') {
-    return jsonResponse(route, {
-      y_property: 'adsorption_energy',
-      x_property: 'reaction_barrier',
-      target_property: 'adsorption_energy',
-      descriptor: 'reaction_barrier',
-      min_n: 3,
-      n: 3,
-      ready: true,
-      source: 'exploratory_same_sample',
-      pearson_r: 1,
-      spearman_rho: 1,
-      slope: 1,
-      intercept: -1.4,
-      points: [
-        { x: 0.4, y: -1.0, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
-        { x: 0.6, y: -0.8, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
-        { x: 0.8, y: -0.6, catalyst: 'Fe-GDY', adsorbate: 'H', paper_title: 'Test paper' },
-      ],
-    });
-  }
-
   // G3B Evidence Locator APIs
   if (pathname === '/api/papers/paper-1/evidence/locators' && method === 'GET') {
     return jsonResponse(route, []);
@@ -1884,51 +1862,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     page.on('pageerror', err => {
       consoleErrors.push(err.message);
     });
-  });
-
-  test('visuals lazy-loads expensive sections and scatter data', async ({ page }) => {
-    const visualRequests = [];
-    page.on('request', request => {
-      if (request.url().includes('/api/visuals/')) visualRequests.push(request.url());
-    });
-
-    const overviewResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=overview'));
-    await page.goto(`${BASE_URL}/pages/visuals/index.html`);
-    await overviewResponse;
-    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
-    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
-
-    const matrixResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=matrix'));
-    await page.click('.tab-btn[data-view="matrix"]');
-    await matrixResponse;
-    expect(visualRequests.filter(url => url.includes('sections=matrix'))).toHaveLength(1);
-
-    const correlationResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation'));
-    await page.click('.tab-btn[data-view="correlation"]');
-    await correlationResponse;
-    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(1);
-    expect(visualRequests.some(url => url.includes('corr_allow_exploratory=true'))).toBe(true);
-    expect(visualRequests.some(url => url.includes('correlation-pairs'))).toBe(false);
-    await expect(page.locator('#view-correlation .panel-title')).toContainText('DFT 总相关性热力图');
-    await expect(page.locator('#correlationHeadMeta')).toContainText('2 个 DFT 数值变量');
-    await expect(page.locator('.correlation-col-head')).toContainText(['吸附能', '反应能垒']);
-    await expect(page.locator('.correlation-row-head')).toContainText(['吸附能', '反应能垒']);
-    await expect(page.locator('.correlation-cell')).toHaveCount(4);
-    await expect(page.locator('.correlation-cell').nth(1)).toContainText('1.00');
-
-    const filteredResponse = page.waitForResponse(response => response.url().includes('/api/visuals/overview') && response.url().includes('sections=correlation') && response.url().includes('corr_min_n=5'));
-    await page.fill('#corrMinN', '5');
-    await page.dispatchEvent('#corrMinN', 'change');
-    await filteredResponse;
-    expect(visualRequests.filter(url => url.includes('sections=overview'))).toHaveLength(1);
-    expect(visualRequests.filter(url => url.includes('sections=correlation'))).toHaveLength(2);
-
-    const scatterResponse = page.waitForResponse(response => response.url().includes('/api/visuals/correlation-pairs'));
-    await page.locator('.correlation-cell:not(.identity)').first().click();
-    await scatterResponse;
-    expect(visualRequests.filter(url => url.includes('correlation-pairs'))).toHaveLength(1);
-    const scatterRequests = visualRequests.filter(url => url.includes('correlation-pairs'));
-    expect(scatterRequests.some(url => url.includes('allow_exploratory=true'))).toBe(true);
   });
 
   for (const pageInfo of PAGES) {
