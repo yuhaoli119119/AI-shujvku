@@ -157,6 +157,8 @@ class OfflineDFTReviewResult(BaseModel):
     paper_code: str = Field(min_length=1, max_length=64)
     chart_scope_type: Literal["paper", "external_analysis_run", "paper_reviewed_aggregate"] = "paper_reviewed_aggregate"
     chart_run_id: str | None = Field(default=None, max_length=64)
+    catalyst_sample_id: str | None = Field(default=None, max_length=64)
+    dft_result_ids: list[str] = Field(default_factory=list)
     review_mode: DFTReviewMode
     review_source: OfflineReviewSource
     overall_status: OverallReviewStatus = Field(
@@ -184,6 +186,24 @@ class OfflineDFTReviewResult(BaseModel):
         if not stripped:
             raise ValueError("identity value must not be blank")
         return stripped
+
+    @field_validator("catalyst_sample_id")
+    @classmethod
+    def strip_optional_target_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+    @field_validator("dft_result_ids")
+    @classmethod
+    def normalize_explicit_result_ids(cls, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+
+    @model_validator(mode="after")
+    def validate_explicit_target_selector(self) -> "OfflineDFTReviewResult":
+        if self.catalyst_sample_id and self.dft_result_ids:
+            raise ValueError("catalyst_sample_id and dft_result_ids are mutually exclusive")
+        return self
 
     @model_validator(mode="after")
     def validate_chart_scope(self) -> "OfflineDFTReviewResult":

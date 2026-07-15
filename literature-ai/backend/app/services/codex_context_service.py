@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.models import (
+    CatalystSample,
     DFTResult,
     EvidenceLocator,
     ExternalAnalysisCandidate,
@@ -144,10 +145,26 @@ class CodexContextService:
             supported = ", ".join(sorted(set(self.item_type_aliases.values())))
             raise ValueError(f"Unsupported item type. Supported values: {supported}")
 
-        detail = PaperQueryService(self.session).get_paper_detail(paper_id)
+        query_service = PaperQueryService(self.session)
+        detail = query_service.get_paper_detail(paper_id)
         if detail is None:
             return None
-        item = self._find_detail_item(detail, normalized_type, item_id)
+        if normalized_type == "dft_result":
+            result_page = query_service.get_dft_results_page(
+                paper_id,
+                result_id=item_id,
+            )
+            item = result_page["items"][0] if result_page and result_page["items"] else None
+        elif normalized_type == "catalyst_sample":
+            catalyst = self.session.scalar(
+                select(CatalystSample).where(
+                    CatalystSample.paper_id == paper_id,
+                    CatalystSample.id == item_id,
+                )
+            )
+            item = query_service._serialize_catalyst_sample(catalyst) if catalyst is not None else None
+        else:
+            item = self._find_detail_item(detail, normalized_type, item_id)
         if item is None:
             return None
 
@@ -1214,6 +1231,16 @@ class CodexContextService:
         corrections: list[dict[str, Any]],
     ) -> dict[str, Any]:
         payload = self._sample_identity_payload(detail, item_payload)
+        dependent_rows = self._direct_sample_dependent_dft_rows(
+            paper_id=detail.id,
+            sample_id=item_id,
+        )
+        payload["dependent_dft_summary"] = {
+            "total": len(dependent_rows),
+            "bound": len(dependent_rows),
+            "future_unbound": 0,
+        }
+        payload["dependent_dft_results"] = dependent_rows
         correction_anchors = [
             item.get("evidence_anchor")
             for item in corrections
@@ -1240,6 +1267,22 @@ class CodexContextService:
             }
         )
         return payload
+
+    def _direct_sample_dependent_dft_rows(
+        self,
+        *,
+        paper_id: UUID,
+        sample_id: UUID,
+    ) -> list[dict[str, Any]]:
+        rows = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id == sample_id,
+            )
+            .order_by(DFTResult.id.asc())
+        ).all()
+        return [self._dependent_dft_row_payload(row, binding_status="bound") for row in rows]
 
     def _sample_identity_payload(self, detail: PaperDetailResponse, sample_payload: dict[str, Any]) -> dict[str, Any]:
         name = str(sample_payload.get("name") or "").strip()
@@ -1319,21 +1362,22 @@ class CodexContextService:
                     binding_status = "future_candidate"
             if not binding_status:
                 continue
-            rows.append(
-                {
-                    "id": str(row.id),
-                    "binding_status": binding_status,
-                    "adsorbate": row.adsorbate,
-                    "property_type": row.property_type,
-                    "value": row.value,
-                    "unit": row.unit,
-                    "source_section": row.source_section,
-                    "source_figure": row.source_figure,
-                    "evidence_text": self._clip(row.evidence_text, 240),
-                    "candidate_status": self._legacy_candidate_status(row.candidate_status),
-                }
-            )
+            rows.append(self._dependent_dft_row_payload(row, binding_status=binding_status))
         return rows
+
+    def _dependent_dft_row_payload(self, row: Any, *, binding_status: str) -> dict[str, Any]:
+        return {
+            "id": str(row.id),
+            "binding_status": binding_status,
+            "adsorbate": row.adsorbate,
+            "property_type": row.property_type,
+            "value": row.value,
+            "unit": row.unit,
+            "source_section": row.source_section,
+            "source_figure": row.source_figure,
+            "evidence_text": self._clip(row.evidence_text, 240),
+            "candidate_status": self._legacy_candidate_status(row.candidate_status),
+        }
 
     def _build_dft_export_readiness(self, detail: PaperDetailResponse, *, limit: int) -> dict[str, Any]:
         rows = self.session.scalars(

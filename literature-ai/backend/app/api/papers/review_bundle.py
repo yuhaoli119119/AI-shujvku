@@ -37,6 +37,28 @@ def get_dft_review_state(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/{paper_id}/dft-review-task")
+def get_dft_review_task(
+    paper_id: UUID,
+    catalyst_sample_id: UUID | None = Query(default=None),
+    dft_result_ids: list[UUID] | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Return a pending-only or UUID-scoped local-AI DFT task without exporting or writing."""
+
+    try:
+        return DFTReviewBundleService(session, settings).get_review_task(
+            paper_id,
+            catalyst_sample_id=catalyst_sample_id,
+            dft_result_ids=dft_result_ids,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/{paper_id}/dft-review-bundle")
 def export_dft_review_bundle(
     paper_id: UUID,

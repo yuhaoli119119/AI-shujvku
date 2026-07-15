@@ -681,6 +681,30 @@ def get_dft_review_queue(
         )
 
 
+@mcp_server.tool(
+    name="get_dft_review_task",
+    description=(
+        "Get the current read-only DFT review task for one paper. "
+        "Pass catalyst_sample_id or dft_result_ids to explicitly re-review those UUID-bound rows, including terminal rows; "
+        "omit both selectors to keep the ordinary pending-only task. "
+        "Use this as the local IDE AI entry point before reading item/page evidence and writing through import_analysis."
+    ),
+)
+def get_dft_review_task(
+    paper_id: str,
+    catalyst_sample_id: str | None = None,
+    dft_result_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return DFTReviewBundleService(session, settings).get_review_task(
+            UUID(paper_id),
+            catalyst_sample_id=UUID(catalyst_sample_id) if catalyst_sample_id else None,
+            dft_result_ids=[UUID(item) for item in dft_result_ids or []],
+        )
+
+
 @mcp_server.tool(name="get_dft_audit_issues", description="Read DFT audit issue queue entries for one paper. This is read-only and does not repair or verify DFT data.")
 def get_dft_audit_issues(
     paper_id: str,

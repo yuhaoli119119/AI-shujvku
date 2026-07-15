@@ -732,6 +732,63 @@ def test_mcp_get_codex_item_returns_low_token_dft_context(mcp_test_env):
     assert payload["context"]["evidence_locators"]["items"][0]["page"] == 5
 
 
+def test_mcp_get_codex_item_reads_dft_after_detail_page_and_all_sample_bindings(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP exact DFT item paper", pdf_path="exact-dft-item.pdf")
+        session.add(paper)
+        session.flush()
+        sample = CatalystSample(paper_id=paper.id, name="Fe-N4")
+        session.add(sample)
+        session.flush()
+        rows = [
+            DFTResult(
+                id=UUID(int=index + 1),
+                paper_id=paper.id,
+                catalyst_sample_id=sample.id,
+                property_type="adsorption_energy",
+                adsorbate=f"Li2S{index}",
+                value=float(index),
+                unit="eV",
+                evidence_text=f"Exact DFT evidence {index}",
+            )
+            for index in range(30)
+        ]
+        session.add_all(rows)
+        session.commit()
+        paper_id = str(paper.id)
+        sample_id = str(sample.id)
+        target_id = str(rows[-1].id)
+        expected_row_ids = {str(row.id) for row in rows}
+
+        detail = PaperQueryService(session).get_paper_detail(paper.id)
+        assert detail is not None
+        assert len(detail.dft_results_items) == 28
+        assert target_id not in {str(item.id) for item in detail.dft_results_items}
+
+    with mcp_auth_context(_auth()):
+        dft_payload = get_codex_item(
+            paper_id=paper_id,
+            item_type="dft_result",
+            item_id=target_id,
+        )
+        sample_payload = get_codex_item(
+            paper_id=paper_id,
+            item_type="catalyst_sample",
+            item_id=sample_id,
+        )
+
+    assert dft_payload["context"]["item"]["id"] == target_id
+    assert dft_payload["context"]["item"]["value"] == 29.0
+    sample_item = sample_payload["context"]["item"]
+    assert sample_item["dependent_dft_summary"] == {
+        "total": 30,
+        "bound": 30,
+        "future_unbound": 0,
+    }
+    assert len(sample_item["dependent_dft_results"]) == 30
+    assert {item["id"] for item in sample_item["dependent_dft_results"]} == expected_row_ids
+
+
 def test_ordinary_ide_ai_reads_context_and_imports_unverified_audit_candidate(mcp_test_env):
     configs = parse_mcp_api_keys(
         "ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse"

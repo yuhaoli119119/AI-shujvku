@@ -58,6 +58,7 @@ class DFTImportedOpinionMixin:
                 verification_actor_type="ai",
                 source_label=source_label,
                 evidence_payload=evidence_payload,
+                expected_write_versions=expected_write_versions or {},
                 commit=commit,
             )
             return {

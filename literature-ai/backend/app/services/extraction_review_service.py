@@ -309,6 +309,7 @@ class ExtractionReviewService:
         items: list[ExtractionFieldReviewSaveItem],
         *,
         commit: bool = True,
+        allow_verified_reject: bool = False,
     ) -> list[ExtractionFieldReviewResponse]:
         prepared: list[tuple[ExtractionFieldReviewSaveItem, str, Any, dict[str, Any], ExtractionFieldReview | None]] = []
         for item in items:
@@ -336,7 +337,8 @@ class ExtractionReviewService:
 
         saved: list[ExtractionFieldReviewResponse] = []
         for item, canonical_type, target, field_snapshot, review in writable:
-            self._guard_verified_review_mutation(review, item.reviewed_value, item.reviewer_status)
+            if not allow_verified_reject:
+                self._guard_verified_review_mutation(review, item.reviewed_value, item.reviewer_status)
             # D1 Phase 3: save_reviews cannot directly set reviewer_status=verified
             # Verified must go through mark_verified API which has evidence checks
             incoming_status = item.reviewer_status
@@ -346,10 +348,18 @@ class ExtractionReviewService:
                     "Use the mark-verified endpoint for human verification."
                 )
             review.original_value = item.original_value if item.original_value is not None else field_snapshot["value"]
-            review.reviewed_value = item.reviewed_value if review.reviewer_status != "verified" else review.reviewed_value
+            review.reviewed_value = (
+                None
+                if allow_verified_reject and review.reviewer_status == "verified"
+                else item.reviewed_value if review.reviewer_status != "verified" else review.reviewed_value
+            )
             review.unit = item.unit if item.unit is not None else field_snapshot["unit"]
             review.evidence_text = item.evidence_text if item.evidence_text is not None else field_snapshot["evidence_text"]
-            review.reviewer_status = incoming_status if review.reviewer_status != "verified" else review.reviewer_status
+            review.reviewer_status = (
+                incoming_status
+                if allow_verified_reject or review.reviewer_status != "verified"
+                else review.reviewer_status
+            )
             review.reviewer = item.reviewer
             review.reviewer_note = item.reviewer_note
             review.review_payload = item.review_payload

@@ -622,6 +622,38 @@ class DFTResultGroupRebindResponse(BaseModel):
     remaining_dft_result_count: int
 
 
+class CatalystSampleDuplicateMergeSourceRequest(BaseModel):
+    source_sample_id: UUID
+    expected_current_name: str
+    dft_result_ids: list[UUID] = Field(default_factory=list)
+    expected_dft_result_count: int = Field(ge=0)
+
+
+class CatalystSampleDuplicateMergeRequest(BaseModel):
+    expected_target_name: str
+    sources: list[CatalystSampleDuplicateMergeSourceRequest] = Field(min_length=1)
+    confirm_same_physical_catalyst: bool = False
+    reason: str
+    reviewer: str | None = "literature_library_user"
+
+
+class CatalystSampleDuplicateMergeResponse(BaseModel):
+    status: str
+    target_sample_id: UUID
+    merged_source_sample_ids: list[UUID] = Field(default_factory=list)
+    moved_dft_result_ids: list[UUID] = Field(default_factory=list)
+    moved_dft_result_count: int
+    deleted_source_sample_ids: list[UUID] = Field(default_factory=list)
+    requires_reverification: bool = False
+    review_state_preserved: bool = True
+    invalidated_review_ids: list[UUID] = Field(default_factory=list)
+    reverification_task_ids: list[str] = Field(default_factory=list)
+    audit_log_id: UUID | None = None
+    request_fingerprint: str
+    transferred_evidence_reference_count: int = 0
+    active_site_refresh: dict[str, Any] = Field(default_factory=dict)
+
+
 class RAGWriteResponse(BaseModel):
     topic: str
     query: str

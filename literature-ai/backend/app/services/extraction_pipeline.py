@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import unicodedata
 from typing import Any
 from uuid import UUID
 
@@ -45,6 +46,11 @@ from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.workbench_status import EXTRACTION_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
+
+
+SAFE_DFT_MATERIAL_IDENTITY_ADSORBATES = frozenset(
+    {"li2s", "li2s2", "li2s4", "li2s6", "li2s8", "s8"}
+)
 
 
 STAGE2_LOCATOR_TARGET_TYPES = [
@@ -583,16 +589,13 @@ class ExtractionPipelineService:
         explicit_items: dict[str, list[dict[str, Any]]] = {}
         explicit_names: dict[str, str] = {}
         for item in dft_items or []:
-            raw_name = str(item.get("catalyst_name") or item.get("material_identity") or "").strip()
-            if not raw_name:
+            material_name, _ = self._canonical_dft_material_identity(item)
+            if not material_name:
                 continue
-            normalized_name = str(
-                self.chemistry_normalizer.normalize({"name": raw_name}).get("name") or raw_name
-            ).strip()
-            key = re.sub(r"[^a-z0-9]+", "", normalized_name.lower())
+            key = re.sub(r"[^a-z0-9]+", "", material_name.lower())
             if not key:
                 continue
-            explicit_names.setdefault(key, normalized_name)
+            explicit_names.setdefault(key, material_name)
             explicit_items.setdefault(key, []).append(item)
 
         if explicit_names:
@@ -764,9 +767,9 @@ class ExtractionPipelineService:
                         target_reaction=target_profile.key,
                     )
                     evidence_payload = PaperWorkbenchService.dft_evidence_payload(item)
-                    catalyst_name = str(
-                        item.get("catalyst_name") or item.get("material_identity") or ""
-                    ).strip()
+                    catalyst_name, reported_material_identity = (
+                        self._canonical_dft_material_identity(item)
+                    )
                     catalyst = (
                         catalyst_by_name.get(
                             re.sub(r"[^a-z0-9]+", "", catalyst_name.lower())
@@ -778,6 +781,7 @@ class ExtractionPipelineService:
                         {
                             "catalyst_name": catalyst_name or None,
                             "material_identity": catalyst_name or None,
+                            "reported_material_identity": reported_material_identity or None,
                             "active_site_context": item.get("active_site_context"),
                             "structure_context": item.get("structure_context"),
                             "material_binding_status": "bound" if catalyst is not None else "unbound",
@@ -1111,6 +1115,7 @@ class ExtractionPipelineService:
             "adsorbate": item.get("adsorbate") or "",
             "property_type": item.get("category") or "",
         })
+        material_identity, _ = self._canonical_dft_material_identity(item)
         value = item.get("value")
         try:
             value_key = f"{float(value):.4f}" if value is not None else ""
@@ -1128,7 +1133,7 @@ class ExtractionPipelineService:
 
         return "|".join(
             [
-                clean(item.get("catalyst_name") or item.get("material_identity")),
+                clean(material_identity),
                 clean(item.get("active_site_context")),
                 clean(item.get("structure_context")),
                 clean(item.get("dft_setting_id")),
@@ -1148,8 +1153,72 @@ class ExtractionPipelineService:
             ]
         )
 
+    def _canonical_dft_material_identity(self, item: dict[str, Any]) -> tuple[str, str]:
+        """Return the catalyst identity without an explicitly separated adsorbate.
+
+        The adsorbate is removed only when it is an exact prefix or suffix component
+        separated by ``@``, ``/``, or the word ``on``. This intentionally avoids
+        fuzzy substitutions inside real catalyst names.
+        """
+        reported_name = str(
+            item.get("catalyst_name") or item.get("material_identity") or ""
+        ).strip()
+        if not reported_name:
+            return "", ""
+
+        material_name = self._strip_explicit_adsorbate_component(
+            reported_name,
+            str(item.get("adsorbate") or ""),
+        )
+        normalized_name = str(
+            self.chemistry_normalizer.normalize({"name": material_name}).get("name")
+            or material_name
+        ).strip()
+        return normalized_name, reported_name
+
+    def _strip_explicit_adsorbate_component(self, name: str, adsorbate: str) -> str:
+        adsorbate_key = self._dft_adsorbate_component_key(adsorbate)
+        if adsorbate_key not in SAFE_DFT_MATERIAL_IDENTITY_ADSORBATES:
+            return name.strip()
+
+        for separator in ("@", "/"):
+            prefix, found, suffix = name.partition(separator)
+            if found and self._dft_adsorbate_component_key(prefix) == adsorbate_key:
+                candidate = suffix.strip()
+                if candidate:
+                    return candidate
+
+            prefix, found, suffix = name.rpartition(separator)
+            if found and self._dft_adsorbate_component_key(suffix) == adsorbate_key:
+                candidate = prefix.strip()
+                if candidate:
+                    return candidate
+
+        on_parts = re.split(r"\s+on\s+", name.strip(), maxsplit=1, flags=re.IGNORECASE)
+        if len(on_parts) == 2:
+            prefix, suffix = on_parts
+            if self._dft_adsorbate_component_key(prefix) == adsorbate_key and suffix.strip():
+                return suffix.strip()
+            if self._dft_adsorbate_component_key(suffix) == adsorbate_key and prefix.strip():
+                return prefix.strip()
+
+        return name.strip()
+
+    def _dft_adsorbate_component_key(self, value: Any) -> str:
+        text = unicodedata.normalize("NFKC", str(value or "")).strip()
+        if not text:
+            return ""
+        canonical = self.chemistry_normalizer.normalize({"adsorbate": text}).get(
+            "adsorbate"
+        )
+        return self._material_identity_component_key(canonical or text)
+
     @staticmethod
-    def _dft_evidence_source(item: dict[str, Any]) -> dict[str, Any]:
+    def _material_identity_component_key(value: Any) -> str:
+        text = unicodedata.normalize("NFKC", str(value or "")).strip().lower()
+        return re.sub(r"[^a-z0-9]+", "", text)
+
+    def _dft_evidence_source(self, item: dict[str, Any]) -> dict[str, Any]:
         location = item.get("source_location") or {}
         return {
             "evidence_text": item.get("evidence_text"),
@@ -1160,6 +1229,10 @@ class ExtractionPipelineService:
             "bbox": location.get("bbox"),
             "confidence": item.get("confidence"),
             "parser_source": item.get("parser_source") or "system_rules",
+            "reported_material_identity": str(
+                item.get("catalyst_name") or item.get("material_identity") or ""
+            ).strip()
+            or None,
         }
 
     def _persist_electrochemical_performance(self, paper_id: UUID, items: list[dict[str, Any]]) -> int:

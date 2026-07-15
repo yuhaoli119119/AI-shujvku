@@ -124,6 +124,43 @@ def test_dft_duplicate_candidates_merge_across_source_locations():
     assert len(merged[0]["evidence_sources"]) == 2
 
 
+def test_dft_duplicate_merge_preserves_each_reported_material_identity():
+    service = object.__new__(ExtractionPipelineService)
+    service.chemistry_normalizer = ChemistryNormalizer()
+
+    base = {
+        "category": "adsorption_energy",
+        "adsorbate": "Li2S4",
+        "value": -1.2,
+        "unit": "eV",
+        "reaction_step": "Li2S4 adsorption",
+        "active_site_context": "Fe-N4",
+        "source_location": {"table": "Table 1", "page": 5},
+    }
+    merged = service._merge_duplicate_dft_items(
+        [
+            {
+                **base,
+                "catalyst_name": "Li2S4@Fe-N4",
+                "evidence_text": "The adsorbed model is labeled Li2S4@Fe-N4.",
+                "confidence": 0.8,
+            },
+            {
+                **base,
+                "catalyst_name": "Fe-N4",
+                "evidence_text": "The catalyst model is labeled Fe-N4.",
+                "confidence": 0.9,
+            },
+        ]
+    )
+
+    assert len(merged) == 1
+    assert {
+        source["reported_material_identity"]
+        for source in merged[0]["evidence_sources"]
+    } == {"Li2S4@Fe-N4", "Fe-N4"}
+
+
 def test_dft_duplicate_key_keeps_distinct_lis_atom_pair_and_site_label():
     service = object.__new__(ExtractionPipelineService)
     service.chemistry_normalizer = ChemistryNormalizer()
@@ -855,6 +892,134 @@ def test_stage2_preserves_distinct_catalyst_identity_for_equal_dft_values():
             assert len(project_result) == 1
             assert len(project_result[0]["catalyst_samples"]) == 3
             assert len(project_result[0]["active_site_instances"]) == 3
+    finally:
+        engine.dispose()
+
+
+def test_dft_material_identity_only_strips_exact_delimited_adsorbate_components():
+    service = object.__new__(ExtractionPipelineService)
+    service.chemistry_normalizer = ChemistryNormalizer()
+
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Li2S4@Fe-N4", "adsorbate": "Li2S4"}
+    ) == ("Fe-N4", "Li2S4@Fe-N4")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Fe-N4/Li2S4", "adsorbate": "Li2S4"}
+    ) == ("Fe-N4", "Fe-N4/Li2S4")
+    assert service._canonical_dft_material_identity(
+        {"material_identity": "Li2S4 on Fe-N4", "adsorbate": "Li2S4"}
+    ) == ("Fe-N4", "Li2S4 on Fe-N4")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Fe-Li2S4-N4", "adsorbate": "Li2S4"}
+    ) == ("Fe-Li2S4-N4", "Fe-Li2S4-N4")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Fe-N4/Li2S4-host", "adsorbate": "Li2S4"}
+    ) == ("Fe-N4/Li2S4-host", "Fe-N4/Li2S4-host")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Li₂S₄@Fe-N4", "adsorbate": "Li2S4"}
+    ) == ("Fe-N4", "Li₂S₄@Fe-N4")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "lithium sulfide@Fe-N4", "adsorbate": "Li2S"}
+    ) == ("Fe-N4", "lithium sulfide@Fe-N4")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Pt/C", "adsorbate": "C"}
+    ) == ("Pt/C", "Pt/C")
+    assert service._canonical_dft_material_identity(
+        {"catalyst_name": "Li/graphene", "adsorbate": "Li"}
+    ) == ("Li/graphene", "Li/graphene")
+
+
+def test_stage2_groups_adsorbate_labeled_variants_under_one_catalyst_sample():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as session:
+            paper = Paper(
+                title="Adsorbate-labeled catalyst variants",
+                library_name="锂硫单原子",
+                pdf_path="adsorbate-labeled-catalysts.pdf",
+            )
+            session.add(paper)
+            session.flush()
+
+            reported_rows = [
+                ("Li2S@FeN4P1,2-DG", "Li2S", -1.10),
+                ("FeN4P1,2-DG/Li2S2", "Li2S2", -1.20),
+                ("Li2S4 on FeN4P1,2-DG", "Li2S4", -1.30),
+                ("FeN4P1,2-DG@Li2S6", "Li2S6", -1.40),
+                ("Li2S8@CoN4P1,2-DG", "Li2S8", -1.50),
+            ]
+            service = _stage2_service_with_stubbed_extractors(
+                session,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "catalyst_name": reported_name,
+                        "active_site_context": reported_name,
+                        "adsorbate": adsorbate,
+                        "value": value,
+                        "unit": "eV",
+                        "reaction_step": f"{adsorbate} adsorption",
+                        "evidence_text": (
+                            f"The reported {reported_name} model gives an adsorption "
+                            f"energy of {value} eV for {adsorbate}."
+                        ),
+                        "confidence": 0.9,
+                    }
+                    for reported_name, adsorbate, value in reported_rows
+                ],
+            )
+
+            summary = service.run_stage2(paper, _minimal_document())
+            session.commit()
+
+            catalysts = session.scalars(
+                select(CatalystSample).where(CatalystSample.paper_id == paper.id)
+            ).all()
+            dft_rows = session.scalars(
+                select(DFTResult).where(DFTResult.paper_id == paper.id)
+            ).all()
+
+            assert summary["catalyst_samples"] == 2
+            assert summary["dft_results"] == 5
+            assert {row.name for row in catalysts} == {
+                "FeN4P1,2-DG",
+                "CoN4P1,2-DG",
+            }
+
+            catalyst_by_name = {row.name: row for row in catalysts}
+            fe_rows = [
+                row
+                for row in dft_rows
+                if row.evidence_payload["material_identity"] == "FeN4P1,2-DG"
+            ]
+            co_rows = [
+                row
+                for row in dft_rows
+                if row.evidence_payload["material_identity"] == "CoN4P1,2-DG"
+            ]
+
+            assert len(fe_rows) == 4
+            assert {row.catalyst_sample_id for row in fe_rows} == {
+                catalyst_by_name["FeN4P1,2-DG"].id
+            }
+            assert {row.adsorbate for row in fe_rows} == {
+                "Li2S",
+                "Li2S2",
+                "Li2S4",
+                "Li2S6",
+            }
+            assert {
+                row.evidence_payload["reported_material_identity"] for row in fe_rows
+            } == {
+                "Li2S@FeN4P1,2-DG",
+                "FeN4P1,2-DG/Li2S2",
+                "Li2S4 on FeN4P1,2-DG",
+                "FeN4P1,2-DG@Li2S6",
+            }
+            assert len(co_rows) == 1
+            assert co_rows[0].catalyst_sample_id == catalyst_by_name["CoN4P1,2-DG"].id
+            assert co_rows[0].catalyst_sample_id != catalyst_by_name["FeN4P1,2-DG"].id
     finally:
         engine.dispose()
 

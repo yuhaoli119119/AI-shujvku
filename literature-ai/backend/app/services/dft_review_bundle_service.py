@@ -33,6 +33,7 @@ from app.services.figure_table_snapshot_service import compute_figure_table_snap
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.review_bundle_shared import compact_figure_artifact, linked_source_papers
+from app.services.dft_rescan_policy import normalize_source_document_type
 from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_pdf_evidence_anchor
@@ -40,6 +41,7 @@ from app.utils.review_safety import bulk_export_gate_results
 
 
 OFFLINE_REVIEW_BUNDLE_SCHEMA_VERSION = "offline_dft_review_bundle_v1"
+DFT_LIVE_REVIEW_TASK_SCHEMA_VERSION = "dft_live_review_task_v1"
 MAX_TEXT_SNIPPETS = 100
 MAX_TEXT_SNIPPET_CHARS = 6000
 MAX_FIGURE_FILES = 24
@@ -81,6 +83,7 @@ ALLOWED_DFT_REVIEW_FIELDS = {
 
 FIGURE_TABLE_REVIEW_READY_STATUSES = {"completed", "not_required"}
 LOCAL_AI_REQUIRED_TOOLS = ("get_codex_item", "read_paper_page")
+_LIVE_TASK_OMIT = object()
 
 
 class FigureTableReviewNotCompletedError(ValueError):
@@ -195,6 +198,173 @@ class DFTReviewBundleService:
             ),
             "target_count": len(materials["target_dft_result_ids"]),
             "review_runs": materials["curated_evidence_snapshot"].get("review_runs") or [],
+        }
+
+    def get_review_task(
+        self,
+        paper_id: UUID,
+        *,
+        catalyst_sample_id: UUID | None = None,
+        dft_result_ids: list[UUID] | None = None,
+    ) -> dict[str, Any]:
+        """Return the current local-AI DFT task without creating an export or writing state."""
+
+        materials = self._build_materials(
+            paper_id,
+            enforce_figure_table_gate=False,
+            catalyst_sample_id=catalyst_sample_id,
+            dft_result_ids=dft_result_ids,
+        )
+        metadata = materials["paper_metadata"]
+        evidence_items = [
+            self._live_evidence_item(item)
+            for item in sorted(
+                materials["evidence_map"].values(),
+                key=lambda item: str(item.get("evidence_id") or ""),
+            )
+        ]
+        evidence_by_id = {
+            str(item.get("evidence_id")): item
+            for item in materials["evidence_map"].values()
+            if str(item.get("evidence_id") or "").strip()
+        }
+        target_ids = sorted(str(item) for item in materials["target_dft_result_ids"])
+        targets_by_id = {
+            str(item.get("target_id")): item
+            for item in materials["initial_dft_candidates"].get("existing_candidates", [])
+            if str(item.get("target_id") or "").strip()
+        }
+        target_evidence_map = {
+            target_id: [
+                evidence_id
+                for evidence_id, evidence in sorted(evidence_by_id.items())
+                if self._evidence_relevant_to_dft_target(evidence, target_id, materials)
+            ]
+            for target_id in target_ids
+        }
+        targets = []
+        for target_id in target_ids:
+            target = self._live_target_payload(targets_by_id.get(target_id) or {})
+            target["evidence_ids"] = target_evidence_map[target_id]
+            targets.append(target)
+
+        terminal_context = [
+            self._live_target_payload(item)
+            for item in materials["initial_dft_candidates"].get("existing_terminal_context", [])
+        ]
+        review_source = {
+            "review_source_type": "local_ai",
+            "reviewer_label": "local_ai",
+            "reviewer_model": None,
+            "tool_capabilities": list(LOCAL_AI_REQUIRED_TOOLS),
+        }
+        review_result_template = self._return_template(materials)
+        review_result_template["review_source"] = deepcopy(review_source)
+        import_analysis_template = self._live_import_analysis_template(
+            materials=materials,
+            review_source=review_source,
+            target_evidence_map=target_evidence_map,
+            evidence_items=evidence_items,
+        )
+        eligible_evidence_ids = [
+            str(item.get("evidence_id"))
+            for item in evidence_items
+            if item.get("eligible_for_auto_apply") is True
+        ]
+        missing_data_scan = {
+            "required": True,
+            "scope": "all packaged evidence_items with eligible_for_auto_apply=true",
+            "eligible_evidence_ids": eligible_evidence_ids,
+            "existing_terminal_context_target_ids": [
+                str(item.get("target_id"))
+                for item in terminal_context
+                if str(item.get("target_id") or "").strip()
+            ],
+            "completion_field": "coverage_acknowledgement.missing_data_search_complete",
+            "completion_value": False,
+            "rule": (
+                "Inspect every eligible evidence item for genuinely missing DFT results and compare each candidate "
+                "with existing_terminal_context before proposing target_id='new'."
+            ),
+        }
+        public_paper = {
+            key: metadata.get(key)
+            for key in (
+                "paper_id",
+                "paper_code",
+                "title",
+                "doi",
+                "authors",
+                "year",
+                "journal",
+                "abstract",
+                "paper_type",
+            )
+        }
+        source_documents = [
+            self._live_public_payload(item)
+            for item in materials["paper_metadata"].get("source_documents", [])
+        ]
+        source_pdf_inventory = self._live_public_payload(
+            materials["paper_metadata"].get("source_pdf_inventory", [])
+        )
+        review_gate = self._live_public_payload(
+            materials["curated_evidence_snapshot"].get("review_gate") or {}
+        )
+        local_ai = {
+            "review_result_template": review_result_template,
+            "import_analysis_template": import_analysis_template,
+        }
+        return {
+            "schema_version": DFT_LIVE_REVIEW_TASK_SCHEMA_VERSION,
+            "generated_at": datetime.now(UTC).isoformat(),
+            "paper_id": metadata["paper_id"],
+            "paper_code": metadata["paper_code"],
+            "title": metadata.get("title"),
+            "paper": public_paper,
+            "writeback": {
+                "paper_id": metadata["paper_id"],
+                "paper_code": metadata["paper_code"],
+                "target_type": "dft_results",
+                "target_field": "dft_results",
+                "tool": "import_analysis",
+            },
+            "writeback_paper_id": metadata["paper_id"],
+            "source_documents": source_documents,
+            "source_pdf_inventory": source_pdf_inventory,
+            "bundle_fingerprint": materials["bundle_fingerprint"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "catalyst_sample_id": materials["review_selection"]["catalyst_sample_id"],
+            "dft_result_ids": materials["review_selection"]["dft_result_ids"],
+            "explicit_review": materials["review_selection"]["explicit"],
+            "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"].get(
+                "completed_snapshot_fingerprint"
+            ),
+            "figure_table_review": review_gate,
+            "review_mode": materials["review_mode"],
+            "target_count": len(target_ids),
+            "target_ids": target_ids,
+            "targets": targets,
+            "existing_terminal_context_count": len(terminal_context),
+            "existing_terminal_context": terminal_context,
+            "evidence_count": len(evidence_items),
+            "evidence_items": evidence_items,
+            "target_evidence_map": target_evidence_map,
+            "missing_data_scan": missing_data_scan,
+            "missing_data_scan_requirements": missing_data_scan,
+            "missing_data_search": missing_data_scan,
+            "local_ai": local_ai,
+            "review_result_template": review_result_template,
+            "import_analysis_template": import_analysis_template,
+            "local_ai_writeback_contract": self._local_ai_writeback_contract(),
+            "offline_zip_policy": {
+                "available": True,
+                "purpose": "web_ai_third_party_or_offline_review",
+                "local_ai_workflow": "Use this live task with get_codex_item/read_paper_page and import_analysis.",
+                "compatibility": "The existing in-memory build_zip workflow remains unchanged.",
+                "retention_policy": "generated_in_memory_not_persisted_on_server",
+            },
         }
 
     def get_completeness_snapshot(self, paper_id: UUID) -> dict[str, Any]:
@@ -491,7 +661,27 @@ class DFTReviewBundleService:
                 "import_analysis_request": None,
             }
 
-        materials = self._build_materials(paper_id, enforce_figure_table_gate=False)
+        try:
+            catalyst_sample_id = UUID(result.catalyst_sample_id) if result.catalyst_sample_id else None
+            dft_result_ids = [UUID(item) for item in result.dft_result_ids]
+        except (TypeError, ValueError, AttributeError):
+            return {
+                "valid": False,
+                "errors": [
+                    {
+                        "code": "invalid_explicit_target_id",
+                        "message": "catalyst_sample_id and dft_result_ids must contain valid UUID values",
+                    }
+                ],
+                "warnings": normalization_warnings,
+                "import_analysis_request": None,
+            }
+        materials = self._build_materials(
+            paper_id,
+            enforce_figure_table_gate=False,
+            catalyst_sample_id=catalyst_sample_id,
+            dft_result_ids=dft_result_ids,
+        )
         source_pdf_inventory_complete = all(
             item.get("pdf_available") and item.get("included_in_bundle")
             for item in materials["source_pdf_inventory"]
@@ -663,8 +853,10 @@ class DFTReviewBundleService:
                         "checked_pages": [],
                         "verification_note": None,
                         "instruction": (
-                            "Cover every required_evidence_checks item with get_codex_item and every unique "
-                            "(source_paper_id, page) with read_paper_page. A successful evidence-object or page "
+                            "Cover every required_evidence_checks item with get_codex_item using item_paper_id "
+                            "and source_record_id (ordinary same-source evidence may use source_paper_id), and "
+                            "cover every unique (source_paper_id, page) with read_paper_page. A successful "
+                            "evidence-object or page "
                             "read may be reused across audits that require the same key. read_paper_page returns "
                             "stored database page layout; the PDF judgment must also use the source PDF/page "
                             "evidence included in the review bundle."
@@ -784,6 +976,8 @@ class DFTReviewBundleService:
                         "chart_scope_type": result.chart_scope_type,
                         "chart_run_id": result.chart_run_id,
                         "review_mode": result.review_mode,
+                        "catalyst_sample_id": result.catalyst_sample_id,
+                        "dft_result_ids": result.dft_result_ids,
                         "figure_table_completed_snapshot_fingerprint": (
                             result.figure_table_completed_snapshot_fingerprint
                         ),
@@ -848,6 +1042,8 @@ class DFTReviewBundleService:
         chart_run_id: UUID | None = None,
         explicit_paper_scope: bool = False,
         enforce_figure_table_gate: bool = True,
+        catalyst_sample_id: UUID | None = None,
+        dft_result_ids: list[UUID] | None = None,
     ) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
@@ -894,6 +1090,12 @@ class DFTReviewBundleService:
         dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id.in_(source_ids))).all()
         samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id.in_(source_ids))).all()
 
+        review_selection, explicit_target_ids = self._resolve_explicit_review_targets(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst_sample_id,
+            dft_result_ids=dft_result_ids,
+        )
+
         source_by_id = {item["paper"].id: item for item in source_papers}
         # Keep the DFT gate on exactly the same normalized whole-paper figure
         # scope as chart review.  In particular, an SI extraction candidate
@@ -905,7 +1107,11 @@ class DFTReviewBundleService:
         )
         sample_by_id = {row.id: row for row in samples}
         dft_rows = sorted(dft_rows, key=lambda row: (row.paper_id != paper.id, str(row.id)))
-        review_dft_rows, terminal_main_rows = self._dft_rows_for_review_bundle(dft_rows, main_paper_id=paper.id)
+        review_dft_rows, terminal_main_rows = self._dft_rows_for_review_bundle(
+            dft_rows,
+            main_paper_id=paper.id,
+            explicit_target_ids=explicit_target_ids,
+        )
         locator_by_target = self._dft_locator_payloads_by_target(dft_rows)
         anchors = self._collect_anchors(review_dft_rows)
         reviewed_aggregate = self._reviewed_evidence_aggregate(paper, source_by_id=source_by_id)
@@ -1080,6 +1286,7 @@ class DFTReviewBundleService:
             ],
             "curated_evidence_snapshot": curated_evidence_snapshot,
             "review_mode": review_mode,
+            "review_selection": review_selection,
         }
         bundle_fingerprint = _sha256(_canonical_json_bytes(fingerprint_payload))
         warnings = []
@@ -1109,13 +1316,87 @@ class DFTReviewBundleService:
             "excluded_terminal_main_dft_candidates": len(terminal_main_rows),
             "review_mode": review_mode,
             "evidence_summary": reviewed_aggregate["summary"],
+            "review_selection": review_selection,
         }
+
+    def _resolve_explicit_review_targets(
+        self,
+        *,
+        paper_id: UUID,
+        catalyst_sample_id: UUID | None,
+        dft_result_ids: list[UUID] | None,
+    ) -> tuple[dict[str, Any], set[UUID] | None]:
+        requested_result_ids = list(dict.fromkeys(dft_result_ids or []))
+        if catalyst_sample_id is not None and requested_result_ids:
+            raise ValueError("catalyst_sample_id and dft_result_ids are mutually exclusive")
+
+        if catalyst_sample_id is not None:
+            sample = self.session.scalar(
+                select(CatalystSample).where(
+                    CatalystSample.paper_id == paper_id,
+                    CatalystSample.id == catalyst_sample_id,
+                )
+            )
+            if sample is None:
+                raise LookupError("Catalyst sample not found for this paper")
+            resolved_ids = set(
+                self.session.scalars(
+                    select(DFTResult.id).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.catalyst_sample_id == catalyst_sample_id,
+                    )
+                ).all()
+            )
+            return (
+                {
+                    "explicit": True,
+                    "catalyst_sample_id": str(catalyst_sample_id),
+                    "dft_result_ids": [],
+                    "resolved_target_ids": sorted(str(item) for item in resolved_ids),
+                },
+                resolved_ids,
+            )
+
+        if requested_result_ids:
+            resolved_ids = set(
+                self.session.scalars(
+                    select(DFTResult.id).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.id.in_(requested_result_ids),
+                    )
+                ).all()
+            )
+            missing_ids = sorted(str(item) for item in set(requested_result_ids) - resolved_ids)
+            if missing_ids:
+                raise LookupError(
+                    "DFT results not found for this paper: " + ", ".join(missing_ids)
+                )
+            return (
+                {
+                    "explicit": True,
+                    "catalyst_sample_id": None,
+                    "dft_result_ids": [str(item) for item in requested_result_ids],
+                    "resolved_target_ids": sorted(str(item) for item in resolved_ids),
+                },
+                resolved_ids,
+            )
+
+        return (
+            {
+                "explicit": False,
+                "catalyst_sample_id": None,
+                "dft_result_ids": [],
+                "resolved_target_ids": [],
+            },
+            None,
+        )
 
     def _dft_rows_for_review_bundle(
         self,
         rows: list[DFTResult],
         *,
         main_paper_id: UUID,
+        explicit_target_ids: set[UUID] | None = None,
     ) -> tuple[list[DFTResult], list[DFTResult]]:
         if not rows:
             return [], []
@@ -1123,6 +1404,12 @@ class DFTReviewBundleService:
         selected: list[DFTResult] = []
         terminal_main: list[DFTResult] = []
         for row in rows:
+            if explicit_target_ids is not None and row.paper_id == main_paper_id:
+                if row.id in explicit_target_ids:
+                    selected.append(row)
+                else:
+                    terminal_main.append(row)
+                continue
             status = str(row.candidate_status or "").strip().lower()
             gate = gate_by_id.get(str(row.id))
             review_status = str(getattr(gate, "review_status", "") or "").strip().lower()
@@ -1309,6 +1596,140 @@ class DFTReviewBundleService:
             },
         }
 
+    @staticmethod
+    def _dft_evidence_payload_candidates(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        material_binding = payload.get("material_binding")
+        material_binding = material_binding if isinstance(material_binding, dict) else {}
+        candidates: list[dict[str, Any]] = [payload]
+        for key in ("evidence_anchor", "corrected_value", "source_location", "evidence_location"):
+            value = material_binding.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+        for key in ("evidence_anchor", "corrected_value", "source_location", "evidence_location"):
+            value = payload.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+        candidates.append(material_binding)
+        return candidates
+
+    @classmethod
+    def _dft_review_evidence_details(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        """Expose only review-relevant evidence fields from the stored payload."""
+
+        detail_keys = (
+            "bond",
+            "bond_pair",
+            "configuration_index",
+            "environment",
+            "solvent_complex",
+            "method",
+            "catalyst_scope",
+            "coordination_environment",
+            "li_s_bond_length",
+            "metal_centers",
+            "metal_metal_distance",
+            "metal_pairing_type",
+            "support_material",
+            "srr_lis_intermediate",
+        )
+        details: dict[str, Any] = {}
+        for candidate in cls._dft_evidence_payload_candidates(payload):
+            for key in detail_keys:
+                value = candidate.get(key)
+                if key not in details and value not in (None, "", []):
+                    details[key] = cls._sanitize_for_bundle(value)
+        return details
+
+    @classmethod
+    def _resolve_dft_evidence_source(
+        cls,
+        row: DFTResult,
+        source_by_id: dict[UUID, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Resolve PDF provenance without changing the DFT writeback owner."""
+
+        payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+        candidates = cls._dft_evidence_payload_candidates(payload)
+
+        def first_value(*keys: str) -> Any:
+            for candidate in candidates:
+                for key in keys:
+                    value = candidate.get(key)
+                    if value not in (None, "", []):
+                        return value
+            return None
+
+        explicit_source_paper_id = first_value("source_paper_id")
+        explicit_source_paper_code = first_value("source_paper_code")
+        source_types = [
+            normalize_source_document_type(candidate.get("source_document_type") or candidate.get("source_type"))
+            for candidate in candidates
+        ]
+        source_types = [value for value in source_types if value != "unknown"]
+        explicit_source_type = (
+            "supplementary_information"
+            if "supplementary_information" in source_types
+            else source_types[0] if source_types else None
+        )
+
+        def source_id_match(value: Any) -> UUID | None:
+            value_text = str(value or "").strip()
+            if not value_text:
+                return None
+            for source_id in source_by_id:
+                if str(source_id) == value_text:
+                    return source_id
+            return None
+
+        resolved_id = source_id_match(explicit_source_paper_id)
+        if resolved_id is None and explicit_source_paper_code:
+            for source_id, source in source_by_id.items():
+                if str(source["paper"].paper_code or "").strip() == str(explicit_source_paper_code).strip():
+                    resolved_id = source_id
+                    break
+
+        row_source = source_by_id.get(row.paper_id)
+        if row_source is None:
+            raise LookupError(f"DFT row source paper is not in review scope: {row.paper_id}")
+
+        if resolved_id is None and explicit_source_type == "supplementary_information":
+            supplementary_sources = [
+                source_id
+                for source_id, source in source_by_id.items()
+                if source.get("source_document_type") == "supplementary_information"
+            ]
+            if len(supplementary_sources) == 1:
+                resolved_id = supplementary_sources[0]
+
+        source = source_by_id.get(resolved_id, row_source)
+        item_paper = source_by_id.get(row.paper_id, row_source)
+
+        def first_anchor_value(*keys: str) -> Any:
+            for candidate in candidates:
+                for key in keys:
+                    value = candidate.get(key)
+                    if value not in (None, "", []):
+                        return value
+            return None
+
+        source_location = {
+            "page": first_anchor_value("page", "page_start"),
+            "section": first_anchor_value("section", "section_title"),
+            "figure": first_anchor_value("figure", "figure_label"),
+            "table": first_anchor_value("table", "table_label"),
+        }
+        return {
+            "source": source,
+            "item_paper_id": str(row.paper_id),
+            "item_paper_code": str(item_paper["paper"].paper_code),
+            "source_paper_id": str(source["paper"].id),
+            "source_paper_code": str(source["paper"].paper_code),
+            "source_document_type": source["source_document_type"],
+            "evidence_payload": payload,
+            "source_location": source_location,
+            "explicit_source_document_type": explicit_source_type,
+        }
+
     def _text_snippets(
         self,
         *,
@@ -1346,9 +1767,10 @@ class DFTReviewBundleService:
             )
 
         for row in dft_rows:
-            source = source_by_id[row.paper_id]
-            evidence = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-            location = evidence.get("source_location") if isinstance(evidence.get("source_location"), dict) else {}
+            source_resolution = self._resolve_dft_evidence_source(row, source_by_id)
+            source = source_resolution["source"]
+            evidence = source_resolution["evidence_payload"]
+            location = source_resolution["source_location"]
             primary_locator = self._primary_locator(locator_by_target.get(str(row.id), []))
             append_item(
                 source=source,
@@ -1356,6 +1778,8 @@ class DFTReviewBundleService:
                 payload={
                     "source_record_id": str(row.id),
                     "source_record_type": "dft_result_candidate_evidence",
+                    "item_paper_id": source_resolution["item_paper_id"],
+                    "item_paper_code": source_resolution["item_paper_code"],
                     "page": evidence.get("page") or location.get("page") or (primary_locator or {}).get("page"),
                     "section": row.source_section or evidence.get("section") or location.get("section") or (primary_locator or {}).get("section"),
                     "figure": row.source_figure or evidence.get("figure") or location.get("figure"),
@@ -1388,6 +1812,8 @@ class DFTReviewBundleService:
                 payload={
                     "source_record_id": str(section.id),
                     "source_record_type": "paper_section",
+                    "item_paper_id": str(section.paper_id),
+                    "item_paper_code": source_by_id[section.paper_id]["paper"].paper_code,
                     "section_title": title or None,
                     "page_start": section.page_start,
                     "page_end": section.page_end,
@@ -1431,6 +1857,8 @@ class DFTReviewBundleService:
                 "source_document_type": source["source_document_type"],
                 "source_paper_id": str(row.paper_id),
                 "source_paper_code": source["paper"].paper_code,
+                "item_paper_id": str(row.paper_id),
+                "item_paper_code": source["paper"].paper_code,
                 "source_record_id": str(row.id),
                 "caption": row.caption,
                 "page": row.page,
@@ -1495,6 +1923,8 @@ class DFTReviewBundleService:
                 "source_document_type": source["source_document_type"],
                 "source_paper_id": str(row.paper_id),
                 "source_paper_code": source["paper"].paper_code,
+                "item_paper_id": str(row.paper_id),
+                "item_paper_code": source["paper"].paper_code,
                 "source_record_id": str(row.id),
                 "figure_label": row.figure_label,
                 "caption": row.caption,
@@ -1584,8 +2014,9 @@ class DFTReviewBundleService:
             must_exist=True,
         )
 
-    @staticmethod
+    @classmethod
     def _dft_row_payload(
+        cls,
         row: DFTResult,
         *,
         sample_by_id: dict[UUID, CatalystSample],
@@ -1593,15 +2024,21 @@ class DFTReviewBundleService:
         locator_by_target: dict[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         sample = sample_by_id.get(row.catalyst_sample_id) if row.catalyst_sample_id else None
-        source = source_by_id[row.paper_id]
+        source_resolution = cls._resolve_dft_evidence_source(row, source_by_id)
+        source = source_resolution["source"]
+        item_source = source_by_id[row.paper_id]
         locators = list((locator_by_target or {}).get(str(row.id), []))
-        primary_locator = DFTReviewBundleService._primary_locator(locators)
+        primary_locator = cls._primary_locator(locators)
+        evidence_payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
+        evidence_details = cls._dft_review_evidence_details(evidence_payload)
         return {
             "target_id": str(row.id),
             "target_type": "dft_results",
             "source_document_type": source["source_document_type"],
-            "source_paper_id": str(row.paper_id),
-            "source_paper_code": source["paper"].paper_code,
+            "source_paper_id": source_resolution["source_paper_id"],
+            "source_paper_code": source_resolution["source_paper_code"],
+            "item_paper_id": str(row.paper_id),
+            "item_paper_code": item_source["paper"].paper_code,
             "catalyst_sample_id": str(row.catalyst_sample_id) if row.catalyst_sample_id else None,
             "material_identity": sample.name if sample else None,
             "adsorbate": row.adsorbate,
@@ -1617,7 +2054,9 @@ class DFTReviewBundleService:
             "evidence_text": row.evidence_text,
             "confidence": row.confidence,
             "candidate_status": row.candidate_status,
-            "evidence_payload": DFTReviewBundleService._sanitize_for_bundle(row.evidence_payload),
+            **evidence_details,
+            "evidence_details": evidence_details,
+            "evidence_payload": cls._sanitize_for_bundle(row.evidence_payload),
             "primary_evidence_locator": primary_locator,
             "evidence_locators": locators,
         }
@@ -2425,6 +2864,8 @@ class DFTReviewBundleService:
         evidence_id = str(item.get("evidence_id") or "").strip()
         source_paper_id = str(item.get("source_paper_id") or "").strip()
         source_paper_code = str(item.get("source_paper_code") or "").strip()
+        item_paper_id = str(item.get("item_paper_id") or source_paper_id).strip()
+        item_paper_code = str(item.get("item_paper_code") or source_paper_code).strip()
         source_record_id = str(item.get("source_record_id") or "").strip()
         source_document_type = str(item.get("source_document_type") or "").strip()
         anchor = first_pdf_evidence_anchor(item) or {}
@@ -2433,6 +2874,8 @@ class DFTReviewBundleService:
             name
             for name, value in (
                 ("evidence_id", evidence_id),
+                ("item_paper_id", item_paper_id),
+                ("item_paper_code", item_paper_code),
                 ("source_paper_id", source_paper_id),
                 ("source_paper_code", source_paper_code),
                 ("source_record_id", source_record_id),
@@ -2449,7 +2892,7 @@ class DFTReviewBundleService:
             normalized_page = int(page)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Evidence '{evidence_id}' has an invalid PDF page: {page!r}.") from exc
-        return {
+        requirement = {
             "evidence_id": evidence_id,
             "source_paper_id": source_paper_id,
             "source_paper_code": source_paper_code,
@@ -2458,6 +2901,14 @@ class DFTReviewBundleService:
             "page": normalized_page,
             "source_document_type": source_document_type,
         }
+        # Keep the historical ordinary-evidence JSON shape stable.  When the
+        # DFT row belongs to one paper but its PDF evidence belongs to another
+        # (the main-paper-writeback + SI-evidence case), these fields are
+        # mandatory so get_codex_item and read_paper_page cannot be conflated.
+        if item_paper_id != source_paper_id or item_paper_code != source_paper_code:
+            requirement["item_paper_id"] = item_paper_id
+            requirement["item_paper_code"] = item_paper_code
+        return requirement
 
     @staticmethod
     def _unique_evidence_checks(checks: Any) -> list[dict[str, Any]]:
@@ -2492,11 +2943,256 @@ class DFTReviewBundleService:
             }
         return [unique[key] for key in sorted(unique)]
 
+    @classmethod
+    def _live_public_payload(cls, value: Any) -> Any:
+        """Strip filesystem/private implementation details from live task data."""
+
+        if isinstance(value, dict):
+            cleaned: dict[str, Any] = {}
+            for key, item in value.items():
+                public_key = str(key)
+                lowered = public_key.strip().lower()
+                if (
+                    public_key.startswith("_")
+                    or "byte" in lowered
+                    or lowered.endswith("_path")
+                    or lowered in {"path", "local_path", "server_path"}
+                ):
+                    continue
+                public_value = cls._live_public_payload(item)
+                if public_value is not _LIVE_TASK_OMIT:
+                    cleaned[public_key] = public_value
+            return cleaned
+        if isinstance(value, list):
+            return [
+                public_value
+                for item in value
+                if (public_value := cls._live_public_payload(item)) is not _LIVE_TASK_OMIT
+            ]
+        if isinstance(value, tuple):
+            return [
+                public_value
+                for item in value
+                if (public_value := cls._live_public_payload(item)) is not _LIVE_TASK_OMIT
+            ]
+        if isinstance(value, set):
+            return [
+                public_value
+                for item in sorted(value, key=str)
+                if (public_value := cls._live_public_payload(item)) is not _LIVE_TASK_OMIT
+            ]
+        if isinstance(value, (bytes, bytearray, memoryview, Path)):
+            return _LIVE_TASK_OMIT
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+
+    @classmethod
+    def _live_target_payload(cls, item: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "target_id",
+            "target_type",
+            "item_paper_id",
+            "item_paper_code",
+            "source_document_type",
+            "source_paper_id",
+            "source_paper_code",
+            "catalyst_sample_id",
+            "material_identity",
+            "adsorbate",
+            "property_type",
+            "value",
+            "value_upper",
+            "value_kind",
+            "value_type",
+            "unit",
+            "reaction_step",
+            "reaction_type",
+            "bond",
+            "bond_pair",
+            "configuration_index",
+            "environment",
+            "solvent_complex",
+            "method",
+            "catalyst_scope",
+            "coordination_environment",
+            "li_s_bond_length",
+            "metal_centers",
+            "metal_metal_distance",
+            "metal_pairing_type",
+            "support_material",
+            "srr_lis_intermediate",
+            "evidence_details",
+            "source_section",
+            "source_figure",
+            "evidence_text",
+            "confidence",
+            "candidate_status",
+            "primary_evidence_locator",
+            "readonly",
+            "eligible_as_write_target",
+            "is_ml_ready",
+            "is_rejected",
+            "review_status",
+        }
+        return cls._live_public_payload(
+            {key: value for key, value in item.items() if key in allowed}
+        )
+
+    @classmethod
+    def _live_evidence_item(cls, item: dict[str, Any]) -> dict[str, Any]:
+        anchor = first_pdf_evidence_anchor(item) or {}
+        quoted_text = cls._evidence_quote(item)
+        public_item = cls._live_public_payload(item)
+        public_item.pop("evidence_payload", None)
+        public_item.pop("evidence_locators", None)
+        public_item.update(
+            {
+                "item_type": cls._evidence_item_type(item),
+                "item_paper_id": item.get("item_paper_id") or item.get("source_paper_id"),
+                "item_paper_code": item.get("item_paper_code") or item.get("source_paper_code"),
+                "source_paper_id": item.get("source_paper_id"),
+                "source_paper_code": item.get("source_paper_code"),
+                "source_document_type": item.get("source_document_type"),
+                "source_record_id": item.get("source_record_id"),
+                "page": anchor.get("page") or item.get("page") or item.get("page_start"),
+                "figure": item.get("figure") or item.get("figure_label"),
+                "table": item.get("table") or item.get("caption"),
+                "section": item.get("section") or item.get("section_title"),
+                "original_text": quoted_text,
+                "quoted_text": quoted_text,
+            }
+        )
+        return cls._live_public_payload(public_item)
+
+    def _live_import_analysis_template(
+        self,
+        *,
+        materials: dict[str, Any],
+        review_source: dict[str, Any],
+        target_evidence_map: dict[str, list[str]],
+        evidence_items: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        metadata = materials["paper_metadata"]
+        raw_evidence_by_id = {
+            str(item.get("evidence_id")): item
+            for item in materials["evidence_map"].values()
+            if str(item.get("evidence_id") or "").strip()
+        }
+        required_evidence_checks: list[dict[str, Any]] = []
+        for item in raw_evidence_by_id.values():
+            try:
+                required_evidence_checks.append(self._evidence_verification_requirement(item))
+            except ValueError:
+                continue
+        unique_evidence_checks = self._unique_evidence_checks(required_evidence_checks)
+        unique_page_checks = self._unique_page_checks(unique_evidence_checks)
+        audits: list[dict[str, Any]] = []
+        for target_id in sorted(target_evidence_map):
+            evidence_ids = list(target_evidence_map[target_id])
+            primary = raw_evidence_by_id.get(evidence_ids[0]) if evidence_ids else None
+            primary_public = self._live_evidence_item(primary) if primary else {}
+            audits.append(
+                {
+                    "paper_id": metadata["paper_id"],
+                    "target_type": "dft_results",
+                    "target_id": target_id,
+                    "field_name": "dft_results",
+                    "decision": None,
+                    "evidence_checked": False,
+                    "evidence_ids": evidence_ids,
+                    "evidence_location": {
+                        "source_document_type": primary_public.get("source_document_type"),
+                        "source_paper_id": primary_public.get("source_paper_id"),
+                        "source_paper_code": primary_public.get("source_paper_code"),
+                        "source_record_id": primary_public.get("source_record_id"),
+                        "page": primary_public.get("page"),
+                        "section": primary_public.get("section"),
+                        "figure": primary_public.get("figure"),
+                        "table": primary_public.get("table"),
+                        "quoted_text": primary_public.get("quoted_text"),
+                        "evidence_ids": evidence_ids,
+                        "bundle_fingerprint": materials["bundle_fingerprint"],
+                        "figure_table_completed_snapshot_fingerprint": materials[
+                            "curated_evidence_snapshot"
+                        ].get("completed_snapshot_fingerprint"),
+                    },
+                    "recommended_action": None,
+                    "corrected_value": None,
+                    "confidence": None,
+                    "reason": None,
+                    "source": "local_ai",
+                    "source_label": review_source["reviewer_label"],
+                    "agent_role": "local_ai_pdf_verifier",
+                    "requires_local_ai_verification": True,
+                    "local_ai_verification": {
+                        "verified_against_pdf": False,
+                        "required_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+                        "checked_evidence_ids": [],
+                        "checked_pages": [],
+                        "verification_note": None,
+                    },
+                    "writes_final_truth": False,
+                    "confirmation_required": True,
+                }
+            )
+        review_template = self._return_template(materials)
+        review_template["review_source"] = deepcopy(review_source)
+        review_metadata = {
+            "schema_version": review_template["schema_version"],
+            "bundle_fingerprint": materials["bundle_fingerprint"],
+            "paper_id": metadata["paper_id"],
+            "chart_scope_type": "paper_reviewed_aggregate",
+            "chart_run_id": None,
+            "catalyst_sample_id": materials["review_selection"]["catalyst_sample_id"],
+            "dft_result_ids": materials["review_selection"]["dft_result_ids"],
+            "review_mode": materials["review_mode"],
+            "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"].get(
+                "completed_snapshot_fingerprint"
+            ),
+            "paper_code": metadata["paper_code"],
+            "overall_status": review_template["overall_status"],
+            "web_ai_review_source": deepcopy(review_source),
+            "review_source": deepcopy(review_source),
+            "local_ai_verification_required": True,
+            "required_local_ai_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+            "local_ai_verification_reuse_policy": (
+                "Each audit must record complete coverage. One successful get_codex_item result may be reused for "
+                "the same evidence_id, and one successful read_paper_page result may be reused for the same "
+                "(source_paper_id, page)."
+            ),
+        }
+        return {
+            "paper_id": metadata["paper_id"],
+            "source": "local_ai",
+            "source_label": review_source["reviewer_label"],
+            "reviewer": review_source["reviewer_label"],
+            "auto_apply_review_rules": True,
+            "raw_payload": {
+                "review_metadata": review_metadata,
+                "local_ai_verification_plan": {
+                    "unique_evidence_checks": unique_evidence_checks,
+                    "unique_page_checks": unique_page_checks,
+                    "evidence_check_count": len(unique_evidence_checks),
+                    "page_check_count": len(unique_page_checks),
+                },
+                "coverage_acknowledgement": review_template["coverage_acknowledgement"],
+                "object_review_audits": audits,
+                "review_notes": [],
+            },
+        }
+
     @staticmethod
     def _local_ai_writeback_contract() -> dict[str, Any]:
+        export_authorization = {
+            "decisions": ["PASS", "REVISE"],
+            "required_recommended_action": "ready_for_ml_export",
+            "otherwise": "not_authorized",
+        }
         return {
             "dft_web_ai_is_suggestion_only": True,
             "required_tools": list(LOCAL_AI_REQUIRED_TOOLS),
+            "export_authorization": export_authorization,
             "reuse_policy": {
                 "get_codex_item": "one successful result may be reused for the same evidence_id",
                 "read_paper_page": "one successful result may be reused for the same (source_paper_id, page)",
@@ -2505,6 +3201,14 @@ class DFTReviewBundleService:
             "required_local_ai_verification": {
                 "verified_against_pdf": True,
                 "used_tools_include": list(LOCAL_AI_REQUIRED_TOOLS),
+                "get_codex_item_arguments": {
+                    "paper_id": "item_paper_id (or source_paper_id for ordinary same-source evidence)",
+                    "item_id": "source_record_id",
+                },
+                "read_paper_page_arguments": {
+                    "paper_id": "source_paper_id",
+                    "page": "page",
+                },
                 "checked_evidence_ids_cover": "all server-derived evidence_ids for this audit",
                 "checked_pages_cover": "all server-derived (source_paper_id, page) pairs for this audit",
                 "verification_note_required": True,
@@ -2517,6 +3221,7 @@ class DFTReviewBundleService:
                 "tool": "import_analysis",
                 "auto_apply_review_rules": True,
                 "source": "local_ai",
+                "export_authorization": export_authorization,
                 "after_write_readback": [
                     "object_versions",
                     "candidate_status",
@@ -2535,6 +3240,8 @@ class DFTReviewBundleService:
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "chart_scope_type": "paper_reviewed_aggregate",
             "chart_run_id": None,
+            "catalyst_sample_id": materials["review_selection"]["catalyst_sample_id"],
+            "dft_result_ids": materials["review_selection"]["dft_result_ids"],
             "review_mode": materials["review_mode"],
             "figure_table_completed_snapshot_fingerprint": materials["curated_evidence_snapshot"][
                 "completed_snapshot_fingerprint"

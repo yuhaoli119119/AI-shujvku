@@ -61,7 +61,8 @@ _DFT_SHARED_RULES = """目标文献：
 
 范围与证据：
 - 只处理当前 paper_id 的 dft_results、DFT candidate 和 DFT audit issue；禁止修改图片、表格、章节、元数据或其他对象。
-- 读取 get_codex_context、get_codex_item、get_dft_audit_issues 和 read_paper_page，并核对主文及已关联 SI 中与 DFT 直接相关的正文和表格证据。
+- 本地 AI 主流程固定为：get_dft_review_task -> get_codex_item/read_paper_page -> acquire dft_results lock -> import_analysis(auto_apply_review_rules=true) -> readback。离线 DFT 审阅 ZIP 仅用于 web AI、第三方或离线审阅。
+- 先读取 get_dft_review_task，再用 get_codex_item、get_dft_audit_issues 和 read_paper_page 核对主文及已关联 SI 中与 DFT 直接相关的正文和表格证据。
 - SI 中的 DFT 数据写回 writeback_paper_id，并保留 source_paper_id、source_document_type、页码和原文证据。
 - 每条数据必须能定位到材料/结构/位点、性质或反应步、数值、单位及证据；不得猜测，不得把 ML prediction 当作 DFT 结果。
 - 只使用当前会话的 Literature AI MCP 工具或 app.mcp.context.mcp_auth_context + app.mcp.server 受控后备路径；禁止直接调用 service/session/model、执行 SQL 或直接写数据库。
@@ -78,7 +79,7 @@ _DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
 - new_candidate、NEEDS_HUMAN、REJECT、缺少 recommended_action 或其他模糊建议都不得导出；单位缺失、占位单位或键相关性质缺少 bond/bond_pair 时也不得建议导出。
 
 执行：
-1. 读取当前 paper_id 的 context、DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
+1. 调用 get_dft_review_task 取得当前任务，再读取 DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
 2. 对每条已有 candidate 写入带证据的 object_review_audit。
 3. 漏项使用 target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"；corrected_value 至少包含 material_identity、property_type、value、unit，能确认时补充 adsorbate、reaction_step、method。
 4. 写入前获取 dft_results 模块写锁，然后使用 import_analysis(auto_apply_review_rules=true) 写入审核结果。PASS 会确认当前值，REVISE 会修改后确认，REJECT 会直接拒绝，new_candidate 会新增后确认；NEEDS_HUMAN 保持待人工，不得猜测。

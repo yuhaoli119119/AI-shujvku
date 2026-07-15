@@ -568,6 +568,24 @@ class ExternalAnalysisMaterializationMixin:
 
         dft_candidates = [candidate for candidate in candidates if self._is_dft_import_candidate(candidate)]
         validation = self._validate_dft_import_json(run, dft_candidates)
+        missing_export_authorization: list[str] = []
+        for candidate in dft_candidates:
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            decision = str(payload.get("decision") or "").strip().upper()
+            recommended_action = str(payload.get("recommended_action") or "").strip().lower()
+            if decision not in {"PASS", "REVISE"} or recommended_action == "ready_for_ml_export":
+                continue
+            candidate.status = "requires_resolution"
+            candidate.mapping_reason = "recommended_action_ready_for_ml_export_required"
+            self.session.add(candidate)
+            missing_export_authorization.append(str(candidate.id))
+        if missing_export_authorization:
+            self.session.flush()
+            raise ValueError(
+                "dft_export_authorization_required:PASS/REVISE requires "
+                "recommended_action='ready_for_ml_export';candidate_ids="
+                + ",".join(missing_export_authorization)
+            )
         expected_snapshot = self._dft_import_expected_completed_snapshot(run, dft_candidates)
         bundle_service = DFTReviewBundleService(self.session, self.settings)
         state = bundle_service.get_review_state(run.paper_id)["review_gate"]
@@ -674,6 +692,8 @@ class ExternalAnalysisMaterializationMixin:
             "paper_code": metadata.get("paper_code"),
             "chart_scope_type": metadata.get("chart_scope_type") or "paper_reviewed_aggregate",
             "chart_run_id": metadata.get("chart_run_id"),
+            "catalyst_sample_id": metadata.get("catalyst_sample_id"),
+            "dft_result_ids": metadata.get("dft_result_ids") or [],
             "review_mode": metadata.get("review_mode"),
             "review_source": review_source,
             "overall_status": metadata.get("overall_status"),

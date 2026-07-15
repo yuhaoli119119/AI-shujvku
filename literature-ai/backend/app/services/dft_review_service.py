@@ -6,12 +6,28 @@ import json
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import bindparam, func, inspect as sa_inspect, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, CatalystSample, DFTResult, ExtractionFieldReview, Paper, PaperCorrection, WorkflowJob, utcnow
+from app.db.models import (
+    ActiveSiteMetal,
+    AuditLog,
+    CatalystSample,
+    DFTResult,
+    ElectrochemicalPerformance,
+    EvidenceClaim,
+    EvidenceLocator,
+    EvidenceSpan,
+    ExtractionFieldReview,
+    MechanismClaim,
+    Paper,
+    PaperCorrection,
+    WorkflowJob,
+    utcnow,
+)
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
+from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
 from app.services.dft_identity_service import DFTIdentityV2
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.dft_review_fields import DFT_CORRECTION_FIELD_ALIASES, DFT_REVIEW_FIELD_ALIASES
@@ -27,6 +43,16 @@ __all__ = [
     "DFT_REVIEW_FIELD_ALIASES",
     "DFTResultReviewService",
 ]
+
+
+DUPLICATE_MERGE_OPTIONAL_CATALYST_TABLES = (
+    "project_library_active_site_instances",
+    "project_library_adsorbate_properties",
+    "project_library_reaction_step_properties",
+    "project_library_electronic_properties",
+    "project_library_structure_properties",
+    "project_library_ambiguous_records",
+)
 
 
 class DFTResultReviewService(
@@ -415,6 +441,7 @@ class DFTResultReviewService(
                 for field_name in selected_fields
             ],
             commit=False,
+            allow_verified_reject=True,
         )
         if verification_actor_type == "ai":
             reviews = self._rewrite_rejected_review_payloads(
@@ -667,6 +694,13 @@ class DFTResultReviewService(
         skipped: list[dict[str, Any]] = []
         for rid in result_ids:
             try:
+                existing_reviews = self.session.scalars(
+                    select(ExtractionFieldReview).where(
+                        ExtractionFieldReview.paper_id == paper_id,
+                        ExtractionFieldReview.target_type == "dft_results",
+                        ExtractionFieldReview.target_id == str(rid),
+                    )
+                ).all()
                 result = self.reject_result(
                     paper_id=paper_id,
                     result_id=rid,
@@ -674,6 +708,10 @@ class DFTResultReviewService(
                     reviewer=reviewer,
                     reviewer_note=reviewer_note,
                     field_names=field_names,
+                    expected_write_versions={
+                        review.field_name: review.write_version
+                        for review in existing_reviews
+                    },
                 )
                 rejected.append(result)
             except Exception as exc:
@@ -871,32 +909,12 @@ class DFTResultReviewService(
         )
         self.issue_lifecycle.apply_result_identity(row, identity)
 
-        invalidated_reviews = self.session.scalars(
-            select(ExtractionFieldReview).where(
-                ExtractionFieldReview.paper_id == paper_id,
-                ExtractionFieldReview.target_type == "dft_results",
-                ExtractionFieldReview.target_id == str(result_id),
-            )
-        ).all()
-        for review in invalidated_reviews:
-            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
-            review.reviewer_status = "pending"
-            review.reviewed_value = None
-            review.reviewer = reviewer_name
-            review.reviewer_note = "Invalidated because the DFT row was manually edited and requires re-verification."
-            review.review_payload = {
-                **payload,
-                "human_verification": {
-                    "reviewer": reviewer_name,
-                    "reviewer_note": review.reviewer_note,
-                    "decision": "invalidated_by_manual_update",
-                    "writes_final_truth": False,
-                },
-            }
-            self.session.add(review)
-
-        row.candidate_status = "system_candidate"
-        self.session.add(row)
+        invalidated_reviews = self.invalidate_result_reviews_for_reverification(
+            row=row,
+            reviewer=reviewer_name,
+            decision="invalidated_by_manual_update",
+            reviewer_note="Invalidated because the DFT row was manually edited and requires re-verification.",
+        )
         self.session.flush()
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
         audit = AuditLog(
@@ -943,6 +961,275 @@ class DFTResultReviewService(
             "export_safety": self._gate_payload(row, gate),
             "audit_log_id": str(audit.id),
             "reverification_task_id": workflow_job_id,
+        }
+
+    def invalidate_result_reviews_for_reverification(
+        self,
+        *,
+        row: DFTResult,
+        reviewer: str,
+        decision: str,
+        reviewer_note: str,
+    ) -> list[ExtractionFieldReview]:
+        """Apply the shared manual-review invalidation rule without committing."""
+
+        invalidated_reviews = self.session.scalars(
+            select(ExtractionFieldReview)
+            .where(
+                ExtractionFieldReview.paper_id == row.paper_id,
+                ExtractionFieldReview.target_type == "dft_results",
+                ExtractionFieldReview.target_id == str(row.id),
+            )
+            .order_by(ExtractionFieldReview.id.asc())
+            .with_for_update()
+        ).all()
+        for review in invalidated_reviews:
+            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+            review.reviewer_status = "pending"
+            review.reviewed_value = None
+            review.reviewer = reviewer
+            review.reviewer_note = reviewer_note
+            review.review_payload = {
+                **payload,
+                "human_verification": {
+                    "reviewer": reviewer,
+                    "reviewer_note": reviewer_note,
+                    "decision": decision,
+                    "writes_final_truth": False,
+                },
+            }
+            self.session.add(review)
+
+        row.candidate_status = "system_candidate"
+        self.session.add(row)
+        return invalidated_reviews
+
+    def rekey_catalyst_sample_name(
+        self,
+        *,
+        paper_id: UUID,
+        sample_id: UUID,
+        new_name: str | None,
+        confirm_name_change_with_dft: bool,
+        name_change_reason: str | None,
+        expected_current_name: str | None,
+        affected_dft_result_ids: list[UUID] | None,
+        expected_dft_result_count: int | None,
+        reviewer: str | None = None,
+    ) -> dict[str, Any]:
+        """Atomically prepare a CatalystSample rename and all dependent DFT v2 writes."""
+
+        initial_sample = self.session.get(CatalystSample, sample_id)
+        if initial_sample is None or initial_sample.paper_id != paper_id:
+            raise LookupError("Catalyst sample not found for this paper.")
+
+        requested_ids = list(affected_dft_result_ids or [])
+        requested_id_set = set(requested_ids)
+        lock_filter = DFTResult.catalyst_sample_id == sample_id
+        if requested_ids:
+            lock_filter = or_(lock_filter, DFTResult.id.in_(requested_ids))
+        # Match the single-row/manual-edit lock order: DFTResult rows first,
+        # then CatalystSample rows. UUID ordering makes concurrent batches stable.
+        self.session.scalars(
+            select(DFTResult)
+            .where(DFTResult.paper_id == paper_id, lock_filter)
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+        ).all()
+        samples = self.session.scalars(
+            select(CatalystSample)
+            .where(CatalystSample.paper_id == paper_id)
+            .order_by(CatalystSample.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        samples_by_id = {item.id: item for item in samples}
+        sample = samples_by_id.get(sample_id)
+        if sample is None:
+            raise LookupError("Catalyst sample not found for this paper.")
+
+        current_rows = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id == sample_id,
+            )
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        current_name = self._normalized_catalyst_name(sample.name)
+        target_name = self._normalized_catalyst_name(new_name)
+
+        request_fingerprint = None
+        if (
+            expected_current_name is not None
+            and affected_dft_result_ids is not None
+            and expected_dft_result_count is not None
+        ):
+            request_fingerprint = self._catalyst_name_change_request_fingerprint(
+                paper_id=paper_id,
+                sample_id=sample_id,
+                expected_current_name=expected_current_name,
+                new_name=target_name,
+                affected_dft_result_ids=requested_ids,
+                expected_dft_result_count=expected_dft_result_count,
+            )
+
+        if current_name == target_name:
+            if request_fingerprint:
+                previous_audit = self._find_successful_catalyst_name_change_audit(
+                    paper_id=paper_id,
+                    sample_id=sample_id,
+                    request_fingerprint=request_fingerprint,
+                )
+                if previous_audit is not None:
+                    if not self._catalyst_name_change_retry_state_matches(
+                        paper_id=paper_id,
+                        sample=sample,
+                        rows=current_rows,
+                        requested_ids=requested_id_set,
+                        expected_result_count=expected_dft_result_count,
+                    ):
+                        raise ValueError("write_conflict:catalyst_name_change_retry_state_mismatch")
+                    return self._catalyst_name_change_response_from_audit(
+                        previous_audit,
+                        status="already_renamed",
+                    )
+            return {
+                "status": "unchanged",
+                "previous_name": current_name or None,
+                "current_name": current_name or None,
+                "affected_dft_result_ids": [],
+                "affected_dft_result_count": 0,
+                "requires_reverification": False,
+                "invalidated_review_ids": [],
+                "reverification_task_ids": [],
+                "identity_changes": [],
+                "request_fingerprint": request_fingerprint,
+            }
+
+        if not current_rows:
+            return {
+                "status": "unguarded_no_dft",
+                "previous_name": current_name or None,
+                "current_name": target_name or None,
+                "affected_dft_result_ids": [],
+                "affected_dft_result_count": 0,
+                "requires_reverification": False,
+                "invalidated_review_ids": [],
+                "reverification_task_ids": [],
+                "identity_changes": [],
+                "request_fingerprint": request_fingerprint,
+            }
+
+        if not target_name:
+            raise ValueError("Catalyst name must remain non-empty while DFT results are associated.")
+        if not confirm_name_change_with_dft:
+            raise ValueError("Explicit catalyst name change confirmation is required when DFT results are associated.")
+        reason_text = str(name_change_reason or "").strip()
+        if not reason_text:
+            raise ValueError("A catalyst name change reason is required when DFT results are associated.")
+        if expected_current_name is None:
+            raise ValueError("expected_current_name is required when DFT results are associated.")
+        if affected_dft_result_ids is None:
+            raise ValueError("affected_dft_result_ids is required when DFT results are associated.")
+        if expected_dft_result_count is None:
+            raise ValueError("expected_dft_result_count is required when DFT results are associated.")
+        if len(requested_ids) != len(requested_id_set):
+            raise ValueError("affected_dft_result_ids must not contain duplicates.")
+        if self._normalized_catalyst_name(expected_current_name) != current_name:
+            raise ValueError(
+                "write_conflict:catalyst_sample_name_stale:"
+                f"expected={self._normalized_catalyst_name(expected_current_name)}:current={current_name}"
+            )
+
+        actual_count = len(current_rows)
+        if expected_dft_result_count != actual_count:
+            raise ValueError(
+                "write_conflict:catalyst_sample_dft_result_count_stale:"
+                f"expected={expected_dft_result_count}:current={actual_count}"
+            )
+        current_id_set = {row.id for row in current_rows}
+        if requested_id_set != current_id_set:
+            missing = sorted(str(row_id) for row_id in current_id_set - requested_id_set)
+            unexpected = sorted(str(row_id) for row_id in requested_id_set - current_id_set)
+            raise ValueError(
+                "affected_dft_result_ids must exactly cover every DFT result currently bound to the catalyst sample; "
+                f"missing={missing}, unexpected={unexpected}."
+            )
+
+        duplicate = next(
+            (
+                item
+                for item in samples
+                if item.id != sample_id
+                and self._normalized_catalyst_name(item.name).casefold() == target_name.casefold()
+            ),
+            None,
+        )
+        if duplicate is not None:
+            raise ValueError(
+                "write_conflict:catalyst_sample_name_already_exists:"
+                f"{duplicate.id}:use_duplicate_merge:请使用“合并重复样本”"
+            )
+
+        if request_fingerprint is None:
+            raise ValueError("The protected catalyst name change request is incomplete.")
+        sample.name = target_name
+        identities = {
+            row.id: self.issue_lifecycle.build_identity(
+                paper_id=paper_id,
+                payload=self.issue_lifecycle.authoritative_payload_for_result(
+                    row,
+                    catalyst_sample=sample,
+                ),
+            )
+            for row in current_rows
+        }
+        self._assert_identity_observation_keys_available(
+            paper_id=paper_id,
+            identities=identities,
+            exclude_ids=current_id_set,
+        )
+
+        identity_changes = [
+            {
+                "dft_result_id": str(row.id),
+                "old_subject_key": row.subject_key,
+                "new_subject_key": identities[row.id].subject_key,
+                "old_observation_key": row.observation_key,
+                "new_observation_key": identities[row.id].observation_key,
+            }
+            for row in current_rows
+        ]
+        for row in current_rows:
+            self.issue_lifecycle.clear_result_observation_key_for_rekey(row)
+        self.session.flush()
+
+        self.session.add(sample)
+        for row in current_rows:
+            self.issue_lifecycle.apply_result_identity(row, identities[row.id])
+            self.session.add(row)
+
+        # DFTAuditIssue rows are linked to the stable DFTResult id. Their
+        # current_snapshot is historical audit evidence, so a same-sample name
+        # correction must not rewrite or reopen those lifecycle records.
+        affected_ids = [str(row.id) for row in current_rows]
+        self.session.flush()
+        return {
+            "status": "renamed",
+            "previous_name": current_name or None,
+            "current_name": target_name,
+            "affected_dft_result_ids": affected_ids,
+            "affected_dft_result_count": len(affected_ids),
+            "requires_reverification": False,
+            "review_state_preserved": True,
+            "invalidated_review_ids": [],
+            "reverification_task_ids": [],
+            "identity_changes": identity_changes,
+            "reason": reason_text,
+            "request_fingerprint": request_fingerprint,
         }
 
     def rebind_result_group(
@@ -1158,6 +1445,353 @@ class DFTResultReviewService(
             "remaining_dft_result_count": remaining_count,
         }
 
+    def merge_duplicate_catalyst_samples(
+        self,
+        *,
+        paper_id: UUID,
+        target_sample_id: UUID,
+        expected_target_name: str,
+        sources: list[dict[str, Any]],
+        confirm_same_physical_catalyst: bool,
+        reason: str,
+        reviewer: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge duplicate CatalystSample rows without invalidating DFT review truth."""
+
+        if not confirm_same_physical_catalyst:
+            raise ValueError("Explicit same-physical-catalyst confirmation is required.")
+        reason_text = str(reason or "").strip()
+        if not reason_text:
+            raise ValueError("A duplicate catalyst sample merge reason is required.")
+        target_name_expected = self._normalized_catalyst_name(expected_target_name)
+        if not target_name_expected:
+            raise ValueError("expected_target_name must be non-empty.")
+        if not sources:
+            raise ValueError("At least one duplicate source catalyst sample is required.")
+
+        canonical_sources: list[dict[str, Any]] = []
+        seen_source_ids: set[UUID] = set()
+        seen_result_ids: set[UUID] = set()
+        for source in sources:
+            try:
+                source_sample_id = UUID(str(source.get("source_sample_id")))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Every duplicate source must include a valid source_sample_id.") from exc
+            if source_sample_id == target_sample_id:
+                raise ValueError("Duplicate source samples must be different from the target sample.")
+            if source_sample_id in seen_source_ids:
+                raise ValueError("sources must not contain duplicate source_sample_id values.")
+            seen_source_ids.add(source_sample_id)
+            expected_current_name = self._normalized_catalyst_name(source.get("expected_current_name"))
+            if not expected_current_name:
+                raise ValueError("Every duplicate source must include a non-empty expected_current_name.")
+            try:
+                expected_count = int(source.get("expected_dft_result_count"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Every duplicate source must include expected_dft_result_count.") from exc
+            if expected_count < 0:
+                raise ValueError("expected_dft_result_count must be zero or greater.")
+            requested_ids: list[UUID] = []
+            for value in source.get("dft_result_ids") or []:
+                try:
+                    result_id = UUID(str(value))
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("dft_result_ids must contain valid UUID values.") from exc
+                if result_id in requested_ids:
+                    raise ValueError("Each source dft_result_ids list must not contain duplicates.")
+                if result_id in seen_result_ids:
+                    raise ValueError("A DFT result ID must not appear under more than one duplicate source.")
+                requested_ids.append(result_id)
+                seen_result_ids.add(result_id)
+            canonical_sources.append(
+                {
+                    "source_sample_id": source_sample_id,
+                    "expected_current_name": expected_current_name,
+                    "dft_result_ids": requested_ids,
+                    "expected_dft_result_count": expected_count,
+                }
+            )
+        canonical_sources.sort(key=lambda item: str(item["source_sample_id"]))
+        source_ids = [item["source_sample_id"] for item in canonical_sources]
+        requested_result_ids = [
+            result_id
+            for item in canonical_sources
+            for result_id in item["dft_result_ids"]
+        ]
+        request_fingerprint = self._duplicate_merge_request_fingerprint(
+            paper_id=paper_id,
+            target_sample_id=target_sample_id,
+            expected_target_name=target_name_expected,
+            sources=canonical_sources,
+        )
+
+        lock_filter = DFTResult.catalyst_sample_id.in_([target_sample_id, *source_ids])
+        if requested_result_ids:
+            lock_filter = or_(lock_filter, DFTResult.id.in_(requested_result_ids))
+        # Keep the established mutation lock order: DFTResult first, then
+        # CatalystSample, both in UUID order. Membership is refreshed after
+        # both lock sets are held.
+        self.session.scalars(
+            select(DFTResult)
+            .where(DFTResult.paper_id == paper_id, lock_filter)
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+        ).all()
+        samples = self.session.scalars(
+            select(CatalystSample)
+            .where(CatalystSample.id.in_([target_sample_id, *source_ids]))
+            .order_by(CatalystSample.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        samples_by_id = {sample.id: sample for sample in samples}
+        target_sample = samples_by_id.get(target_sample_id)
+        if target_sample is None or target_sample.paper_id != paper_id:
+            raise LookupError("Target catalyst sample not found for this paper.")
+
+        previous_audit = self._find_successful_duplicate_merge_audit(
+            paper_id=paper_id,
+            target_sample_id=target_sample_id,
+            request_fingerprint=request_fingerprint,
+        )
+        missing_source_ids = [source_id for source_id in source_ids if source_id not in samples_by_id]
+        if missing_source_ids and previous_audit is not None:
+            if self._duplicate_merge_retry_state_matches(
+                paper_id=paper_id,
+                target_sample=target_sample,
+                expected_target_name=target_name_expected,
+                source_ids=set(source_ids),
+                requested_result_ids=set(requested_result_ids),
+            ):
+                return self._duplicate_merge_response_from_audit(previous_audit, status="already_merged")
+            raise ValueError("write_conflict:duplicate_catalyst_merge_retry_state_mismatch")
+        if missing_source_ids:
+            raise LookupError(
+                "Duplicate source catalyst sample not found for this paper: "
+                + ",".join(sorted(str(source_id) for source_id in missing_source_ids))
+            )
+
+        source_samples = [samples_by_id[source_id] for source_id in source_ids]
+        cross_paper_ids = [sample.id for sample in source_samples if sample.paper_id != paper_id]
+        if cross_paper_ids:
+            raise ValueError(
+                "Source and target catalyst samples must belong to the same paper: "
+                + ",".join(sorted(str(source_id) for source_id in cross_paper_ids))
+            )
+        target_current_name = self._normalized_catalyst_name(target_sample.name)
+        if target_current_name != target_name_expected:
+            raise ValueError(
+                "write_conflict:duplicate_catalyst_merge_target_name_stale:"
+                f"expected={target_name_expected}:current={target_current_name}"
+            )
+
+        current_rows = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id.in_(source_ids),
+            )
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        rows_by_source: dict[UUID, list[DFTResult]] = {source_id: [] for source_id in source_ids}
+        for row in current_rows:
+            if row.catalyst_sample_id in rows_by_source:
+                rows_by_source[row.catalyst_sample_id].append(row)
+        for source in canonical_sources:
+            source_id = source["source_sample_id"]
+            source_sample = samples_by_id[source_id]
+            source_current_name = self._normalized_catalyst_name(source_sample.name)
+            if source_current_name != source["expected_current_name"]:
+                raise ValueError(
+                    "write_conflict:duplicate_catalyst_merge_source_name_stale:"
+                    f"source={source_id}:expected={source['expected_current_name']}:current={source_current_name}"
+                )
+            source_rows = rows_by_source[source_id]
+            if len(source_rows) != source["expected_dft_result_count"]:
+                raise ValueError(
+                    "write_conflict:duplicate_catalyst_merge_result_count_stale:"
+                    f"source={source_id}:expected={source['expected_dft_result_count']}:current={len(source_rows)}"
+                )
+            actual_ids = {row.id for row in source_rows}
+            requested_ids = set(source["dft_result_ids"])
+            if actual_ids != requested_ids:
+                missing = sorted(str(result_id) for result_id in actual_ids - requested_ids)
+                unexpected = sorted(str(result_id) for result_id in requested_ids - actual_ids)
+                raise ValueError(
+                    "write_conflict:duplicate_catalyst_merge_incomplete_result_set:"
+                    f"source={source_id}:missing={missing}:unexpected={unexpected}"
+                )
+
+        self._assert_duplicate_merge_has_no_non_dft_references(
+            paper_id=paper_id,
+            source_ids=source_ids,
+        )
+        target_before = self._catalyst_sample_snapshot(target_sample)
+        source_snapshots = [
+            {
+                **self._catalyst_sample_snapshot(sample),
+                "dft_result_ids": [str(row.id) for row in rows_by_source[sample.id]],
+                "dft_result_count": len(rows_by_source[sample.id]),
+            }
+            for sample in source_samples
+        ]
+        inherited_basic_info_fields = self._merge_compatible_catalyst_basic_info(
+            target_sample=target_sample,
+            source_samples=source_samples,
+        )
+        evidence_strength_merge = self._merge_catalyst_evidence_strength(
+            target_sample=target_sample,
+            source_samples=source_samples,
+        )
+
+        evidence_spans, evidence_claims, evidence_locators = self._lock_duplicate_merge_evidence_references(
+            paper_id=paper_id,
+            source_ids=source_ids,
+        )
+        active_site_rows = self.session.scalars(
+            select(ActiveSiteMetal)
+            .where(ActiveSiteMetal.catalyst_sample_id.in_([target_sample_id, *source_ids]))
+            .order_by(ActiveSiteMetal.id.asc())
+            .with_for_update()
+        ).all()
+
+        moved_rows = sorted(current_rows, key=lambda row: str(row.id))
+        identities = {
+            row.id: self.issue_lifecycle.build_identity(
+                paper_id=paper_id,
+                payload=self.issue_lifecycle.authoritative_payload_for_result(
+                    row,
+                    catalyst_sample=target_sample,
+                ),
+            )
+            for row in moved_rows
+        }
+        moved_id_set = {row.id for row in moved_rows}
+        self._assert_identity_observation_keys_available(
+            paper_id=paper_id,
+            identities=identities,
+            exclude_ids=moved_id_set,
+        )
+        identity_changes = [
+            {
+                "dft_result_id": str(row.id),
+                "old_subject_key": row.subject_key,
+                "new_subject_key": identities[row.id].subject_key,
+                "old_observation_key": row.observation_key,
+                "new_observation_key": identities[row.id].observation_key,
+            }
+            for row in moved_rows
+        ]
+
+        for row in moved_rows:
+            self.issue_lifecycle.clear_result_observation_key_for_rekey(row)
+        self.session.flush()
+        for row in moved_rows:
+            row.catalyst_sample_id = target_sample_id
+            self.issue_lifecycle.apply_result_identity(row, identities[row.id])
+            self.session.add(row)
+
+        target_id_text = str(target_sample_id)
+        for span in evidence_spans:
+            span.object_id = target_id_text
+            self.session.add(span)
+        for claim in evidence_claims:
+            claim.target_id = target_id_text
+            self.session.add(claim)
+        for locator in evidence_locators:
+            locator.target_id = target_id_text
+            self.session.add(locator)
+        transferred_evidence_count = len(evidence_spans) + len(evidence_claims) + len(evidence_locators)
+
+        deleted_source_active_site_count = 0
+        for row in active_site_rows:
+            if row.catalyst_sample_id in seen_source_ids:
+                self.session.delete(row)
+                deleted_source_active_site_count += 1
+        self.session.add(target_sample)
+        self.session.flush()
+
+        remaining_rows = self.session.scalars(
+            select(DFTResult)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.catalyst_sample_id.in_(source_ids),
+            )
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+        ).all()
+        if remaining_rows:
+            raise ValueError(
+                "write_conflict:duplicate_catalyst_merge_source_not_empty:"
+                + ",".join(str(row.id) for row in remaining_rows)
+            )
+        for source_sample in source_samples:
+            self.session.delete(source_sample)
+        self.session.flush()
+
+        active_site_refresh = ActiveSiteEnrichmentService(self.session).refresh_sample(target_sample)
+        reviewer_name = str(reviewer or "literature_library_user").strip() or "literature_library_user"
+        moved_result_ids = [str(row.id) for row in moved_rows]
+        merged_source_ids = [str(source_id) for source_id in source_ids]
+        audit_payload = {
+            "request_fingerprint": request_fingerprint,
+            "target_sample_id": str(target_sample_id),
+            "expected_target_name": target_name_expected,
+            "merged_source_sample_ids": merged_source_ids,
+            "deleted_source_sample_ids": merged_source_ids,
+            "moved_dft_result_ids": moved_result_ids,
+            "moved_dft_result_count": len(moved_result_ids),
+            "reason": reason_text,
+            "requires_reverification": False,
+            "review_state_preserved": True,
+            "invalidated_review_ids": [],
+            "reverification_task_ids": [],
+            "target_before": target_before,
+            "target_after": self._catalyst_sample_snapshot(target_sample),
+            "source_snapshots": source_snapshots,
+            "inherited_basic_info_fields": inherited_basic_info_fields,
+            "evidence_strength_merge": evidence_strength_merge,
+            "identity_changes": identity_changes,
+            "transferred_evidence_reference_count": transferred_evidence_count,
+            "transferred_evidence_references": {
+                "evidence_spans": len(evidence_spans),
+                "evidence_claims": len(evidence_claims),
+                "evidence_locators": len(evidence_locators),
+            },
+            "deleted_source_active_site_count": deleted_source_active_site_count,
+            "active_site_refresh": active_site_refresh,
+        }
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="merge_duplicate_catalyst_samples",
+            source=reviewer_name,
+            target_type="catalyst_samples",
+            target_id=str(target_sample_id),
+            payload=audit_payload,
+        )
+        self.session.add(audit)
+        self.session.flush()
+        self.session.commit()
+        self.session.refresh(audit)
+        return {
+            "status": "merged",
+            "target_sample_id": str(target_sample_id),
+            "merged_source_sample_ids": merged_source_ids,
+            "moved_dft_result_ids": moved_result_ids,
+            "moved_dft_result_count": len(moved_result_ids),
+            "deleted_source_sample_ids": merged_source_ids,
+            "requires_reverification": False,
+            "review_state_preserved": True,
+            "invalidated_review_ids": [],
+            "reverification_task_ids": [],
+            "audit_log_id": str(audit.id),
+            "request_fingerprint": request_fingerprint,
+            "transferred_evidence_reference_count": transferred_evidence_count,
+            "active_site_refresh": active_site_refresh,
+        }
+
     def _assert_identity_observation_keys_available(
         self,
         *,
@@ -1183,6 +1817,11 @@ class DFTResultReviewService(
         observation_keys = sorted(result_ids_by_key)
         if not observation_keys:
             return
+        # This is a preflight read, not a second lock phase. All mutation
+        # entrypoints lock their own DFT rows before CatalystSample rows; taking
+        # a late lock on an external conflicting DFT row would invert that order
+        # and can deadlock. The database unique index remains the final arbiter
+        # for a concurrent observation-key insert, surfaced as HTTP 409.
         conflicts = self.session.scalars(
             select(DFTResult)
             .where(
@@ -1192,7 +1831,6 @@ class DFTResultReviewService(
                 DFTResult.id.notin_(exclude_ids),
             )
             .order_by(DFTResult.id.asc())
-            .with_for_update()
         ).all()
         if conflicts:
             conflict = conflicts[0]
@@ -1200,6 +1838,401 @@ class DFTResultReviewService(
                 "write_conflict:dft_identity_observation_key_conflict:"
                 f"{conflict.observation_key}:{conflict.id}"
             )
+
+    def _assert_duplicate_merge_has_no_non_dft_references(
+        self,
+        *,
+        paper_id: UUID,
+        source_ids: list[UUID],
+    ) -> None:
+        mechanism_claims = self.session.scalars(
+            select(MechanismClaim)
+            .where(
+                MechanismClaim.paper_id == paper_id,
+                MechanismClaim.catalyst_sample_id.in_(source_ids),
+            )
+            .order_by(MechanismClaim.id.asc())
+            .with_for_update()
+        ).all()
+        performance_rows = self.session.scalars(
+            select(ElectrochemicalPerformance)
+            .where(
+                ElectrochemicalPerformance.paper_id == paper_id,
+                ElectrochemicalPerformance.catalyst_sample_id.in_(source_ids),
+            )
+            .order_by(ElectrochemicalPerformance.id.asc())
+            .with_for_update()
+        ).all()
+        source_id_texts = [str(source_id) for source_id in source_ids]
+        sample_reviews = self.session.scalars(
+            select(ExtractionFieldReview)
+            .where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type == "catalyst_samples",
+                ExtractionFieldReview.target_id.in_(source_id_texts),
+            )
+            .order_by(ExtractionFieldReview.id.asc())
+            .with_for_update()
+        ).all()
+        correction_path_filters = [
+            PaperCorrection.target_path.like(f"{target_type}:{source_id}:%")
+            for source_id in source_id_texts
+            for target_type in ("catalyst_samples", "catalyst_sample")
+        ]
+        active_corrections = self.session.scalars(
+            select(PaperCorrection)
+            .where(
+                PaperCorrection.paper_id == paper_id,
+                PaperCorrection.status.in_(("pending", "requires_resolution")),
+                or_(*correction_path_filters),
+            )
+            .order_by(PaperCorrection.id.asc())
+            .with_for_update()
+        ).all()
+        physical_reference_counts = self._optional_catalyst_reference_counts(source_ids)
+        if (
+            mechanism_claims
+            or performance_rows
+            or sample_reviews
+            or active_corrections
+            or physical_reference_counts
+        ):
+            raise ValueError(
+                "write_conflict:duplicate_catalyst_merge_non_dft_references:"
+                f"mechanism_claims={len(mechanism_claims)}:"
+                f"electrochemical_performance={len(performance_rows)}:"
+                f"sample_reviews={len(sample_reviews)}:"
+                f"active_corrections={len(active_corrections)}:"
+                f"optional_physical_tables={json.dumps(physical_reference_counts, sort_keys=True)}"
+            )
+
+    def _optional_catalyst_reference_counts(
+        self,
+        source_ids: list[UUID],
+    ) -> dict[str, int]:
+        inspector = sa_inspect(self.session.connection())
+        source_id_texts = [str(source_id) for source_id in source_ids]
+        counts: dict[str, int] = {}
+        for table_name in DUPLICATE_MERGE_OPTIONAL_CATALYST_TABLES:
+            if not inspector.has_table(table_name):
+                continue
+            statement = text(
+                f'SELECT COUNT(*) FROM "{table_name}" '
+                "WHERE CAST(catalyst_sample_id AS TEXT) IN :source_ids"
+            ).bindparams(bindparam("source_ids", expanding=True))
+            count = int(
+                self.session.scalar(statement, {"source_ids": source_id_texts}) or 0
+            )
+            if count:
+                counts[table_name] = count
+        return counts
+
+    def _lock_duplicate_merge_evidence_references(
+        self,
+        *,
+        paper_id: UUID,
+        source_ids: list[UUID],
+    ) -> tuple[list[EvidenceSpan], list[EvidenceClaim], list[EvidenceLocator]]:
+        source_id_texts = [str(source_id) for source_id in source_ids]
+        target_types = ("catalyst_samples", "catalyst_sample", "CatalystSample")
+        spans = self.session.scalars(
+            select(EvidenceSpan)
+            .where(
+                EvidenceSpan.paper_id == paper_id,
+                EvidenceSpan.object_type.in_(target_types),
+                EvidenceSpan.object_id.in_(source_id_texts),
+            )
+            .order_by(EvidenceSpan.id.asc())
+            .with_for_update()
+        ).all()
+        claims = self.session.scalars(
+            select(EvidenceClaim)
+            .where(
+                EvidenceClaim.paper_id == paper_id,
+                EvidenceClaim.target_type.in_(target_types),
+                EvidenceClaim.target_id.in_(source_id_texts),
+            )
+            .order_by(EvidenceClaim.id.asc())
+            .with_for_update()
+        ).all()
+        locators = self.session.scalars(
+            select(EvidenceLocator)
+            .where(
+                EvidenceLocator.paper_id == paper_id,
+                EvidenceLocator.target_type.in_(target_types),
+                EvidenceLocator.target_id.in_(source_id_texts),
+            )
+            .order_by(EvidenceLocator.id.asc())
+            .with_for_update()
+        ).all()
+        return list(spans), list(claims), list(locators)
+
+    def _merge_compatible_catalyst_basic_info(
+        self,
+        *,
+        target_sample: CatalystSample,
+        source_samples: list[CatalystSample],
+    ) -> list[str]:
+        inherited_fields: list[str] = []
+        fields = (
+            "catalyst_type",
+            "metal_centers",
+            "coordination",
+            "support",
+            "synthesis_method",
+        )
+        for field_name in fields:
+            target_value = self._catalyst_basic_info_field_value(target_sample, field_name)
+            target_normalized = self._normalized_catalyst_basic_info_value(target_value)
+            source_values_by_normalized: dict[Any, Any] = {}
+            for source_sample in source_samples:
+                source_value = self._catalyst_basic_info_field_value(source_sample, field_name)
+                source_normalized = self._normalized_catalyst_basic_info_value(source_value)
+                if source_normalized is not None:
+                    source_values_by_normalized.setdefault(source_normalized, source_value)
+            if len(source_values_by_normalized) > 1:
+                raise ValueError(
+                    "write_conflict:duplicate_catalyst_merge_basic_info_conflict:"
+                    f"field={field_name}:source_values_disagree"
+                )
+            if not source_values_by_normalized:
+                continue
+            source_normalized, source_value = next(iter(source_values_by_normalized.items()))
+            if target_normalized is not None and target_normalized != source_normalized:
+                raise ValueError(
+                    "write_conflict:duplicate_catalyst_merge_basic_info_conflict:"
+                    f"field={field_name}:target_and_source_disagree"
+                )
+            if target_normalized is None:
+                self._assign_catalyst_basic_info_field(target_sample, field_name, source_value)
+                inherited_fields.append(field_name)
+        return inherited_fields
+
+    @staticmethod
+    def _merge_catalyst_evidence_strength(
+        *,
+        target_sample: CatalystSample,
+        source_samples: list[CatalystSample],
+    ) -> dict[str, Any]:
+        """Keep every distinct sample-level evidence text when duplicate rows are removed."""
+
+        merged_values: list[str] = []
+        seen: set[str] = set()
+        for sample in [target_sample, *source_samples]:
+            value = str(sample.evidence_strength or "").strip()
+            normalized = " ".join(value.split())
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            merged_values.append(value)
+        merged_value = "\n\n".join(merged_values) or None
+        changed = merged_value != target_sample.evidence_strength
+        if changed:
+            target_sample.evidence_strength = merged_value
+        return {
+            "changed": changed,
+            "distinct_value_count": len(merged_values),
+        }
+
+    @staticmethod
+    def _catalyst_basic_info_field_value(sample: CatalystSample, field_name: str) -> Any:
+        if field_name == "catalyst_type":
+            return sample.catalyst_type
+        if field_name == "metal_centers":
+            return list(sample.metal_centers or [])
+        if field_name == "coordination":
+            return sample.coordination
+        if field_name == "support":
+            return sample.support
+        if field_name == "synthesis_method":
+            return sample.synthesis_method
+        raise ValueError(f"Unsupported catalyst basic-info compatibility field: {field_name}")
+
+    @staticmethod
+    def _assign_catalyst_basic_info_field(
+        sample: CatalystSample,
+        field_name: str,
+        value: Any,
+    ) -> None:
+        if field_name == "catalyst_type":
+            sample.catalyst_type = value
+            return
+        if field_name == "metal_centers":
+            sample.metal_centers = list(value or [])
+            return
+        if field_name == "coordination":
+            sample.coordination = value
+            return
+        if field_name == "support":
+            sample.support = value
+            return
+        if field_name == "synthesis_method":
+            sample.synthesis_method = value
+            return
+        raise ValueError(f"Unsupported catalyst basic-info compatibility field: {field_name}")
+
+    @staticmethod
+    def _normalized_catalyst_basic_info_value(value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, list):
+            normalized = tuple(str(item).strip().casefold() for item in value if str(item).strip())
+            return normalized or None
+        normalized = " ".join(str(value).split()).casefold()
+        return normalized or None
+
+    @staticmethod
+    def _catalyst_sample_snapshot(sample: CatalystSample) -> dict[str, Any]:
+        return {
+            "id": str(sample.id),
+            "paper_id": str(sample.paper_id),
+            "name": sample.name,
+            "catalyst_type": sample.catalyst_type,
+            "metal_centers": list(sample.metal_centers or []),
+            "coordination": sample.coordination,
+            "support": sample.support,
+            "synthesis_method": sample.synthesis_method,
+            "evidence_strength": sample.evidence_strength,
+        }
+
+    def _find_successful_duplicate_merge_audit(
+        self,
+        *,
+        paper_id: UUID,
+        target_sample_id: UUID,
+        request_fingerprint: str,
+    ) -> AuditLog | None:
+        audits = self.session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.paper_id == paper_id,
+                AuditLog.action == "merge_duplicate_catalyst_samples",
+                AuditLog.target_type == "catalyst_samples",
+                AuditLog.target_id == str(target_sample_id),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .with_for_update()
+        ).all()
+        return next(
+            (
+                audit
+                for audit in audits
+                if isinstance(audit.payload, dict)
+                and audit.payload.get("request_fingerprint") == request_fingerprint
+            ),
+            None,
+        )
+
+    def _duplicate_merge_retry_state_matches(
+        self,
+        *,
+        paper_id: UUID,
+        target_sample: CatalystSample,
+        expected_target_name: str,
+        source_ids: set[UUID],
+        requested_result_ids: set[UUID],
+    ) -> bool:
+        if self._normalized_catalyst_name(target_sample.name) != expected_target_name:
+            return False
+        remaining_sources = self.session.scalars(
+            select(CatalystSample)
+            .where(CatalystSample.id.in_(source_ids))
+            .order_by(CatalystSample.id.asc())
+            .with_for_update()
+        ).all()
+        if remaining_sources:
+            return False
+        remaining_source_rows = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(DFTResult)
+                .where(
+                    DFTResult.paper_id == paper_id,
+                    DFTResult.catalyst_sample_id.in_(source_ids),
+                )
+            )
+            or 0
+        )
+        if remaining_source_rows:
+            return False
+        moved_rows = self.session.scalars(
+            select(DFTResult)
+            .where(DFTResult.id.in_(requested_result_ids))
+            .order_by(DFTResult.id.asc())
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).all()
+        if len(moved_rows) != len(requested_result_ids):
+            return False
+        for row in moved_rows:
+            if row.paper_id != paper_id or row.catalyst_sample_id != target_sample.id:
+                return False
+            identity = self.issue_lifecycle.build_identity(
+                paper_id=paper_id,
+                payload=self.issue_lifecycle.authoritative_payload_for_result(
+                    row,
+                    catalyst_sample=target_sample,
+                ),
+            )
+            if (
+                row.identity_version != identity.identity_version
+                or row.subject_key != identity.subject_key
+                or row.observation_key != identity.observation_key
+                or row.identity_payload != identity.identity_payload
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _duplicate_merge_request_fingerprint(
+        *,
+        paper_id: UUID,
+        target_sample_id: UUID,
+        expected_target_name: str,
+        sources: list[dict[str, Any]],
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "paper_id": str(paper_id),
+                "target_sample_id": str(target_sample_id),
+                "expected_target_name": str(expected_target_name or "").strip(),
+                "sources": [
+                    {
+                        "source_sample_id": str(source["source_sample_id"]),
+                        "expected_current_name": str(source["expected_current_name"] or "").strip(),
+                        "dft_result_ids": sorted(str(result_id) for result_id in source["dft_result_ids"]),
+                        "expected_dft_result_count": int(source["expected_dft_result_count"]),
+                    }
+                    for source in sorted(sources, key=lambda item: str(item["source_sample_id"]))
+                ],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _duplicate_merge_response_from_audit(audit: AuditLog, *, status: str) -> dict[str, Any]:
+        payload = audit.payload if isinstance(audit.payload, dict) else {}
+        return {
+            "status": status,
+            "target_sample_id": payload.get("target_sample_id"),
+            "merged_source_sample_ids": list(payload.get("merged_source_sample_ids") or []),
+            "moved_dft_result_ids": list(payload.get("moved_dft_result_ids") or []),
+            "moved_dft_result_count": int(payload.get("moved_dft_result_count") or 0),
+            "deleted_source_sample_ids": list(payload.get("deleted_source_sample_ids") or []),
+            "requires_reverification": bool(payload.get("requires_reverification", False)),
+            "review_state_preserved": bool(payload.get("review_state_preserved", True)),
+            "invalidated_review_ids": list(payload.get("invalidated_review_ids") or []),
+            "reverification_task_ids": list(payload.get("reverification_task_ids") or []),
+            "audit_log_id": str(audit.id),
+            "request_fingerprint": payload.get("request_fingerprint"),
+            "transferred_evidence_reference_count": int(
+                payload.get("transferred_evidence_reference_count") or 0
+            ),
+            "active_site_refresh": payload.get("active_site_refresh") or {},
+        }
 
     def _find_successful_rebind_audit(
         self,
@@ -1228,6 +2261,114 @@ class DFTResultReviewService(
             ),
             None,
         )
+
+    def _find_successful_catalyst_name_change_audit(
+        self,
+        *,
+        paper_id: UUID,
+        sample_id: UUID,
+        request_fingerprint: str,
+    ) -> AuditLog | None:
+        audits = self.session.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.paper_id == paper_id,
+                AuditLog.action == "update_catalyst_basic_info",
+                AuditLog.target_type == "catalyst_samples",
+                AuditLog.target_id == str(sample_id),
+            )
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .with_for_update()
+        ).all()
+        return next(
+            (
+                audit
+                for audit in audits
+                if isinstance(audit.payload, dict)
+                and isinstance(audit.payload.get("name_identity_rekey"), dict)
+                and audit.payload["name_identity_rekey"].get("request_fingerprint") == request_fingerprint
+            ),
+            None,
+        )
+
+    def _catalyst_name_change_retry_state_matches(
+        self,
+        *,
+        paper_id: UUID,
+        sample: CatalystSample,
+        rows: list[DFTResult],
+        requested_ids: set[UUID],
+        expected_result_count: int,
+    ) -> bool:
+        if len(rows) != expected_result_count or {row.id for row in rows} != requested_ids:
+            return False
+        for row in rows:
+            if row.paper_id != paper_id or row.catalyst_sample_id != sample.id:
+                return False
+            identity = self.issue_lifecycle.build_identity(
+                paper_id=paper_id,
+                payload=self.issue_lifecycle.authoritative_payload_for_result(
+                    row,
+                    catalyst_sample=sample,
+                ),
+            )
+            if (
+                row.identity_version != identity.identity_version
+                or row.subject_key != identity.subject_key
+                or row.observation_key != identity.observation_key
+                or row.identity_payload != identity.identity_payload
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _catalyst_name_change_request_fingerprint(
+        *,
+        paper_id: UUID,
+        sample_id: UUID,
+        expected_current_name: str,
+        new_name: str,
+        affected_dft_result_ids: list[UUID],
+        expected_dft_result_count: int,
+    ) -> str:
+        canonical = json.dumps(
+            {
+                "paper_id": str(paper_id),
+                "sample_id": str(sample_id),
+                "expected_current_name": str(expected_current_name or "").strip(),
+                "new_name": str(new_name or "").strip(),
+                "affected_dft_result_ids": sorted(str(result_id) for result_id in affected_dft_result_ids),
+                "expected_dft_result_count": expected_dft_result_count,
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _catalyst_name_change_response_from_audit(audit: AuditLog, *, status: str) -> dict[str, Any]:
+        payload = audit.payload if isinstance(audit.payload, dict) else {}
+        rekey = payload.get("name_identity_rekey") if isinstance(payload.get("name_identity_rekey"), dict) else {}
+        return {
+            "status": status,
+            "previous_name": rekey.get("previous_name"),
+            "current_name": rekey.get("new_name"),
+            "affected_dft_result_ids": list(rekey.get("affected_dft_result_ids") or []),
+            "affected_dft_result_count": int(rekey.get("affected_dft_result_count") or 0),
+            "requires_reverification": bool(rekey.get("requires_reverification", False)),
+            "review_state_preserved": bool(rekey.get("review_state_preserved", False)),
+            "invalidated_review_ids": list(rekey.get("invalidated_review_ids") or []),
+            "reverification_task_ids": list(rekey.get("reverification_task_ids") or []),
+            "identity_changes": list(rekey.get("identity_changes") or []),
+            "request_fingerprint": rekey.get("request_fingerprint"),
+            "audit_log_id": str(audit.id),
+            "active_site_refresh": payload.get("active_site_refresh") or {},
+        }
+
+    @staticmethod
+    def _normalized_catalyst_name(value: Any) -> str:
+        return str(value or "").strip()
 
     @staticmethod
     def _rebind_request_fingerprint(

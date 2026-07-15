@@ -26,6 +26,8 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.schemas.api import (
+    CatalystSampleDuplicateMergeRequest,
+    CatalystSampleDuplicateMergeResponse,
     CodexContextResponse,
     CodexItemContextResponse,
     DFTResultCorrectionProposalRequest,
@@ -105,6 +107,11 @@ class CatalystBasicInfoUpdateRequest(BaseModel):
     reviewer: str | None = None
     evidence_payload: dict[str, Any] | None = None
     note: str | None = None
+    confirm_name_change_with_dft: bool = False
+    name_change_reason: str | None = None
+    expected_current_name: str | None = None
+    affected_dft_result_ids: list[UUID] | None = None
+    expected_dft_result_count: int | None = None
 
 
 class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
@@ -594,96 +601,13 @@ async def set_manual_review_progress(
     }
 
 
-@router.post("/{paper_id}/catalyst-samples/{sample_id}/basic-info")
-async def update_catalyst_sample_basic_info(
+def _catalyst_basic_info_update_response(
+    *,
     paper_id: UUID,
-    sample_id: UUID,
-    payload: CatalystBasicInfoUpdateRequest,
-    session: Session = Depends(get_db_session),
+    sample: CatalystSample,
+    active_site_refresh: dict[str, Any],
+    name_change: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    paper = session.get(Paper, paper_id)
-    if not paper:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    sample = session.get(CatalystSample, sample_id)
-    if sample is None or sample.paper_id != paper_id:
-        raise HTTPException(status_code=404, detail="Catalyst sample not found for this paper")
-
-    provided = set(getattr(payload, "model_fields_set", set()) or set())
-    merged = {
-        "name": payload.name if "name" in provided else sample.name,
-        "catalyst_type": payload.catalyst_type if "catalyst_type" in provided else sample.catalyst_type,
-        "metal_centers": payload.metal_centers if "metal_centers" in provided else (sample.metal_centers or []),
-        "coordination": payload.coordination if "coordination" in provided else sample.coordination,
-        "support": payload.support if "support" in provided else sample.support,
-        "synthesis_method": payload.synthesis_method if "synthesis_method" in provided else sample.synthesis_method,
-        "evidence_strength": payload.evidence_strength if "evidence_strength" in provided else sample.evidence_strength,
-    }
-    normalized = catalyst_basic_info_payload(**merged)
-    fields = normalized["fields"]
-    before = {
-        "name": sample.name,
-        "catalyst_type": sample.catalyst_type,
-        "metal_centers": sample.metal_centers or [],
-        "coordination": sample.coordination,
-        "support": sample.support,
-        "synthesis_method": sample.synthesis_method,
-        "evidence_strength": sample.evidence_strength,
-    }
-
-    if "name" in provided:
-        sample.name = fields["name"]
-    if "catalyst_type" in provided:
-        sample.catalyst_type = fields["catalyst_type"]
-    if "metal_centers" in provided:
-        sample.metal_centers = fields["metal_centers"]
-    if "coordination" in provided:
-        sample.coordination = fields["coordination"]
-    if "support" in provided:
-        sample.support = fields["support"]
-    if "synthesis_method" in provided:
-        sample.synthesis_method = fields["synthesis_method"]
-    if "evidence_strength" in provided:
-        sample.evidence_strength = fields["evidence_strength"]
-
-    source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
-    after = {
-        "name": sample.name,
-        "catalyst_type": sample.catalyst_type,
-        "metal_centers": sample.metal_centers or [],
-        "coordination": sample.coordination,
-        "support": sample.support,
-        "synthesis_method": sample.synthesis_method,
-        "evidence_strength": sample.evidence_strength,
-    }
-    session.add(sample)
-    session.flush()
-    active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
-    session.add(
-        AuditLog(
-            paper_id=paper_id,
-            action="update_catalyst_basic_info",
-            source=source,
-            target_type="catalyst_samples",
-            target_id=str(sample_id),
-            payload={
-                "schema_version": normalized["schema_version"],
-                "before": before,
-                "after": after,
-                "provided_fields": sorted(provided),
-                "normalization": {
-                    "raw": normalized["raw"],
-                    "allowed_values": normalized["allowed_values"],
-                    "normalization_source": normalized["normalization_source"],
-                },
-                "metal_descriptors": normalized["metal_descriptors"],
-                "active_site_refresh": active_site_refresh,
-                "evidence_payload": payload.evidence_payload or {},
-                "note": payload.note,
-            },
-        )
-    )
-    session.commit()
-    session.refresh(sample)
     detail_payload = catalyst_basic_info_payload(
         name=sample.name,
         catalyst_type=sample.catalyst_type,
@@ -693,10 +617,10 @@ async def update_catalyst_sample_basic_info(
         synthesis_method=sample.synthesis_method,
         evidence_strength=sample.evidence_strength,
     )
-    return {
+    response = {
         "status": "updated",
         "paper_id": str(paper_id),
-        "catalyst_sample_id": str(sample_id),
+        "catalyst_sample_id": str(sample.id),
         "catalyst_sample": {
             "id": str(sample.id),
             **detail_payload["fields"],
@@ -709,6 +633,203 @@ async def update_catalyst_sample_basic_info(
         "allowed_values": detail_payload["allowed_values"],
         "active_site_refresh": active_site_refresh,
     }
+    if name_change is not None:
+        response["name_change"] = {
+            key: name_change.get(key)
+            for key in (
+                "status",
+                "previous_name",
+                "current_name",
+                "affected_dft_result_ids",
+                "affected_dft_result_count",
+                "requires_reverification",
+                "review_state_preserved",
+                "invalidated_review_ids",
+                "reverification_task_ids",
+                "audit_log_id",
+            )
+        }
+    return response
+
+
+@router.post("/{paper_id}/catalyst-samples/{sample_id}/basic-info")
+async def update_catalyst_sample_basic_info(
+    paper_id: UUID,
+    sample_id: UUID,
+    payload: CatalystBasicInfoUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    try:
+        paper = session.get(Paper, paper_id)
+        if not paper:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        sample = session.get(CatalystSample, sample_id)
+        if sample is None or sample.paper_id != paper_id:
+            raise HTTPException(status_code=404, detail="Catalyst sample not found for this paper")
+
+        provided = set(getattr(payload, "model_fields_set", set()) or set())
+        merged = {
+            "name": payload.name if "name" in provided else sample.name,
+            "catalyst_type": payload.catalyst_type if "catalyst_type" in provided else sample.catalyst_type,
+            "metal_centers": payload.metal_centers if "metal_centers" in provided else (sample.metal_centers or []),
+            "coordination": payload.coordination if "coordination" in provided else sample.coordination,
+            "support": payload.support if "support" in provided else sample.support,
+            "synthesis_method": payload.synthesis_method if "synthesis_method" in provided else sample.synthesis_method,
+            "evidence_strength": payload.evidence_strength if "evidence_strength" in provided else sample.evidence_strength,
+        }
+        normalized = catalyst_basic_info_payload(**merged)
+        fields = normalized["fields"]
+        name_change_result: dict[str, Any] | None = None
+        if "name" in provided:
+            name_change_result = DFTResultReviewService(session).rekey_catalyst_sample_name(
+                paper_id=paper_id,
+                sample_id=sample_id,
+                new_name=fields["name"],
+                confirm_name_change_with_dft=payload.confirm_name_change_with_dft,
+                name_change_reason=payload.name_change_reason,
+                expected_current_name=payload.expected_current_name,
+                affected_dft_result_ids=payload.affected_dft_result_ids,
+                expected_dft_result_count=payload.expected_dft_result_count,
+                reviewer=payload.reviewer,
+            )
+            sample = session.get(CatalystSample, sample_id)
+            if name_change_result["status"] == "already_renamed":
+                session.refresh(sample)
+                return _catalyst_basic_info_update_response(
+                    paper_id=paper_id,
+                    sample=sample,
+                    active_site_refresh=name_change_result.get("active_site_refresh") or {},
+                    name_change=name_change_result,
+                )
+
+            # The protected rename path refreshes the locked sample in the
+            # identity map. Rebuild normalization from that locked snapshot so
+            # concurrent changes to fields omitted by this request cannot make
+            # the audit describe stale values.
+            merged = {
+                "name": payload.name if "name" in provided else sample.name,
+                "catalyst_type": payload.catalyst_type if "catalyst_type" in provided else sample.catalyst_type,
+                "metal_centers": payload.metal_centers if "metal_centers" in provided else (sample.metal_centers or []),
+                "coordination": payload.coordination if "coordination" in provided else sample.coordination,
+                "support": payload.support if "support" in provided else sample.support,
+                "synthesis_method": payload.synthesis_method if "synthesis_method" in provided else sample.synthesis_method,
+                "evidence_strength": payload.evidence_strength if "evidence_strength" in provided else sample.evidence_strength,
+            }
+            normalized = catalyst_basic_info_payload(**merged)
+            fields = normalized["fields"]
+
+        before = {
+            "name": (
+                name_change_result["previous_name"]
+                if name_change_result is not None and name_change_result["status"] == "renamed"
+                else sample.name
+            ),
+            "catalyst_type": sample.catalyst_type,
+            "metal_centers": sample.metal_centers or [],
+            "coordination": sample.coordination,
+            "support": sample.support,
+            "synthesis_method": sample.synthesis_method,
+            "evidence_strength": sample.evidence_strength,
+        }
+
+        if "name" in provided:
+            sample.name = fields["name"]
+        if "catalyst_type" in provided:
+            sample.catalyst_type = fields["catalyst_type"]
+        if "metal_centers" in provided:
+            sample.metal_centers = fields["metal_centers"]
+        if "coordination" in provided:
+            sample.coordination = fields["coordination"]
+        if "support" in provided:
+            sample.support = fields["support"]
+        if "synthesis_method" in provided:
+            sample.synthesis_method = fields["synthesis_method"]
+        if "evidence_strength" in provided:
+            sample.evidence_strength = fields["evidence_strength"]
+
+        source = str(payload.source or payload.reviewer or "literature_library_basic_info").strip() or "literature_library_basic_info"
+        after = {
+            "name": sample.name,
+            "catalyst_type": sample.catalyst_type,
+            "metal_centers": sample.metal_centers or [],
+            "coordination": sample.coordination,
+            "support": sample.support,
+            "synthesis_method": sample.synthesis_method,
+            "evidence_strength": sample.evidence_strength,
+        }
+        session.add(sample)
+        session.flush()
+        active_site_refresh = ActiveSiteEnrichmentService(session).refresh_sample(sample)
+        audit_payload = {
+            "schema_version": normalized["schema_version"],
+            "before": before,
+            "after": after,
+            "provided_fields": sorted(provided),
+            "normalization": {
+                "raw": normalized["raw"],
+                "allowed_values": normalized["allowed_values"],
+                "normalization_source": normalized["normalization_source"],
+            },
+            "metal_descriptors": normalized["metal_descriptors"],
+            "active_site_refresh": active_site_refresh,
+            "evidence_payload": payload.evidence_payload or {},
+            "note": payload.note,
+        }
+        if name_change_result is not None and name_change_result["status"] == "renamed":
+            audit_payload["name_identity_rekey"] = {
+                "previous_name": name_change_result["previous_name"],
+                "new_name": name_change_result["current_name"],
+                "affected_dft_result_ids": name_change_result["affected_dft_result_ids"],
+                "affected_dft_result_count": name_change_result["affected_dft_result_count"],
+                "reason": name_change_result["reason"],
+                "identity_changes": name_change_result["identity_changes"],
+                "invalidated_review_ids": name_change_result["invalidated_review_ids"],
+                "reverification_task_ids": name_change_result["reverification_task_ids"],
+                "requires_reverification": name_change_result["requires_reverification"],
+                "review_state_preserved": name_change_result["review_state_preserved"],
+                "request_fingerprint": name_change_result["request_fingerprint"],
+            }
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="update_catalyst_basic_info",
+            source=source,
+            target_type="catalyst_samples",
+            target_id=str(sample_id),
+            payload=audit_payload,
+        )
+        session.add(audit)
+        session.flush()
+        public_name_change = None
+        if name_change_result is not None and name_change_result["status"] == "renamed":
+            name_change_result["audit_log_id"] = str(audit.id)
+            public_name_change = name_change_result
+        session.commit()
+        session.refresh(sample)
+        return _catalyst_basic_info_update_response(
+            paper_id=paper_id,
+            sample=sample,
+            active_site_refresh=active_site_refresh,
+            name_change=public_name_change,
+        )
+    except HTTPException:
+        session.rollback()
+        raise
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="write_conflict:dft_identity_observation_key_conflict",
+        ) from exc
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.post("/{paper_id}/catalyst-samples/from-dft-group")
@@ -1056,6 +1177,45 @@ async def rebind_catalyst_sample_dft_results(
             detail="write_conflict:dft_identity_observation_key_conflict",
         ) from exc
     return DFTResultGroupRebindResponse.model_validate(result)
+
+
+@router.post(
+    "/{paper_id}/catalyst-samples/{target_sample_id}/merge-duplicates",
+    response_model=CatalystSampleDuplicateMergeResponse,
+)
+async def merge_duplicate_catalyst_samples(
+    paper_id: UUID,
+    target_sample_id: UUID,
+    payload: CatalystSampleDuplicateMergeRequest,
+    session: Session = Depends(get_db_session),
+) -> CatalystSampleDuplicateMergeResponse:
+    try:
+        result = DFTResultReviewService(session).merge_duplicate_catalyst_samples(
+            paper_id=paper_id,
+            target_sample_id=target_sample_id,
+            expected_target_name=payload.expected_target_name,
+            sources=[source.model_dump() for source in payload.sources],
+            confirm_same_physical_catalyst=payload.confirm_same_physical_catalyst,
+            reason=payload.reason,
+            reviewer=payload.reviewer,
+        )
+    except LookupError as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        session.rollback()
+        status_code = 409 if str(exc).startswith("write_conflict") else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="write_conflict:dft_identity_observation_key_conflict",
+        ) from exc
+    except Exception:
+        session.rollback()
+        raise
+    return CatalystSampleDuplicateMergeResponse.model_validate(result)
 
 
 @router.post("/{paper_id}/dft-results/{result_id}/apply-imported-opinion")
