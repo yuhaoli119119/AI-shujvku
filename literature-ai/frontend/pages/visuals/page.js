@@ -7,10 +7,47 @@
     quickX: "li2s_bader_charge_transfer",
     quickY: "li_s_bond_max",
   };
-  const state = { fields: [], requestId: 0, libraryName: new URLSearchParams(window.location.search).get("library_name") || "" };
+  const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+  const state = {
+    fields: [],
+    requestId: 0,
+    libraryName: new URLSearchParams(window.location.search).get("library_name") || "",
+    libraryResolutionFailed: false,
+  };
+  const WARNING_LABELS = {
+    min_n_not_reached: "有效配对未达到最少样本数，暂不计算拟合结果",
+    fewer_than_two_contributing_papers: "有效数据来自不到 2 篇论文，跨文献可信度不足",
+  };
+  const EXCLUSION_LABELS = {
+    context_mismatch: "X、Y 都有候选值，但计算设置、位点或构型不兼容",
+    multiple_comparable_contexts: "存在多个可比计算上下文，无法唯一选择",
+    missing_both_field_values: "同一催化剂同时缺少 X 和 Y 字段",
+    missing_x_field_value: "同一催化剂缺少 X 字段",
+    missing_y_field_value: "同一催化剂缺少 Y 字段",
+    missing_field_value: "同一催化剂缺少所选字段",
+    conflicting_values: "同一语义上下文存在冲突数值",
+    identity_v2_required: "历史记录尚未完成 Identity V2 结构化身份",
+    identity_v2_not_ml_ready: "Identity V2 信息不完整，尚不能用于分析",
+    missing_catalyst_sample_id: "记录未明确绑定催化剂样品",
+    missing_or_ambiguous_calculation_context: "计算设置缺失或无法唯一关联",
+    "safety_gate:missing_atom_or_site_identity": "缺少原子或吸附位点身份",
+    "safety_gate:missing_atom_pair_identity": "缺少键长对应的原子对身份",
+    "safety_gate:missing_material_identity": "缺少材料或催化剂身份",
+    "safety_gate:missing_reaction_step_identity": "缺少反应步骤身份",
+    "safety_gate:missing_required_unit": "缺少该性质必需的单位",
+    "safety_gate:missing_review": "记录尚未完成审核",
+    "safety_gate:missing_state_context_identity": "缺少初态、终态或吸附状态身份",
+    "safety_gate:missing_unit_identity": "单位尚未完成结构化识别",
+    "safety_gate:missing_value_identity": "缺少可用数值",
+    "safety_gate:target_rejected": "记录已在审核中被拒绝",
+    "safety_gate:unsafe_review": "审核状态不允许用于分析",
+    "safety_gate:unsupported_unit_identity": "单位不受支持或无法安全换算",
+  };
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-  const number = (value) => Number.isFinite(Number(value)) ? Number(value) : null;
+  const number = (value) => value === null || value === undefined || value === ""
+    ? null
+    : (Number.isFinite(Number(value)) ? Number(value) : null);
   const display = (value) => number(value) === null ? "—" : Number(value).toLocaleString(undefined, { maximumFractionDigits: 4 });
 
   async function getJSON(url) {
@@ -22,6 +59,21 @@
   function visualParams(params) {
     if (state.libraryName) params.set("library_name", state.libraryName);
     return params;
+  }
+
+  async function resolveLibraryScope() {
+    if (state.libraryName) return;
+    try {
+      const payload = await getJSON("/api/libraries");
+      const libraries = Array.isArray(payload) ? payload : (payload.libraries || []);
+      const stored = window.localStorage.getItem(CURRENT_LIBRARY_STORAGE_KEY) || "";
+      const selected = libraries.find((item) => item.name === stored)
+        || libraries.find((item) => item.is_active)
+        || libraries[0];
+      if (selected?.name) state.libraryName = selected.name;
+    } catch (_error) {
+      state.libraryResolutionFailed = true;
+    }
   }
 
   function downloadFilename(response, fallback) {
@@ -87,7 +139,9 @@
     try {
       const data = await getJSON("/api/visuals/overview?" + visualParams(new URLSearchParams()).toString());
       setOverview(data.summary || data.overview || {});
-      $("overviewStatus").textContent = "概览已更新";
+      $("overviewStatus").textContent = state.libraryName
+        ? "当前文献库：" + state.libraryName
+        : (state.libraryResolutionFailed ? "当前文献库读取失败，已显示全部文献库" : "全部文献库");
     } catch (error) {
       $("overviewStatus").textContent = "概览读取失败：" + error.message;
     }
@@ -127,6 +181,16 @@
     target.innerHTML = (items || []).map((item) => "<li>" + esc(typeof item === "string" ? item : (item.reason || item.message || JSON.stringify(item))) + "</li>").join("");
   }
 
+  function warningLabel(reason) {
+    return WARNING_LABELS[reason] || reason;
+  }
+
+  function exclusionLabel(reason) {
+    if (reason === "missing_x_field_value") return "同一催化剂缺少 X 字段（" + fieldLabel($("xField").value) + "）";
+    if (reason === "missing_y_field_value") return "同一催化剂缺少 Y 字段（" + fieldLabel($("yField").value) + "）";
+    return EXCLUSION_LABELS[reason] || reason;
+  }
+
   function renderDiagnostics(data) {
     const warnings = data.warnings || [];
     const excluded = data.excluded_reasons || data.excluded || {};
@@ -136,8 +200,27 @@
     $("diagnostics").hidden = !(warnings.length || excludedEntries.length);
     $("warningsBox").hidden = !warnings.length;
     $("excludedBox").hidden = !excludedEntries.length;
-    listItems("warningsList", warnings);
-    $("excludedList").innerHTML = excludedEntries.map(([reason, count]) => "<li>" + esc(reason) + (count === "" ? "" : "：" + esc(count)) + "</li>").join("");
+    listItems("warningsList", warnings.map(warningLabel));
+    $("excludedList").innerHTML = excludedEntries.map(([reason, count]) => "<li>" + esc(exclusionLabel(reason)) + (count === "" ? "" : "：" + esc(count) + " 次") + (EXCLUSION_LABELS[reason] || reason.startsWith("safety_gate:") || reason.startsWith("missing_") || reason.startsWith("identity_") ? " <code>" + esc(reason) + "</code>" : "") + "</li>").join("");
+
+    const catalystCount = Number(data.n_catalysts ?? data.catalyst_count ?? (data.points || []).length) || 0;
+    const paperCount = Number(data.n_papers ?? data.paper_count) || 0;
+    const minN = Number(data.min_n ?? data.statistics?.min_n ?? $("minN").value) || 3;
+    $("diagnosticTitle").textContent = data.ready === true ? "当前数据可以进行拟合" : "当前数据不足，暂不进行拟合";
+    $("diagnosticMessage").textContent = data.ready === true
+      ? "已形成 " + catalystCount + " 个同一催化剂有效配对，来自 " + paperCount + " 篇论文。"
+      : "当前只有 " + catalystCount + " 个同一催化剂有效配对，至少需要 " + minN + " 个才能计算拟合结果。";
+    const highlights = [];
+    if (paperCount < 2) highlights.push("有效数据来自不到 2 篇论文，当前结果只能用于数据核验。");
+    const topReasons = excludedEntries
+      .filter(([, count]) => Number.isFinite(Number(count)) && Number(count) > 0)
+      .sort((left, right) => Number(right[1]) - Number(left[1]))
+      .slice(0, 3);
+    if (topReasons.length) {
+      highlights.push("主要阻断项（原因次数可能重复）：" + topReasons.map(([reason, count]) => exclusionLabel(reason) + " " + count + " 次").join("；") + "。");
+    }
+    $("diagnosticHighlights").innerHTML = highlights.map((item) => "<li>" + esc(item) + "</li>").join("");
+    $("technicalDiagnostics").open = false;
   }
 
   function statistic(data, name) {
@@ -253,6 +336,7 @@
 
   async function init() {
     TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
+    await resolveLibraryScope();
     loadOverview();
     try {
       await loadFields();

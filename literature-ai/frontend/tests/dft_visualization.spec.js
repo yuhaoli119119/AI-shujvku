@@ -60,15 +60,25 @@ function correlationPayload(url) {
     n_catalysts: insufficient ? 2 : 3,
     n_papers: 2,
     ready: !insufficient,
-    statistics: insufficient ? {} : { pearson_r: -0.91, spearman_rho: -1, r_squared: 0.83, slope: -0.5, intercept: 2.1 },
+    statistics: insufficient
+      ? { pearson_r: null, spearman_rho: null, r_squared: null, slope: null, intercept: null }
+      : { pearson_r: -0.91, spearman_rho: -1, r_squared: 0.83, slope: -0.5, intercept: 2.1 },
     insufficient_reason: insufficient ? "样本数 3 小于最少样本数 5，未绘制拟合线。" : null,
-    warnings: ["贡献论文较少，结果仅用于探索性比较。"],
-    excluded_reasons: { "X/Y 数值不可比": 1 },
+    warnings: insufficient ? ["min_n_not_reached", "fewer_than_two_contributing_papers"] : [],
+    excluded_count: 12,
+    excluded_reasons: { identity_v2_required: 1290, missing_catalyst_sample_id: 567, context_mismatch: 12 },
     points,
   };
 }
 
 async function installVisualMocks(page, correlationRequests) {
+  await page.route("**/api/libraries", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify([
+      { name: "Other Library", is_active: false },
+      { name: "Active Library", is_active: true },
+    ]),
+  }));
   await page.route("**/api/visuals/overview*", (route) => route.fulfill({
     contentType: "application/json",
     body: JSON.stringify({ summary: {
@@ -140,8 +150,14 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(page.locator("#statIntercept")).toHaveText("2.1");
     await expect(page.locator("#statCatalysts")).toHaveText("3");
     await expect(page.locator("#statPapers")).toHaveText("2");
-    await expect(page.locator("#warningsBox")).toContainText("贡献论文较少");
-    await expect(page.locator("#excludedBox")).toContainText("X/Y 数值不可比：1");
+    await expect(page.locator("#diagnosticTitle")).toHaveText("当前数据可以进行拟合");
+    await expect(page.locator("#diagnosticMessage")).toContainText("3 个同一催化剂有效配对");
+    await expect(page.locator("#technicalDiagnostics")).not.toHaveAttribute("open", "");
+    await page.locator("#technicalDiagnostics summary").click();
+    await expect(page.locator("#excludedBox")).toContainText("历史记录尚未完成 Identity V2 结构化身份：1290 次");
+    await expect(page.locator("#excludedBox")).toContainText("记录未明确绑定催化剂样品：567 次");
+    await expect(page.locator("#excludedBox")).toContainText("计算设置、位点或构型不兼容：12 次");
+    await expect(page.locator("#technicalDiagnostics")).toContainText("同一记录可能同时命中多个原因");
 
     const second = page.locator("#detailsBody tr").nth(1);
     await expect(second).toContainText("sample-co-002");
@@ -166,6 +182,7 @@ test.describe("DFT 数据可视化迁移", () => {
     await installVisualMocks(page, correlationRequests);
     await page.goto(BASE_URL + "/pages/visuals/index.html");
     await expect.poll(() => correlationRequests.length).toBe(1);
+    expect(correlationRequests[0].searchParams.get("library_name")).toBe("Active Library");
 
     await page.locator("#minN").fill("2");
     await page.locator("#minN").dispatchEvent("change");
@@ -177,6 +194,13 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect.poll(() => correlationRequests.length).toBe(3);
     await expect(page.locator(".fit-line")).toHaveCount(0);
     await expect(page.locator("#fitNotice")).toContainText("样本数 3 小于最少样本数 5");
+    await expect(page.locator("#statPearson")).toHaveText("—");
+    await expect(page.locator("#statR2")).toHaveText("—");
+    await expect(page.locator("#diagnosticTitle")).toHaveText("当前数据不足，暂不进行拟合");
+    await expect(page.locator("#diagnosticMessage")).toContainText("至少需要 5 个");
+    await page.locator("#technicalDiagnostics summary").click();
+    await expect(page.locator("#warningsBox")).toContainText("有效配对未达到最少样本数");
+    await expect(page.locator("#warningsBox")).toContainText("跨文献可信度不足");
   });
 
   test("offers fixed catalyst CSV and audit JSON downloads with library scope and clear errors", async ({ page }) => {

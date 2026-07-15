@@ -80,8 +80,20 @@
       </div>
 
       <section id="diagnostics" class="diagnostics" hidden aria-label="分析提示">
-        <div id="warningsBox" hidden><h3>提示</h3><ul id="warningsList"></ul></div>
-        <div id="excludedBox" hidden><h3>排除原因</h3><ul id="excludedList"></ul></div>
+        <div class="diagnostic-summary">
+          <h3 id="diagnosticTitle">当前分析状态</h3>
+          <p id="diagnosticMessage"></p>
+          <ul id="diagnosticHighlights"></ul>
+          <p class="diagnostic-policy">严格模式只使用同一催化剂、审核通过且计算设置与位点兼容的数据。旧版探索性配对数量不会直接沿用。</p>
+        </div>
+        <details id="technicalDiagnostics" class="technical-diagnostics">
+          <summary>查看数据质量技术明细</summary>
+          <p class="diagnostic-note">以下数字是“原因出现次数”，同一记录可能同时命中多个原因，因此不能相加，也不代表数据被删除。</p>
+          <div class="technical-diagnostic-grid">
+            <div id="warningsBox" hidden><h4>分析提示</h4><ul id="warningsList"></ul></div>
+            <div id="excludedBox" hidden><h4>排除原因</h4><ul id="excludedList"></ul></div>
+          </div>
+        </details>
       </section>
 
       <section class="details" aria-labelledby="details-title">

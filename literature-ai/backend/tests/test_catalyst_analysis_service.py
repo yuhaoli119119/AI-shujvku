@@ -254,8 +254,12 @@ def test_correlation_pairs_only_same_catalyst_and_keeps_conflicts_out():
     assert payload["statistics"]["r_squared"] == 1.0
     assert payload["statistics"]["slope"] == 2.0
     assert payload["statistics"]["intercept"] == 0.0
-    assert payload["excluded_reasons"]["context_mismatch"] >= 2
+    assert payload["excluded_reasons"]["missing_x_field_value"] == 1
+    assert payload["excluded_reasons"]["missing_y_field_value"] == 1
+    assert payload["excluded_reasons"].get("context_mismatch", 0) == 0
     assert payload["excluded_reasons"]["conflicting_values"] == 1
+    assert payload["min_n"] == 3
+    assert payload["excluded_reasons_are_overlapping"] is True
     small_payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy", min_n=4)
     assert small_payload["n_catalysts"] == 3
     assert small_payload["n_papers"] == 3

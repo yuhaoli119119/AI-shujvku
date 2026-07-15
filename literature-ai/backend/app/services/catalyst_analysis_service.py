@@ -961,6 +961,12 @@ class CatalystAnalysisService:
             if x_field == y_field:
                 selected_x, reason, _ = _resolve_field(x_field, x_groups)
                 selected_y = selected_x
+            elif not x_groups and not y_groups:
+                reason = "missing_both_field_values"
+            elif not x_groups:
+                reason = "missing_x_field_value"
+            elif not y_groups:
+                reason = "missing_y_field_value"
             else:
                 compatible = [
                     (x_group, y_group)
@@ -1014,6 +1020,7 @@ class CatalystAnalysisService:
             "y": dict(FIELD_REGISTRY[y_field]),
             "x_field": x_field,
             "y_field": y_field,
+            "min_n": min_n,
             "points": points,
             "n_catalysts": len(points),
             "n_papers": len(paper_ids),
@@ -1022,6 +1029,7 @@ class CatalystAnalysisService:
             "excluded_count": len(details),
             "excluded_row_reason_count": sum(exclusions.values()),
             "excluded_reasons": dict(sorted(exclusions.items())),
+            "excluded_reasons_are_overlapping": True,
             "excluded_details": details,
             "warnings": warnings,
             "selection_policy": "One point per catalyst_sample_id. Safety gate, Identity V2, and is_ml_ready are required; semantic contexts must be comparable. Conflicts are null/excluded, never averaged or Cartesian-paired.",
