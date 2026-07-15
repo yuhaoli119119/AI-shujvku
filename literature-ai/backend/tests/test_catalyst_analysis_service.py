@@ -16,6 +16,7 @@ from app.services.catalyst_analysis_service import (
     _field_matches,
     _is_li2s_barrier,
     _is_li2s_charge_transfer,
+    _pair_analysis_record_exclusion,
     _pairing_contexts_compatible,
     _resolve_group,
     _stats,
@@ -85,6 +86,28 @@ def test_analysis_fields_api_uses_public_dissociation_key():
     assert "li2s_decomposition_barrier" not in fields
     assert fields["li2s_dissociation_barrier"]["unit"] == "eV"
     assert fields["li2s_dissociation_barrier"]["type"] == "number"
+
+
+def test_pair_analysis_accepts_reviewed_legacy_numeric_target_without_generic_descriptor_readiness():
+    paper, catalyst = _paper_and_catalyst(99)
+    ready = _ready(
+        catalyst=catalyst,
+        paper=paper,
+        property_type="adsorption_energy",
+        value=-2.4,
+        adsorbate="Li2S4",
+    )
+    ready.row.identity_version = None
+    ready.record["is_ml_ready"] = False
+    ready.record["target"]["normalization_status"] = "normalized"
+    ready.record["setting_link_status"] = "clear_primary"
+    assert _pair_analysis_record_exclusion(ready.row, ready.record) is None
+
+    ready.record["setting_link_status"] = "ambiguous"
+    assert _pair_analysis_record_exclusion(ready.row, ready.record) == "missing_or_ambiguous_calculation_context"
+    ready.record["setting_link_status"] = "clear_primary"
+    ready.record["target"]["normalization_status"] = "unsupported_unit"
+    assert _pair_analysis_record_exclusion(ready.row, ready.record) == "pair_analysis_target_not_normalized"
 
 
 def test_li2s_barrier_and_charge_rules_are_species_specific():
@@ -245,7 +268,7 @@ def test_correlation_pairs_only_same_catalyst_and_keeps_conflicts_out():
     )
 
     service = CatalystAnalysisService(None)
-    service._load_ready_rows = lambda _library: (ready, exclusions, {})
+    service._load_pair_analysis_rows = lambda _library: (ready, exclusions, {})
     payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy", min_n=3)
     assert payload["n_catalysts"] == 3
     assert payload["n_papers"] == 3
@@ -290,7 +313,7 @@ def test_cross_field_pairing_ignores_property_state_but_requires_setting_and_sit
         site_label="bridge",
     )
     service = CatalystAnalysisService(None)
-    service._load_ready_rows = lambda _library: ([adsorption, barrier], Counter(), {})
+    service._load_pair_analysis_rows = lambda _library: ([adsorption, barrier], Counter(), {})
     payload = service.correlation(
         library_name="unit",
         x_field="li2s_adsorption_energy",
@@ -313,7 +336,7 @@ def test_cross_field_pairing_ignores_property_state_but_requires_setting_and_sit
             reaction_step="Li2S dissociation",
             **changed,
         )
-        service._load_ready_rows = lambda _library, incompatible_barrier=incompatible_barrier: (
+        service._load_pair_analysis_rows = lambda _library, incompatible_barrier=incompatible_barrier: (
             [adsorption, incompatible_barrier],
             Counter(),
             {},
@@ -334,7 +357,7 @@ def test_equal_duplicates_dedupe_and_keep_all_source_ids():
     duplicate = _ready(catalyst=catalyst, paper=paper, property_type="d_band_center", value=1.0)
     y_value = _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-1.0, adsorbate="Li2S")
     service = CatalystAnalysisService(None)
-    service._load_ready_rows = lambda _library: ([first, duplicate, y_value], Counter(), {})
+    service._load_pair_analysis_rows = lambda _library: ([first, duplicate, y_value], Counter(), {})
     payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy")
     assert payload["n_catalysts"] == 1
     point = payload["points"][0]
@@ -351,12 +374,34 @@ def test_multiple_comparable_contexts_do_not_form_cartesian_product():
         _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-2.0, adsorbate="Li2S", setting_id="setting-2"),
     ]
     service = CatalystAnalysisService(None)
-    service._load_ready_rows = lambda _library: (ready, Counter(), {})
+    service._load_pair_analysis_rows = lambda _library: (ready, Counter(), {})
     payload = service.correlation(library_name="unit", x_field="d_band_center", y_field="li2s_adsorption_energy")
     assert payload["n_catalysts"] == 0
     assert payload["excluded_reasons"]["multiple_comparable_contexts"] == 1
     assert len(payload["excluded_details"][0]["x_candidates"]) == 2
     assert len(payload["excluded_details"][0]["y_candidates"]) == 2
+
+
+def test_correlation_reports_when_a_pair_uses_reviewed_legacy_identity_rows():
+    paper, catalyst = _paper_and_catalyst(33)
+    legacy_x = _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-2.0, adsorbate="Li2S")
+    v2_y = _ready(catalyst=catalyst, paper=paper, property_type="adsorption_energy", value=-1.2, adsorbate="Li2S4")
+    legacy_x.row.identity_version = None
+    service = CatalystAnalysisService(None)
+    service._load_pair_analysis_rows = lambda _library: ([legacy_x, v2_y], Counter(), {})
+
+    payload = service.correlation(
+        library_name="unit",
+        x_field="li2s_adsorption_energy",
+        y_field="li2s4_adsorption_energy",
+    )
+
+    assert payload["n_catalysts"] == 1
+    assert payload["legacy_identity_point_count"] == 1
+    assert payload["identity_v2_only_point_count"] == 0
+    assert payload["points"][0]["uses_legacy_identity"] is True
+    assert payload["points"][0]["legacy_identity_source_record_ids"] == [str(legacy_x.row.id)]
+    assert payload["points"][0]["x"]["candidates"][0]["identity_version"] is None
 
 
 def test_pairing_context_excludes_property_state_fields():

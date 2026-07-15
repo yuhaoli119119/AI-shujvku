@@ -59,6 +59,7 @@ function correlationPayload(url) {
     n: 3,
     n_catalysts: insufficient ? 2 : 3,
     n_papers: 2,
+    legacy_identity_point_count: 2,
     ready: !insufficient,
     statistics: insufficient
       ? { pearson_r: null, spearman_rho: null, r_squared: null, slope: null, intercept: null }
@@ -66,7 +67,7 @@ function correlationPayload(url) {
     insufficient_reason: insufficient ? "样本数 3 小于最少样本数 5，未绘制拟合线。" : null,
     warnings: insufficient ? ["min_n_not_reached", "fewer_than_two_contributing_papers"] : [],
     excluded_count: 12,
-    excluded_reasons: { identity_v2_required: 1290, missing_catalyst_sample_id: 567, context_mismatch: 12 },
+    excluded_reasons: { pair_analysis_target_not_normalized: 8, missing_catalyst_sample_id: 5, context_mismatch: 12 },
     points,
   };
 }
@@ -152,10 +153,11 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(page.locator("#statPapers")).toHaveText("2");
     await expect(page.locator("#diagnosticTitle")).toHaveText("当前数据可以进行拟合");
     await expect(page.locator("#diagnosticMessage")).toContainText("3 个同一催化剂有效配对");
+    await expect(page.locator("#diagnosticHighlights")).toContainText("有 2 个使用了通过审核的历史身份记录");
     await expect(page.locator("#technicalDiagnostics")).not.toHaveAttribute("open", "");
     await page.locator("#technicalDiagnostics summary").click();
-    await expect(page.locator("#excludedBox")).toContainText("历史记录尚未完成 Identity V2 结构化身份：1290 次");
-    await expect(page.locator("#excludedBox")).toContainText("记录未明确绑定催化剂样品：567 次");
+    await expect(page.locator("#excludedBox")).toContainText("数值或单位无法安全标准化：8 次");
+    await expect(page.locator("#excludedBox")).toContainText("记录未明确绑定催化剂样品：5 次");
     await expect(page.locator("#excludedBox")).toContainText("计算设置、位点或构型不兼容：12 次");
     await expect(page.locator("#technicalDiagnostics")).toContainText("同一记录可能同时命中多个原因");
 
@@ -201,6 +203,42 @@ test.describe("DFT 数据可视化迁移", () => {
     await page.locator("#technicalDiagnostics summary").click();
     await expect(page.locator("#warningsBox")).toContainText("有效配对未达到最少样本数");
     await expect(page.locator("#warningsBox")).toContainText("跨文献可信度不足");
+  });
+
+  test("keeps the newest field selection when the initial correlation request is still running", async ({ page }) => {
+    const correlationRequests = [];
+    await page.route("**/api/libraries", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([{ name: "Active Library", is_active: true }]),
+    }));
+    await page.route("**/api/visuals/overview*", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ summary: {} }),
+    }));
+    await page.route("**/api/visuals/analysis-fields*", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(fields),
+    }));
+    await page.route("**/api/visuals/catalyst-correlation?*", async (route) => {
+      const url = new URL(route.request().url());
+      correlationRequests.push(url);
+      const payload = correlationPayload(url);
+      if (url.searchParams.get("y_field") === "li2s_dissociation_barrier") {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      } else {
+        payload.n_catalysts = 6;
+      }
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(payload) });
+    });
+
+    await page.goto(BASE_URL + "/pages/visuals/index.html");
+    await expect(page.locator("#yField option[value='d_band_center']")).toHaveCount(1);
+    await page.locator("#yField").selectOption("d_band_center");
+    await expect.poll(() => correlationRequests.length).toBe(2);
+    await expect(page.locator("#relationStatus")).toContainText("已加载 6 个同一催化剂样本");
+    await page.waitForTimeout(700);
+    await expect(page.locator("#yField")).toHaveValue("d_band_center");
+    await expect(page.locator("#relationStatus")).toContainText("已加载 6 个同一催化剂样本");
   });
 
   test("offers fixed catalyst CSV and audit JSON downloads with library scope and clear errors", async ({ page }) => {

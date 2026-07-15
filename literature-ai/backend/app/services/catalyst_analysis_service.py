@@ -322,6 +322,26 @@ def _numeric_value(record: dict[str, Any], row: DFTResult, field: str) -> tuple[
     return number, unit
 
 
+def _pair_analysis_record_exclusion(row: DFTResult, record: dict[str, Any]) -> str | None:
+    """Return a pair-specific blocker without requiring generic ML-wide readiness."""
+    target = record.get("target") if isinstance(record.get("target"), dict) else {}
+    value = target.get("normalized_value")
+    if value is None:
+        value = row.value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "pair_analysis_invalid_numeric_target"
+    if not math.isfinite(number):
+        return "pair_analysis_invalid_numeric_target"
+    normalization_status = _norm(target.get("normalization_status"))
+    if normalization_status not in {"", "normalized"}:
+        return "pair_analysis_target_not_normalized"
+    if record.get("setting_link_status") != "clear_primary" or not record.get("linked_dft_setting"):
+        return "missing_or_ambiguous_calculation_context"
+    return None
+
+
 def _field_matches(field: str, ready: _ReadyRow) -> bool:
     row = ready.row
     prop = _canonical_property(row)
@@ -402,6 +422,7 @@ def _candidate_payload(candidate: _Candidate) -> dict[str, Any]:
         "pathway": pathway,
         "source_record_id": candidate.record_id,
         "source_record_ids": list(candidate.source_ids),
+        "identity_version": candidate.ready.row.identity_version,
         "paper_id": str(candidate.ready.paper.id),
         "paper_code": candidate.ready.paper.paper_code,
         "paper": _paper_payload(candidate.ready.paper),
@@ -600,7 +621,12 @@ class CatalystAnalysisService:
     def field_registry() -> list[dict[str, Any]]:
         return [dict(item) for item in _FIELD_REGISTRY]
 
-    def _load_ready_rows(self, library_name: str | None) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
+    def _load_rows(
+        self,
+        library_name: str | None,
+        *,
+        pair_analysis: bool,
+    ) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
         stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
         if library_name:
             stmt = stmt.where(build_library_name_clause(Paper.library_name, normalize_library_name(library_name)))
@@ -614,7 +640,7 @@ class CatalystAnalysisService:
                     exclusion_reasons[f"safety_gate:{reason}"] += 1
             if not row.catalyst_sample_id:
                 exclusion_reasons["missing_catalyst_sample_id"] += 1
-            if row.identity_version != 2:
+            if not pair_analysis and row.identity_version != 2:
                 exclusion_reasons["identity_v2_required"] += 1
 
         if not source_rows:
@@ -622,6 +648,8 @@ class CatalystAnalysisService:
                 "total_dft_rows": 0,
                 "exportable_dft_rows": 0,
                 "v2_row_ready_numeric_rows": 0,
+                "pair_analysis_ready_numeric_rows": 0,
+                "legacy_pair_analysis_rows": 0,
                 "distinct_exportable_catalysts": 0,
             }
         paper_ids = {paper.id for _row, paper in source_rows}
@@ -638,6 +666,7 @@ class CatalystAnalysisService:
         )
         rows_by_id = {str(row.id): (row, paper) for row, paper in source_rows}
         ready: list[_ReadyRow] = []
+        legacy_pair_analysis_rows = 0
         exportable = 0
         exportable_catalysts: set[str] = set()
         for row, paper in source_rows:
@@ -655,24 +684,44 @@ class CatalystAnalysisService:
             gate = gates.get(record_id)
             if gate is None or not gate.eligible:
                 continue
-            if row.identity_version != 2:
-                continue
-            if not bool(record.get("is_ml_ready")):
-                exclusion_reasons["identity_v2_not_ml_ready"] += 1
-                continue
-            if record.get("setting_link_status") != "clear_primary" or not record.get("linked_dft_setting"):
-                exclusion_reasons["missing_or_ambiguous_calculation_context"] += 1
-                continue
+            if pair_analysis:
+                pair_exclusion = _pair_analysis_record_exclusion(row, record)
+                if pair_exclusion:
+                    exclusion_reasons[pair_exclusion] += 1
+                    continue
+            else:
+                if row.identity_version != 2:
+                    continue
+                if not bool(record.get("is_ml_ready")):
+                    exclusion_reasons["identity_v2_not_ml_ready"] += 1
+                    continue
+                if record.get("setting_link_status") != "clear_primary" or not record.get("linked_dft_setting"):
+                    exclusion_reasons["missing_or_ambiguous_calculation_context"] += 1
+                    continue
             catalyst = catalyst_by_id.get(str(row.catalyst_sample_id)) if row.catalyst_sample_id else None
             if catalyst is None:
                 continue
             ready.append(_ReadyRow(row=row, paper=paper, record=record, catalyst=catalyst))
+            if pair_analysis and row.identity_version != 2:
+                legacy_pair_analysis_rows += 1
         return ready, exclusion_reasons, {
             "total_dft_rows": len(source_rows),
             "exportable_dft_rows": exportable,
-            "v2_row_ready_numeric_rows": len(ready),
+            "v2_row_ready_numeric_rows": sum(
+                1
+                for item in ready
+                if item.row.identity_version == 2 and bool(item.record.get("is_ml_ready"))
+            ),
+            "pair_analysis_ready_numeric_rows": len(ready) if pair_analysis else 0,
+            "legacy_pair_analysis_rows": legacy_pair_analysis_rows,
             "distinct_exportable_catalysts": len(exportable_catalysts),
         }
+
+    def _load_ready_rows(self, library_name: str | None) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
+        return self._load_rows(library_name, pair_analysis=False)
+
+    def _load_pair_analysis_rows(self, library_name: str | None) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
+        return self._load_rows(library_name, pair_analysis=True)
 
     def overview_counts(self, library_name: str | None) -> dict[str, Any]:
         ready, exclusions, counts = self._load_ready_rows(library_name)
@@ -944,7 +993,7 @@ class CatalystAnalysisService:
             raise ValueError("x_field and y_field must be numeric analysis fields")
         if min_n < 3:
             raise ValueError("min_n must be at least 3")
-        ready, exclusions, _counts = self._load_ready_rows(library_name)
+        ready, exclusions, analysis_counts = self._load_pair_analysis_rows(library_name)
         by_catalyst: dict[str, list[_ReadyRow]] = defaultdict(list)
         for item in ready:
             by_catalyst[str(item.catalyst.id)].append(item)
@@ -993,6 +1042,12 @@ class CatalystAnalysisService:
                     }
                 )
                 continue
+            source_record_ids = set(selected_x["source_record_ids"]) | set(selected_y["source_record_ids"])
+            legacy_identity_source_record_ids = sorted(
+                str(item.row.id)
+                for item in rows
+                if str(item.row.id) in source_record_ids and item.row.identity_version != 2
+            )
             point = {
                 "catalyst_sample_id": catalyst_id,
                 "catalyst_name": rows[0].catalyst.name,
@@ -1003,6 +1058,8 @@ class CatalystAnalysisService:
                 "x_source_record_ids": selected_x["source_record_ids"],
                 "y_source_record_ids": selected_y["source_record_ids"],
                 "semantic_context": selected_x["context"],
+                "uses_legacy_identity": bool(legacy_identity_source_record_ids),
+                "legacy_identity_source_record_ids": legacy_identity_source_record_ids,
             }
             points.append(point)
 
@@ -1026,13 +1083,16 @@ class CatalystAnalysisService:
             "n_papers": len(paper_ids),
             "paper_ids": paper_ids,
             "paper_codes": paper_codes,
+            "legacy_identity_point_count": sum(1 for point in points if point["uses_legacy_identity"]),
+            "identity_v2_only_point_count": sum(1 for point in points if not point["uses_legacy_identity"]),
             "excluded_count": len(details),
             "excluded_row_reason_count": sum(exclusions.values()),
             "excluded_reasons": dict(sorted(exclusions.items())),
             "excluded_reasons_are_overlapping": True,
             "excluded_details": details,
+            "analysis_row_counts": analysis_counts,
             "warnings": warnings,
-            "selection_policy": "One point per catalyst_sample_id. Safety gate, Identity V2, and is_ml_ready are required; semantic contexts must be comparable. Conflicts are null/excluded, never averaged or Cartesian-paired.",
+            "selection_policy": "One point per catalyst_sample_id. The export safety gate, a normalized numeric target, and one clear DFT setting are required. Identity V2 is preferred, but reviewed legacy rows may be used when catalyst identity and calculation setting are explicit. Conflicts are null/excluded, never averaged or Cartesian-paired.",
             "ready": len(points) >= min_n,
             "pearson": stats["pearson"],
             "pearson_r": stats["pearson"],

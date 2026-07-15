@@ -28,6 +28,8 @@
     conflicting_values: "同一语义上下文存在冲突数值",
     identity_v2_required: "历史记录尚未完成 Identity V2 结构化身份",
     identity_v2_not_ml_ready: "Identity V2 信息不完整，尚不能用于分析",
+    pair_analysis_invalid_numeric_target: "缺少可用于关系分析的有限数值",
+    pair_analysis_target_not_normalized: "数值或单位无法安全标准化",
     missing_catalyst_sample_id: "记录未明确绑定催化剂样品",
     missing_or_ambiguous_calculation_context: "计算设置缺失或无法唯一关联",
     "safety_gate:missing_atom_or_site_identity": "缺少原子或吸附位点身份",
@@ -211,14 +213,11 @@
       ? "已形成 " + catalystCount + " 个同一催化剂有效配对，来自 " + paperCount + " 篇论文。"
       : "当前只有 " + catalystCount + " 个同一催化剂有效配对，至少需要 " + minN + " 个才能计算拟合结果。";
     const highlights = [];
-    if (paperCount < 2) highlights.push("有效数据来自不到 2 篇论文，当前结果只能用于数据核验。");
-    const topReasons = excludedEntries
-      .filter(([, count]) => Number.isFinite(Number(count)) && Number(count) > 0)
-      .sort((left, right) => Number(right[1]) - Number(left[1]))
-      .slice(0, 3);
-    if (topReasons.length) {
-      highlights.push("主要阻断项（原因次数可能重复）：" + topReasons.map(([reason, count]) => exclusionLabel(reason) + " " + count + " 次").join("；") + "。");
+    const legacyPointCount = Number(data.legacy_identity_point_count) || 0;
+    if (legacyPointCount > 0) {
+      highlights.push("本次 " + catalystCount + " 个配对中，有 " + legacyPointCount + " 个使用了通过审核的历史身份记录；这些记录仍须有明确的催化剂 ID 和计算设置。");
     }
+    if (paperCount < 2) highlights.push("有效数据来自不到 2 篇论文，当前结果只能用于数据核验。");
     $("diagnosticHighlights").innerHTML = highlights.map((item) => "<li>" + esc(item) + "</li>").join("");
     $("technicalDiagnostics").open = false;
   }
@@ -336,14 +335,6 @@
 
   async function init() {
     TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
-    await resolveLibraryScope();
-    loadOverview();
-    try {
-      await loadFields();
-      await loadCorrelation();
-    } catch (error) {
-      $("relationStatus").textContent = "可分析字段读取失败：" + error.message;
-    }
     ["xField", "yField", "minN"].forEach((id) => $(id).addEventListener("change", loadCorrelation));
     $("exportCatalystCsv").addEventListener("click", () => downloadDataset("csv"));
     $("downloadCatalystJson").addEventListener("click", () => downloadDataset("json"));
@@ -356,6 +347,14 @@
         $("relationStatus").textContent = "当前接口未提供该快捷关系所需的数值字段。";
       }
     });
+    await resolveLibraryScope();
+    loadOverview();
+    try {
+      await loadFields();
+      await loadCorrelation();
+    } catch (error) {
+      $("relationStatus").textContent = "可分析字段读取失败：" + error.message;
+    }
   }
   document.addEventListener("DOMContentLoaded", init);
 }());
