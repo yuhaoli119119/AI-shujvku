@@ -8,6 +8,11 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db_session
 from app.mcp.auth import get_optional_request_mcp_auth
 from app.mcp.context import MCPAuthInfo
+from app.schemas.content_knowledge import ContentKnowledgeReviewRequest
+from app.services.content_knowledge_review_service import (
+    ContentKnowledgeReviewError,
+    ContentKnowledgeReviewService,
+)
 from app.services.content_knowledge_service import ContentKnowledgeService
 from app.services.content_review_bundle_service import ContentReviewBundleService
 from app.services.content_writing_plan_service import ContentWritingPlanService
@@ -20,14 +25,21 @@ def list_content_knowledge(
     paper_id: str | None = Query(default=None),
     run_id: UUID | None = Query(default=None),
     library_name: str | None = Query(default=None),
-    category: str | None = Query(default=None),
+    category: str | None = Query(
+        default=None,
+        pattern="^(mechanism_evidence|performance_evidence|dft_evidence|figure_table_evidence|material_evidence|method_evidence|writing_material|review_viewpoint|uncertainty_note|draft_evidence_check)$",
+    ),
     query: str | None = Query(default=None),
     include_candidates: bool = Query(default=True),
     include_blocked: bool = Query(default=False),
-    review_status: str | None = Query(default=None),
-    citation_status: str | None = Query(default=None),
+    review_status: str | None = Query(
+        default=None,
+        pattern="^(needs_review|needs_human|content_ready|validated|approved|safe_verified|rejected)$",
+    ),
+    citation_status: str | None = Query(default=None, pattern="^(citable|writing_only|needs_review|blocked)$"),
     source_trust: str | None = Query(default=None, pattern="^(verified|unverified)$"),
     problem_status: str | None = Query(default=None, pattern="^(has_risk)$"),
+    offset: int = Query(default=0, ge=0),
     limit: int = Query(default=100, ge=1, le=500),
     session: Session = Depends(get_db_session),
 ) -> dict:
@@ -43,8 +55,55 @@ def list_content_knowledge(
         citation_status=citation_status,
         source_trust=source_trust,
         problem_status=problem_status,
+        offset=offset,
         limit=limit,
     )
+
+
+@router.get("/items/{item_id}")
+def get_content_knowledge_item(
+    item_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ContentKnowledgeReviewService(session).get_item(item_id)
+    except ContentKnowledgeReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+
+
+@router.post("/items/{item_id}/review")
+def review_content_knowledge_item(
+    item_id: UUID,
+    payload: ContentKnowledgeReviewRequest,
+    session: Session = Depends(get_db_session),
+    auth: MCPAuthInfo | None = Depends(get_optional_request_mcp_auth),
+) -> dict:
+    if auth is not None:
+        raise HTTPException(status_code=403, detail={"code": "human_review_requires_non_mcp_session"})
+    try:
+        result = ContentKnowledgeReviewService(session).review_item(
+            item_id,
+            decision=payload.decision,
+            reviewer=payload.reviewer,
+            reason=payload.reason,
+            expected_updated_at=payload.expected_updated_at,
+        )
+        session.commit()
+        return result
+    except ContentKnowledgeReviewError as exc:
+        session.rollback()
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+
+
+@router.get("/papers/{paper_id}/review-summary")
+def get_content_knowledge_review_summary(
+    paper_id: str,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        return ContentKnowledgeReviewService(session).paper_summary(paper_id)
+    except ContentKnowledgeReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
 
 
 @router.post("/sync")

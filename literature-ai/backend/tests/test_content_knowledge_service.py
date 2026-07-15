@@ -22,6 +22,7 @@ def _seed_content_knowledge(engine) -> str:
             library_name="内容知识测试库",
             title="Unified content knowledge for Li-S catalysts",
             paper_code="CK001",
+            doi="10.1000/ck001",
             abstract="content knowledge test",
             pdf_path="content-knowledge.pdf",
         )
@@ -173,6 +174,48 @@ def test_content_knowledge_filters_category_query_and_candidates(setup_test_db):
     ).json()
     assert by_paper_code["items"]
     assert {item["paper_code"] for item in by_paper_code["items"]} == {"CK001"}
+
+
+def test_legacy_fallback_search_pagination_and_reviewability(setup_test_db):
+    paper_id = _seed_content_knowledge(setup_test_db)
+    client = TestClient(app)
+
+    search = client.get(
+        "/api/content-knowledge",
+        params={"query": "CK001 catalysts 10.1000/ck001", "limit": 2, "offset": 0},
+    )
+    assert search.status_code == 200
+    first = search.json()
+    assert first["total"] == 5
+    assert first["offset"] == 0
+    assert first["limit"] == 2
+    assert first["has_more"] is True
+    assert all(item["paper_id"] == paper_id for item in first["items"])
+    assert all(item["paper_doi"] == "10.1000/ck001" for item in first["items"])
+    assert all(item["reviewable"] is False and item["requires_sync"] is True for item in first["items"])
+
+    pages = [
+        client.get(
+            "/api/content-knowledge",
+            params={"query": "CK001 catalysts 10.1000/ck001", "limit": 2, "offset": offset},
+        ).json()
+        for offset in (0, 2, 4)
+    ]
+    item_ids = [item["item_id"] for page in pages for item in page["items"]]
+    assert len(item_ids) == first["total"]
+    assert len(set(item_ids)) == first["total"]
+    assert pages[-1]["has_more"] is False
+
+    legacy_id = first["items"][0]["item_id"]
+    review = client.post(
+        f"/api/content-knowledge/items/{legacy_id}/review",
+        json={
+            "decision": "writing_only",
+            "reviewer": "tester",
+            "expected_updated_at": "2026-01-01T00:00:00",
+        },
+    )
+    assert review.status_code == 422
 
 
 def test_retrieval_search_includes_content_knowledge_with_policy_metadata(setup_test_db):

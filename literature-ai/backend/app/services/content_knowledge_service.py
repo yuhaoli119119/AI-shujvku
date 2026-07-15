@@ -10,6 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    AuditLog,
     EvidenceClaim,
     ContentEvidenceItem,
     ExternalAnalysisCandidate,
@@ -19,6 +20,7 @@ from app.db.models import (
     PaperNote,
     WritingCard,
 )
+from app.services.content_knowledge_search import content_item_filters, content_search_score
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import writing_card_content_gate, writing_card_gate
 from app.services.embedding import get_embedding_service
@@ -51,11 +53,14 @@ class ContentKnowledgeItem:
     paper_id: str
     paper_code: str | None
     paper_title: str | None
+    paper_doi: str | None
     category: str
     category_label: str
     source_type: str
     source_id: str
     source_table: str
+    reviewable: bool
+    requires_sync: bool
     content: str
     evidence_text: str | None = None
     evidence_locator: dict[str, Any] | None = None
@@ -77,6 +82,8 @@ class ContentKnowledgeItem:
     reviewer: str | None = None
     reviewed_at: str | None = None
     snapshot_fingerprint: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def payload(self) -> dict[str, Any]:
@@ -103,9 +110,11 @@ class ContentKnowledgeService:
         citation_status: str | None = None,
         source_trust: str | None = None,
         problem_status: str | None = None,
+        offset: int = 0,
         limit: int = 100,
     ) -> dict[str, Any]:
         normalized_library = normalize_library_name(library_name) if library_name is not None else None
+        offset_value = max(0, int(offset or 0))
         limit_value = max(1, min(int(limit or 100), 500))
         papers = self._scoped_papers(paper_id=paper_id, library_name=normalized_library)
         paper_by_id = {paper.id: paper for paper in papers}
@@ -116,9 +125,8 @@ class ContentKnowledgeService:
         # Projection is deliberately explicit: callers that need a durable review
         # package call sync_items() (and commit).  A GET remains read-only and can
         # still render legacy source rows until the first sync is performed.
-        items = self._persistent_items(
+        items, total = self._persistent_items(
             paper_ids=paper_ids,
-            paper_by_id=paper_by_id,
             run_id=run_uuid,
             category=category,
             query=query,
@@ -128,15 +136,31 @@ class ContentKnowledgeService:
             citation_status=citation_status,
             source_trust=source_trust,
             problem_status=problem_status,
+            offset=offset_value,
             limit=limit_value,
         )
-        if not items and paper_ids and not run_id:
-            items = self._legacy_items(paper_ids, paper_by_id, include_candidates=include_candidates)
-        filtered = [item for item in items if self._include_item(
-            item, category=category, query=query, include_candidates=include_candidates, include_blocked=include_blocked,
-        )][:limit_value]
+        if total == 0 and paper_ids and not run_id and not self._has_persistent_items(paper_ids):
+            legacy = self._legacy_items(paper_ids, paper_by_id, include_candidates=include_candidates)
+            matched = [
+                item
+                for item in legacy
+                if self._include_item(
+                    item,
+                    category=category,
+                    query=query,
+                    include_candidates=include_candidates,
+                    include_blocked=include_blocked,
+                    review_status=review_status,
+                    citation_status=citation_status,
+                    source_trust=source_trust,
+                    problem_status=problem_status,
+                )
+            ]
+            ordered = _sort_legacy_items(matched, query=query)
+            total = len(ordered)
+            items = ordered[offset_value:offset_value + limit_value]
 
-        counts = Counter(item.category for item in filtered)
+        counts = Counter(item.category for item in items)
         return {
             "schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION,
             "policy": {
@@ -157,10 +181,15 @@ class ContentKnowledgeService:
                 "citation_status": citation_status,
                 "source_trust": source_trust,
                 "problem_status": problem_status,
+                "offset": offset_value,
                 "limit": limit_value,
             },
+            "total": total,
+            "offset": offset_value,
+            "limit": limit_value,
+            "has_more": offset_value + len(items) < total,
             "category_counts": dict(sorted(counts.items())),
-            "items": [item.payload() for item in filtered],
+            "items": [item.payload() for item in items],
         }
 
     def sync_items(
@@ -225,28 +254,59 @@ class ContentKnowledgeService:
                 self.session.add(existing)
                 created += 1
             else:
-                embedding_changed = any(
-                    getattr(existing, field_name) != value
-                    for field_name, value in (
-                        ("content", item.content),
-                        ("evidence_text", item.evidence_text),
-                        ("evidence_locator", item.evidence_locator),
-                        ("page_start", item.page_start),
-                        ("page_end", item.page_end),
-                        ("section_title", item.section_title),
-                    )
+                merged_risks = list(dict.fromkeys([*(existing.risk_flags or []), *(item.risk_flags or [])]))
+                changed_fields = _review_relevant_changes(
+                    existing,
+                    item,
+                    source_metadata=source_metadata,
+                    run_id=source_run_id if source_run_id is not None else existing.run_id,
+                    risk_flags=merged_risks,
                 )
+                before_review = _stored_review_state(existing)
                 existing.content = item.content
                 existing.evidence_text = item.evidence_text
                 existing.evidence_locator = item.evidence_locator
                 existing.page_start = item.page_start
                 existing.page_end = item.page_end
                 existing.section_title = item.section_title
+                existing.category = item.category
                 existing.source_record = source_metadata
                 if source_run_id is not None:
                     existing.run_id = source_run_id
-                existing.risk_flags = list(dict.fromkeys([*(existing.risk_flags or []), *(item.risk_flags or [])]))
-                if embedding_changed:
+                if "source_identity" in source_metadata:
+                    existing.source_identity = source_metadata.get("source_identity")
+                if "source_identity_verified" in source_metadata:
+                    existing.source_identity_verified = bool(source_metadata.get("source_identity_verified"))
+                if "snapshot_fingerprint" in source_metadata:
+                    existing.snapshot_fingerprint = source_metadata.get("snapshot_fingerprint")
+                existing.risk_flags = merged_risks
+                if changed_fields and _has_effective_review(existing):
+                    existing.review_status = "needs_review"
+                    existing.citation_status = "needs_review"
+                    existing.reviewer = None
+                    existing.reviewed_at = None
+                    existing.risk_flags = list(dict.fromkeys([*merged_risks, "source_changed_after_review"]))
+                    self.session.add(
+                        AuditLog(
+                            paper_id=existing.paper_id,
+                            action="invalidate_content_evidence_review",
+                            source="content_knowledge_sync",
+                            target_type="content_evidence_item",
+                            target_id=str(existing.id),
+                            payload={
+                                "changed_fields": changed_fields,
+                                "before": before_review,
+                                "after": {
+                                    "review_status": "needs_review",
+                                    "citation_status": "needs_review",
+                                    "reviewer": None,
+                                    "reviewed_at": None,
+                                },
+                                "risk_flag": "source_changed_after_review",
+                            },
+                        )
+                    )
+                if changed_fields:
                     try:
                         existing.embedding = embedding.embed_text(f"{item.content}\n{item.evidence_text or ''}")
                         existing.embedding_model = settings.embedding_model
@@ -335,61 +395,53 @@ class ContentKnowledgeService:
                 items.extend(self._external_candidate_items(paper_ids, paper_by_id))
         return items
 
-    def _persistent_items(self, *, paper_ids, paper_by_id, run_id, category, query, include_candidates,
-                          include_blocked, review_status, citation_status, source_trust, problem_status, limit):
+    def _persistent_items(self, *, paper_ids, run_id, category, query, include_candidates,
+                          include_blocked, review_status, citation_status, source_trust, problem_status,
+                          offset, limit):
         if not paper_ids:
-            return []
-        stmt = select(ContentEvidenceItem).where(ContentEvidenceItem.paper_id.in_(paper_ids))
-        if run_id:
-            stmt = stmt.where(ContentEvidenceItem.run_id == run_id)
-        if category:
-            stmt = stmt.where(ContentEvidenceItem.category == category)
-        if review_status:
-            stmt = stmt.where(ContentEvidenceItem.review_status == review_status)
-        if citation_status:
-            stmt = stmt.where(ContentEvidenceItem.citation_status == citation_status)
-        if not include_candidates:
-            stmt = stmt.where(ContentEvidenceItem.source_type != "external_analysis_candidate")
-        if not include_blocked:
-            stmt = stmt.where(ContentEvidenceItem.citation_status != "blocked")
-        if source_trust == "verified":
-            stmt = stmt.where(ContentEvidenceItem.source_identity_verified.is_(True))
-        elif source_trust == "unverified":
-            stmt = stmt.where(ContentEvidenceItem.source_identity_verified.is_(False))
-        if problem_status == "has_risk":
-            stmt = stmt.where(ContentEvidenceItem.risk_flags != [])
-        # PostgreSQL filters scope before any in-process rerank.  Query tokens are
-        # intentionally substring-based here so Chinese and formula/mixed tokens
-        # remain searchable even without whitespace segmentation.
-        for token in _search_terms(query):
-            pattern = f"%{token}%"
-            stmt = stmt.where(or_(ContentEvidenceItem.content.ilike(pattern), ContentEvidenceItem.evidence_text.ilike(pattern)))
-        rows = self.session.scalars(stmt.order_by(ContentEvidenceItem.updated_at.desc()).limit(limit)).all()
-        return [self._persistent_item(row, paper_by_id.get(row.paper_id)) for row in rows]
+            return [], 0
+        terms = _search_terms(query)
+        filters = content_item_filters(
+            paper_ids=paper_ids,
+            run_id=run_id,
+            category=category,
+            terms=terms,
+            include_candidates=include_candidates,
+            include_blocked=include_blocked,
+            review_status=review_status,
+            citation_status=citation_status,
+            source_trust=source_trust,
+            problem_status=problem_status,
+        )
+        total = int(
+            self.session.scalar(
+                select(func.count())
+                .select_from(ContentEvidenceItem)
+                .join(Paper, Paper.id == ContentEvidenceItem.paper_id)
+                .where(*filters)
+            )
+            or 0
+        )
+        stmt = (
+            select(ContentEvidenceItem, Paper)
+            .join(Paper, Paper.id == ContentEvidenceItem.paper_id)
+            .where(*filters)
+        )
+        score = content_search_score(terms)
+        if score is not None:
+            stmt = stmt.order_by(score.desc(), ContentEvidenceItem.updated_at.desc(), ContentEvidenceItem.id.asc())
+        else:
+            stmt = stmt.order_by(ContentEvidenceItem.updated_at.desc(), ContentEvidenceItem.id.asc())
+        rows = self.session.execute(stmt.offset(offset).limit(limit)).all()
+        return [serialize_content_item(item, paper) for item, paper in rows], total
 
     def _persistent_item(self, row: ContentEvidenceItem, paper: Paper | None) -> ContentKnowledgeItem:
-        citation = _normalized(row.citation_status) or "needs_review"
-        reviewed = _normalized(row.review_status) in {"validated", "approved", "safe_verified"}
-        can_cite = citation == "citable" and reviewed and bool(row.evidence_text) and bool(row.page_start or row.section_title)
-        metadata = dict(row.source_record or {})
-        if row.run_id is not None:
-            metadata.setdefault("external_analysis_run_id", str(row.run_id))
-        return ContentKnowledgeItem(
-            item_id=str(row.id), paper_id=str(row.paper_id), paper_code=getattr(paper, "paper_code", None),
-            paper_title=getattr(paper, "title", None), category=row.category,
-            category_label=CATEGORY_LABELS.get(row.category, row.category), source_type=row.source_type,
-            source_id=row.source_id, source_table="content_evidence_items", content=_clean_text(row.content),
-            evidence_text=_clean_text(row.evidence_text) or None, evidence_locator=row.evidence_locator,
-            page_start=row.page_start, page_end=row.page_end, section_title=row.section_title,
-            review_status=row.review_status, review_gate_status=row.review_status,
-            citation_policy=citation, can_use_for_writing=citation in {"citable", "writing_only"},
-            can_use_for_citation=can_cite, risk_flags=list(row.risk_flags or []),
-            recommended_action=None if reviewed else "review_content_evidence", source_ai=metadata.get("source_ai"),
-            source_label=metadata.get("source_label"), source_identity=row.source_identity,
-            source_identity_verified=bool(row.source_identity_verified), reviewer=row.reviewer,
-            reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at else None,
-            snapshot_fingerprint=row.snapshot_fingerprint, metadata=metadata,
-        )
+        return serialize_content_item(row, paper)
+
+    def _has_persistent_items(self, paper_ids: list[uuid.UUID]) -> bool:
+        return self.session.scalar(
+            select(ContentEvidenceItem.id).where(ContentEvidenceItem.paper_id.in_(paper_ids)).limit(1)
+        ) is not None
 
     def _scoped_papers(
         self,
@@ -439,6 +491,7 @@ class ContentKnowledgeService:
                     can_use_for_citation=False,
                     risk_flags=risks,
                     recommended_action="review_mechanism_claim_evidence",
+                    updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
                     metadata={
                         "claim_type": row.claim_type,
                         "confidence": row.confidence,
@@ -483,6 +536,7 @@ class ContentKnowledgeService:
                     can_use_for_citation=False,
                     risk_flags=risks,
                     recommended_action=None if can_write else "complete_writing_card_evidence_chain",
+                    updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
                     metadata={
                         "paper_type": row.paper_type,
                         "evidence_chain_status": content_gate.evidence_chain_status,
@@ -528,6 +582,7 @@ class ContentKnowledgeService:
                     can_use_for_citation=False,
                     risk_flags=["note_requires_review"],
                     recommended_action="review_note_before_writing",
+                    updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
                     metadata={"source": row.source, "field_name": row.field_name},
                 )
             )
@@ -576,6 +631,7 @@ class ContentKnowledgeService:
                     can_use_for_citation=is_citable,
                     risk_flags=[] if is_citable else ["evidence_claim_unverified"],
                     recommended_action=None if is_citable else "review_evidence_claim",
+                    updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
                     metadata={
                         "target_type": row.target_type,
                         "target_id": row.target_id,
@@ -627,6 +683,7 @@ class ContentKnowledgeService:
                     recommended_action="resolve_external_ai_candidate" if risks else "review_external_ai_candidate",
                     source_ai=run.source,
                     source_label=run.source_label,
+                    updated_at=getattr(candidate, "updated_at", getattr(candidate, "created_at", None)),
                     metadata={
                         "candidate_type": candidate.candidate_type,
                         "mapping_reason": candidate.mapping_reason,
@@ -669,6 +726,7 @@ class ContentKnowledgeService:
         recommended_action: str | None = None,
         source_ai: str | None = None,
         source_label: str | None = None,
+        updated_at: Any | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> ContentKnowledgeItem:
         item_category = category if category in CATEGORY_LABELS else "draft_evidence_check"
@@ -679,11 +737,14 @@ class ContentKnowledgeService:
             paper_id=paper_id,
             paper_code=getattr(paper, "paper_code", None),
             paper_title=getattr(paper, "title", None),
+            paper_doi=getattr(paper, "doi", None),
             category=item_category,
             category_label=CATEGORY_LABELS[item_category],
             source_type=source_type,
             source_id=str(source_id),
             source_table=source_table,
+            reviewable=False,
+            requires_sync=True,
             content=_clean_text(content),
             evidence_text=_clean_text(evidence_text) or None,
             evidence_locator=evidence_locator,
@@ -700,6 +761,9 @@ class ContentKnowledgeService:
             recommended_action=recommended_action,
             source_ai=source_ai,
             source_label=source_label,
+            source_identity=(metadata or {}).get("source_identity"),
+            source_identity_verified=bool((metadata or {}).get("source_identity_verified")),
+            updated_at=updated_at.isoformat() if updated_at else None,
             metadata=metadata or {},
         )
 
@@ -711,6 +775,10 @@ class ContentKnowledgeService:
         query: str | None,
         include_candidates: bool,
         include_blocked: bool,
+        review_status: str | None,
+        citation_status: str | None,
+        source_trust: str | None,
+        problem_status: str | None,
     ) -> bool:
         if category and item.category != category:
             return False
@@ -718,10 +786,162 @@ class ContentKnowledgeService:
             return False
         if not include_blocked and item.citation_policy == "blocked":
             return False
+        if review_status and item.review_status != review_status:
+            return False
+        if citation_status and item.citation_policy != citation_status:
+            return False
+        if source_trust == "verified" and not item.source_identity_verified:
+            return False
+        if source_trust == "unverified" and item.source_identity_verified:
+            return False
+        if problem_status == "has_risk" and not item.risk_flags:
+            return False
         tokens = _query_tokens(query)
         if tokens and not all(token in _search_blob(item) for token in tokens):
             return False
         return True
+
+
+def serialize_content_item(row: ContentEvidenceItem, paper: Paper | None) -> ContentKnowledgeItem:
+    citation = _normalized(row.citation_status) or "needs_review"
+    reviewed = _normalized(row.review_status) in {"validated", "approved", "safe_verified"}
+    can_cite = citation == "citable" and reviewed and bool(row.evidence_text) and _content_item_has_locator(row)
+    metadata = dict(row.source_record or {})
+    if row.run_id is not None:
+        metadata.setdefault("external_analysis_run_id", str(row.run_id))
+    return ContentKnowledgeItem(
+        item_id=str(row.id),
+        paper_id=str(row.paper_id),
+        paper_code=getattr(paper, "paper_code", None),
+        paper_title=getattr(paper, "title", None),
+        paper_doi=getattr(paper, "doi", None),
+        category=row.category,
+        category_label=CATEGORY_LABELS.get(row.category, row.category),
+        source_type=row.source_type,
+        source_id=row.source_id,
+        source_table="content_evidence_items",
+        reviewable=True,
+        requires_sync=False,
+        content=_clean_text(row.content),
+        evidence_text=_clean_text(row.evidence_text) or None,
+        evidence_locator=row.evidence_locator,
+        page_start=row.page_start,
+        page_end=row.page_end,
+        section_title=row.section_title,
+        review_status=row.review_status,
+        review_gate_status=row.review_status,
+        citation_policy=citation,
+        can_use_for_writing=citation in {"citable", "writing_only"},
+        can_use_for_citation=can_cite,
+        risk_flags=list(row.risk_flags or []),
+        recommended_action=None if reviewed else "review_content_evidence",
+        source_ai=metadata.get("source_ai"),
+        source_label=metadata.get("source_label"),
+        source_identity=row.source_identity,
+        source_identity_verified=bool(row.source_identity_verified),
+        reviewer=row.reviewer,
+        reviewed_at=row.reviewed_at.isoformat() if row.reviewed_at else None,
+        snapshot_fingerprint=row.snapshot_fingerprint,
+        created_at=row.created_at.isoformat() if row.created_at else None,
+        updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        metadata=metadata,
+    )
+
+
+def _review_relevant_changes(
+    stored: ContentEvidenceItem,
+    incoming: ContentKnowledgeItem,
+    *,
+    source_metadata: dict[str, Any],
+    run_id: uuid.UUID | None,
+    risk_flags: list[str],
+) -> list[str]:
+    current_risks = [flag for flag in (stored.risk_flags or []) if flag != "source_changed_after_review"]
+    incoming_risks = [flag for flag in risk_flags if flag != "source_changed_after_review"]
+    source_identity = source_metadata.get("source_identity", stored.source_identity)
+    source_identity_verified = source_metadata.get(
+        "source_identity_verified", stored.source_identity_verified
+    )
+    snapshot_fingerprint = source_metadata.get(
+        "snapshot_fingerprint", stored.snapshot_fingerprint
+    )
+    values = {
+        "category": (stored.category, incoming.category),
+        "content": (stored.content, incoming.content),
+        "evidence_text": (stored.evidence_text, incoming.evidence_text),
+        "evidence_locator": (stored.evidence_locator, incoming.evidence_locator),
+        "page_start": (stored.page_start, incoming.page_start),
+        "page_end": (stored.page_end, incoming.page_end),
+        "section_title": (stored.section_title, incoming.section_title),
+        "source_record": (stored.source_record or {}, source_metadata),
+        "run_id": (stored.run_id, run_id),
+        "source_identity": (stored.source_identity, source_identity),
+        "source_identity_verified": (
+            stored.source_identity_verified,
+            bool(source_identity_verified),
+        ),
+        "snapshot_fingerprint": (stored.snapshot_fingerprint, snapshot_fingerprint),
+        "risk_flags": (current_risks, incoming_risks),
+    }
+    return [field_name for field_name, (before, after) in values.items() if before != after]
+
+
+def _content_item_has_locator(item: ContentEvidenceItem) -> bool:
+    locator = item.evidence_locator if isinstance(item.evidence_locator, dict) else {}
+    return bool(
+        item.page_start
+        or str(item.section_title or "").strip()
+        or locator.get("page")
+        or locator.get("page_start")
+        or locator.get("section")
+        or locator.get("section_title")
+    )
+
+
+def _has_effective_review(item: ContentEvidenceItem) -> bool:
+    return (
+        _normalized(item.review_status) in {"validated", "approved", "safe_verified"}
+        or _normalized(item.citation_status) in {"citable", "writing_only"}
+    )
+
+
+def _stored_review_state(item: ContentEvidenceItem) -> dict[str, str | None]:
+    return {
+        "review_status": item.review_status,
+        "citation_status": item.citation_status,
+        "reviewer": item.reviewer,
+        "reviewed_at": item.reviewed_at.isoformat() if item.reviewed_at else None,
+    }
+
+
+def _sort_legacy_items(items: list[ContentKnowledgeItem], *, query: str | None) -> list[ContentKnowledgeItem]:
+    ordered = sorted(items, key=lambda item: item.item_id)
+    ordered.sort(key=lambda item: item.updated_at or "", reverse=True)
+    terms = _search_terms(query)
+    if terms:
+        ordered.sort(key=lambda item: _legacy_search_score(item, terms), reverse=True)
+    return ordered
+
+
+def _legacy_search_score(item: ContentKnowledgeItem, terms: list[str]) -> int:
+    score = 0
+    fields = (
+        (item.paper_title, 12),
+        (item.content, 10),
+        (item.evidence_text, 9),
+        (item.section_title, 7),
+        (item.category, 5),
+        (item.source_type, 4),
+        (item.paper_code, 15),
+        (item.paper_doi, 14),
+    )
+    for term in terms:
+        if _normalized(item.paper_code) == term:
+            score += 40
+        if _normalized(item.paper_doi) == term:
+            score += 35
+        score += sum(weight for value, weight in fields if term in _normalized(value))
+    return score
 
 
 def _maybe_uuid(value: str | uuid.UUID) -> uuid.UUID | None:
@@ -793,12 +1013,12 @@ def _search_blob(item: ContentKnowledgeItem) -> str:
             [
                 item.content,
                 item.evidence_text or "",
+                item.section_title or "",
                 item.paper_title or "",
                 item.paper_code or "",
+                item.paper_doi or "",
                 item.category,
-                item.category_label,
                 item.source_type,
-                _json_preview(item.metadata),
             ]
         )
     )
