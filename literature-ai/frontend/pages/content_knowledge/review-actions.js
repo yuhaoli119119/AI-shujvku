@@ -1,6 +1,11 @@
 import { escapeHtml } from './render-list.js';
 
-const decisions = [{ value: 'approve_citable', label: '批准可引用' }, { value: 'writing_only', label: '仅写作使用' }, { value: 'needs_human', label: '转需人工' }, { value: 'reject', label: '拒绝' }];
+const decisions = [
+  { value: 'approve_citable', label: '批准可引用' },
+  { value: 'writing_only', label: '仅写作使用' },
+  { value: 'needs_human', label: '转需人工' },
+  { value: 'reject', label: '拒绝' },
+];
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isReviewable(item) {
@@ -10,10 +15,17 @@ export function isReviewable(item) {
 }
 
 export function renderReview(root, item, onReview) {
-  if (!item) { root.innerHTML = '<div class="state-card">选择内容后可进行人工审核。</div>'; return; }
+  if (!item) {
+    root.innerHTML = '<div class="state-card">选择内容后可进行人工审核。</div>';
+    return;
+  }
   const risks = (item.risk_flags || item.risks || []).map((risk) => `<li>${escapeHtml(risk)}</li>`).join('') || '<li>未返回风险标记</li>';
   const sourceCorrectionLink = item.paper_id ? `<a class="source-correction-link" href="../review_center/index.html?paper_id=${encodeURIComponent(item.paper_id)}">去审核中心修正源内容</a>` : '';
-  const reviewable = isReviewable(item); const disabled = reviewable ? '' : ' disabled';
+  const reviewable = isReviewable(item);
+  const disabled = reviewable ? '' : ' disabled';
+  const sourceTrust = item.source_identity_verified
+    ? '来源身份已由服务端核验'
+    : '来源仅为声明，身份未认证';
   const decisionControls = decisions.map((entry) => [
     '<label class="decision">',
     `<input type="radio" name="decision" value="${entry.value}"${disabled}>`,
@@ -24,7 +36,7 @@ export function renderReview(root, item, onReview) {
     '<div class="panel-heading"><h2>审核与来源风险</h2></div>',
     '<p class="muted">这里审核证据与引用资格，不会直接编辑 MechanismClaim 或 WritingCard 源内容。</p>',
     sourceCorrectionLink,
-    `<p class="muted">来源可信度：${escapeHtml(item.source_identity_verified ? '已核验' : (item.source_trust || '待核验'))}</p>`,
+    `<p class="muted">来源可信度：${escapeHtml(sourceTrust)}</p>`,
     `<ul class="risk-list">${risks}</ul>`,
     reviewable ? '' : '<p class="state-card">先同步索引后审核</p>',
     `<form id="reviewForm"><fieldset${disabled}><legend>人工决定</legend>${decisionControls}</fieldset>`,

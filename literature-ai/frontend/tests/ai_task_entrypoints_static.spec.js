@@ -79,7 +79,9 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   const page = [
     'pages/content_knowledge/index.html',
     'pages/content_knowledge/api.js',
+    'pages/content_knowledge/filters.js',
     'pages/content_knowledge/page.js',
+    'pages/content_knowledge/render-detail.js',
     'pages/content_knowledge/review-actions.js',
   ].map(readFrontendFile).join('\n');
 
@@ -97,14 +99,13 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   expect(page).toContain('risk_flags');
   expect(page).toContain('include_candidates');
   expect(page).toContain('include_blocked');
-  expect(page).toContain('currentRunId');
-  expect(page).toContain('run_id:runId');
+  expect(page).toContain("PRESERVED_SCOPE_KEYS = ['run_id']");
+  expect(page).toContain('state.filters.run_id');
   expect(page).toContain('scopeBanner');
   expect(page).toContain('当前审核范围：AI 批次');
-  expect(page).toContain('external_analysis_run');
   expect(page).toContain('item_count');
-  expect(page).toContain('finalizeReview');
+  expect(page).toContain('finalizeReviewBundle');
   expect(page).toContain('完成审核');
-  expect(page).toContain('仍有未解决项');
-  expect(page).toContain('声明来源；未认证');
+  expect(page).toContain('项未解决');
+  expect(page).toContain('来源仅为声明，身份未认证');
 });

@@ -17,7 +17,14 @@ export async function listItems(filters, offset, limit) {
   const params = new URLSearchParams({ ...filters, offset: String(offset), limit: String(limit) });
   const body = await request(`/api/content-knowledge?${params}`);
   const items = Array.isArray(body) ? body : (body.items || []);
-  return { items, total: body.total ?? items.length, offset: body.offset ?? offset, limit: body.limit ?? limit, hasMore: body.has_more ?? false, schemaVersion: body.schema_version };
+  return {
+    items,
+    total: body.total ?? items.length,
+    offset: body.offset ?? offset,
+    limit: body.limit ?? limit,
+    hasMore: body.has_more ?? false,
+    schemaVersion: body.schema_version,
+  };
 }
 
 export async function getItem(itemId) {
@@ -30,7 +37,14 @@ export async function getItem(itemId) {
 
 export async function reviewItem(itemId, body) {
   try {
-    const result = await request(`/api/content-knowledge/items/${encodeURIComponent(itemId)}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const result = await request(
+      `/api/content-knowledge/items/${encodeURIComponent(itemId)}/review`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
     return result.item || result;
   } catch (error) {
     if (error.status === 409) {
@@ -47,21 +61,41 @@ export function syncIndex(scope) {
 }
 
 export function createReviewBundle(body) {
-  return request('/api/content-knowledge/review-bundles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return request('/api/content-knowledge/review-bundles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 export function validateReviewBundle(bundleId, result) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/validate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) });
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/validate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(result),
+  });
 }
 
 export function applyReviewBundle(bundleId) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewer: 'human-ui' }) });
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reviewer: 'human-ui' }),
+  });
 }
 
 export function finalizeReviewBundle(bundleId) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/finalize`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewer: 'human-ui' }) });
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/finalize`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reviewer: 'human-ui' }),
+  });
 }
 
 export function createWritingPlan(query, paperIds) {
-  return request('/api/content-knowledge/writing-plan', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query, paper_ids: paperIds }) });
+  return request('/api/content-knowledge/writing-plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, paper_ids: paperIds }),
+  });
 }

@@ -1,8 +1,9 @@
 const { test, expect } = require('@playwright/test');
 const BASE_URL = 'http://127.0.0.1:4174';
+const PAPER_ID = '11111111-1111-4111-8111-111111111111';
 
 const firstItem = {
-  item_id: 'claim:1', reviewable: true, paper_id: 'paper-uuid-1', paper_code: 'B0078', paper_title: 'Evidence <b>claim</b>', category: 'mechanism_evidence', category_label: '机理证据卡', content: '<img src=x onerror="window.xssHit=1">Catalyst improves conversion', evidence_text: 'Page evidence', page_start: 4, section_title: 'Results', review_status: 'needs_review', citation_policy: 'needs_review', risk_flags: ['missing_locator'], source_identity_verified: false, match_reason: '关键词命中', updated_at: '2026-07-16T00:00:00Z', metadata: { internal: '<script>bad()</script>' },
+  item_id: 'claim:1', reviewable: true, paper_id: PAPER_ID, paper_code: 'B0078', paper_title: 'Evidence <b>claim</b>', category: 'mechanism_evidence', category_label: '机理证据卡', content: '<img src=x onerror="window.xssHit=1">Catalyst improves conversion', evidence_text: 'Page evidence', page_start: 4, section_title: 'Results', review_status: 'needs_review', citation_policy: 'needs_review', risk_flags: ['missing_locator'], source_identity_verified: false, match_reason: '关键词命中', updated_at: '2026-07-16T00:00:00Z', metadata: { internal: '<script>bad()</script>' },
 };
 const secondItem = { ...firstItem, item_id: 'card:2', paper_code: 'B0079', paper_title: 'Second paper', content: 'Second content', risk_flags: [] };
 const thirdItem = { ...firstItem, item_id: 'card:3', paper_code: 'B0080', paper_title: 'Third paper', content: 'Third content' };
@@ -52,7 +53,7 @@ test('content detail has collapsed technical JSON and all four evidence decision
   await page.getByRole('button', { name: /Evidence.*claim/ }).click();
   await expect(page.locator('blockquote')).toHaveText('Page evidence');
   await expect(page.locator('.technical-details')).not.toHaveAttribute('open', '');
-  await expect(page.getByRole('link', { name: '去审核中心修正源内容' })).toHaveAttribute('href', /paper_id=paper-uuid-1/);
+  await expect(page.getByRole('link', { name: '去审核中心修正源内容' })).toHaveAttribute('href', new RegExp(`paper_id=${PAPER_ID}`));
   for (const decision of ['approve_citable', 'writing_only', 'needs_human', 'reject']) {
     await page.locator(`input[value="${decision}"]`).check();
     if (decision === 'needs_human' || decision === 'reject') {
@@ -103,4 +104,137 @@ test('legacy projection requires index sync and never sends its source-shaped ID
   await expect(page.getByRole('radio', { name: '批准可引用' })).toBeDisabled();
   expect(detailRequested).toBeFalsy();
   expect(reviewRequested).toBeFalsy();
+});
+
+test('advanced actions keep run scope and call the real scoped workflow endpoints', async ({ page }) => {
+  const calls = [];
+  page.on('dialog', (dialog) => dialog.accept());
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const body = request.postData() ? JSON.parse(request.postData()) : null;
+    calls.push({ method: request.method(), path: url.pathname, search: url.search, body });
+
+    if (request.method() === 'GET' && url.pathname === '/api/content-knowledge') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }),
+      });
+    }
+    if (url.pathname.endsWith('/claim%3A1') || url.pathname.endsWith('/claim:1')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ item: firstItem }) });
+    }
+    if (url.pathname === '/api/content-knowledge/sync') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ synced: true }) });
+    }
+    if (url.pathname === '/api/content-knowledge/review-bundles') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          bundle_id: 'bundle-1',
+          manifest: { scope_type: 'external_analysis_run', item_count: 1, instructions: 'Review B0078' },
+          return_template: { schema_version: 'content_evidence_review_result_v1' },
+        }),
+      });
+    }
+    if (url.pathname.endsWith('/validate')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
+    }
+    if (url.pathname.endsWith('/apply')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ applied: 1, needs_human: 0 }) });
+    }
+    if (url.pathname.endsWith('/finalize')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ finalized: true }) });
+    }
+    if (url.pathname === '/api/content-knowledge/writing-plan') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ query: body.query, citations: [] }) });
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html?paper_id=B0078&run_id=run-1`);
+  await expect(page.getByText('当前审核范围：AI 批次 run-1')).toBeVisible();
+  await page.locator('#categorySelect').selectOption('mechanism_evidence');
+  await expect(page).toHaveURL(/run_id=run-1/);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await page.getByText('批量与高级操作').click();
+
+  await page.getByRole('button', { name: '同步内容索引' }).click();
+  await expect.poll(() => calls.some((call) => call.path.endsWith('/sync'))).toBeTruthy();
+  const syncCall = calls.find((call) => call.path.endsWith('/sync'));
+  expect(syncCall.search).toContain(`paper_id=${PAPER_ID}`);
+  expect(syncCall.body).toBeNull();
+
+  await page.getByRole('button', { name: '生成 AI 审核包' }).click();
+  await expect(page.getByText(/审核包已生成：bundle-1/)).toBeVisible();
+  const bundleCall = calls.find((call) => call.path.endsWith('/review-bundles'));
+  expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, run_id: 'run-1' });
+
+  await page.locator('#bundleResultInput').fill('{}');
+  await page.getByRole('button', { name: '校验回传' }).click();
+  await expect(page.getByText(/回传校验通过/)).toBeVisible();
+  await page.getByRole('button', { name: '应用审核回传' }).click();
+  await expect(page.getByText(/已应用 1 项/)).toBeVisible();
+  await page.getByRole('button', { name: '完成审核' }).click();
+  await expect(page.getByText('审核已完成。')).toBeVisible();
+
+  await page.locator('#writingPlanQuery').fill('Li2S conversion');
+  await page.getByRole('button', { name: '生成写作证据计划' }).click();
+  await expect(page.locator('#writingPlanResult')).toContainText('Li2S conversion');
+  const writingCall = calls.find((call) => call.path.endsWith('/writing-plan'));
+  expect(writingCall.body).toEqual({ query: 'Li2S conversion', paper_ids: [PAPER_ID] });
+  expect(calls.some((call) => call.path.endsWith('/validate'))).toBeTruthy();
+  expect(calls.some((call) => call.path.endsWith('/apply'))).toBeTruthy();
+  expect(calls.some((call) => call.path.endsWith('/finalize'))).toBeTruthy();
+});
+
+test('a paper-code deep link resolves the UUID before creating a review bundle', async ({ page }) => {
+  let bundleBody = null;
+  await mockKnowledge(page);
+  await page.route('**/api/content-knowledge/review-bundles', async (route) => {
+    bundleBody = JSON.parse(route.request().postData() || '{}');
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ bundle_id: 'bundle-paper-code', manifest: { item_count: 1 } }),
+    });
+  });
+
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html?paper_id=B0078`);
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 AI 审核包' }).click();
+
+  await expect(page.getByText(/审核包已生成：bundle-paper-code/)).toBeVisible();
+  expect(bundleBody).toEqual({ paper_id: PAPER_ID });
+});
+
+test('structured evidence shows its quote and locator instead of a JSON wall', async ({ page }) => {
+  const structuredItem = {
+    ...firstItem,
+    item_id: '22222222-2222-4222-8222-222222222222',
+    evidence_text: JSON.stringify({
+      raw_payload: {
+        evidence_location: {
+          quoted_text: 'The defect formation energy is 3.711 eV.',
+          page: 3,
+          section: 'Geometry optimization',
+        },
+      },
+    }),
+    page_start: null,
+    section_title: null,
+  };
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const url = new URL(route.request().url());
+    const body = url.pathname.includes('/items/')
+      ? { item: structuredItem }
+      : { items: [structuredItem], total: 1, offset: 0, limit: 25, has_more: false };
+    await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
+  });
+
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+
+  await expect(page.locator('blockquote')).toHaveText('The defect formation energy is 3.711 eV.');
+  await expect(page.locator('.detail-content')).toContainText('Geometry optimization · 第 3 页');
+  await expect(page.locator('blockquote')).not.toContainText('raw_payload');
 });

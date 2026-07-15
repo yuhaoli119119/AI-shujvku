@@ -144,7 +144,11 @@ class ContentKnowledgeReviewService:
             paper_uuid = UUID(str(paper_id))
         except (TypeError, ValueError):
             paper_uuid = None
-        stmt = select(Paper).where(Paper.id == paper_uuid) if paper_uuid else select(Paper).where(Paper.paper_code == paper_id.strip())
+        stmt = (
+            select(Paper).where(Paper.id == paper_uuid)
+            if paper_uuid
+            else select(Paper).where(Paper.paper_code == paper_id.strip())
+        )
         paper = self.session.scalar(stmt)
         if paper is None:
             raise ContentKnowledgeReviewError("paper_not_found", status_code=404)

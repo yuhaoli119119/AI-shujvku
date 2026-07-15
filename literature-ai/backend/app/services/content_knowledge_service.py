@@ -201,8 +201,9 @@ class ContentKnowledgeService:
     ) -> dict[str, Any]:
         """Materialize legacy source rows into the ContentEvidenceItem contract.
 
-        The method never upgrades review/citation state.  Existing human review
-        state is preserved while source text/locators are refreshed.
+        The method never upgrades review/citation state. Existing decisions are
+        preserved only while review-relevant source fields remain unchanged;
+        changed accepted cards are invalidated and must be reviewed again.
         """
         papers = self._scoped_papers(
             paper_id=paper_id,
@@ -395,9 +396,22 @@ class ContentKnowledgeService:
                 items.extend(self._external_candidate_items(paper_ids, paper_by_id))
         return items
 
-    def _persistent_items(self, *, paper_ids, run_id, category, query, include_candidates,
-                          include_blocked, review_status, citation_status, source_trust, problem_status,
-                          offset, limit):
+    def _persistent_items(
+        self,
+        *,
+        paper_ids,
+        run_id,
+        category,
+        query,
+        include_candidates,
+        include_blocked,
+        review_status,
+        citation_status,
+        source_trust,
+        problem_status,
+        offset,
+        limit,
+    ):
         if not paper_ids:
             return [], 0
         terms = _search_terms(query)
@@ -429,9 +443,16 @@ class ContentKnowledgeService:
         )
         score = content_search_score(terms)
         if score is not None:
-            stmt = stmt.order_by(score.desc(), ContentEvidenceItem.updated_at.desc(), ContentEvidenceItem.id.asc())
+            stmt = stmt.order_by(
+                score.desc(),
+                ContentEvidenceItem.updated_at.desc(),
+                ContentEvidenceItem.id.asc(),
+            )
         else:
-            stmt = stmt.order_by(ContentEvidenceItem.updated_at.desc(), ContentEvidenceItem.id.asc())
+            stmt = stmt.order_by(
+                ContentEvidenceItem.updated_at.desc(),
+                ContentEvidenceItem.id.asc(),
+            )
         rows = self.session.execute(stmt.offset(offset).limit(limit)).all()
         return [serialize_content_item(item, paper) for item, paper in rows], total
 

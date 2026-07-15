@@ -19,4 +19,7 @@ export function writeUrlState({ resetOffset = false } = {}) {
   window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
 }
 
-export function setSelected(itemId) { state.selectedId = itemId || null; writeUrlState(); }
+export function setSelected(itemId) {
+  state.selectedId = itemId || null;
+  writeUrlState();
+}

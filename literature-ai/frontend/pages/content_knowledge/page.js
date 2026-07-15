@@ -1,6 +1,16 @@
 import { state, setSelected, writeUrlState } from './state.js';
 import { initFilters } from './filters.js';
-import { listItems, getItem, reviewItem, syncIndex, createReviewBundle, validateReviewBundle, applyReviewBundle, finalizeReviewBundle, createWritingPlan } from './api.js';
+import {
+  listItems,
+  getItem,
+  reviewItem,
+  syncIndex,
+  createReviewBundle,
+  validateReviewBundle,
+  applyReviewBundle,
+  finalizeReviewBundle,
+  createWritingPlan,
+} from './api.js';
 import { renderList, renderListError } from './render-list.js';
 import { renderDetail } from './render-detail.js';
 import { renderReview, isReviewable } from './review-actions.js';
@@ -24,11 +34,50 @@ function selectedItem() {
 function getSyncScope() {
   const item = selectedItem();
   if (item?.paper_id) {
-    return { label: `当前论文：${item.paper_code || item.paper_id}`, filters: { ...state.filters, paper_id: item.paper_id } };
+    return {
+      label: `当前论文：${item.paper_code || item.paper_id}`,
+      filters: {
+        paper_id: item.paper_id,
+        include_candidates: state.filters.include_candidates || 'true',
+      },
+    };
   }
-  if (state.filters.paper_id) return { label: `当前论文：${state.filters.paper_id}`, filters: state.filters };
-  if (state.filters.library_name) return { label: `当前文献库：${state.filters.library_name}`, filters: state.filters };
+  if (state.filters.paper_id) {
+    return {
+      label: `当前论文：${state.filters.paper_id}`,
+      filters: {
+        paper_id: state.filters.paper_id,
+        include_candidates: state.filters.include_candidates || 'true',
+      },
+    };
+  }
+  if (state.filters.library_name) {
+    return {
+      label: `当前文献库：${state.filters.library_name}`,
+      filters: {
+        library_name: state.filters.library_name,
+        include_candidates: state.filters.include_candidates || 'true',
+      },
+    };
+  }
   return null;
+}
+
+function renderScopeBanner() {
+  const banner = document.querySelector('#scopeBanner');
+  if (state.filters.run_id) {
+    banner.textContent = `当前审核范围：AI 批次 ${state.filters.run_id}`;
+    return;
+  }
+  if (state.filters.paper_id) {
+    banner.textContent = `当前审核范围：论文 ${state.filters.paper_id}`;
+    return;
+  }
+  if (state.filters.library_name) {
+    banner.textContent = `当前审核范围：文献库 ${state.filters.library_name}`;
+    return;
+  }
+  banner.textContent = '当前审核范围：全部内容；建议先选择论文或文献库。';
 }
 
 function updateSyncScope() {
@@ -50,6 +99,7 @@ function renderMetadata() {
   document.querySelector('#resultRange').textContent = `显示 ${shown}，共 ${state.total} 条`;
   document.querySelector('#resultCount').textContent = `${state.total} 条`;
   document.querySelector('#loadMoreButton').hidden = !state.hasMore;
+  renderScopeBanner();
 }
 
 async function loadItems({ append = false } = {}) {
@@ -123,7 +173,12 @@ async function runAdvancedAction(action) {
 }
 
 function selectedPaperId() {
-  return selectedItem()?.paper_id || state.filters.paper_id || null;
+  const selected = selectedItem();
+  if (selected?.paper_id) return selected.paper_id;
+  const scopedItem = state.items.find((item) => (
+    item.paper_id === state.filters.paper_id || item.paper_code === state.filters.paper_id
+  ));
+  return scopedItem?.paper_id || null;
 }
 
 function renderBundleStatus(text) {
@@ -138,15 +193,22 @@ async function generateBundle() {
     currentBundle = await createReviewBundle({ paper_id: paperId, run_id: state.filters.run_id || undefined });
     const manifest = currentBundle.manifest || {};
     renderBundleStatus(`审核包已生成：${currentBundle.bundle_id}；范围 ${manifest.scope_type || 'paper'}；项目 ${manifest.item_count ?? (manifest.items || []).length}。`);
-  } catch (error) { showMessage(`生成审核包失败：${error.message}`, true); }
+  } catch (error) {
+    showMessage(`生成审核包失败：${error.message}`, true);
+  }
 }
 
 async function copyBundleInstruction() {
   if (!currentBundle) await generateBundle();
   if (!currentBundle) return;
   const text = `${currentBundle.manifest?.instructions || ''}\n\nRETURN TEMPLATE:\n${JSON.stringify(currentBundle.return_template || {}, null, 2)}`;
-  try { await navigator.clipboard.writeText(text); showMessage('IDE AI 指令与 JSON 模板已复制。'); }
-  catch (_) { document.querySelector('#bundleResultInput').value = text; showMessage('无法使用剪贴板，指令已显示在输入框。'); }
+  try {
+    await navigator.clipboard.writeText(text);
+    showMessage('IDE AI 指令与 JSON 模板已复制。');
+  } catch (_) {
+    document.querySelector('#bundleResultInput').value = text;
+    showMessage('无法使用剪贴板，指令已显示在输入框。');
+  }
 }
 
 async function validateBundle() {
@@ -155,7 +217,9 @@ async function validateBundle() {
     const result = JSON.parse(document.querySelector('#bundleResultInput').value);
     const response = await validateReviewBundle(currentBundle.bundle_id, result);
     renderBundleStatus(`回传校验通过。${response.unresolved?.length ? `仍有 ${response.unresolved.length} 项未解决。` : '可应用审核回传。'}`);
-  } catch (error) { showMessage(`回传校验失败：${error.message}`, true); }
+  } catch (error) {
+    showMessage(`回传校验失败：${error.message}`, true);
+  }
 }
 
 async function applyBundle() {
@@ -166,13 +230,20 @@ async function applyBundle() {
     renderBundleStatus(`已应用 ${response.applied ?? 0} 项。${unresolved ? `仍有 ${unresolved} 项未解决。` : '可完成审核。'}`);
     document.querySelector('#finalizeBundleButton').hidden = Boolean(unresolved);
     await loadItems();
-  } catch (error) { showMessage(`应用审核回传失败：${error.message}`, true); }
+  } catch (error) {
+    showMessage(`应用审核回传失败：${error.message}`, true);
+  }
 }
 
 async function finalizeBundle() {
   if (!currentBundle) return;
-  try { await finalizeReviewBundle(currentBundle.bundle_id); renderBundleStatus('审核已完成。'); await loadItems(); }
-  catch (error) { showMessage(`无法完成审核：${error.message}`, true); }
+  try {
+    await finalizeReviewBundle(currentBundle.bundle_id);
+    renderBundleStatus('审核已完成。');
+    await loadItems();
+  } catch (error) {
+    showMessage(`无法完成审核：${error.message}`, true);
+  }
 }
 
 async function generateWritingPlan() {
@@ -184,7 +255,9 @@ async function generateWritingPlan() {
     const output = document.querySelector('#writingPlanResult');
     output.hidden = false;
     output.textContent = JSON.stringify(plan, null, 2);
-  } catch (error) { showMessage(`生成写作证据计划失败：${error.message}`, true); }
+  } catch (error) {
+    showMessage(`生成写作证据计划失败：${error.message}`, true);
+  }
 }
 
 document.addEventListener('DOMContentLoaded', () => {

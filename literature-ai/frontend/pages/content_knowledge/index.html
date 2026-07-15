@@ -64,8 +64,19 @@
         <button id="createBundleButton" class="secondary-btn" type="button">生成 AI 审核包</button>
         <button id="copyBundleButton" class="secondary-btn" type="button">复制 IDE AI 指令</button>
       </div>
-      <section id="bundleControls" hidden><p id="bundleStatus"></p><textarea id="bundleResultInput" rows="6" placeholder="粘贴与审核包匹配的 JSON 回传"></textarea><button id="validateBundleButton" class="secondary-btn" type="button">校验回传</button><button id="applyBundleButton" class="secondary-btn" type="button">应用审核回传</button><button id="finalizeBundleButton" class="secondary-btn" type="button" hidden>完成审核</button></section>
-      <label class="field" for="writingPlanQuery"><span>写作计划查询</span><input id="writingPlanQuery" placeholder="输入写作主题或检索词"></label><button id="writingPlanButton" class="secondary-btn" type="button">生成写作证据计划</button><pre id="writingPlanResult" hidden></pre>
+      <section id="bundleControls" hidden>
+        <p id="bundleStatus"></p>
+        <textarea id="bundleResultInput" rows="6" placeholder="粘贴与审核包匹配的 JSON 回传"></textarea>
+        <button id="validateBundleButton" class="secondary-btn" type="button">校验回传</button>
+        <button id="applyBundleButton" class="secondary-btn" type="button">应用审核回传</button>
+        <button id="finalizeBundleButton" class="secondary-btn" type="button" hidden>完成审核</button>
+      </section>
+      <label class="field" for="writingPlanQuery">
+        <span>写作计划查询</span>
+        <input id="writingPlanQuery" placeholder="输入写作主题或检索词">
+      </label>
+      <button id="writingPlanButton" class="secondary-btn" type="button">生成写作证据计划</button>
+      <pre id="writingPlanResult" hidden></pre>
     </details>
   </main>
   <script type="module" src="./page.js"></script>
