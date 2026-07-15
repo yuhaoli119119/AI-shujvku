@@ -22,6 +22,7 @@ from app.db.models import (
 )
 from app.db.session import get_db_session
 from app.services.dft_export_service import build_dft_ml_dataset
+from app.services.catalyst_analysis_service import CatalystAnalysisService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 from app.utils.text_cleaning import repair_mojibake_text
@@ -1715,6 +1716,38 @@ def _requested_visual_sections(raw_sections: str | None) -> set[str]:
     return {item for item in (part.strip().lower() for part in raw_sections.split(",")) if item in allowed}
 
 
+@router.get("/analysis-fields")
+def catalyst_analysis_fields() -> dict[str, Any]:
+    """Return the centralized catalyst-level analysis field registry."""
+    return {
+        "schema_version": "dft_catalyst_analysis_fields_v1",
+        "fields": CatalystAnalysisService.field_registry(),
+        "selection_policy": (
+            "Fields are internal snake_case. Numeric analysis requires a safety-gate-eligible DFT row, "
+            "identity_version=2, row-level is_ml_ready=true, and an explicit catalyst_sample_id."
+        ),
+    }
+
+
+@router.get("/catalyst-correlation")
+def catalyst_correlation(
+    library_name: str | None = Query(default=None),
+    x_field: str = Query(...),
+    y_field: str = Query(...),
+    min_n: int = Query(default=3, ge=3, le=50),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    try:
+        return CatalystAnalysisService(session).correlation(
+            library_name=library_name,
+            x_field=x_field.strip().lower(),
+            y_field=y_field.strip().lower(),
+            min_n=min_n,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/overview")
 def visualization_overview(
     library_name: str | None = Query(default=None),
@@ -1765,12 +1798,22 @@ def visualization_overview(
     }
 
     if "overview" in requested_sections:
+        catalyst_analysis_meta = CatalystAnalysisService(session).overview_counts(library_name)
         summary = {
             **_overview_summary_counts(session, filters),
             "dft_results": dft_review_counts["total"],
             "reviewed_exportable_dft_results": dft_review_counts["reviewed_exportable"],
             "candidate_dft_results": dft_review_counts["candidates"],
-            "correlation_ready_dft_results": dft_review_counts["correlation_ready"],
+            "total_dft_rows": catalyst_analysis_meta["total_dft_rows"],
+            "exportable_dft_rows": catalyst_analysis_meta["exportable_dft_rows"],
+            "v2_row_ready_numeric_rows": catalyst_analysis_meta["v2_row_ready_numeric_rows"],
+            "distinct_exportable_catalysts": catalyst_analysis_meta["distinct_exportable_catalysts"],
+            "contributing_papers": catalyst_analysis_meta["contributing_papers"],
+            "correlation_ready_dft_results": catalyst_analysis_meta["v2_row_ready_numeric_rows"],
+            "deprecated_fields": {
+                "correlation_ready_dft_results": "Deprecated compatibility alias; use v2_row_ready_numeric_rows and catalyst-correlation.n_catalysts.",
+                "reviewed_exportable_dft_results": "Deprecated compatibility alias; use exportable_dft_rows.",
+            },
         }
         years = []
         year_stmt = select(Paper.year, func.count(Paper.id)).group_by(Paper.year).order_by(Paper.year.desc())
@@ -1828,6 +1871,7 @@ def visualization_overview(
                 "journals": journals,
                 "paper_types": [{"type": key, "count": value} for key, value in sorted(type_counts.items())],
                 "dft_overview_meta": _dft_overview_meta(dft_rows, dft_review_counts),
+                "catalyst_analysis_meta": catalyst_analysis_meta,
                 "dft_status": dft_status,
                 "recent_tasks": tasks,
             }
