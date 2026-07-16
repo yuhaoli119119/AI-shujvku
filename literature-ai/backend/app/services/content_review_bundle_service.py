@@ -16,6 +16,12 @@ from app.utils.artifact_paths import resolve_paper_pdf_path
 
 RESULT_SCHEMA = "content_evidence_review_result_v1"
 ALLOWED_DECISIONS = {"approve_citable", "writing_only", "needs_human", "reject"}
+CONTENT_REVIEW_BUNDLE_V1_DEPRECATED_CODE = "content_review_bundle_v1_deprecated"
+
+
+class ContentReviewBundleV1DeprecatedError(ValueError):
+    def __init__(self) -> None:
+        super().__init__(CONTENT_REVIEW_BUNDLE_V1_DEPRECATED_CODE)
 
 
 class ContentReviewBundleService:
@@ -30,6 +36,7 @@ class ContentReviewBundleService:
         self.settings = settings or get_settings()
 
     def generate(self, *, paper_id: UUID, run_id: UUID | None = None, created_by: str = "user") -> dict[str, Any]:
+        raise ContentReviewBundleV1DeprecatedError()
         paper = self._paper(paper_id)
         scope_type = "external_analysis_run" if run_id else "paper"
         if run_id:
@@ -78,6 +85,7 @@ class ContentReviewBundleService:
         authenticated_identity: str | None = None,
         authenticated_identity_verified: bool = False,
     ) -> dict[str, Any]:
+        raise ContentReviewBundleV1DeprecatedError()
         bundle = self._bundle(bundle_id)
         paper = self._paper(bundle.paper_id)
         self._assert_snapshot_current(bundle, paper)
@@ -139,6 +147,7 @@ class ContentReviewBundleService:
         return {"valid": True, "bundle_id": str(bundle.id), "item_count": len(actions), "snapshot_fingerprint": bundle.snapshot_fingerprint}
 
     def apply_result(self, bundle_id: UUID, *, reviewer: str) -> dict[str, Any]:
+        raise ContentReviewBundleV1DeprecatedError()
         bundle = self._bundle(bundle_id)
         if bundle.status not in {"validated", "applied"} or not isinstance(bundle.result_payload, dict):
             raise ValueError("content_review_result_must_be_validated_before_apply")
@@ -190,6 +199,7 @@ class ContentReviewBundleService:
         return {"applied": applied, "needs_human": needs_human, "bundle_id": str(bundle.id)}
 
     def finalize_review(self, bundle_id: UUID, *, reviewer: str) -> dict[str, Any]:
+        raise ContentReviewBundleV1DeprecatedError()
         bundle = self._bundle(bundle_id)
         if bundle.status != "applied":
             raise ValueError("content_review_result_must_be_applied_before_finalize")
@@ -258,6 +268,26 @@ class ContentReviewBundleService:
             "declared_reviewer_label": str(source.get("reviewer_label") or "").strip() or None,
             "authenticated_identity": authenticated_identity if authenticated_identity_verified else None,
             "identity_verified": bool(authenticated_identity_verified and authenticated_identity),
+        }
+
+    def get_readonly(self, bundle_id: UUID) -> dict[str, Any]:
+        """Retain audit access to historical v1 rows without mutating them."""
+
+        bundle = self._bundle(bundle_id)
+        return {
+            "bundle_id": str(bundle.id),
+            "schema_version": "content_evidence_review_bundle_v1",
+            "deprecated": True,
+            "deprecated_code": CONTENT_REVIEW_BUNDLE_V1_DEPRECATED_CODE,
+            "paper_id": str(bundle.paper_id),
+            "run_id": str(bundle.run_id) if bundle.run_id else None,
+            "status": bundle.status,
+            "snapshot_fingerprint": bundle.snapshot_fingerprint,
+            "manifest": bundle.manifest,
+            "result_payload": bundle.result_payload,
+            "created_by": bundle.created_by,
+            "created_at": bundle.created_at.isoformat() if bundle.created_at else None,
+            "updated_at": bundle.updated_at.isoformat() if bundle.updated_at else None,
         }
 
     def _has_real_pdf_evidence(self, paper, item, action):

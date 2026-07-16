@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
 from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
-from app.utils.review_safety import bulk_export_gate_results, has_safe_verified_review, writing_card_content_gate, writing_card_gate
+from app.utils.review_safety import (
+    bulk_export_gate_results,
+    content_object_gate,
+    has_safe_verified_review,
+    writing_card_content_gate,
+    writing_card_gate,
+)
 
 
 def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:
@@ -31,13 +37,13 @@ def writing_card_is_rag_eligible(session: Session, item: Any) -> bool:
 
     if not isinstance(item, WritingCard):
         return False
-    return writing_card_gate(session, item).can_use_for_writing
+    return content_object_gate(session, "writing_cards", item).can_use_for_writing
 
 
 def writing_card_rag_review_status(session: Session, item: Any) -> str:
     if not isinstance(item, WritingCard):
         return "blocked"
-    gate = writing_card_gate(session, item)
+    gate = content_object_gate(session, "writing_cards", item)
     if gate.can_use_for_writing:
         return "safe_verified"
     return gate.review_gate_status
@@ -127,8 +133,7 @@ def _section_item_is_eligible(session: Session, item: Any) -> bool:
     )
     if section is None:
         return False
-    gate = bulk_export_gate_results(session, [section], target_type="sections").get(str(section.id))
-    return bool(gate and gate.eligible)
+    return content_object_gate(session, "sections", section).can_use_for_writing
 
 
 def _figure_item_is_eligible(session: Session, item: Any) -> bool:

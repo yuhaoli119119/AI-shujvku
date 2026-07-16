@@ -3,13 +3,17 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 import re
+from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
+from weakref import WeakKeyDictionary
 
 from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
     CatalystSample,
+    ContentEvidenceItem,
     DFTAuditIssue,
     DFTResult,
     EvidenceClaim,
@@ -17,6 +21,8 @@ from app.db.models import (
     EvidenceSpan,
     ExtractionFieldReview,
     ExternalAnalysisCandidate,
+    MechanismClaim,
+    Paper,
     PaperCorrection,
     PaperSection,
     WritingCard,
@@ -64,6 +70,7 @@ MISSING_UNIT_MARKERS = {
 }
 
 TARGET_TYPE_ALIASES: dict[str, set[str]] = {
+    "abstract": {"abstract", "paper_abstract", "summary", "paper_summary"},
     "dft_results": {"dft_results", "dft_result", "DFTResult"},
     "mechanism_claims": {"mechanism_claims", "mechanism_claim", "MechanismClaim"},
     "electrochemical_performance": {
@@ -77,6 +84,8 @@ TARGET_TYPE_ALIASES: dict[str, set[str]] = {
     "sections": {"sections", "section", "paper_section", "PaperSection"},
 }
 
+CONTENT_OBJECT_GATE_POLICY_VERSION = "content_object_gate.v1"
+
 LOCATOR_PAYLOAD_KEYS = {
     "locator_status",
     "provenance_level",
@@ -87,7 +96,7 @@ LOCATOR_PAYLOAD_KEYS = {
     "evidence_locator",
 }
 
-_TABLE_NAMES_BY_BIND: dict[int, set[str]] = {}
+_TABLE_NAMES_BY_BIND: WeakKeyDictionary[Any, set[str]] = WeakKeyDictionary()
 _BATCH_REVIEWS_CACHE_KEY = "dft_import_reviews_by_target"
 _BATCH_EVIDENCE_CACHE_KEY = "dft_import_evidence_reference_ids"
 _BATCH_CONFLICT_CACHE_KEY = "dft_import_open_conflict_ids"
@@ -111,6 +120,16 @@ class WritingGateResult:
     blocked_reasons: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class ContentObjectGateResult:
+    can_use_for_writing: bool
+    can_use_for_citation: bool
+    review_gate_status: str
+    locator_status: str
+    blocked_reasons: tuple[str, ...]
+    policy_version: str = CONTENT_OBJECT_GATE_POLICY_VERSION
+
+
 def _normalized(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -131,11 +150,10 @@ def _target_type_values(target_type: str) -> set[str]:
 
 def _table_exists(session: Session, table_name: str) -> bool:
     bind = session.get_bind()
-    bind_key = id(bind)
-    table_names = _TABLE_NAMES_BY_BIND.get(bind_key)
+    table_names = _TABLE_NAMES_BY_BIND.get(bind)
     if table_names is None:
         table_names = set(inspect(bind).get_table_names())
-        _TABLE_NAMES_BY_BIND[bind_key] = table_names
+        _TABLE_NAMES_BY_BIND[bind] = table_names
     return table_name in table_names
 
 
@@ -997,6 +1015,254 @@ def writing_card_gate(session: Session, card: WritingCard) -> WritingGateResult:
         review_gate_status="blocked",
         blocked_reasons=tuple(dict.fromkeys((*content_gate.blocked_reasons, *export_gate.reasons))),
     )
+
+
+def content_object_gate(
+    session: Session,
+    target_type: str,
+    target: Any,
+) -> ContentObjectGateResult:
+    """Authoritative object-level admission gate for content writing and citation.
+
+    ``ContentEvidenceItem`` is only a cache/projection.  When one is supplied,
+    the source row is resolved again and the gate is evaluated against that
+    canonical object.  A missing, stale, cross-paper, or unsupported mapping is
+    always blocked instead of falling back to projected review fields.
+    """
+
+    canonical_type = _canonical_content_target_type(target_type)
+    projection = target if isinstance(target, ContentEvidenceItem) else None
+    resolved_target = target
+    if isinstance(target, ContentEvidenceItem):
+        canonical_type, resolved_target, resolution_error = _resolve_content_projection_target(
+            session,
+            target,
+        )
+        if resolution_error:
+            return _blocked_content_object_gate(resolution_error, locator_status="unmapped")
+        if not _content_projection_snapshot_matches(canonical_type, target, resolved_target):
+            return _blocked_content_object_gate(
+                "content_projection_snapshot_mismatch",
+                locator_status="snapshot_mismatch",
+            )
+
+    model_by_type = {
+        "abstract": Paper,
+        "sections": PaperSection,
+        "mechanism_claims": MechanismClaim,
+        "writing_cards": WritingCard,
+    }
+    model = model_by_type.get(canonical_type)
+    if model is None or not isinstance(resolved_target, model):
+        return _blocked_content_object_gate("no_real_object_mapping", locator_status="unmapped")
+
+    target_id = getattr(resolved_target, "id", None)
+    if target_id is None or session.get(model, target_id) is None:
+        return _blocked_content_object_gate("no_real_object_mapping", locator_status="unmapped")
+
+    if canonical_type == "abstract":
+        paper = resolved_target
+        wrapped = SimpleNamespace(
+            id=paper.id,
+            paper_id=paper.id,
+            evidence_text=paper.abstract,
+        )
+        export_gate = bulk_export_gate_results(session, [wrapped], target_type="abstract")[str(paper.id)]
+        return _degrade_for_projection_cache(
+            projection,
+            _content_gate_from_export(export_gate),
+        )
+
+    if canonical_type == "writing_cards":
+        writing_gate = writing_card_gate(session, resolved_target)
+        export_gate = bulk_export_gate_results(
+            session,
+            [resolved_target],
+            target_type="writing_cards",
+        )[str(resolved_target.id)]
+        return _degrade_for_projection_cache(projection, ContentObjectGateResult(
+            can_use_for_writing=writing_gate.can_use_for_writing,
+            can_use_for_citation=False,
+            review_gate_status=writing_gate.review_gate_status,
+            locator_status=export_gate.locator_status,
+            blocked_reasons=writing_gate.blocked_reasons,
+        ))
+
+    export_gate = bulk_export_gate_results(
+        session,
+        [resolved_target],
+        target_type=canonical_type,
+    )[str(resolved_target.id)]
+    return _degrade_for_projection_cache(
+        projection,
+        _content_gate_from_export(export_gate),
+    )
+
+
+def _content_gate_from_export(export_gate: ExportGateResult) -> ContentObjectGateResult:
+    return ContentObjectGateResult(
+        can_use_for_writing=export_gate.eligible,
+        can_use_for_citation=export_gate.eligible,
+        review_gate_status=export_gate.review_gate_status,
+        locator_status=export_gate.locator_status,
+        blocked_reasons=export_gate.reasons,
+    )
+
+
+def _blocked_content_object_gate(
+    *reasons: str,
+    locator_status: str = "missing_locator",
+) -> ContentObjectGateResult:
+    return ContentObjectGateResult(
+        can_use_for_writing=False,
+        can_use_for_citation=False,
+        review_gate_status="blocked",
+        locator_status=locator_status,
+        blocked_reasons=tuple(dict.fromkeys(reason for reason in reasons if reason)),
+    )
+
+
+def _degrade_for_projection_cache(
+    projection: ContentEvidenceItem | None,
+    gate: ContentObjectGateResult,
+) -> ContentObjectGateResult:
+    if projection is None:
+        return gate
+    projection_claims_access = (
+        _normalized(projection.citation_status) in {"citable", "writing_only"}
+        or _normalized(projection.review_status) in {"validated", "approved", "safe_verified"}
+    )
+    if gate.can_use_for_writing or gate.can_use_for_citation or not projection_claims_access:
+        return gate
+    return ContentObjectGateResult(
+        can_use_for_writing=False,
+        can_use_for_citation=False,
+        review_gate_status=gate.review_gate_status,
+        locator_status=gate.locator_status,
+        blocked_reasons=tuple(dict.fromkeys((*gate.blocked_reasons, "content_projection_gate_mismatch"))),
+    )
+
+
+def _canonical_content_target_type(target_type: str) -> str:
+    normalized = _normalized(target_type)
+    aliases = {
+        "abstract": {"abstract", "paper_abstract", "summary", "paper_summary"},
+        "sections": {_normalized(value) for value in _target_type_values("sections")},
+        "mechanism_claims": {_normalized(value) for value in _target_type_values("mechanism_claims")},
+        "writing_cards": {_normalized(value) for value in _target_type_values("writing_cards")},
+    }
+    for canonical, values in aliases.items():
+        if normalized in values:
+            return canonical
+    return normalized
+
+
+def _resolve_content_projection_target(
+    session: Session,
+    item: ContentEvidenceItem,
+) -> tuple[str, Any | None, str | None]:
+    canonical_type = _canonical_content_target_type(item.source_type)
+    if canonical_type == "abstract":
+        # Abstract projections historically use language keys such as "en" as
+        # source_id.  The canonical abstract is always the projection's own
+        # paper, so source_id must never participate in object or cross-paper
+        # resolution.
+        target = session.get(Paper, item.paper_id)
+        if target is None:
+            return canonical_type, None, "no_real_object_mapping"
+        return canonical_type, target, None
+
+    model_by_type = {
+        "sections": PaperSection,
+        "mechanism_claims": MechanismClaim,
+        "writing_cards": WritingCard,
+    }
+    model = model_by_type.get(canonical_type)
+    if model is None:
+        return canonical_type, None, "no_real_object_mapping"
+    try:
+        source_id = UUID(str(item.source_id))
+    except (TypeError, ValueError):
+        return canonical_type, None, "no_real_object_mapping"
+    target = session.get(model, source_id)
+    if target is None:
+        return canonical_type, None, "no_real_object_mapping"
+    target_paper_id = target.id if isinstance(target, Paper) else getattr(target, "paper_id", None)
+    if target_paper_id != item.paper_id:
+        return canonical_type, None, "content_object_paper_mismatch"
+    return canonical_type, target, None
+
+
+def _projection_text(value: Any) -> str:
+    return " ".join(str(value or "").split())
+
+
+def _content_projection_snapshot_matches(
+    canonical_type: str,
+    projection: ContentEvidenceItem,
+    target: Any,
+) -> bool:
+    """Require projected text to be an exact normalized snapshot of its object.
+
+    Locator and projected review fields are intentionally excluded: those are
+    derived caches and may be absent while the canonical object gate is safe.
+    The text returned by formal RAG, however, must never differ from the real
+    object's current content/evidence snapshot.
+    """
+
+    if canonical_type == "abstract" and isinstance(target, Paper):
+        expected_content = target.abstract
+        expected_evidence = target.abstract
+    elif canonical_type == "sections" and isinstance(target, PaperSection):
+        expected_content = target.text
+        expected_evidence = target.text
+    elif canonical_type == "mechanism_claims" and isinstance(target, MechanismClaim):
+        expected_content = target.claim_text
+        expected_evidence = target.evidence_text
+    elif canonical_type == "writing_cards" and isinstance(target, WritingCard):
+        expected_content = _writing_card_projection_content(target)
+        expected_evidence = _projection_evidence_preview(target.evidence_chain)
+    else:
+        return False
+
+    return (
+        _projection_text(projection.content) == _projection_text(expected_content)
+        and _projection_text(projection.evidence_text) == _projection_text(expected_evidence)
+    )
+
+
+def _writing_card_projection_content(card: WritingCard) -> str:
+    parts: list[str] = []
+    for label, field_name in (
+        ("research_gap", "research_gap"),
+        ("proposed_solution", "proposed_solution"),
+        ("core_hypothesis", "core_hypothesis"),
+        ("abstract_logic", "abstract_logic"),
+        ("introduction_logic", "introduction_logic"),
+        ("discussion_logic", "discussion_logic"),
+        ("figure_logic", "figure_logic"),
+    ):
+        value = _projection_text(getattr(card, field_name, None))
+        if value:
+            parts.append(f"{label}: {value}")
+    return " | ".join(parts)
+
+
+def _projection_evidence_preview(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _projection_text(value)
+    if isinstance(value, dict):
+        for key in ("evidence_text", "quoted_text", "text", "content", "reason"):
+            text = _projection_text(value.get(key))
+            if text:
+                return text
+        return ""
+    if isinstance(value, list):
+        texts = [text for item in value if (text := _projection_evidence_preview(item))]
+        return " | ".join(texts[:3])
+    return _projection_text(value)
 
 
 def _writing_card_has_safe_approved_ide_correction(session: Session, card: WritingCard) -> bool:

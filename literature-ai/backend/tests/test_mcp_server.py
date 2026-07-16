@@ -488,6 +488,11 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
         assert len(notes["items"]) == 1
         assert notes["items"][0]["quoted_text"] == "The adsorption energy of Li2S4 is -1.23 eV."
 
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="metadata",
+            locked_by="claude",
+        )
         correction = propose_correction(
             paper_id=paper_id,
             field_name="abstract",
@@ -496,6 +501,7 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
             proposed_value="Updated abstract text",
             reason="Cross-check against the uploaded PDF abstract.",
             evidence_payload={"page": 1, "section_title": "Abstract"},
+            write_lock_token=lock["lock_token"],
         )
         assert correction["status"] == "approved"
         assert correction["target_path"] == "abstract"
@@ -507,7 +513,12 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
 
         assert len(saved_notes) == 1
         assert len(saved_corrections) == 1
-        assert [item.action for item in audit_logs] == ["append_note", "propose_correction", "approve_correction"]
+        assert [item.action for item in audit_logs] == [
+            "append_note",
+            "acquire_module_write_lock",
+            "propose_correction",
+            "approve_correction",
+        ]
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
@@ -1946,7 +1957,7 @@ def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
         assert audit.target_id == correction["id"]
 
 
-def test_propose_correction_applies_non_dft_without_module_lock(mcp_test_env):
+def test_propose_correction_requires_module_lock_for_abstract(mcp_test_env):
     with Session(mcp_test_env["engine"]) as session:
         paper = Paper(title="AI Review Lock Target", abstract="Old abstract", pdf_path="review-lock.pdf")
         session.add(paper)
@@ -1954,6 +1965,20 @@ def test_propose_correction_applies_non_dft_without_module_lock(mcp_test_env):
         paper_id = str(paper.id)
 
     with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError, match="module_write_lock_required:metadata"):
+            propose_correction(
+                paper_id=paper_id,
+                field_name="abstract",
+                target_path="abstract",
+                operation="replace",
+                proposed_value="Rejected unlocked abstract",
+                reason="AI proposes a safer abstract.",
+            )
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="metadata",
+            locked_by="claude",
+        )
         correction = propose_correction(
             paper_id=paper_id,
             field_name="abstract",
@@ -1961,6 +1986,7 @@ def test_propose_correction_applies_non_dft_without_module_lock(mcp_test_env):
             operation="replace",
             proposed_value="Locked abstract",
             reason="AI proposes a safer abstract.",
+            write_lock_token=lock["lock_token"],
         )
 
         assert correction["status"] == "approved"
@@ -2139,6 +2165,11 @@ def test_non_dft_proposals_apply_immediately_and_leave_queue_empty(mcp_test_env)
         paper_id = str(paper.id)
 
     with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="metadata",
+            locked_by="claude",
+        )
         first = propose_correction(
             paper_id=paper_id,
             field_name="abstract",
@@ -2146,6 +2177,7 @@ def test_non_dft_proposals_apply_immediately_and_leave_queue_empty(mcp_test_env)
             operation="replace",
             proposed_value="Approved abstract",
             reason="Better aligned with PDF abstract.",
+            write_lock_token=lock["lock_token"],
         )
         second = propose_correction(
             paper_id=paper_id,
@@ -2262,6 +2294,11 @@ def test_admin_mcp_review_flow_applies_mechanism_claim_patch(mcp_test_env):
         claim_id = str(claim.id)
 
     with mcp_auth_context(_auth()):
+        lock = acquire_module_write_lock(
+            paper_id=paper_id,
+            module_name="mechanism_claims",
+            locked_by="claude",
+        )
         correction = propose_correction(
             paper_id=paper_id,
             field_name="mechanism_claims",
@@ -2269,6 +2306,7 @@ def test_admin_mcp_review_flow_applies_mechanism_claim_patch(mcp_test_env):
             operation="replace",
             proposed_value="Fe-N4 is associated with reduced shuttle behavior under the reported test conditions.",
             reason="The original wording overstates causality compared with the source text.",
+            write_lock_token=lock["lock_token"],
         )
 
     with mcp_auth_context(_admin_auth()):

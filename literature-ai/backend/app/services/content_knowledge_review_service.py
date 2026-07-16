@@ -12,6 +12,7 @@ from app.db.models import AuditLog, ContentEvidenceItem, Paper, utcnow
 from app.schemas.content_knowledge import ContentReviewDecision
 from app.services.content_knowledge_service import CONTENT_KNOWLEDGE_SCHEMA_VERSION, serialize_content_item
 from app.utils.artifact_paths import resolve_paper_pdf_path
+from app.utils.review_safety import content_object_gate
 
 
 class ContentKnowledgeReviewError(ValueError):
@@ -22,7 +23,7 @@ class ContentKnowledgeReviewError(ValueError):
 
 
 class ContentKnowledgeReviewService:
-    """Human card review over the canonical ContentEvidenceItem projection."""
+    """Human audit workflow over the non-authoritative content projection."""
 
     def __init__(self, session: Session):
         self.session = session
@@ -37,7 +38,14 @@ class ContentKnowledgeReviewService:
         if row is None:
             raise ContentKnowledgeReviewError("content_knowledge_item_not_found", status_code=404)
         item, paper = row
-        return {"schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION, "item": serialize_content_item(item, paper).payload()}
+        return {
+            "schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION,
+            "item": serialize_content_item(
+                item,
+                paper,
+                object_gate=content_object_gate(self.session, item.source_type, item),
+            ).payload(),
+        }
 
     def review_item(
         self,
@@ -87,7 +95,11 @@ class ContentKnowledgeReviewService:
         return {
             "schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION,
             "reviewed": True,
-            "item": serialize_content_item(item, paper).payload(),
+            "item": serialize_content_item(
+                item,
+                paper,
+                object_gate=content_object_gate(self.session, item.source_type, item),
+            ).payload(),
             "audit_log_id": str(audit.id),
         }
 

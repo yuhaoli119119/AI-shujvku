@@ -161,7 +161,7 @@ def _seed_run_scope(engine):
         return paper.id, other_paper.id, run_a.id, run_b.id, empty_run.id
 
 
-def test_run_scoped_bundle_isolated_from_other_runs_and_paper_scope(setup_test_db):
+def test_run_scoped_projection_remains_readonly_after_v1_bundle_deprecation(setup_test_db):
     paper_id, other_paper_id, run_a_id, run_b_id, empty_run_id = _seed_run_scope(setup_test_db)
     client = TestClient(app)
 
@@ -176,66 +176,14 @@ def test_run_scoped_bundle_isolated_from_other_runs_and_paper_scope(setup_test_d
     assert scoped_knowledge.json()["filters"]["run_id"] == str(run_a_id)
     assert {item["content"] for item in scoped_knowledge.json()["items"]} == {"Run A item 1", "Run A item 2"}
 
-    generated = client.post(
-        "/api/content-knowledge/review-bundles",
-        json={"paper_id": str(paper_id), "run_id": str(run_a_id)},
-    )
-    assert generated.status_code == 200, generated.text
-    payload = generated.json()
-    manifest = payload["manifest"]
-    assert manifest["scope_type"] == "external_analysis_run"
-    assert manifest["run_id"] == str(run_a_id)
-    assert manifest["paper_id"] == str(paper_id)
-    assert manifest["paper_code"] == "RS001"
-    assert manifest["item_count"] == 2
-    assert {item["content"] for item in manifest["items"]} == {"Run A item 1", "Run A item 2"}
-    assert all("Run B" not in item["content"] for item in manifest["items"])
-    assert all(item["content"] != "Paper-level content" for item in manifest["items"])
-    assert payload["return_template"]["scope_type"] == "external_analysis_run"
-    assert payload["return_template"]["run_id"] == str(run_a_id)
-    assert str(run_a_id) in manifest["instructions"]
-
-    mismatch = client.post(
-        "/api/content-knowledge/review-bundles",
-        json={"paper_id": str(other_paper_id), "run_id": str(run_a_id)},
-    )
-    assert mismatch.status_code == 400
-    assert mismatch.json()["detail"] == "content_review_run_not_found_for_paper"
-    empty = client.post(
-        "/api/content-knowledge/review-bundles",
-        json={"paper_id": str(paper_id), "run_id": str(empty_run_id)},
-    )
-    assert empty.status_code == 400
-    assert empty.json()["detail"] == "content_review_no_items_for_run"
-    with Session(setup_test_db) as session:
-        assert session.query(ContentReviewBundle).count() == bundle_before + 1
-        other_run_item = session.scalar(
-            select(ContentEvidenceItem).where(ContentEvidenceItem.source_id == "run-b-1")
-        )
-        other_run_item.content = "Run B changed after Run A bundle generation"
-        session.commit()
-
-    result = {
-        **payload["return_template"],
-        "items": [],
-    }
-    result["items"] = [
-        {"item_id": item["item_id"], "decision": "reject", "evidence_id": item["evidence_id"]}
-        for item in manifest["items"]
-    ]
-    validated = client.post(
-        f"/api/content-knowledge/review-bundles/{payload['bundle_id']}/validate", json=result
-    )
-    assert validated.status_code == 200, validated.text
-    applied = client.post(
-        f"/api/content-knowledge/review-bundles/{payload['bundle_id']}/apply", json={"reviewer": "test"}
-    )
-    assert applied.status_code == 200, applied.text
-    finalized = client.post(
-        f"/api/content-knowledge/review-bundles/{payload['bundle_id']}/finalize", json={"reviewer": "test"}
-    )
-    assert finalized.status_code == 200, finalized.text
-    assert finalized.json()["finalized"] is True
+    for body in (
+        {"paper_id": str(paper_id), "run_id": str(run_a_id)},
+        {"paper_id": str(other_paper_id), "run_id": str(run_a_id)},
+        {"paper_id": str(paper_id), "run_id": str(empty_run_id)},
+    ):
+        response = client.post("/api/content-knowledge/review-bundles", json=body)
+        assert response.status_code == 410
+        assert response.json()["detail"]["code"] == "content_review_bundle_v1_deprecated"
 
     with Session(setup_test_db) as session:
         run_a_items = session.scalars(
@@ -247,10 +195,11 @@ def test_run_scoped_bundle_isolated_from_other_runs_and_paper_scope(setup_test_d
         paper_level = session.scalar(
             select(ContentEvidenceItem).where(ContentEvidenceItem.source_id == "paper-level")
         )
-        assert all(item.citation_status == "blocked" for item in run_a_items)
+        assert session.query(ContentReviewBundle).count() == bundle_before
+        assert all(item.citation_status == "needs_review" for item in run_a_items)
         assert all(item.review_status == "needs_review" for item in run_b_items)
         assert paper_level.citation_status == "needs_review"
         task_a = session.get(WorkflowJob, "run-a-task")
         task_b = session.get(WorkflowJob, "run-b-task")
-        assert task_a.result["last_action"] == "finalized"
+        assert task_a.result["last_action"] == "seed"
         assert task_b.result["last_action"] == "seed"

@@ -16,11 +16,25 @@ from app.services.content_knowledge_review_service import (
     ContentKnowledgeReviewService,
 )
 from app.services.content_knowledge_service import ContentKnowledgeService
-from app.services.content_review_bundle_service import ContentReviewBundleService
+from app.services.content_review_bundle_service import (
+    CONTENT_REVIEW_BUNDLE_V1_DEPRECATED_CODE,
+    ContentReviewBundleService,
+)
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 from app.services.content_writing_plan_service import ContentWritingPlanService
 
 router = APIRouter()
+
+
+def _raise_content_review_bundle_v1_deprecated() -> None:
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": CONTENT_REVIEW_BUNDLE_V1_DEPRECATED_CODE,
+            "message": "content review bundle v1 is read-only; use canonical object review gates",
+            "read_only": True,
+        },
+    )
 
 
 @router.get("")
@@ -131,17 +145,18 @@ def sync_content_knowledge(
 def generate_content_review_bundle(
     payload: dict = Body(...), session: Session = Depends(get_db_session)
 ) -> dict:
+    _raise_content_review_bundle_v1_deprecated()
+
+
+@router.get("/review-bundles/{bundle_id}")
+def get_content_review_bundle_readonly(
+    bundle_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> dict:
     try:
-        result = ContentReviewBundleService(session).generate(
-            paper_id=UUID(str(payload.get("paper_id"))),
-            run_id=UUID(str(payload["run_id"])) if payload.get("run_id") else None,
-            created_by=str(payload.get("created_by") or "user"),
-        )
-        session.commit()
-        return result
-    except (ValueError, TypeError) as exc:
-        session.rollback()
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return ContentReviewBundleService(session).get_readonly(bundle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/review-bundles/v2")
@@ -215,45 +230,21 @@ def validate_content_review_bundle(
     session: Session = Depends(get_db_session),
     auth: MCPAuthInfo | None = Depends(get_optional_request_mcp_auth),
 ) -> dict:
-    try:
-        identity_verified = bool(auth and auth.identity_verified and auth.source_identity)
-        result = ContentReviewBundleService(session).validate_result(
-            bundle_id,
-            payload,
-            authenticated_identity=str(auth.source_identity) if identity_verified else None,
-            authenticated_identity_verified=identity_verified,
-        )
-        session.commit()
-        return result
-    except ValueError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _raise_content_review_bundle_v1_deprecated()
 
 
 @router.post("/review-bundles/{bundle_id}/apply")
 def apply_content_review_bundle(
     bundle_id: UUID, payload: dict = Body(...), session: Session = Depends(get_db_session)
 ) -> dict:
-    try:
-        result = ContentReviewBundleService(session).apply_result(bundle_id, reviewer=str(payload.get("reviewer") or "human"))
-        session.commit()
-        return result
-    except ValueError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _raise_content_review_bundle_v1_deprecated()
 
 
 @router.post("/review-bundles/{bundle_id}/finalize")
 def finalize_content_review_bundle(
     bundle_id: UUID, payload: dict = Body(default={}), session: Session = Depends(get_db_session)
 ) -> dict:
-    try:
-        result = ContentReviewBundleService(session).finalize_review(bundle_id, reviewer=str(payload.get("reviewer") or "human"))
-        session.commit()
-        return result
-    except ValueError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _raise_content_review_bundle_v1_deprecated()
 
 
 @router.post("/writing-plan")

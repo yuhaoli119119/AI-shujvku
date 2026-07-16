@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from fastapi.testclient import TestClient
@@ -15,7 +16,10 @@ from PIL import Image
 from app.config import get_settings
 from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, WorkflowJob
 from app.main import app
-from app.services.content_review_bundle_service import ContentReviewBundleService
+from app.services.content_review_bundle_service import (
+    ContentReviewBundleService,
+    ContentReviewBundleV1DeprecatedError,
+)
 from app.services.dft_review_bundle_service import (
     DFTReviewBundleService,
     FigureTableReviewNotCompletedError,
@@ -381,14 +385,11 @@ def test_content_figure_field_reminder_cannot_become_citable(setup_test_db):
         )
         session.add(item)
         session.commit()
-        bundle = ContentReviewBundleService(session).generate(paper_id=paper.id)
-        result = {**bundle["return_template"], "items":[{"item_id":str(item.id),"decision":"approve_citable","evidence_id":f"evidence:{item.id}","evidence_text":"Figure 1."}]}
-        try:
-            ContentReviewBundleService(session).validate_result(__import__("uuid").UUID(bundle["bundle_id"]), result)
-        except ValueError as exc:
-            assert "figure_field_review_requires_chart_bundle" in str(exc)
-        else:
-            raise AssertionError("figure field reminder was accepted as citable")
+        with pytest.raises(ContentReviewBundleV1DeprecatedError):
+            ContentReviewBundleService(session).generate(paper_id=paper.id)
+        session.refresh(item)
+        assert item.review_status == "needs_review"
+        assert item.citation_status == "needs_review"
 
 
 def _seed_completed_chart_run(session, paper, figure_count=1):

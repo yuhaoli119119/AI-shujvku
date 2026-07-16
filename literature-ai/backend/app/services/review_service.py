@@ -47,8 +47,6 @@ class StructuredTargetSpec:
 
 class ReviewService:
     TRUSTED_LOCK_BYPASS_REVIEWERS = {"admin", "human", "curator", "system"}
-    DIRECT_AI_LOCK_REVIEWERS = {"ide_ai", "ai_writer", "codex", "gemini", "claude", "glm", "openai", "chatgpt"}
-    DIRECT_AI_LOCK_PREFIXES = ("ai_", "ide_ai", "codex_", "gemini_", "claude_", "glm_", "openai_")
     CONTENT_REVIEW_TARGETS = frozenset(
         {"abstract", "sections", "writing_cards", "mechanism_claims", "electrochemical_performance"}
     )
@@ -839,17 +837,16 @@ class ReviewService:
     @classmethod
     def _reviewer_requires_module_lock(cls, reviewer: str) -> bool:
         normalized = str(reviewer or "").strip().lower()
-        if not normalized or normalized in cls.TRUSTED_LOCK_BYPASS_REVIEWERS:
-            return False
-        if normalized in cls.DIRECT_AI_LOCK_REVIEWERS:
-            return True
-        return normalized.startswith(cls.DIRECT_AI_LOCK_PREFIXES)
+        # Default deny: only the explicit human/system trust set may bypass a
+        # module lock.  Unknown, custom, or empty identities must never become
+        # an accidental trusted path merely because their label lacks a known
+        # AI prefix.
+        return normalized not in cls.TRUSTED_LOCK_BYPASS_REVIEWERS
 
     def _requires_non_dft_module_lock(self, correction: PaperCorrection) -> bool:
-        # Non-DFT AI writes are intentionally last-writer-wins. DFT review/export
-        # gates remain separate, but figures, tables, text, notes, and metadata
-        # must not create module lock conflicts between AI passes.
-        return False
+        if self._is_top_level_paper_correction(correction):
+            return correction.field_name == "abstract"
+        return correction.field_name in {"sections", "mechanism_claims", "writing_cards"}
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
         record, spec, attribute = self._resolve_structured_target(correction)

@@ -1038,7 +1038,8 @@ def append_note(
 @mcp_server.tool(
     name="propose_correction",
     description=(
-        "Apply a non-DFT correction immediately with last-writer-wins semantics. "
+        "Propose a correction. Direct local-AI writes to abstract, sections, mechanism claims, "
+        "and writing cards require the corresponding module write lock token. "
         "DFT data/settings corrections remain pending for the dedicated review flow."
     ),
 )
@@ -1050,6 +1051,7 @@ def propose_correction(
     proposed_value: Any,
     reason: str,
     evidence_payload: dict[str, Any] | list[Any] | None = None,
+    write_lock_token: str | None = None,
 ) -> dict[str, Any]:
     auth = require_mcp_capability("propose_corrections")
     settings = get_settings()
@@ -1088,6 +1090,7 @@ def propose_correction(
             correction = ReviewService(session).approve_correction(
                 correction.id,
                 reviewer=auth.source_prefix,
+                write_lock_tokens=[write_lock_token] if write_lock_token else None,
             )
         session.refresh(correction)
         return _serialize_correction(correction)

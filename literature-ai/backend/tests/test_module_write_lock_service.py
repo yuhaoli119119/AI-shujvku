@@ -9,7 +9,16 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.models import AuditLog, Base, ModuleWriteLock, Paper, utcnow
+from app.db.models import (
+    AuditLog,
+    Base,
+    EvidenceLocator,
+    ExtractionFieldReview,
+    ModuleWriteLock,
+    Paper,
+    PaperCorrection,
+    utcnow,
+)
 from app.db.session import get_db_session
 from app.main import app
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -176,7 +185,7 @@ def test_module_write_lock_uses_non_blocking_postgres_scope_lock():
         service._lock_paper_scope(uuid4())
 
 
-def test_non_dft_auto_apply_uses_last_writer_wins_and_accepts_optional_lock(tmp_path):
+def test_unauthenticated_non_dft_auto_apply_is_rejected_with_or_without_lock(tmp_path):
     engine, SessionLocal = _session()
 
     def override_get_db_session():
@@ -217,9 +226,10 @@ def test_non_dft_auto_apply_uses_last_writer_wins_and_accepts_optional_lock(tmp_
                 },
             },
         )
-        assert direct.status_code == 200, direct.text
+        assert direct.status_code == 403, direct.text
+        assert direct.json()["detail"]["code"] == "authenticated_identity_required_for_auto_apply_review_rules"
         with Session(engine) as session:
-            assert session.get(Paper, paper_id).abstract == "New abstract"
+            assert session.get(Paper, paper_id).abstract == "Old"
 
         acquired = client.post(
             "/api/module-locks/acquire",
@@ -249,15 +259,18 @@ def test_non_dft_auto_apply_uses_last_writer_wins_and_accepts_optional_lock(tmp_
                 },
             },
         )
-        assert allowed.status_code == 200, allowed.text
+        assert allowed.status_code == 403, allowed.text
         with Session(engine) as session:
-            assert session.get(Paper, paper_id).abstract == "New abstract"
+            assert session.get(Paper, paper_id).abstract == "Old"
+            assert session.query(PaperCorrection).count() == 0
+            assert session.query(ExtractionFieldReview).count() == 0
+            assert session.query(EvidenceLocator).count() == 0
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
 
 
-def test_external_analysis_api_defaults_reviewer_from_source_label_for_lock_validation(tmp_path):
+def test_spoofed_local_ai_reviewer_with_valid_lock_cannot_cross_unauthenticated_http_boundary(tmp_path):
     engine, SessionLocal = _session()
 
     def override_get_db_session():
@@ -289,6 +302,7 @@ def test_external_analysis_api_defaults_reviewer_from_source_label_for_lock_vali
                 "source": "ide_ai",
                 "source_label": "api_writer",
                 "auto_apply_review_rules": True,
+                "reviewer": "ide_ai",
                 "write_lock_token": acquired.json()["lock_token"],
                 "raw_payload": {
                     "correction_proposals": [
@@ -304,9 +318,73 @@ def test_external_analysis_api_defaults_reviewer_from_source_label_for_lock_vali
                 },
             },
         )
-        assert allowed.status_code == 200, allowed.text
+        assert allowed.status_code == 403, allowed.text
+        assert allowed.json()["detail"]["code"] == "authenticated_identity_required_for_auto_apply_review_rules"
         with Session(engine) as session:
-            assert session.get(Paper, paper_id).abstract == "New abstract via default reviewer"
+            assert session.get(Paper, paper_id).abstract == "Old"
+            assert session.query(PaperCorrection).count() == 0
+            assert session.query(ExtractionFieldReview).count() == 0
+            assert session.query(EvidenceLocator).count() == 0
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_unauthenticated_apply_review_rules_requires_authenticated_mcp_identity(tmp_path):
+    engine, SessionLocal = _session()
+
+    def override_get_db_session():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        with Session(engine) as session:
+            paper = Paper(title="Apply Rules Auth Paper", abstract="Old", pdf_path="paper.pdf", authors=[])
+            session.add(paper)
+            session.commit()
+            paper_id = paper.id
+
+        client = TestClient(app)
+        imported = client.post(
+            "/api/external-analysis/import",
+            json={
+                "paper_id": str(paper_id),
+                "source": "ide_ai",
+                "source_label": "spoofed local AI",
+                "auto_apply_review_rules": False,
+                "raw_payload": {
+                    "correction_proposals": [{
+                        "field_name": "abstract",
+                        "target_path": "abstract",
+                        "operation": "replace",
+                        "proposed_value": "Spoofed abstract",
+                        "reason": "Untrusted payload.",
+                        "evidence_payload": {"page": 1, "quoted_text": "Old"},
+                    }]
+                },
+            },
+        )
+        assert imported.status_code == 200, imported.text
+        lock = client.post(
+            "/api/module-locks/acquire",
+            json={"paper_id": str(paper_id), "module_name": "content", "locked_by": "ide_ai"},
+        )
+        assert lock.status_code == 200
+
+        applied = client.post(
+            f"/api/external-analysis/runs/{imported.json()['id']}/apply-review-rules",
+            json={"reviewer": "ide_ai", "write_lock_token": lock.json()["lock_token"]},
+        )
+        assert applied.status_code in {401, 403}
+        with Session(engine) as session:
+            assert session.get(Paper, paper_id).abstract == "Old"
+            assert session.query(PaperCorrection).count() == 0
+            assert session.query(ExtractionFieldReview).count() == 0
+            assert session.query(EvidenceLocator).count() == 0
     finally:
         app.dependency_overrides.clear()
         engine.dispose()

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
-from app.mcp.auth import get_optional_request_mcp_auth
+from app.mcp.auth import get_optional_request_mcp_auth, require_request_mcp_capability
 from app.mcp.context import MCPAuthInfo
 from app.schemas.api import InternalAIParseRequest, InternalAIParseResponse
 from app.schemas.external_analysis import (
@@ -27,6 +27,18 @@ from app.services.task_log_service import TaskLogService
 from app.services.external_analysis_identity import UNTRUSTED_HTTP_SOURCE_IDENTITY
 
 router = APIRouter()
+UNTRUSTED_HTTP_REVIEWER = "untrusted_web_ai"
+
+
+def _authenticated_external_analysis_reviewer(auth: MCPAuthInfo | None) -> str:
+    if (
+        auth
+        and auth.identity_verified
+        and auth.source_identity
+        and "propose_corrections" in auth.capabilities
+    ):
+        return str(auth.source_prefix).strip() or UNTRUSTED_HTTP_REVIEWER
+    return UNTRUSTED_HTTP_REVIEWER
 
 ACTIVE_REVIEW_RULE_STATUSES = {"candidate", "pending", "requires_resolution"}
 MATERIALIZABLE_CANDIDATE_TYPES = {"note", "correction", "relationship"}
@@ -102,9 +114,6 @@ async def import_external_analysis(
     auth: MCPAuthInfo | None = Depends(get_optional_request_mcp_auth),
 ) -> ExternalAnalysisRunResponse:
     try:
-        effective_reviewer = (
-            str(payload.reviewer or payload.source_label or payload.source or "ide_ai").strip() or "ide_ai"
-        )
         service = ExternalAnalysisService(session=session, settings=settings)
         identity_verified = bool(
             auth
@@ -112,6 +121,12 @@ async def import_external_analysis(
             and auth.source_identity
             and "propose_corrections" in auth.capabilities
         )
+        if payload.auto_apply_review_rules is True and not identity_verified:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "authenticated_identity_required_for_auto_apply_review_rules"},
+            )
+        effective_reviewer = _authenticated_external_analysis_reviewer(auth)
         run = service.import_run(
             paper_id=payload.paper_id,
             source=payload.source,
@@ -126,8 +141,8 @@ async def import_external_analysis(
             source_identity_verified=identity_verified,
         )
         imported_candidates = service.list_candidates(run.id)
-        should_apply_review_rules = payload.auto_apply_review_rules
-        if should_apply_review_rules is None:
+        should_apply_review_rules = bool(payload.auto_apply_review_rules) if identity_verified else False
+        if identity_verified and payload.auto_apply_review_rules is None:
             should_apply_review_rules = _contains_dft_object_reviews(imported_candidates)
         auto_apply_summary = None
         if should_apply_review_rules:
@@ -250,6 +265,7 @@ async def apply_review_rules_for_run(
     payload: ExternalAnalysisApplyReviewRulesRequest,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
+    auth: MCPAuthInfo = Depends(require_request_mcp_capability("propose_corrections")),
 ) -> dict:
     """Apply IDE-AI review rules to an existing external analysis run.
 
@@ -260,15 +276,18 @@ async def apply_review_rules_for_run(
     token, the service auto-acquires a ``dft_results`` lock for the duration
     of the apply step.
     """
+    if not auth.identity_verified or not auth.source_identity:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "authenticated_identity_required_for_apply_review_rules"},
+        )
     service = ExternalAnalysisService(session=session, settings=settings)
     try:
         run = service.get_run(run_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     try:
-        effective_reviewer = (
-            str(payload.reviewer or run.source_label or run.source or "ide_ai").strip() or "ide_ai"
-        )
+        effective_reviewer = _authenticated_external_analysis_reviewer(auth)
         write_lock_tokens = [*payload.write_lock_tokens]
         if payload.write_lock_token:
             write_lock_tokens.append(payload.write_lock_token)

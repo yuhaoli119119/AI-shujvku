@@ -22,7 +22,13 @@ from app.db.models import (
 )
 from app.services.content_knowledge_search import content_item_filters, content_search_score
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results, writing_card_content_gate, writing_card_gate
+from app.utils.review_safety import (
+    ContentObjectGateResult,
+    bulk_export_gate_results,
+    content_object_gate,
+    writing_card_content_gate,
+    writing_card_gate,
+)
 from app.services.embedding import get_embedding_service
 from app.config import get_settings
 
@@ -331,8 +337,6 @@ class ContentKnowledgeService:
         stmt = select(ContentEvidenceItem)
         if paper_ids:
             stmt = stmt.where(ContentEvidenceItem.paper_id.in_(paper_ids))
-        if not include_review_assist:
-            stmt = stmt.where(ContentEvidenceItem.citation_status.in_(("citable", "writing_only")))
         terms = _search_terms(query)
         if terms:
             # OR is recall; BM25-like character n-gram scoring below supplies precision.
@@ -340,7 +344,7 @@ class ContentKnowledgeService:
                 or_(ContentEvidenceItem.content.ilike(f"%{term}%"), ContentEvidenceItem.evidence_text.ilike(f"%{term}%"))
                 for term in terms
             ]))
-        candidate_limit = max(limit * 6, 30)
+        candidate_limit = max(limit * 20, 100)
         rows = self.session.scalars(stmt.order_by(ContentEvidenceItem.updated_at.desc()).limit(candidate_limit)).all()
         scoped_paper_ids = [row.paper_id for row in rows]
         paper_by_id = {
@@ -358,11 +362,23 @@ class ContentKnowledgeService:
             query_vector = None
         scored = []
         for row in rows:
+            gate = content_object_gate(self.session, row.source_type, row)
+            if not include_review_assist and not (
+                gate.can_use_for_writing or gate.can_use_for_citation
+            ):
+                continue
             lexical = _bm25ish_score(query, f"{row.content} {row.evidence_text or ''}")
             vector = _cosine(query_vector, row.embedding)
             hybrid = round(0.68 * lexical + 0.32 * vector, 4)
             if hybrid > 0 or not terms:
-                scored.append((self._persistent_item(row, paper_by_id.get(row.paper_id)), {"bm25": lexical, "vector": vector, "hybrid": hybrid}))
+                scored.append((
+                    self._persistent_item(
+                        row,
+                        paper_by_id.get(row.paper_id),
+                        object_gate=gate,
+                    ),
+                    {"bm25": lexical, "vector": vector, "hybrid": hybrid},
+                ))
         return sorted(scored, key=lambda pair: pair[1]["hybrid"], reverse=True)[:limit]
 
     def count_unreviewed_matching(
@@ -454,10 +470,23 @@ class ContentKnowledgeService:
                 ContentEvidenceItem.id.asc(),
             )
         rows = self.session.execute(stmt.offset(offset).limit(limit)).all()
-        return [serialize_content_item(item, paper) for item, paper in rows], total
+        return [
+            serialize_content_item(
+                item,
+                paper,
+                object_gate=content_object_gate(self.session, item.source_type, item),
+            )
+            for item, paper in rows
+        ], total
 
-    def _persistent_item(self, row: ContentEvidenceItem, paper: Paper | None) -> ContentKnowledgeItem:
-        return serialize_content_item(row, paper)
+    def _persistent_item(
+        self,
+        row: ContentEvidenceItem,
+        paper: Paper | None,
+        *,
+        object_gate: ContentObjectGateResult | None = None,
+    ) -> ContentKnowledgeItem:
+        return serialize_content_item(row, paper, object_gate=object_gate)
 
     def _has_persistent_items(self, paper_ids: list[uuid.UUID]) -> bool:
         return self.session.scalar(
@@ -826,13 +855,52 @@ class ContentKnowledgeService:
         return True
 
 
-def serialize_content_item(row: ContentEvidenceItem, paper: Paper | None) -> ContentKnowledgeItem:
+def serialize_content_item(
+    row: ContentEvidenceItem,
+    paper: Paper | None,
+    *,
+    object_gate: ContentObjectGateResult | None = None,
+) -> ContentKnowledgeItem:
     citation = _normalized(row.citation_status) or "needs_review"
     reviewed = _normalized(row.review_status) in {"validated", "approved", "safe_verified"}
-    can_cite = citation == "citable" and reviewed and bool(row.evidence_text) and _content_item_has_locator(row)
     metadata = dict(row.source_record or {})
+    metadata["projection_state"] = {
+        "review_status": row.review_status,
+        "citation_status": citation,
+        "reviewer": row.reviewer,
+        "reviewed_at": row.reviewed_at.isoformat() if row.reviewed_at else None,
+    }
     if row.run_id is not None:
         metadata.setdefault("external_analysis_run_id", str(row.run_id))
+    risk_flags = list(row.risk_flags or [])
+    if object_gate is None:
+        can_write = False
+        can_cite = False
+        review_gate_status = "projection_only"
+        effective_citation = citation
+        risk_flags = list(dict.fromkeys([*risk_flags, "content_projection_non_authoritative"]))
+        recommended_action = "review_source_object"
+    else:
+        can_write = object_gate.can_use_for_writing
+        can_cite = object_gate.can_use_for_citation
+        review_gate_status = object_gate.review_gate_status
+        effective_citation = "citable" if can_cite else "writing_only" if can_write else "blocked"
+        projection_claims_access = citation in {"citable", "writing_only"} or reviewed
+        if projection_claims_access and not (can_write or can_cite):
+            risk_flags.append("content_projection_gate_mismatch")
+        elif (can_write or can_cite) and not projection_claims_access:
+            risk_flags.append("content_projection_cache_stale")
+        risk_flags.extend(object_gate.blocked_reasons)
+        risk_flags = list(dict.fromkeys(risk_flags))
+        metadata["content_object_gate"] = {
+            "can_use_for_writing": can_write,
+            "can_use_for_citation": can_cite,
+            "review_gate_status": review_gate_status,
+            "locator_status": object_gate.locator_status,
+            "blocked_reasons": list(object_gate.blocked_reasons),
+            "policy_version": object_gate.policy_version,
+        }
+        recommended_action = None if can_write or can_cite else "review_source_object"
     return ContentKnowledgeItem(
         item_id=str(row.id),
         paper_id=str(row.paper_id),
@@ -853,12 +921,12 @@ def serialize_content_item(row: ContentEvidenceItem, paper: Paper | None) -> Con
         page_end=row.page_end,
         section_title=row.section_title,
         review_status=row.review_status,
-        review_gate_status=row.review_status,
-        citation_policy=citation,
-        can_use_for_writing=citation in {"citable", "writing_only"},
+        review_gate_status=review_gate_status,
+        citation_policy=effective_citation,
+        can_use_for_writing=can_write,
         can_use_for_citation=can_cite,
-        risk_flags=list(row.risk_flags or []),
-        recommended_action=None if reviewed else "review_content_evidence",
+        risk_flags=risk_flags,
+        recommended_action=recommended_action,
         source_ai=metadata.get("source_ai"),
         source_label=metadata.get("source_label"),
         source_identity=row.source_identity,

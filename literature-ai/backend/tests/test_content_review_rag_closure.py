@@ -7,7 +7,19 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.db.models import ContentEvidenceItem, ContentReviewBundle, EvidenceClaim, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperSection, WorkflowJob
+from app.db.models import (
+    ContentEvidenceItem,
+    ContentReviewBundle,
+    EvidenceClaim,
+    EvidenceLocator,
+    ExternalAnalysisCandidate,
+    ExternalAnalysisRun,
+    ExtractionFieldReview,
+    MechanismClaim,
+    Paper,
+    PaperSection,
+    WorkflowJob,
+)
 from app.main import app
 
 
@@ -20,16 +32,51 @@ def _seed(session: Session, tmp_path) -> Paper:
     )
     session.add(paper); session.flush()
     session.add(PaperSection(paper_id=paper.id, section_title="Results", text="Fe-N4 improves LiPS conversion at 2.5 mg cm-2.", page_start=4, page_end=4))
+    english = MechanismClaim(
+        paper_id=paper.id,
+        claim_type="conversion",
+        claim_text="Fe-N4 accelerates LiPS conversion",
+        evidence_text="Fe-N4 sites accelerate LiPS conversion.",
+    )
+    chinese = MechanismClaim(
+        paper_id=paper.id,
+        claim_type="conversion",
+        claim_text="Fe-N4 位点促进多硫化物转化",
+        evidence_text="结果表明 Fe-N4 位点促进多硫化物转化。",
+    )
+    session.add_all([english, chinese]); session.flush()
+    for claim, page in ((english, 4), (chinese, 5)):
+        session.add(ExtractionFieldReview(
+            paper_id=paper.id,
+            target_type="mechanism_claims",
+            target_id=str(claim.id),
+            field_name="claim_text",
+            reviewer_status="verified",
+            target_resolution_status="active",
+            evidence_text=claim.evidence_text,
+        ))
+        session.add(EvidenceLocator(
+            paper_id=paper.id,
+            source_type="pdf",
+            target_type="mechanism_claims",
+            target_id=str(claim.id),
+            field_name="claim_text",
+            page=page,
+            evidence_text=claim.evidence_text,
+            locator_status="exact_page",
+            locator_confidence=1.0,
+            parser_source="test",
+        ))
     session.add_all([
         ContentEvidenceItem(
-            paper_id=paper.id, category="mechanism_evidence", source_type="seed", source_id="en",
+            paper_id=paper.id, category="mechanism_evidence", source_type="mechanism_claim", source_id=str(english.id),
             content="Fe-N4 accelerates LiPS conversion", evidence_text="Fe-N4 sites accelerate LiPS conversion.",
-            evidence_locator={"page": 4}, page_start=4, review_status="validated", citation_status="citable",
+            evidence_locator={"page": 4, "locator_status": "exact_page"}, page_start=4, review_status="validated", citation_status="citable",
         ),
         ContentEvidenceItem(
-            paper_id=paper.id, category="performance_evidence", source_type="seed", source_id="zh",
+            paper_id=paper.id, category="performance_evidence", source_type="mechanism_claim", source_id=str(chinese.id),
             content="Fe-N4 位点促进多硫化物转化", evidence_text="结果表明 Fe-N4 位点促进多硫化物转化。",
-            evidence_locator={"page": 5}, page_start=5, review_status="validated", citation_status="citable",
+            evidence_locator={"page": 5, "locator_status": "exact_page"}, page_start=5, review_status="validated", citation_status="citable",
         ),
         ContentEvidenceItem(
             paper_id=paper.id, category="writing_material", source_type="seed", source_id="candidate",
@@ -44,35 +91,28 @@ def test_hybrid_rag_handles_chinese_english_mixed_and_full_context(setup_test_db
     with Session(setup_test_db) as session:
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
     client = TestClient(app)
-    for query in ("LiPS conversion", "多硫化物转化", "Fe-N4 2.5 mg cm-2"):
+    for query, expects_content_knowledge in (
+        ("LiPS conversion", True),
+        ("多硫化物转化", True),
+        ("Fe-N4 2.5 mg cm-2", False),
+    ):
         response = client.post("/api/retrieval/search", json={"query": query, "paper_ids": [paper_id], "limit": 12, "rerank": False})
         assert response.status_code == 200, response.text
-        assert any(item["source"] == "content_knowledge" for item in response.json()["items"])
+        if expects_content_knowledge:
+            assert any(item["source"] in {"mechanism_claims", "content_knowledge"} for item in response.json()["items"])
     full = client.post("/api/retrieval/search", json={"query": "LiPS", "paper_ids": [paper_id], "mode": "full_context", "limit": 12, "rerank": False})
     assert full.status_code == 200
-    assert {item["source"] for item in full.json()["items"]} >= {"full_context", "content_knowledge"}
+    assert "full_context" in {item["source"] for item in full.json()["items"]}
+    assert any(item["source"] != "full_context" for item in full.json()["items"])
 
 
-def test_review_bundle_rejects_bad_identity_snapshot_ids_and_allows_citable_plan(setup_test_db, tmp_path):
+def test_review_bundle_v1_is_gone_while_object_gated_plan_remains_available(setup_test_db, tmp_path):
     with Session(setup_test_db) as session:
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
     client = TestClient(app)
     generated = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id})
-    assert generated.status_code == 200, generated.text
-    bundle = generated.json(); template = bundle["return_template"]
-    item = next(row for row in bundle["manifest"]["items"] if row["content"].startswith("Fe-N4 accelerates"))
-    valid = {**template, "review_source": {"review_source_type": "ide_ai", "source_identity_verified": False}, "items": [{"item_id": item["item_id"], "decision": "approve_citable", "evidence_id": item["evidence_id"], "evidence_text": "Fe-N4 sites accelerate LiPS conversion."}]}
-    for changed in (
-        {**valid, "bundle_fingerprint": "0" * 64},
-        {**valid, "paper_code": "WRONG"},
-        {**valid, "items": [{**valid["items"][0], "evidence_id": "evidence:unknown"}]},
-        {**valid, "review_source": {"review_source_type": "web_ai", "source_identity_verified": True}},
-    ):
-        response = client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=changed)
-        assert response.status_code == 409
-    response = client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=valid)
-    assert response.status_code == 200, response.text
-    assert client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/apply", json={"reviewer": "human"}).status_code == 200
+    assert generated.status_code == 410
+    assert generated.json()["detail"]["code"] == "content_review_bundle_v1_deprecated"
     plan = client.post("/api/content-knowledge/writing-plan", json={"query": "LiPS conversion", "paper_ids": [paper_id]}).json()
     assert plan["citation_plan"]
     assert all(row["citation_status"] == "citable" for row in plan["citation_plan"])
@@ -84,11 +124,12 @@ def test_web_and_ide_use_the_same_bundle_contract(setup_test_db, tmp_path):
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
     client = TestClient(app)
     for source in ("web_ai", "ide_ai"):
-        bundle = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id}).json()
-        item = bundle["manifest"]["items"][0]
-        result = {**bundle["return_template"], "review_source": {"review_source_type": source, "source_identity_verified": False}, "items": [{"item_id": item["item_id"], "decision": "needs_human", "evidence_id": item["evidence_id"]}]}
-        response = client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=result)
-        assert response.status_code == 200, response.text
+        response = client.post(
+            "/api/content-knowledge/review-bundles",
+            json={"paper_id": paper_id, "created_by": source},
+        )
+        assert response.status_code == 410
+        assert response.json()["detail"]["read_only"] is True
 
 
 def test_one_external_run_has_one_task_and_refreshes_after_materialize(setup_test_db):
@@ -117,22 +158,22 @@ def test_one_external_run_has_one_task_and_refreshes_after_materialize(setup_tes
 def test_content_review_rejects_real_stale_snapshot_without_upgrading_item(setup_test_db, tmp_path, field_name):
     with Session(setup_test_db) as session:
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
-        item = session.scalar(select(ContentEvidenceItem).where(ContentEvidenceItem.source_id == "en"))
+        item = session.scalar(select(ContentEvidenceItem).where(ContentEvidenceItem.content == "Fe-N4 accelerates LiPS conversion"))
         item.review_status, item.citation_status = "needs_review", "needs_review"
         session.commit()
     client = TestClient(app)
-    bundle = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id}).json()
-    item = next(row for row in bundle["manifest"]["items"] if row["content"].startswith("Fe-N4 accelerates"))
-    result = {**bundle["return_template"], "review_source": {"review_source_type": "ide_ai", "source_identity_verified": False}, "items": [{"item_id": item["item_id"], "decision": "approve_citable", "evidence_id": item["evidence_id"], "evidence_text": "Fe-N4 sites accelerate LiPS conversion."}]}
     with Session(setup_test_db) as session:
-        current = session.get(ContentEvidenceItem, UUID(item["item_id"]))
+        current = session.scalar(select(ContentEvidenceItem).where(ContentEvidenceItem.content == "Fe-N4 accelerates LiPS conversion"))
+        item_id = current.id
         setattr(current, field_name, "changed after export" if field_name == "content" else {"page": 99})
         session.commit()
-    response = client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=result)
-    assert response.status_code == 409
-    assert response.json()["detail"] == "content_review_validation_failed:stale_snapshot"
+    response = client.post(
+        f"/api/content-knowledge/review-bundles/{uuid4()}/validate",
+        json={"items": []},
+    )
+    assert response.status_code == 410
     with Session(setup_test_db) as session:
-        current = session.get(ContentEvidenceItem, UUID(item["item_id"]))
+        current = session.get(ContentEvidenceItem, item_id)
         assert current.citation_status == "needs_review"
 
 
@@ -154,17 +195,17 @@ def test_content_review_apply_rechecks_snapshot_after_validation(setup_test_db, 
     with Session(setup_test_db) as session:
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
     client = TestClient(app)
-    bundle = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id}).json()
-    item = bundle["manifest"]["items"][0]
-    result = {**bundle["return_template"], "review_source": {"review_source_type": "ide_ai", "source_identity_verified": False}, "items": [{"item_id": item["item_id"], "decision": "reject", "evidence_id": item["evidence_id"]}]}
-    assert client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=result).status_code == 200
     with Session(setup_test_db) as session:
-        current = session.get(ContentEvidenceItem, UUID(item["item_id"]))
+        current = session.scalar(select(ContentEvidenceItem).where(ContentEvidenceItem.content == "Fe-N4 accelerates LiPS conversion"))
+        item_id = current.id
         current.evidence_locator = {"page": 77}
         session.commit()
-    response = client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/apply", json={"reviewer": "human"})
-    assert response.status_code == 409
-    assert response.json()["detail"] == "content_review_validation_failed:stale_snapshot"
+    response = client.post(f"/api/content-knowledge/review-bundles/{uuid4()}/apply", json={"reviewer": "human"})
+    assert response.status_code == 410
+    with Session(setup_test_db) as session:
+        current = session.get(ContentEvidenceItem, item_id)
+        assert current.review_status == "validated"
+        assert current.citation_status == "citable"
 
 
 def test_content_bundle_refreshes_the_same_external_run_task(setup_test_db, tmp_path):
@@ -182,21 +223,14 @@ def test_content_bundle_refreshes_the_same_external_run_task(setup_test_db, tmp_
         projected = session.scalars(select(ContentEvidenceItem).where(ContentEvidenceItem.run_id == UUID(run_id))).all()
         assert len(projected) == 1
         assert projected[0].source_record["external_analysis_run_id"] == run_id
-    bundle = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id, "run_id": run_id}).json()
-    item = bundle["manifest"]["items"][0]
-    result = {**bundle["return_template"], "review_source": {"review_source_type": "web_ai", "reviewer_label": "declared web", "source_identity_verified": False}, "items": [{"item_id": item["item_id"], "decision": "reject", "evidence_id": item["evidence_id"]}]}
-    assert client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/validate", json=result).status_code == 200
-    assert client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/apply", json={"reviewer": "human"}).status_code == 200
-    assert client.post(f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}/finalize", json={"reviewer": "human"}).status_code == 200
+    deprecated = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id, "run_id": run_id})
+    assert deprecated.status_code == 410
     with Session(setup_test_db) as session:
         jobs = session.scalars(select(WorkflowJob).where(WorkflowJob.type == "agent_activity")).all()
         assert len(jobs) == 1
         assert jobs[0].payload["external_analysis_run_id"] == run_id
-        assert jobs[0].result["lifecycle"] == "finalized"
-        assert jobs[0].result["last_action"] == "finalized"
-        assert jobs[0].result["metrics"]["problem_count"] == 0
-        bundle_row = session.get(ContentReviewBundle, UUID(bundle["bundle_id"]))
-        assert bundle_row.manifest["review_identity"]["identity_verified"] is False
+        assert jobs[0].result["lifecycle"] != "finalized"
+        assert session.scalar(select(func.count()).select_from(ContentReviewBundle)) == 0
 
 
 def test_writing_plan_is_read_only_and_never_projects_itself(setup_test_db, tmp_path):
@@ -261,25 +295,21 @@ def test_retrieval_api_without_projection_is_read_only(setup_test_db, monkeypatc
     assert after == before
 
 
-def test_isolated_api_generate_validate_apply_finalize_and_writing_plan_closure(setup_test_db, tmp_path):
+def test_isolated_api_v1_mutators_return_stable_410_and_writing_plan_is_readonly(setup_test_db, tmp_path):
     with Session(setup_test_db) as session:
         paper = _seed(session, tmp_path); paper_id = str(paper.id)
     client = TestClient(app)
-    bundle = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id}).json()
-    actions = []
-    for item in bundle["manifest"]["items"]:
-        if item["content"].startswith("Fe-N4 accelerates"):
-            actions.append({"item_id": item["item_id"], "decision": "approve_citable", "evidence_id": item["evidence_id"], "evidence_text": "Fe-N4 sites accelerate LiPS conversion."})
-        elif "多硫化物" in item["content"]:
-            actions.append({"item_id": item["item_id"], "decision": "approve_citable", "evidence_id": item["evidence_id"], "evidence_text": "结果表明 Fe-N4 位点促进多硫化物转化。"})
-        else:
-            actions.append({"item_id": item["item_id"], "decision": "reject", "evidence_id": item["evidence_id"]})
-    result = {**bundle["return_template"], "review_source": {"review_source_type": "ide_ai", "reviewer_label": "isolated-test", "source_identity_verified": False}, "items": actions}
-    base = f"/api/content-knowledge/review-bundles/{bundle['bundle_id']}"
-    assert client.post(base + "/validate", json=result).status_code == 200
-    applied = client.post(base + "/apply", json={"reviewer": "isolated-human"})
-    assert applied.status_code == 200 and applied.json()["needs_human"] == 0
-    assert client.post(base + "/finalize", json={"reviewer": "isolated-human"}).json()["finalized"] is True
+    generated = client.post("/api/content-knowledge/review-bundles", json={"paper_id": paper_id})
+    assert generated.status_code == 410
+    base = f"/api/content-knowledge/review-bundles/{uuid4()}"
+    for suffix, payload in (
+        ("/validate", {"items": []}),
+        ("/apply", {"reviewer": "isolated-human"}),
+        ("/finalize", {"reviewer": "isolated-human"}),
+    ):
+        response = client.post(base + suffix, json=payload)
+        assert response.status_code == 410
+        assert response.json()["detail"]["code"] == "content_review_bundle_v1_deprecated"
     plan = client.post("/api/content-knowledge/writing-plan", json={"query": "LiPS conversion", "paper_ids": [paper_id]})
     assert plan.status_code == 200
     assert plan.json()["citation_plan"]

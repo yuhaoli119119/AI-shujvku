@@ -19,7 +19,7 @@ from app.services.embedding import (
 from app.rag.eligibility import is_rag_eligible, section_is_retrieval_candidate, writing_card_rag_review_status
 from app.rag.cards import build_dft_card, build_evidence_card, build_figure_card, build_writing_card, paper_code_for
 from app.utils.figure_summary import flatten_figure_key_elements
-from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
+from app.utils.review_safety import bulk_export_gate_results, content_object_gate, writing_card_gate
 
 
 logger = logging.getLogger(__name__)
@@ -504,7 +504,11 @@ class Retriever:
         results = []
         for row in rows:
             gate = gate_by_id[str(row.id)]
-            if not gate.eligible:
+            if not content_object_gate(
+                self.session,
+                "mechanism_claims",
+                row,
+            ).can_use_for_citation:
                 continue
             haystack = " ".join(filter(None, [row.claim_type, row.claim_text, row.evidence_text, " ".join(row.evidence_types or [])]))
             score, score_info = self._hybrid_score(tokens, query_embedding, haystack, None, allow_paper_fallback=bool(paper_ids))

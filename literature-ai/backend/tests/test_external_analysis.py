@@ -15,6 +15,8 @@ from app.config import Settings, get_settings
 from app.db.models import AuditLog, Base, CatalystSample, DFTAuditIssue, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
+from app.mcp.auth import get_optional_request_mcp_auth, get_request_mcp_auth
+from app.mcp.context import MCPAuthInfo, canonical_mcp_source_identity
 from app.rag.retriever import Retriever
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
 from app.services.external_analysis_models import ExternalObjectReviewAuditModel
@@ -53,6 +55,21 @@ def _acquire_write_lock(client: TestClient, paper_id: Any, module_name: str = "a
     )
     assert response.status_code == 200, response.text
     return response.json()["lock_token"]
+
+
+def _authenticated_test_client(source_prefix: str = "ide_ai") -> TestClient:
+    """Exercise the authenticated HTTP boundary without weakening production auth."""
+    auth = MCPAuthInfo(
+        source_prefix=source_prefix,
+        display_name=f"Test {source_prefix}",
+        capabilities=frozenset({"read_papers", "propose_corrections"}),
+        raw_key="test-only-injected-auth",
+        source_identity=canonical_mcp_source_identity(source_prefix),
+        identity_verified=True,
+    )
+    app.dependency_overrides[get_optional_request_mcp_auth] = lambda: auth
+    app.dependency_overrides[get_request_mcp_auth] = lambda: auth
+    return TestClient(app)
 
 
 def _configure_dual_ai_http_auth(monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, str], dict[str, str]]:
@@ -510,9 +527,9 @@ def test_external_analysis_import_and_materialize_flow():
             run_id = run_payload["id"]
             materialized = client.post(
                 f"/api/external-analysis/runs/{run_id}/materialize",
-                json={"explicit_all": True, "created_by": "reviewer_ai"},
+                json={"explicit_all": True, "created_by": "human"},
             )
-            assert materialized.status_code == 200
+            assert materialized.status_code == 200, materialized.text
             assert materialized.json()["created_notes"] == 1
             assert materialized.json()["created_corrections"] == 1
             assert materialized.json()["created_relationships"] == 1
@@ -668,7 +685,7 @@ def test_import_analysis_auto_applies_non_dft_corrections():
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("codex")
             write_lock_token = _acquire_write_lock(client, paper_id, locked_by="codex")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -759,7 +776,7 @@ def test_import_analysis_auto_creates_non_table_structured_objects():
                 session.refresh(paper)
                 paper_id = paper.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("codex")
             write_lock_token = _acquire_write_lock(client, paper_id, locked_by="codex")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -872,7 +889,7 @@ def test_import_analysis_auto_applies_figure_delete_correction():
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("codex")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="codex")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -974,7 +991,7 @@ def test_import_analysis_rejects_figure_recrop_submission(monkeypatch):
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("gemini")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="gemini")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -1042,7 +1059,7 @@ def test_unvalidated_si_new_dft_candidate_cannot_bypass_import_contract():
                 session.refresh(paper)
                 paper_id = paper.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("IDE AI SI rescan")
             lock = _acquire_write_lock(client, paper_id, module_name="dft_results", locked_by="IDE AI SI rescan")
             response = client.post(
                 "/api/external-analysis/import",
@@ -1129,7 +1146,7 @@ def test_unvalidated_si_writeback_does_not_change_source_row_lifecycle():
                 si_id = si.id
                 source_row_id = source_row.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("SI lifecycle writeback")
             lock = _acquire_write_lock(
                 client,
                 main_id,
@@ -1706,7 +1723,7 @@ def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchor
                 session.refresh(paper)
                 paper_id = paper.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="content", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -1808,7 +1825,7 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
                 claim_id = claim.id
                 performance_id = performance.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="content", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -1955,7 +1972,14 @@ def test_ide_ai_mechanism_correction_without_exact_pdf_evidence_stays_blocked(ev
             session.commit()
             paper_id, claim_id = paper.id, claim.id
 
-        imported = TestClient(app).post(
+        client = _authenticated_test_client("ide_ai")
+        write_lock_token = _acquire_write_lock(
+            client,
+            paper_id,
+            module_name="mechanism_claims",
+            locked_by="ide_ai",
+        )
+        imported = client.post(
             "/api/external-analysis/import",
             json={
                 "paper_id": str(paper_id),
@@ -1963,6 +1987,7 @@ def test_ide_ai_mechanism_correction_without_exact_pdf_evidence_stays_blocked(ev
                 "source_label": "unsafe-mechanism-evidence",
                 "auto_apply_review_rules": True,
                 "reviewer": "ide_ai",
+                "write_lock_token": write_lock_token,
                 "raw_payload": {
                     "correction_proposals": [
                         {
@@ -2065,7 +2090,13 @@ def test_ide_ai_mechanism_create_binds_review_and_locator_to_real_uuid_idempoten
                 ]
             },
         }
-        client = TestClient(app)
+        client = _authenticated_test_client("ide_ai")
+        payload["write_lock_token"] = _acquire_write_lock(
+            client,
+            paper_id,
+            module_name="mechanism_claims",
+            locked_by="ide_ai",
+        )
         first = client.post("/api/external-analysis/import", json=payload)
         second = client.post("/api/external-analysis/import", json=payload)
         assert first.status_code == second.status_code == 200
@@ -2205,7 +2236,12 @@ def test_ide_ai_section_and_writing_card_review_close_formal_rag_without_note_un
             reviewed_card_id = reviewed_card.id
             unreviewed_card_id = unreviewed_card.id
 
-        imported = TestClient(app).post(
+        client = _authenticated_test_client("ide_ai")
+        write_lock_tokens = [
+            _acquire_write_lock(client, paper_id, module_name="sections", locked_by="ide_ai"),
+            _acquire_write_lock(client, paper_id, module_name="writing_cards", locked_by="ide_ai"),
+        ]
+        imported = client.post(
             "/api/external-analysis/import",
             json={
                 "paper_id": str(paper_id),
@@ -2213,6 +2249,7 @@ def test_ide_ai_section_and_writing_card_review_close_formal_rag_without_note_un
                 "source_label": "section-writing-review",
                 "auto_apply_review_rules": True,
                 "reviewer": "ide_ai",
+                "write_lock_tokens": write_lock_tokens,
                 "raw_payload": {
                     "review_notes": [
                         {
@@ -2301,7 +2338,7 @@ def test_external_analysis_import_rejects_empty_payload():
                 session.refresh(paper)
                 paper_id = paper.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
                 json={
@@ -2493,7 +2530,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -2572,7 +2609,7 @@ def test_dft_scoped_import_rejects_non_dft_auto_apply_targets():
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("codex_dft_primary")
             imported = client.post(
                 "/api/external-analysis/import",
                 json={
@@ -2669,7 +2706,7 @@ def test_external_analysis_auto_apply_figure_summary_strips_caption_echo_prefix(
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -2752,7 +2789,7 @@ def test_external_analysis_auto_apply_figure_key_elements_normalizes_stringified
                 paper_id = paper.id
                 figure_id = figure.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="figures", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -2831,7 +2868,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_accepts_tables():
                 paper_id = paper.id
                 table_id = table.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="tables", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -2908,7 +2945,7 @@ def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
                 paper_id = paper.id
                 table_id = table.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="tables", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -2985,7 +3022,7 @@ def test_external_analysis_table_audit_corrected_value_requires_direct_tool():
                 paper_id = paper.id
                 table_id = table.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="tables", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -3068,7 +3105,7 @@ def test_import_analysis_rejects_legacy_codex_item_table_correction():
                 paper_id = paper.id
                 table_id = table.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("ide_ai")
             write_lock_token = _acquire_write_lock(client, paper_id, module_name="tables", locked_by="ide_ai")
             imported = client.post(
                 "/api/external-analysis/import",
@@ -3531,7 +3568,7 @@ def test_internal_ai_parse_uses_persisted_writer_settings(monkeypatch):
             get_settings.cache_clear()
 
 
-def test_http_import_dft_new_candidate_without_contract_is_blocked_before_lock():
+def test_unauthenticated_http_import_defaults_to_candidate_only_before_lock():
     with TemporaryDirectory():
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -3609,14 +3646,19 @@ def test_http_import_dft_new_candidate_without_contract_is_blocked_before_lock()
                 },
             )
 
-            assert response.status_code == 400, response.text
-            assert "dft_json_validation_failed" in response.json()["detail"]
+            assert response.status_code == 200, response.text
+            assert response.json()["source_identity_verified"] is False
+            assert response.json()["auto_apply_summary"] is None
+            assert {item["status"] for item in response.json()["candidates"]} == {"candidate"}
 
             with Session(engine) as session:
                 dft_rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
                 issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
                 assert dft_rows == []
                 assert issues == []
+                assert session.query(PaperCorrection).count() == 0
+                assert session.query(ExtractionFieldReview).count() == 0
+                assert session.query(EvidenceLocator).count() == 0
                 from app.db.models import ModuleWriteLock
                 active_locks = session.scalars(
                     select(ModuleWriteLock).where(
@@ -3702,6 +3744,7 @@ def test_http_apply_review_rules_rejects_deferred_dft_without_contract():
                 )
                 assert dft_row is None
 
+            client = _authenticated_test_client("deferred_dft")
             apply_response = client.post(
                 f"/api/external-analysis/runs/{run_id}/apply-review-rules",
                 json={"reviewer": "deferred_dft"},
@@ -3802,7 +3845,7 @@ def test_apply_review_rules_rejects_manually_constructed_runs_without_contract()
                 old_candidate_id = old_candidate.id
                 current_candidate_id = current_candidate.id
 
-            client = TestClient(app)
+            client = _authenticated_test_client("new-run")
             applied = client.post(
                 f"/api/external-analysis/runs/{new_run_id}/apply-review-rules",
                 json={"reviewer": "new-run"},
@@ -3818,11 +3861,13 @@ def test_apply_review_rules_rejects_manually_constructed_runs_without_contract()
                 issues = session.scalars(select(DFTAuditIssue).where(DFTAuditIssue.paper_id == paper_id)).all()
                 assert issues == []
 
+            client = _authenticated_test_client("old-run")
             applied_old = client.post(
                 f"/api/external-analysis/runs/{old_run_id}/apply-review-rules",
                 json={"reviewer": "old-run"},
             )
             assert applied_old.status_code == 400, applied_old.text
+            assert "dft_json_validation_failed" in applied_old.json()["detail"]
             with Session(engine) as session:
                 assert session.get(ExternalAnalysisCandidate, old_candidate_id).status == "candidate"
                 assert session.query(DFTResult).filter(DFTResult.paper_id == paper_id).count() == 0
@@ -3919,6 +3964,7 @@ def test_materialize_endpoint_defers_object_review_audit_without_consuming_it():
                 assert dft_rows == []
                 assert session.get(ExternalAnalysisCandidate, UUID(candidate_id)).status == "pending"
 
+            client = _authenticated_test_client("test")
             apply_response = client.post(
                 f"/api/external-analysis/runs/{run_id}/apply-review-rules",
                 json={"reviewer": "test"},

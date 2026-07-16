@@ -275,10 +275,11 @@ def test_four_manual_review_decisions_and_audit(
     assert payload["reviewed"] is True
     assert payload["audit_log_id"]
     assert payload["item"]["review_status"] == review_status
-    assert payload["item"]["citation_policy"] == citation_status
+    assert payload["item"]["metadata"]["projection_state"]["citation_status"] == citation_status
+    assert payload["item"]["citation_policy"] == "blocked"
+    assert payload["item"]["can_use_for_writing"] is False
+    assert payload["item"]["can_use_for_citation"] is False
     assert payload["item"]["reviewer"] == "Human Reviewer"
-    if decision == "approve_citable":
-        assert payload["item"]["can_use_for_citation"] is True
 
     factory = _factory(setup_test_db)
     with factory() as session:

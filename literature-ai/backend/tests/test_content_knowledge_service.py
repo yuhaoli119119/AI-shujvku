@@ -244,5 +244,7 @@ def test_retrieval_search_includes_content_knowledge_with_policy_metadata(setup_
     candidate = next(item for item in content_items if item["source_type"] == "external_analysis_candidate")
     assert candidate["paper_code"] == "CK001"
     assert candidate["review_status"] == "needs_review"
-    assert candidate["metadata"]["citation_policy"] == "needs_review"
+    assert candidate["metadata"]["citation_policy"] == "blocked"
+    assert candidate["metadata"]["can_use_for_writing"] is False
+    assert candidate["metadata"]["can_use_for_citation"] is False
     assert "candidate_requires_resolution" in candidate["metadata"]["risk_flags"]
