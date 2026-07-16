@@ -84,9 +84,11 @@ def test_v2_zip_validation_is_proposal_only_and_plan_dedupes_pages(setup_test_db
     assert payload["local_skipped_target_count_by_reason"] == {"ordinary_reject": 0, "needs_human": 1, "discovery_proposals": 1}
     assert payload["metrics"]["physical_page_read_attempt_count"] == 0
     assert len([row for row in payload["required_page_checks"] if row["page"] == 4]) == 1
+    assert len(payload["required_evidence_checks"]) == payload["local_required_target_count"]
     assert any(row["decision"] == "REJECT" for row in payload["required_object_checks"])
     assert payload["unique_page_count"] == payload["metrics"]["logical_page_read_count"]
     assert "apply_content_web_review_local_verification" in payload["local_ai_instruction"]
+    assert payload["metrics"]["unresolved_page_target_count"] == payload["unresolved_page_target_count"]
 
 
 def test_v2_rejects_incomplete_forged_and_wrong_page_payloads(setup_test_db, tmp_path):
@@ -224,3 +226,51 @@ def test_v2_uuidv5_identity_does_not_shift_when_a_target_is_added(setup_test_db,
         unchanged = next(item for item in current["targets"] if item["target_id"] == first_section_id)
         assert unchanged["plan_item_id"] == original_id
         assert stale["affected_plan_item_ids"] != [original_id]
+
+
+def test_v2_zip_embeds_materialized_page_asset_without_local_path(setup_test_db, tmp_path):
+    paper_id, first_section_id = _seed(setup_test_db, tmp_path)
+    preview = tmp_path / "page_004.png"
+    preview_bytes = b"\x89PNG\r\n\x1a\nmaterialized-page"
+    preview.write_bytes(preview_bytes)
+    with _factory(setup_test_db).begin() as session:
+        session.add(EvidenceLocator(
+            paper_id=UUID(paper_id), target_type="paper_section", target_id=first_section_id, field_name="text",
+            page=4, bbox={"full_page_image_path": str(preview), "x0": 0}, evidence_text="preview-backed", locator_status="located",
+        ))
+        session.flush()
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="sections")
+        evidence = next(item["evidence"] for item in bundle["manifest"]["targets"] if item["target_id"] == first_section_id)
+        assert evidence["page_asset_status"] == "materialized"
+        assert evidence["page_asset_ref"].startswith("evidence/pages/")
+        assert str(tmp_path) not in evidence["page_asset_ref"]
+        assert "full_page_image_path" not in evidence["bbox"]
+        archive = service.download(UUID(bundle["bundle_id"]))
+        with ZipFile(BytesIO(archive["content"])) as zip_file:
+            assert zip_file.read(evidence["page_asset_ref"]) == preview_bytes
+            manifest = __import__("json").loads(zip_file.read("manifest.json"))
+            assert str(tmp_path) not in __import__("json").dumps(manifest)
+
+
+def test_v2_renders_only_selected_pdf_page_when_preview_is_absent(setup_test_db, tmp_path):
+    import fitz
+
+    paper_id, first_section_id = _seed(setup_test_db, tmp_path)
+    pdf = tmp_path / "renderable.pdf"
+    document = fitz.open()
+    for number in range(4):
+        page = document.new_page()
+        page.insert_text((72, 72), f"page {number + 1}")
+    document.save(pdf)
+    document.close()
+    with _factory(setup_test_db).begin() as session:
+        session.get(Paper, UUID(paper_id)).pdf_path = str(pdf)
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="sections")
+        evidence = next(item["evidence"] for item in bundle["manifest"]["targets"] if item["target_id"] == first_section_id)
+        assert evidence["page_asset_status"] == "rendered_for_bundle"
+        assert evidence["page_asset_ref"].endswith(".png")
+        archive = service.download(UUID(bundle["bundle_id"]))
+        with ZipFile(BytesIO(archive["content"])) as zip_file:
+            assert zip_file.read(evidence["page_asset_ref"]).startswith(b"\x89PNG")

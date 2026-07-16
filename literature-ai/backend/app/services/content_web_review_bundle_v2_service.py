@@ -48,6 +48,7 @@ class ContentWebReviewBundleV2Service:
     def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
         self.settings = settings or get_settings()
+        self._page_asset_bytes: dict[str, bytes] = {}
 
     def generate(
         self,
@@ -76,6 +77,8 @@ class ContentWebReviewBundleV2Service:
 
     def download(self, bundle_id: UUID) -> dict[str, Any]:
         bundle = self._bundle(bundle_id)
+        if self._stale_report(bundle)["is_stale"]:
+            raise ValueError("content_web_review_v2_bundle_stale")
         manifest = bundle.manifest or {}
         content = self._zip(manifest)
         paper = self._paper(bundle.paper_id)
@@ -209,7 +212,7 @@ class ContentWebReviewBundleV2Service:
                 "source_paper_id": str(paper.id),
                 "source_pdf_sha256": pdf["sha256"],
                 "page": page,
-                "bbox": locator.bbox if locator is not None else None,
+                "bbox": self._safe_bbox(locator.bbox) if locator is not None else None,
                 "locator_id": str(locator.id) if locator is not None else None,
                 "locator_status": locator.locator_status if locator is not None else "not_found",
                 "evidence_source": "evidence_locator" if locator is not None else "object_field_fallback",
@@ -329,9 +332,11 @@ class ContentWebReviewBundleV2Service:
                 "plan_item_id": target["plan_item_id"], "target_type": target["target_type"], "target_id": target["target_id"],
                 "field_name": target["field_name"], "decision": decision, "object_snapshot_hash": target["object_snapshot_hash"],
                 "source_paper_id": evidence["source_paper_id"], "source_pdf_sha256": evidence["source_pdf_sha256"],
+                "evidence_ref_id": evidence["evidence_ref_id"],
                 "page": evidence["page"], "page_asset_sha256": evidence["page_asset_sha256"],
                 "evidence_asset_sha256": evidence["evidence_asset_sha256"], "evidence_excerpt": evidence["evidence_excerpt"],
                 "page_asset_ref": evidence["page_asset_ref"], "page_asset_status": evidence["page_asset_status"],
+                "page_asset_origin": evidence["page_asset_origin"],
                 "bbox": evidence["bbox"], "locator_id": evidence["locator_id"], "locator_status": evidence["locator_status"],
                 "requires_page_render": evidence["page"] is not None or target["target_type"] in {"mechanism_claim", "writing_card"},
                 "layout_consistency_status": evidence["layout_consistency_status"],
@@ -341,8 +346,11 @@ class ContentWebReviewBundleV2Service:
         # Keep every target's evidence/page contract at the object layer; the
         # following evidence/page lists are the deduplicated execution view.
         object_checks = list(required)
-        evidence_checks = self._dedupe(required, ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"))
-        page_checks = [item for item in evidence_checks if item["page"] is not None]
+        evidence_checks = self._dedupe(required, ("evidence_ref_id", "evidence_asset_sha256"))
+        page_checks = self._dedupe(
+            [item for item in evidence_checks if item["page"] is not None],
+            ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"),
+        )
         batches: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
         for item in required:
             if item["page"] is None:
@@ -369,6 +377,7 @@ class ContentWebReviewBundleV2Service:
             "metrics": {
                 "logical_page_read_count": len(page_checks), "physical_page_read_attempt_count": 0,
                 "page_read_retry_count": 0, "page_cache_hit_count": 0,
+                "unresolved_page_target_count": len(unresolved),
                 "physical_counter_note": "Plan generation reports logical work only; no page reader was invoked.",
             },
             "writes_final_truth": False, "local_ai_verification": None,
@@ -463,7 +472,8 @@ class ContentWebReviewBundleV2Service:
             return {
                 "page_asset_sha256": self._hash({"render_source_pdf_sha256": pdf["sha256"], "page": None}),
                 "page_asset_ref": f"render-source:{pdf['sha256'] or 'missing'}#page=unlocated",
-                "page_asset_status": "not_materialized", "layout_consistency_status": "page_unlocated",
+                "page_asset_status": "not_materialized", "page_asset_origin": "page_unlocated",
+                "layout_consistency_status": "page_unlocated",
             }
         bbox = locator.bbox if locator is not None and isinstance(locator.bbox, dict) else {}
         stored_path = next(
@@ -474,32 +484,78 @@ class ContentWebReviewBundleV2Service:
             stored_path, category="figures", settings=self.settings, trusted_persisted_reference=True
         ) if stored_path else None
         if asset is not None and asset.is_file():
+            content = asset.read_bytes()
+            digest = hashlib.sha256(content).hexdigest()
+            bundle_ref = f"evidence/pages/{digest}{asset.suffix.lower() or '.png'}"
+            self._page_asset_bytes[bundle_ref] = content
             return {
-                "page_asset_sha256": self._file_hash(asset), "page_asset_ref": str(asset),
-                "page_asset_status": "materialized", "layout_consistency_status": "asset_available_unchecked",
+                "page_asset_sha256": digest, "page_asset_ref": bundle_ref,
+                "page_asset_status": "materialized", "page_asset_origin": "existing_preview",
+                "layout_consistency_status": "asset_available_unchecked",
+            }
+        rendered = self._render_selected_page(pdf, page)
+        if rendered is not None:
+            digest = hashlib.sha256(rendered).hexdigest()
+            bundle_ref = f"evidence/pages/{digest}.png"
+            self._page_asset_bytes[bundle_ref] = rendered
+            return {
+                "page_asset_sha256": digest, "page_asset_ref": bundle_ref,
+                "page_asset_status": "rendered_for_bundle", "page_asset_origin": "selected_pdf_page_render",
+                "layout_consistency_status": "rendered_page_unchecked",
             }
         return {
             "page_asset_sha256": self._hash({"render_source_pdf_sha256": pdf["sha256"], "page": page}),
             "page_asset_ref": f"render-source:{pdf['sha256'] or 'missing'}#page={page if page is not None else 'unlocated'}",
-            "page_asset_status": "not_materialized",
+            "page_asset_status": "not_materialized", "page_asset_origin": "render_failed",
             "layout_consistency_status": "page_unlocated" if page is None else "page_not_materialized",
         }
+
+    def _render_selected_page(self, pdf: dict[str, Any], page: int) -> bytes | None:
+        cache_key = f"render:{pdf.get('sha256')}:{page}"
+        if cache_key in self._page_asset_bytes:
+            return self._page_asset_bytes[cache_key]
+        local_path = pdf.get("_local_path")
+        if not local_path:
+            return None
+        try:
+            import fitz
+
+            document = fitz.open(str(local_path))
+            try:
+                if page < 1 or page > document.page_count:
+                    return None
+                image = document.load_page(page - 1).get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                content = image.tobytes("png")
+            finally:
+                document.close()
+        except Exception:
+            return None
+        self._page_asset_bytes[cache_key] = content
+        return content
+
+    @staticmethod
+    def _safe_bbox(bbox: dict | None) -> dict | None:
+        if not isinstance(bbox, dict):
+            return None
+        path_keys = {"page_asset_path", "full_page_image_path", "page_image_path", "image_path", "path"}
+        return {key: value for key, value in bbox.items() if key not in path_keys}
 
     def _pdf_descriptor(self, paper: Paper) -> dict[str, Any]:
         path = resolve_paper_pdf_path(paper.pdf_path, self.settings.storage_root)
         if path is None:
-            return {"paper_id": str(paper.id), "path": paper.pdf_path, "sha256": None, "gate_blockers": ["source_pdf_missing"]}
-        return {"paper_id": str(paper.id), "path": str(path), "sha256": self._file_hash(path), "gate_blockers": []}
+            return {"paper_id": str(paper.id), "source_pdf_ref": f"source/{paper.paper_code or paper.id}.pdf", "sha256": None, "gate_blockers": ["source_pdf_missing"]}
+        return {"paper_id": str(paper.id), "source_pdf_ref": f"source/{paper.paper_code or paper.id}.pdf", "sha256": self._file_hash(path), "gate_blockers": [], "_local_path": str(path)}
 
     def _source_pdfs(self, paper: Paper, main_pdf: dict[str, Any]) -> list[dict[str, Any]]:
-        descriptors = [{**main_pdf, "source_document_type": "main"}]
+        descriptors = [{key: value for key, value in main_pdf.items() if key != "_local_path"} | {"source_document_type": "main"}]
         relationship_types = {"supplementary", "supplementary_information", "supporting_information", "si"}
         links = self.session.scalars(select(PaperRelationship).where(PaperRelationship.source_paper_id == paper.id)).all()
         linked_ids = sorted({link.target_paper_id for link in links if str(link.relationship_type or "").lower() in relationship_types}, key=str)
         for linked_id in linked_ids:
             linked = self.session.get(Paper, linked_id)
             if linked is not None:
-                descriptors.append({**self._pdf_descriptor(linked), "source_document_type": "supplementary"})
+                descriptor = self._pdf_descriptor(linked)
+                descriptors.append({key: value for key, value in descriptor.items() if key != "_local_path"} | {"source_document_type": "supplementary"})
         return descriptors
 
     def _bundle_response(self, bundle: ContentWebReviewBundleV2) -> dict[str, Any]:
@@ -539,7 +595,44 @@ class ContentWebReviewBundleV2Service:
                 archive.writestr(name, payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
             for evidence in manifest["allowed_evidence_refs"]:
                 archive.writestr(f"evidence/{evidence['evidence_ref_id']}.json", json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
+            written_assets: set[str] = set()
+            for evidence in manifest["allowed_evidence_refs"]:
+                bundle_ref = str(evidence.get("page_asset_ref") or "")
+                if not bundle_ref.startswith("evidence/pages/") or bundle_ref in written_assets:
+                    continue
+                content = self._asset_bytes_for_evidence(evidence)
+                if content is None or hashlib.sha256(content).hexdigest() != evidence.get("page_asset_sha256"):
+                    raise ValueError("content_web_review_v2_page_asset_changed_or_unavailable")
+                archive.writestr(bundle_ref, content)
+                written_assets.add(bundle_ref)
         return buffer.getvalue()
+
+    def _asset_bytes_for_evidence(self, evidence: dict[str, Any]) -> bytes | None:
+        bundle_ref = str(evidence.get("page_asset_ref") or "")
+        cached = self._page_asset_bytes.get(bundle_ref)
+        if cached is not None:
+            return cached
+        origin = evidence.get("page_asset_origin")
+        if origin == "existing_preview":
+            locator_id = evidence.get("locator_id")
+            locator = self.session.get(EvidenceLocator, UUID(str(locator_id))) if locator_id else None
+            bbox = locator.bbox if locator is not None and isinstance(locator.bbox, dict) else {}
+            stored_path = next(
+                (str(bbox[key]) for key in ("page_asset_path", "full_page_image_path", "page_image_path", "image_path") if bbox.get(key)),
+                None,
+            )
+            asset = resolve_persisted_artifact_path(
+                stored_path, category="figures", settings=self.settings, trusted_persisted_reference=True
+            ) if stored_path else None
+            content = asset.read_bytes() if asset is not None and asset.is_file() else None
+        elif origin == "selected_pdf_page_render":
+            paper = self._paper(UUID(str(evidence["source_paper_id"])))
+            content = self._render_selected_page(self._pdf_descriptor(paper), int(evidence["page"]))
+        else:
+            content = None
+        if content is not None:
+            self._page_asset_bytes[bundle_ref] = content
+        return content
 
     @staticmethod
     def _return_schema() -> dict[str, Any]:
