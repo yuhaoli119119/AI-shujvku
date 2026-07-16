@@ -80,8 +80,8 @@ export function getLocalVerificationPlan(bundleId) {
   return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/local-verification-plan`);
 }
 
-export function downloadReviewBundle(bundleId) {
-  return fetch(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/download`);
+export function downloadReviewBundle(bundleId, downloadUrl) {
+  return fetch(downloadUrl || `/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/download`);
 }
 
 export function createWritingPlan(query, paperIds) {

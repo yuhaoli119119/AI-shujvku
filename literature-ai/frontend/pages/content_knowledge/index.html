@@ -68,6 +68,7 @@
       <section id="bundleControls" hidden>
         <p id="bundleStatus"></p>
         <button id="bundleDownloadButton" class="secondary-btn" type="button" disabled>下载审核包 ZIP</button>
+        <label class="field" for="bundleInstructionOutput"><span>网页 AI 指令（只读降级显示）</span><textarea id="bundleInstructionOutput" rows="4" readonly hidden></textarea></label>
         <div id="bundleDropZone" class="bundle-drop-zone" tabindex="0">拖入网页 AI JSON，或<label for="bundleFile">选择文件</label><input id="bundleFile" type="file" accept="application/json,.json"></div>
         <textarea id="bundleResultInput" rows="6" placeholder="也可以粘贴与审核包匹配的严格 JSON 回传"></textarea>
         <button id="validateBundleButton" class="secondary-btn" type="button">校验网页 AI 建议</button>

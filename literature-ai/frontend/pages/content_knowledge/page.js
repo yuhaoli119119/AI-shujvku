@@ -195,10 +195,19 @@ function countOf(source, ...keys) {
   return 0;
 }
 
+function firstDefined(source, ...keys) {
+  for (const key of keys) {
+    if (source && source[key] != null) return source[key];
+  }
+  return null;
+}
+
 function bundleSummary(bundle) {
   const manifest = bundle.manifest || bundle.summary || {};
-  const objectCount = countOf(bundle, 'object_count', 'target_count', 'item_count') || countOf(manifest, 'object_count', 'target_count', 'item_count', 'item_count');
-  const pageCount = countOf(bundle, 'unique_evidence_page_count', 'unique_page_count') || countOf(manifest, 'unique_evidence_page_count', 'unique_page_count');
+  const targets = Array.isArray(manifest.targets) ? manifest.targets : [];
+  const allowedPages = Array.isArray(manifest.allowed_pages) ? manifest.allowed_pages : [];
+  const objectCount = firstDefined(bundle, 'object_count', 'target_count', 'item_count') ?? firstDefined(manifest, 'object_count', 'target_count', 'item_count') ?? (targets.length || 0);
+  const pageCount = firstDefined(bundle, 'unique_evidence_page_count', 'unique_page_count') ?? firstDefined(manifest, 'unique_evidence_page_count', 'unique_page_count') ?? (allowedPages.length || 0);
   const status = bundle.status || manifest.status || 'created';
   return `审核包已生成：${bundle.bundle_id}；对象 ${objectCount}；唯一证据页 ${pageCount}；状态 ${status}。`;
 }
@@ -214,10 +223,10 @@ async function generateBundle() {
   try {
     currentBundle = await createReviewBundleV2({ paper_id: paperId, module: selectedModule() });
     uploadedProposalKey = null;
+    renderPlan(null);
     renderBundleStatus(bundleSummary(currentBundle));
     document.querySelector('#bundleDownloadButton').disabled = false;
     document.querySelector('#bundleFile').value = '';
-    renderPlan(null);
   } catch (error) {
     showMessage(`生成审核包失败：${error.message}`, true);
   }
@@ -227,24 +236,43 @@ async function copyBundleInstruction() {
   if (!currentBundle) await generateBundle();
   if (!currentBundle) return;
   const text = currentBundle.web_ai_instruction || currentBundle.instructions || currentBundle.manifest?.instructions || `${currentBundle.prompt || ''}\n\nRETURN TEMPLATE:\n${JSON.stringify(currentBundle.return_template || {}, null, 2)}`;
+  const fallback = document.querySelector('#bundleInstructionOutput');
+  fallback.value = text;
   try {
     await navigator.clipboard.writeText(text);
-    showMessage('IDE AI 指令与 JSON 模板已复制。');
+    fallback.hidden = true;
+    showMessage('网页 AI 指令已复制。');
   } catch (_) {
-    showMessage('无法使用剪贴板，请手动复制页面中的指令。', true);
-    showMessage('无法使用剪贴板，指令已显示在输入框。');
+    fallback.hidden = false;
+    showMessage('无法使用剪贴板，网页 AI 指令已显示在只读文本框中。', true);
   }
 }
 
 async function validateBundle() {
   if (!currentBundle) return showMessage('请先生成审核包。', true);
+  renderPlan(null);
   try {
     const input = document.querySelector('#bundleResultInput').value.trim();
     if (!input) throw new Error('请先上传或粘贴网页 AI JSON。');
     const result = JSON.parse(input);
     const response = await validateReviewBundleProposal(currentBundle.bundle_id, result);
     renderBundleStatus(`网页 AI 回传校验完成：${response.valid === false ? '未通过' : '通过'}。${response.message || ''}`);
-    if (response.valid === false) return;
+    if (response.valid === false) {
+      const root = document.querySelector('#localPlan');
+      root.hidden = false;
+      root.replaceChildren();
+      const title = document.createElement('p');
+      title.textContent = '校验错误：';
+      root.append(title);
+      (Array.isArray(response.errors) ? response.errors : ['网页 AI 建议未通过校验。']).forEach((error) => {
+        const item = document.createElement('li');
+        item.textContent = typeof error === 'string' ? error : JSON.stringify(error);
+        const list = root.querySelector('ul') || document.createElement('ul');
+        if (!list.parentNode) root.append(list);
+        list.append(item);
+      });
+      return;
+    }
     await loadLocalPlan();
   } catch (error) {
     showMessage(error instanceof SyntaxError ? 'JSON 解析失败：请上传严格有效的 JSON。' : `网页 AI 回传校验失败：${error.message}`, true);
@@ -259,12 +287,21 @@ function renderPlan(plan) {
   root.replaceChildren();
   const summary = plan.summary || plan;
   const stats = document.createElement('p');
-  stats.textContent = `本地核验计划：网页已核验 ${countOf(summary, 'web_reviewed_target_count')}；本地需核验 ${countOf(summary, 'local_required_target_count')}；本地跳过 ${countOf(summary, 'local_skipped_target_count')}；唯一页 ${countOf(summary, 'unique_page_count')}`;
+  const metrics = plan.metrics || {};
+  const logicalReads = firstDefined(metrics, 'logical_page_read_count');
+  const unresolved = firstDefined(metrics, 'unresolved_page_target_count');
+  const metricText = `${logicalReads != null ? `；逻辑页读取 ${logicalReads}` : ''}${unresolved != null ? `；未解决页目标 ${unresolved}` : ''}`;
+  stats.textContent = `本地核验计划：网页已核验 ${countOf(summary, 'web_reviewed_target_count')}；本地需核验 ${countOf(summary, 'local_required_target_count')}；本地跳过 ${countOf(summary, 'local_skipped_target_count')}；唯一页 ${countOf(summary, 'unique_page_count')}${metricText}`;
   root.append(stats);
   const batches = plan.page_batches || plan.batches || [];
   if (batches.length) {
     const list = document.createElement('ul');
-    batches.forEach((batch) => { const item = document.createElement('li'); item.textContent = `第 ${batch.page_start ?? batch.page ?? '?'} 页批次：${batch.target_count ?? batch.object_count ?? 0} 个对象`; list.append(item); });
+    batches.forEach((batch) => {
+      const item = document.createElement('li');
+      const targetCount = firstDefined(batch, 'target_count', 'object_count') ?? (Array.isArray(batch.checks) ? batch.checks.length : 0);
+      item.textContent = `第 ${batch.page ?? batch.page_start ?? '?'} 页批次：${targetCount} 个对象`;
+      list.append(item);
+    });
     root.append(list);
   }
   const gate = document.createElement('p');
@@ -304,11 +341,19 @@ async function loadLocalPlan() {
 async function downloadBundle() {
   if (!currentBundle) return showMessage('请先生成审核包。', true);
   try {
-    const response = await downloadReviewBundle(currentBundle.bundle_id);
+    const response = await downloadReviewBundle(currentBundle.bundle_id, currentBundle.download_url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const url = URL.createObjectURL(await response.blob());
-    const link = document.createElement('a'); link.href = url; link.download = `${currentBundle.bundle_id}.zip`; link.click();
-    URL.revokeObjectURL(url);
+    const contentType = (response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.includes('zip') && !contentType.includes('octet-stream')) throw new Error('响应不是 ZIP 文件');
+    const blob = await response.blob();
+    if (!blob.size) throw new Error('ZIP 响应为空');
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${currentBundle.bundle_id}.zip`;
+    document.body.append(link);
+    link.click();
+    setTimeout(() => { URL.revokeObjectURL(url); link.remove(); }, 1000);
   } catch (error) {
     showMessage(`下载审核包失败：${error.message}`, true);
   }
@@ -318,6 +363,7 @@ async function readProposalFile(file) {
   if (!file) return;
   const key = `${file.name}:${file.size}:${file.lastModified}`;
   if (key === uploadedProposalKey) return showMessage('该 JSON 已上传过，请选择新的文件。', true);
+  renderPlan(null);
   if (file.size > MAX_PROPOSAL_BYTES) return showMessage('网页 AI JSON 超过 5 MB 大小限制。', true);
   try {
     const text = await file.text();

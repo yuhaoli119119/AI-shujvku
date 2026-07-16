@@ -132,7 +132,8 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
         contentType: 'application/json',
         body: JSON.stringify({
           bundle_id: 'bundle-1',
-          object_count: 1, unique_evidence_page_count: 2, status: 'created', web_ai_instruction: 'Review B0078 safely',
+          status: 'created', bundle_fingerprint: 'fp-1', download_url: '/api/content-knowledge/review-bundles/bundle-1/download', proposal_only: true, writes_final_truth: false, source_identity_verified: true,
+          manifest: { targets: [{ id: 'a' }, { id: 'b' }], allowed_pages: [4, 7], instructions: 'Review B0078 safely' },
           return_template: { schema_version: 'content_evidence_review_result_v1' },
         }),
       });
@@ -141,7 +142,7 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
     }
     if (url.pathname.endsWith('/local-verification-plan')) {
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, page_batches: [{ page_start: 4, target_count: 1 }], local_ai_instruction: 'Do not read the whole bundle.' }) });
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, page_batches: [{ page: 4, checks: ['page_text'], plan_item_ids: ['a'] }, { page: '<img src=x onerror=alert(1)>', target_count: 2, page_asset_ref: 'asset-7' }], metrics: { logical_page_read_count: 3, unresolved_page_target_count: 1 }, local_ai_instruction: 'Do not read the whole bundle.' }) });
     }
     if (url.pathname.endsWith('/download')) {
       return route.fulfill({ contentType: 'application/zip', body: 'PK\u0003\u0004' });
@@ -168,6 +169,7 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   await page.locator('#bundleModule').selectOption('writing_cards');
   await page.getByRole('button', { name: '生成 v2 审核包' }).click();
   await expect(page.getByText(/审核包已生成：bundle-1/)).toBeVisible();
+  await expect(page.getByText(/对象 2；唯一证据页 2/)).toBeVisible();
   const bundleCall = calls.find((call) => call.path.endsWith('/review-bundles/v2'));
   expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, module: 'writing_cards' });
 
@@ -181,8 +183,28 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
   await expect(page.getByText(/网页 AI 回传校验完成：通过/)).toBeVisible();
   await expect(page.getByText(/本地核验计划：网页已核验 1/)).toBeVisible();
+  await expect(page.getByText(/逻辑页读取 3；未解决页目标 1/)).toBeVisible();
+  await expect(page.getByText('第 4 页批次：1 个对象')).toBeVisible();
+  await expect(page.getByText(/第 <img src=x onerror=alert\(1\)> 页批次/)).toBeVisible();
   await expect(page.getByRole('button', { name: '复制精简本地 AI 核验指令' })).toBeVisible();
+  await page.getByRole('button', { name: '复制精简本地 AI 核验指令' }).click();
+  await expect(page.getByText(/精简本地 AI 核验指令已复制|无法使用剪贴板/)).toBeVisible();
+  const lastModified = await page.locator('#bundleFile').evaluate((input) => input.files[0].lastModified);
+  await page.locator('#bundleDropZone').evaluate((element, modified) => {
+    const file = new File(['{"targets":[]}'], 'proposal.json', { type: 'application/json', lastModified: modified });
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(file);
+    element.dispatchEvent(new DragEvent('drop', { bubbles: true, dataTransfer }));
+  }, lastModified);
+  await expect(page.getByText('该 JSON 已上传过，请选择新的文件。')).toBeVisible();
+  await page.locator('#bundleFile').setInputFiles({ name: 'too-large.json', mimeType: 'application/json', buffer: Buffer.alloc(5 * 1024 * 1024 + 1) });
+  await expect(page.getByText('网页 AI JSON 超过 5 MB 大小限制。')).toBeVisible();
+  await page.locator('#bundleFile').setInputFiles({ name: 'new-proposal.json', mimeType: 'application/json', buffer: Buffer.from('{}') });
+  await expect(page.locator('#localPlan')).toBeHidden();
   await page.getByRole('button', { name: '下载审核包 ZIP' }).click();
+  await expect(page.getByRole('button', { name: '复制网页 AI 指令' })).toBeVisible();
+  await page.getByRole('button', { name: '复制网页 AI 指令' }).click();
+  await expect(page.getByText(/网页 AI 指令已复制|网页 AI 指令已显示/)).toBeVisible();
 
   await page.locator('#writingPlanQuery').fill('Li2S conversion');
   await page.getByRole('button', { name: '生成写作证据计划' }).click();
@@ -212,6 +234,31 @@ test('a paper-code deep link resolves the UUID before creating a v2 review bundl
 
   await expect(page.getByText(/审核包已生成：bundle-paper-code/)).toBeVisible();
   expect(bundleBody).toEqual({ paper_id: PAPER_ID, module: 'abstract' });
+});
+
+test('v2 validation errors are rendered as safe text and do not request a local plan', async ({ page }) => {
+  let planRequested = false;
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === '/api/content-knowledge') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }) });
+    if (url.pathname.includes('/items/')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ item: firstItem }) });
+    if (url.pathname.endsWith('/v2')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ bundle_id: 'bundle-errors', status: 'created', manifest: { targets: [], allowed_pages: [] } }) });
+    if (url.pathname.endsWith('/web-proposal/validate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: false, status: 'rejected', errors: ['<img src=x onerror=window.xssHit=1>', { code: 'bad_target', detail: '<script>alert(1)</script>' }] }) });
+    if (url.pathname.endsWith('/local-verification-plan')) planRequested = true;
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await page.locator('#bundleResultInput').fill('{}');
+  await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
+  await expect(page.getByText('<img src=x onerror=window.xssHit=1>')).toBeVisible();
+  await expect(page.getByText('<script>alert(1)</script>')).toBeVisible();
+  await expect(page.locator('img')).toHaveCount(0);
+  expect(await page.evaluate(() => window.xssHit)).toBeUndefined();
+  expect(planRequested).toBeFalsy();
 });
 
 test('structured evidence shows its quote and locator instead of a JSON wall', async ({ page }) => {
