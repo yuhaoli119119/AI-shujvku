@@ -246,7 +246,11 @@ def test_v2_zip_embeds_materialized_page_asset_without_local_path(setup_test_db,
         assert evidence["page_asset_ref"].startswith("evidence/pages/")
         assert str(tmp_path) not in evidence["page_asset_ref"]
         assert "full_page_image_path" not in evidence["bbox"]
-        archive = service.download(UUID(bundle["bundle_id"]))
+        bundle_id = UUID(bundle["bundle_id"])
+    # A fresh service has no in-memory page cache and must safely resolve the
+    # locator-backed preview again for an HTTP-style download.
+    with _factory(setup_test_db).begin() as session:
+        archive = ContentWebReviewBundleV2Service(session).download(bundle_id)
         with ZipFile(BytesIO(archive["content"])) as zip_file:
             assert zip_file.read(evidence["page_asset_ref"]) == preview_bytes
             manifest = __import__("json").loads(zip_file.read("manifest.json"))
@@ -274,3 +278,41 @@ def test_v2_renders_only_selected_pdf_page_when_preview_is_absent(setup_test_db,
         archive = service.download(UUID(bundle["bundle_id"]))
         with ZipFile(BytesIO(archive["content"])) as zip_file:
             assert zip_file.read(evidence["page_asset_ref"]).startswith(b"\x89PNG")
+
+
+def test_v2_unlocated_section_is_a_required_unresolved_page_check(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        section = session.scalar(select(PaperSection).where(PaperSection.paper_id == UUID(paper_id)))
+        section.page_start = None
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="sections")
+        assert service.validate_web_proposal(UUID(bundle["bundle_id"]), _proposal(bundle["manifest"]))["valid"] is True
+        plan = service.local_verification_plan(UUID(bundle["bundle_id"]))
+        unlocated = [row for row in plan["required_object_checks"] if row["page"] is None]
+        assert unlocated and all(row["requires_page_render"] for row in unlocated)
+        assert plan["unresolved_page_target_count"] == len(unlocated)
+
+
+def test_v2_same_pdf_page_with_different_assets_uses_two_page_batches(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    first_asset = tmp_path / "first.png"; first_asset.write_bytes(b"first preview")
+    second_asset = tmp_path / "second.png"; second_asset.write_bytes(b"second preview")
+    with _factory(setup_test_db).begin() as session:
+        sections = session.scalars(select(PaperSection).where(PaperSection.paper_id == UUID(paper_id)).order_by(PaperSection.id)).all()
+        for section, asset in zip(sections, (first_asset, second_asset), strict=True):
+            session.add(EvidenceLocator(
+                paper_id=UUID(paper_id), target_type="paper_section", target_id=str(section.id), field_name="text",
+                page=4, bbox={"full_page_image_path": str(asset)}, evidence_text=section.text, locator_status="located",
+            ))
+        session.flush()
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="sections")
+        assert service.validate_web_proposal(UUID(bundle["bundle_id"]), _proposal(bundle["manifest"]))["valid"] is True
+        plan = service.local_verification_plan(UUID(bundle["bundle_id"]))
+        assert plan["unique_page_count"] == 2
+        assert len(plan["required_page_checks"]) == 2
+        assert len(plan["page_batches"]) == 2
+        assert {batch["page_asset_sha256"] for batch in plan["page_batches"]} == {
+            row["page_asset_sha256"] for row in plan["required_page_checks"]
+        }

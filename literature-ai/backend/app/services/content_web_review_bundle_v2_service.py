@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -338,7 +339,7 @@ class ContentWebReviewBundleV2Service:
                 "page_asset_ref": evidence["page_asset_ref"], "page_asset_status": evidence["page_asset_status"],
                 "page_asset_origin": evidence["page_asset_origin"],
                 "bbox": evidence["bbox"], "locator_id": evidence["locator_id"], "locator_status": evidence["locator_status"],
-                "requires_page_render": evidence["page"] is not None or target["target_type"] in {"mechanism_claim", "writing_card"},
+                "requires_page_render": self._requires_page_render(target, evidence),
                 "layout_consistency_status": evidence["layout_consistency_status"],
                 "proposed_value": action.get("proposed_value"), "verification_note": action.get("verification_note"),
                 "gate_blockers": target["gate_blockers"],
@@ -351,17 +352,23 @@ class ContentWebReviewBundleV2Service:
             [item for item in evidence_checks if item["page"] is not None],
             ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"),
         )
-        batches: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+        batches: dict[tuple[Any, Any, Any, Any], list[dict[str, Any]]] = {}
         for item in required:
             if item["page"] is None:
                 continue
-            batches.setdefault((item["source_pdf_sha256"], item["page"]), []).append(item)
+            batches.setdefault(
+                (item["source_paper_id"], item["source_pdf_sha256"], item["page"], item["page_asset_sha256"]),
+                [],
+            ).append(item)
         web_count = len(manifest.get("targets", []))
         unresolved = [item for item in required if item["page"] is None and item["requires_page_render"]]
         page_batches = []
-        for (source_pdf_sha256, page), checks in sorted(batches.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+        for (source_paper_id, source_pdf_sha256, page, page_asset_sha256), checks in sorted(
+            batches.items(), key=lambda item: tuple(str(value) for value in item[0])
+        ):
             page_batches.append({
-                "source_pdf_sha256": source_pdf_sha256, "page": page,
+                "source_paper_id": source_paper_id, "source_pdf_sha256": source_pdf_sha256, "page": page,
+                "page_asset_sha256": page_asset_sha256,
                 "page_asset_ref": checks[0]["page_asset_ref"], "page_asset_status": checks[0]["page_asset_status"],
                 "target_count": len(checks), "plan_item_ids": [check["plan_item_id"] for check in checks], "checks": checks,
             })
@@ -382,6 +389,19 @@ class ContentWebReviewBundleV2Service:
             },
             "writes_final_truth": False, "local_ai_verification": None,
         }
+
+    @staticmethod
+    def _requires_page_render(target: dict[str, Any], evidence: dict[str, Any]) -> bool:
+        layout_status = str(evidence.get("layout_consistency_status") or "")
+        asset_status = str(evidence.get("page_asset_status") or "")
+        if evidence.get("page") is None or layout_status in {"page_unlocated", "page_not_materialized"}:
+            return True
+        if "unchecked" in layout_status or asset_status not in {"materialized", "rendered_for_bundle"}:
+            return True
+        if target["target_type"] in {"mechanism_claim", "writing_card"}:
+            return True
+        content = " ".join(str(value or "") for value in (target.get("current_value"), evidence.get("evidence_excerpt")))
+        return bool(re.search(r"\d|(?:eV|V|mA|A|%|cm|nm|μ|µ|mol|Table|Fig(?:ure)?|equation|formula)", content, re.IGNORECASE))
 
     def _stale_report(self, bundle: ContentWebReviewBundleV2) -> dict[str, Any]:
         paper = self._paper(bundle.paper_id)
