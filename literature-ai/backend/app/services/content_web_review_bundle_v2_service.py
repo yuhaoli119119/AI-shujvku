@@ -5,7 +5,7 @@ import json
 from io import BytesIO
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import select
@@ -15,18 +15,27 @@ from app.config import Settings, get_settings
 from app.db.models import (
     ContentEvidenceItem,
     ContentWebReviewBundleV2,
+    EvidenceLocator,
     MechanismClaim,
     Paper,
     PaperRelationship,
     PaperSection,
     WritingCard,
 )
-from app.utils.artifact_paths import resolve_paper_pdf_path
+from app.utils.artifact_paths import resolve_paper_pdf_path, resolve_persisted_artifact_path
 
 
 POLICY_VERSION = "content_web_review_bundle_v2.1"
 RESULT_SCHEMA = "content_web_review_proposal_v2"
 DECISIONS = {"PASS", "REVISE", "REJECT", "NEEDS_HUMAN"}
+MODULES = {"abstract", "sections", "mechanism_knowledge", "writing_cards"}
+PLAN_ITEM_NAMESPACE = UUID("4fc7b45c-08f3-58e6-bdf7-8e8420cb1c16")
+TARGET_TYPE_ALIASES = {
+    "paper_abstract": {"paper_abstract", "paper", "papers", "Paper"},
+    "paper_section": {"paper_section", "paper_sections", "PaperSection"},
+    "mechanism_claim": {"mechanism_claim", "mechanism_claims", "MechanismClaim"},
+    "writing_card": {"writing_card", "writing_cards", "WritingCard"},
+}
 
 
 class ContentWebReviewBundleV2Service:
@@ -40,9 +49,19 @@ class ContentWebReviewBundleV2Service:
         self.session = session
         self.settings = settings or get_settings()
 
-    def generate(self, *, paper_id: UUID, created_by: str = "user") -> dict[str, Any]:
+    def generate(
+        self,
+        *,
+        paper_id: UUID,
+        module: str | None = None,
+        modules: list[str] | None = None,
+        created_by: str = "user",
+    ) -> dict[str, Any]:
         paper = self._paper(paper_id)
-        manifest = self._build_manifest(paper)
+        selected_modules = self._selected_modules(module=module, modules=modules)
+        manifest = self._build_manifest(paper, selected_modules=selected_modules)
+        if not manifest["targets"]:
+            raise ValueError("content_web_review_v2_no_targets_for_selected_modules")
         bundle = ContentWebReviewBundleV2(
             paper_id=paper.id,
             policy_version=POLICY_VERSION,
@@ -117,10 +136,10 @@ class ContentWebReviewBundleV2Service:
             raise ValueError("content_web_review_v2_proposal_must_be_validated")
         return self._local_plan(bundle)
 
-    def _build_manifest(self, paper: Paper) -> dict[str, Any]:
+    def _build_manifest(self, paper: Paper, *, selected_modules: list[str]) -> dict[str, Any]:
         pdf = self._pdf_descriptor(paper)
         source_pdfs = self._source_pdfs(paper, pdf)
-        targets = self._targets(paper, pdf)
+        targets = self._targets(paper, pdf, selected_modules=selected_modules)
         evidence = [target["evidence"] for target in targets]
         coverage = [
             {key: target[key] for key in ("plan_item_id", "target_type", "target_id", "field_name", "object_snapshot_hash")}
@@ -131,6 +150,7 @@ class ContentWebReviewBundleV2Service:
             "policy_version": POLICY_VERSION,
             "paper_id": str(paper.id),
             "paper_code": paper.paper_code,
+            "selected_modules": selected_modules,
             "targets": targets,
             "required_target_ids": [target["target_id"] for target in targets],
             "required_field_coverage": coverage,
@@ -152,26 +172,32 @@ class ContentWebReviewBundleV2Service:
             "instructions": self._instructions(),
         }
 
-    def _targets(self, paper: Paper, pdf: dict[str, Any]) -> list[dict[str, Any]]:
+    def _targets(self, paper: Paper, pdf: dict[str, Any], *, selected_modules: list[str]) -> list[dict[str, Any]]:
         raw: list[tuple[str, str, str, Any, str | None, int | None, str | None]] = []
-        if paper.abstract:
+        if "abstract" in selected_modules and paper.abstract:
             raw.append(("paper_abstract", str(paper.id), "abstract", paper.abstract, paper.abstract, None, "abstract"))
-        for section in self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id).order_by(PaperSection.id)).all():
-            raw.append(("paper_section", str(section.id), "text", section.text, section.text, section.page_start, section.section_title))
-        for claim in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper.id).order_by(MechanismClaim.id)).all():
-            raw.append(("mechanism_claim", str(claim.id), "claim_text", claim.claim_text, claim.evidence_text or claim.claim_text, None, claim.claim_type))
+        if "sections" in selected_modules:
+            for section in self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id).order_by(PaperSection.id)).all():
+                raw.append(("paper_section", str(section.id), "text", section.text, section.text, section.page_start, section.section_title))
+        if "mechanism_knowledge" in selected_modules:
+            for claim in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper.id).order_by(MechanismClaim.id)).all():
+                raw.append(("mechanism_claim", str(claim.id), "claim_text", claim.claim_text, claim.evidence_text or claim.claim_text, None, claim.claim_type))
         card_fields = ("research_gap", "proposed_solution", "core_hypothesis", "figure_logic", "abstract_logic", "introduction_logic", "discussion_logic")
-        for card in self.session.scalars(select(WritingCard).where(WritingCard.paper_id == paper.id).order_by(WritingCard.id)).all():
-            for field_name in card_fields:
-                value = getattr(card, field_name)
-                if value:
-                    raw.append(("writing_card", str(card.id), field_name, value, value, None, field_name))
+        if "writing_cards" in selected_modules:
+            for card in self.session.scalars(select(WritingCard).where(WritingCard.paper_id == paper.id).order_by(WritingCard.id)).all():
+                for field_name in card_fields:
+                    value = getattr(card, field_name)
+                    if value:
+                        raw.append(("writing_card", str(card.id), field_name, value, value, None, field_name))
         targets: list[dict[str, Any]] = []
-        for index, (target_type, target_id, field_name, value, excerpt, page, label) in enumerate(raw, start=1):
+        for target_type, target_id, field_name, value, fallback_excerpt, fallback_page, label in raw:
+            locator = self._locator_for(paper.id, target_type, target_id, field_name)
+            excerpt = locator.evidence_text if locator is not None else fallback_excerpt
+            page = locator.page if locator is not None and locator.page is not None else fallback_page
             object_hash = self._hash({"target_type": target_type, "target_id": target_id, "field_name": field_name, "value": value})
-            page_ref = f"source_pdf:{pdf['sha256'] or 'missing'}#page={page if page is not None else 'unlocated'}"
-            page_asset_sha = self._hash({"pdf": pdf["sha256"], "page": page})
-            evidence_id = f"evidence:{index:04d}"
+            plan_item_id = str(uuid5(PLAN_ITEM_NAMESPACE, f"{paper.id}|{target_type}|{target_id}|{field_name}"))
+            evidence_id = f"evidence:{plan_item_id}"
+            page_asset = self._page_asset(pdf, page, locator)
             blockers = list(pdf["gate_blockers"])
             if page is None:
                 blockers.append("page_unlocated")
@@ -183,13 +209,16 @@ class ContentWebReviewBundleV2Service:
                 "source_paper_id": str(paper.id),
                 "source_pdf_sha256": pdf["sha256"],
                 "page": page,
-                "page_asset_sha256": page_asset_sha,
-                "page_asset_ref": page_ref,
+                "bbox": locator.bbox if locator is not None else None,
+                "locator_id": str(locator.id) if locator is not None else None,
+                "locator_status": locator.locator_status if locator is not None else "not_found",
+                "evidence_source": "evidence_locator" if locator is not None else "object_field_fallback",
+                **page_asset,
                 "evidence_excerpt": str(excerpt or ""),
-                "evidence_asset_sha256": self._hash({"excerpt": excerpt, "page_asset_sha256": page_asset_sha}),
+                "evidence_asset_sha256": self._hash({"excerpt": excerpt, "page_asset_sha256": page_asset["page_asset_sha256"]}),
             }
             targets.append({
-                "plan_item_id": f"content-v2-{index:04d}", "target_type": target_type, "target_id": target_id,
+                "plan_item_id": plan_item_id, "target_type": target_type, "target_id": target_id,
                 "field_name": field_name, "current_value": value, "object_snapshot_hash": object_hash,
                 "target_label": label, "gate_blockers": sorted(set(blockers)),
                 "existing_formal_qualification": qualification, "evidence": evidence,
@@ -199,6 +228,12 @@ class ContentWebReviewBundleV2Service:
     def _validate_proposal(self, bundle: ContentWebReviewBundleV2, proposal: dict[str, Any]) -> list[str]:
         manifest = bundle.manifest or {}
         errors: list[str] = []
+        allowed_top_level = {
+            "schema_version", "bundle_fingerprint", "paper_id", "paper_code", "proposal_status",
+            "source_identity_verified", "writes_final_truth", "local_ai_verification", "actions", "discovery_proposals",
+        }
+        if set(proposal) - allowed_top_level:
+            errors.append("proposal_additional_properties_forbidden")
         if proposal.get("schema_version") != RESULT_SCHEMA:
             errors.append("unsupported_schema_version")
         if str(proposal.get("bundle_fingerprint") or "") != bundle.snapshot_fingerprint:
@@ -222,6 +257,12 @@ class ContentWebReviewBundleV2Service:
             if not isinstance(action, dict):
                 errors.append("action_must_be_object")
                 continue
+            allowed_action = {
+                "plan_item_id", "target_type", "target_id", "field_name", "object_snapshot_hash", "decision",
+                "evidence_ref_ids", "evidence_quote", "evidence_asset_sha256", "page", "proposed_value", "verification_note",
+            }
+            if set(action) - allowed_action:
+                errors.append("action_additional_properties_forbidden")
             plan_item_id = str(action.get("plan_item_id") or "")
             if plan_item_id in seen:
                 errors.append(f"duplicate_plan_item_id:{plan_item_id}")
@@ -236,6 +277,14 @@ class ContentWebReviewBundleV2Service:
                     errors.append(f"wrong_{field}:{plan_item_id}")
             if action.get("decision") not in DECISIONS:
                 errors.append(f"invalid_decision:{plan_item_id}")
+            elif action["decision"] == "REVISE" and action.get("proposed_value") is None:
+                errors.append(f"revise_requires_proposed_value:{plan_item_id}")
+            elif action["decision"] != "REVISE" and action.get("proposed_value") is not None:
+                errors.append(f"non_revise_proposed_value_must_be_null:{plan_item_id}")
+            if "proposed_value" not in action:
+                errors.append(f"proposed_value_required:{plan_item_id}")
+            if "verification_note" in action and action["verification_note"] is not None and not isinstance(action["verification_note"], str):
+                errors.append(f"invalid_verification_note:{plan_item_id}")
             evidence = target["evidence"]
             refs = action.get("evidence_ref_ids")
             if refs != [evidence["evidence_ref_id"]]:
@@ -254,7 +303,12 @@ class ContentWebReviewBundleV2Service:
             errors.append("discovery_proposals_must_be_list")
         else:
             for proposal_item in discoveries:
-                if not isinstance(proposal_item, dict) or proposal_item.get("target_id") not in (None, ""):
+                if (
+                    not isinstance(proposal_item, dict)
+                    or set(proposal_item) != {"summary", "target_id"}
+                    or not str(proposal_item.get("summary") or "").strip()
+                    or proposal_item.get("target_id") is not None
+                ):
                     errors.append("discovery_proposal_must_not_target_existing_or_new_id")
         return sorted(set(errors))
 
@@ -277,8 +331,11 @@ class ContentWebReviewBundleV2Service:
                 "source_paper_id": evidence["source_paper_id"], "source_pdf_sha256": evidence["source_pdf_sha256"],
                 "page": evidence["page"], "page_asset_sha256": evidence["page_asset_sha256"],
                 "evidence_asset_sha256": evidence["evidence_asset_sha256"], "evidence_excerpt": evidence["evidence_excerpt"],
-                "page_asset_ref": evidence["page_asset_ref"], "requires_page_render": evidence["page"] is not None,
-                "layout_consistency_status": "pending_local_page_check" if evidence["page"] is not None else "page_unlocated",
+                "page_asset_ref": evidence["page_asset_ref"], "page_asset_status": evidence["page_asset_status"],
+                "bbox": evidence["bbox"], "locator_id": evidence["locator_id"], "locator_status": evidence["locator_status"],
+                "requires_page_render": evidence["page"] is not None or target["target_type"] in {"mechanism_claim", "writing_card"},
+                "layout_consistency_status": evidence["layout_consistency_status"],
+                "proposed_value": action.get("proposed_value"), "verification_note": action.get("verification_note"),
                 "gate_blockers": target["gate_blockers"],
             })
         # Keep every target's evidence/page contract at the object layer; the
@@ -286,17 +343,29 @@ class ContentWebReviewBundleV2Service:
         object_checks = list(required)
         evidence_checks = self._dedupe(required, ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"))
         page_checks = [item for item in evidence_checks if item["page"] is not None]
-        batches: dict[str, list[dict[str, Any]]] = {}
-        for item in page_checks:
-            batches.setdefault(item["source_pdf_sha256"] or "missing_pdf", []).append(item)
+        batches: dict[tuple[Any, Any], list[dict[str, Any]]] = {}
+        for item in required:
+            if item["page"] is None:
+                continue
+            batches.setdefault((item["source_pdf_sha256"], item["page"]), []).append(item)
         web_count = len(manifest.get("targets", []))
+        unresolved = [item for item in required if item["page"] is None and item["requires_page_render"]]
+        page_batches = []
+        for (source_pdf_sha256, page), checks in sorted(batches.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+            page_batches.append({
+                "source_pdf_sha256": source_pdf_sha256, "page": page,
+                "page_asset_ref": checks[0]["page_asset_ref"], "page_asset_status": checks[0]["page_asset_status"],
+                "target_count": len(checks), "plan_item_ids": [check["plan_item_id"] for check in checks], "checks": checks,
+            })
         return {
             "bundle_id": str(bundle.id), "status": bundle.status, "proposal_only": True,
             "web_reviewed_target_count": web_count, "local_required_target_count": len(required),
             "local_skipped_target_count": sum(skipped.values()), "local_skipped_target_count_by_reason": skipped,
             "required_object_checks": object_checks, "required_evidence_checks": evidence_checks,
             "required_page_checks": page_checks, "unique_page_checks": page_checks,
-            "page_batches": [{"source_pdf_sha256": key, "checks": value} for key, value in sorted(batches.items())],
+            "unique_page_count": len(page_checks), "page_batches": page_batches,
+            "unresolved_page_target_count": len(unresolved), "unresolved_page_blockers": unresolved,
+            "local_ai_instruction": self._local_ai_instruction(bundle.id),
             "metrics": {
                 "logical_page_read_count": len(page_checks), "physical_page_read_attempt_count": 0,
                 "page_read_retry_count": 0, "page_cache_hit_count": 0,
@@ -307,8 +376,8 @@ class ContentWebReviewBundleV2Service:
 
     def _stale_report(self, bundle: ContentWebReviewBundleV2) -> dict[str, Any]:
         paper = self._paper(bundle.paper_id)
-        current = self._build_manifest(paper)
         previous = bundle.manifest or {}
+        current = self._build_manifest(paper, selected_modules=list(previous.get("selected_modules") or []))
         changed: list[str] = []
         previous_targets = {item["plan_item_id"]: item for item in previous.get("targets", [])}
         current_targets = {item["plan_item_id"]: item for item in current.get("targets", [])}
@@ -346,6 +415,76 @@ class ContentWebReviewBundleV2Service:
         ))
         return bool(row and row.citation_status == "citable" and row.review_status in {"validated", "approved", "safe_verified"})
 
+    @staticmethod
+    def _selected_modules(*, module: str | None, modules: list[str] | None) -> list[str]:
+        requested: list[str] = []
+        if module is not None:
+            requested.append(str(module))
+        if modules is not None:
+            if not isinstance(modules, list):
+                raise ValueError("content_web_review_v2_modules_must_be_list")
+            requested.extend(str(value) for value in modules)
+        if not requested or any(not value.strip() for value in requested):
+            raise ValueError("content_web_review_v2_module_required")
+        invalid = sorted(set(requested) - MODULES)
+        if invalid:
+            raise ValueError("content_web_review_v2_invalid_module:" + ",".join(invalid))
+        return sorted(set(requested))
+
+    def _locator_for(
+        self, paper_id: UUID, target_type: str, target_id: str, field_name: str
+    ) -> EvidenceLocator | None:
+        aliases = TARGET_TYPE_ALIASES.get(target_type, {target_type})
+        rows = list(self.session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id == paper_id,
+                EvidenceLocator.target_id == target_id,
+                EvidenceLocator.target_type.in_(aliases),
+            )
+        ).all())
+        compatible = [row for row in rows if row.field_name in {field_name, None, ""}]
+        if not compatible:
+            return None
+        return sorted(
+            compatible,
+            key=lambda row: (
+                row.field_name != field_name,
+                row.page is None,
+                row.locator_status in {"missing", "invalid"},
+                -float(row.locator_confidence or 0),
+                str(row.id),
+            ),
+        )[0]
+
+    def _page_asset(
+        self, pdf: dict[str, Any], page: int | None, locator: EvidenceLocator | None
+    ) -> dict[str, Any]:
+        if page is None:
+            return {
+                "page_asset_sha256": self._hash({"render_source_pdf_sha256": pdf["sha256"], "page": None}),
+                "page_asset_ref": f"render-source:{pdf['sha256'] or 'missing'}#page=unlocated",
+                "page_asset_status": "not_materialized", "layout_consistency_status": "page_unlocated",
+            }
+        bbox = locator.bbox if locator is not None and isinstance(locator.bbox, dict) else {}
+        stored_path = next(
+            (str(bbox[key]) for key in ("page_asset_path", "full_page_image_path", "page_image_path", "image_path") if bbox.get(key)),
+            None,
+        )
+        asset = resolve_persisted_artifact_path(
+            stored_path, category="figures", settings=self.settings, trusted_persisted_reference=True
+        ) if stored_path else None
+        if asset is not None and asset.is_file():
+            return {
+                "page_asset_sha256": self._file_hash(asset), "page_asset_ref": str(asset),
+                "page_asset_status": "materialized", "layout_consistency_status": "asset_available_unchecked",
+            }
+        return {
+            "page_asset_sha256": self._hash({"render_source_pdf_sha256": pdf["sha256"], "page": page}),
+            "page_asset_ref": f"render-source:{pdf['sha256'] or 'missing'}#page={page if page is not None else 'unlocated'}",
+            "page_asset_status": "not_materialized",
+            "layout_consistency_status": "page_unlocated" if page is None else "page_not_materialized",
+        }
+
     def _pdf_descriptor(self, paper: Paper) -> dict[str, Any]:
         path = resolve_paper_pdf_path(paper.pdf_path, self.settings.storage_root)
         if path is None:
@@ -367,6 +506,9 @@ class ContentWebReviewBundleV2Service:
         manifest = bundle.manifest or {}
         return {"bundle_id": str(bundle.id), "status": bundle.status, "bundle_fingerprint": bundle.snapshot_fingerprint, "manifest": manifest,
                 "download_url": f"/api/content-knowledge/review-bundles/{bundle.id}/download", "proposal_only": True,
+                "object_count": len(manifest.get("targets", [])),
+                "unique_evidence_page_count": len(manifest.get("allowed_pages", [])),
+                "web_ai_instruction": manifest.get("instructions"),
                 "writes_final_truth": False, "source_identity_verified": False, "local_ai_verification": None}
 
     @staticmethod
@@ -401,7 +543,41 @@ class ContentWebReviewBundleV2Service:
 
     @staticmethod
     def _return_schema() -> dict[str, Any]:
-        return {"schema_version": RESULT_SCHEMA, "required": ["bundle_fingerprint", "paper_id", "paper_code", "proposal_status", "source_identity_verified", "writes_final_truth", "local_ai_verification", "actions"], "action_decisions": sorted(DECISIONS), "discovery_proposals": "optional; no target_id and never applied"}
+        action_properties = {
+            "plan_item_id": {"type": "string", "format": "uuid"},
+            "target_type": {"type": "string"}, "target_id": {"type": "string"},
+            "field_name": {"type": "string"}, "object_snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "decision": {"enum": sorted(DECISIONS)}, "evidence_ref_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "evidence_quote": {"type": "string", "minLength": 1}, "evidence_asset_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "page": {"type": ["integer", "null"]}, "proposed_value": {}, "verification_note": {"type": ["string", "null"]},
+        }
+        action = {
+            "type": "object", "additionalProperties": False, "properties": action_properties,
+            "required": list(action_properties),
+            "allOf": [
+                {
+                    "if": {"properties": {"decision": {"const": "REVISE"}}},
+                    "then": {"properties": {"proposed_value": {"not": {"type": "null"}}}},
+                },
+                {
+                    "if": {"properties": {"decision": {"not": {"const": "REVISE"}}}},
+                    "then": {"properties": {"proposed_value": {"type": "null"}}},
+                },
+            ],
+        }
+        discovery = {"type": "object", "additionalProperties": False, "properties": {"summary": {"type": "string", "minLength": 1}, "target_id": {"type": "null"}}, "required": ["summary", "target_id"]}
+        return {
+            "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": RESULT_SCHEMA,
+            "type": "object", "additionalProperties": False,
+            "properties": {
+                "schema_version": {"const": RESULT_SCHEMA}, "bundle_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "paper_id": {"type": "string", "format": "uuid"}, "paper_code": {"type": ["string", "null"]},
+                "proposal_status": {"const": "web_ai_proposal"}, "source_identity_verified": {"const": False},
+                "writes_final_truth": {"const": False}, "local_ai_verification": {"type": "null"},
+                "actions": {"type": "array", "minItems": 1, "items": action}, "discovery_proposals": {"type": "array", "items": discovery},
+            },
+            "required": ["schema_version", "bundle_fingerprint", "paper_id", "paper_code", "proposal_status", "source_identity_verified", "writes_final_truth", "local_ai_verification", "actions", "discovery_proposals"],
+        }
 
     @staticmethod
     def _return_template(paper: Paper, fingerprint: str, targets: list[dict[str, Any]]) -> dict[str, Any]:
@@ -412,7 +588,7 @@ class ContentWebReviewBundleV2Service:
         if not targets:
             return {"actions": []}
         target = targets[0]; evidence = target["evidence"]
-        return {"schema_version": RESULT_SCHEMA, "bundle_fingerprint": fingerprint, "paper_id": str(paper.id), "paper_code": paper.paper_code, "proposal_status": "web_ai_proposal", "source_identity_verified": False, "writes_final_truth": False, "local_ai_verification": None, "actions": [{"plan_item_id": target["plan_item_id"], "target_type": target["target_type"], "target_id": target["target_id"], "field_name": target["field_name"], "object_snapshot_hash": target["object_snapshot_hash"], "decision": "NEEDS_HUMAN", "evidence_ref_ids": [evidence["evidence_ref_id"]], "evidence_quote": evidence["evidence_excerpt"], "evidence_asset_sha256": evidence["evidence_asset_sha256"], "page": evidence["page"]}]}
+        return {"schema_version": RESULT_SCHEMA, "bundle_fingerprint": fingerprint, "paper_id": str(paper.id), "paper_code": paper.paper_code, "proposal_status": "web_ai_proposal", "source_identity_verified": False, "writes_final_truth": False, "local_ai_verification": None, "actions": [{"plan_item_id": target["plan_item_id"], "target_type": target["target_type"], "target_id": target["target_id"], "field_name": target["field_name"], "object_snapshot_hash": target["object_snapshot_hash"], "decision": "NEEDS_HUMAN", "evidence_ref_ids": [evidence["evidence_ref_id"]], "evidence_quote": evidence["evidence_excerpt"], "evidence_asset_sha256": evidence["evidence_asset_sha256"], "page": evidence["page"], "proposed_value": None, "verification_note": None}], "discovery_proposals": []}
 
     @staticmethod
     def _local_requirements() -> dict[str, Any]:
@@ -421,6 +597,16 @@ class ContentWebReviewBundleV2Service:
     @staticmethod
     def _instructions() -> str:
         return "Return only the v2 proposal JSON. Cover every supplied plan item exactly once. Use only supplied evidence_ref_ids, quotes, hashes and page numbers. Do not claim an identity, local verification, final truth, or create a target_id in discovery proposals. This package cannot apply any review result."
+
+    @staticmethod
+    def _local_ai_instruction(bundle_id: UUID) -> str:
+        return (
+            f"Use local-verification plan for bundle_id={bundle_id}. Read only required_object_checks and unique "
+            "page_batches; do not read the whole web package or full paper. Read each unique PDF page once, then "
+            "return one result per object. When available, use the controlled MCP entry "
+            "apply_content_web_review_local_verification after evidence checks; perform unlocked reads first and "
+            "keep any write lock short. Unresolved page targets remain blockers and must not be applied."
+        )
 
     def _paper(self, paper_id: UUID) -> Paper:
         paper = self.session.get(Paper, paper_id)

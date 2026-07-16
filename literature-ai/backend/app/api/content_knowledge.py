@@ -152,6 +152,8 @@ def generate_content_web_review_bundle_v2(
     try:
         result = ContentWebReviewBundleV2Service(session).generate(
             paper_id=UUID(str(payload.get("paper_id"))),
+            module=str(payload["module"]) if payload.get("module") is not None else None,
+            modules=payload.get("modules"),
             created_by=str(payload.get("created_by") or "user"),
         )
         session.commit()
