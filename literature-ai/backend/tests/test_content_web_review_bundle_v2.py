@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 from uuid import UUID
@@ -32,7 +33,7 @@ def _seed(engine, tmp_path):
         claim = MechanismClaim(paper_id=paper.id, claim_type="mechanism", claim_text="Claim evidence", evidence_text="Claim evidence")
         card = WritingCard(paper_id=paper.id, research_gap="Writing-card evidence")
         session.add_all([first, second, claim, card]); session.flush()
-        # A REJECT of this source is consequential, so it must enter the local plan.
+        # Projection flags alone must never make a REJECT consequential.
         session.add(ContentEvidenceItem(paper_id=paper.id, category="mechanism_evidence", source_type="mechanism_claim", source_id=str(claim.id), content="Claim evidence", review_status="validated", citation_status="citable", risk_flags=[]))
         return str(paper.id), str(first.id)
 
@@ -81,11 +82,11 @@ def test_v2_zip_validation_is_proposal_only_and_plan_dedupes_pages(setup_test_db
     assert plan.status_code == 200
     payload = plan.json()
     assert payload["local_required_target_count"] <= payload["web_reviewed_target_count"]
-    assert payload["local_skipped_target_count_by_reason"] == {"ordinary_reject": 0, "needs_human": 1, "discovery_proposals": 1}
+    assert payload["local_skipped_target_count_by_reason"] == {"ordinary_reject": 1, "needs_human": 1, "discovery_proposals": 1}
     assert payload["metrics"]["physical_page_read_attempt_count"] == 0
     assert len([row for row in payload["required_page_checks"] if row["page"] == 4]) == 1
     assert len(payload["required_evidence_checks"]) == payload["local_required_target_count"]
-    assert any(row["decision"] == "REJECT" for row in payload["required_object_checks"])
+    assert all(row["decision"] != "REJECT" for row in payload["required_object_checks"])
     assert payload["unique_page_count"] == payload["metrics"]["logical_page_read_count"]
     assert "apply_content_web_review_local_verification" in payload["local_ai_instruction"]
     assert payload["metrics"]["unresolved_page_target_count"] == payload["unresolved_page_target_count"]
@@ -202,7 +203,7 @@ def test_v2_unlocated_mechanism_still_requires_page_render_and_blocks(setup_test
     with _factory(setup_test_db).begin() as session:
         service = ContentWebReviewBundleV2Service(session)
         bundle = service.generate(paper_id=UUID(paper_id), module="mechanism_knowledge")
-        proposal = _proposal(bundle["manifest"], {"mechanism_claim": "REJECT"})
+        proposal = _proposal(bundle["manifest"], {"mechanism_claim": "PASS"})
         assert service.validate_web_proposal(UUID(bundle["bundle_id"]), proposal)["valid"] is True
         plan = service.local_verification_plan(UUID(bundle["bundle_id"]))
         row = plan["required_object_checks"][0]
@@ -316,3 +317,39 @@ def test_v2_same_pdf_page_with_different_assets_uses_two_page_batches(setup_test
         assert {batch["page_asset_sha256"] for batch in plan["page_batches"]} == {
             row["page_asset_sha256"] for row in plan["required_page_checks"]
         }
+
+
+def test_v2_stale_report_keeps_independent_child_changes_with_other_source_pdf_change(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=UUID(paper_id), module="sections")
+        bundle = service._bundle(UUID(created["bundle_id"]))
+        previous = deepcopy(bundle.manifest)
+        targets = previous["targets"]
+        assert len(targets) >= 2
+        independent_target, pdf_target = targets[:2]
+        source_paper_id = "synthetic-si-paper"
+        old_pdf = {"paper_id": source_paper_id, "sha256": "old-pdf", "path": "old-si.pdf"}
+        new_pdf = {"paper_id": source_paper_id, "sha256": "new-pdf", "path": "new-si.pdf"}
+        previous["source_pdfs"].append(old_pdf)
+        pdf_target["evidence"]["source_paper_id"] = source_paper_id
+        pdf_target["evidence"]["source_pdf_sha256"] = "old-pdf"
+        current = deepcopy(previous)
+        current["source_pdfs"][-1] = new_pdf
+        current_by_id = {item["plan_item_id"]: item for item in current["targets"]}
+        current_independent = current_by_id[independent_target["plan_item_id"]]
+        current_independent["evidence"]["evidence_asset_sha256"] = "independent-evidence-change"
+        current_independent["evidence"]["page_asset_sha256"] = "independent-page-change"
+        current_pdf_target = current_by_id[pdf_target["plan_item_id"]]
+        current_pdf_target["evidence"]["source_pdf_sha256"] = "new-pdf"
+        current_pdf_target["evidence"]["evidence_asset_sha256"] = "pdf-derived-evidence-change"
+        current_pdf_target["evidence"]["page_asset_sha256"] = "pdf-derived-page-change"
+        bundle.manifest = previous
+        service._build_manifest = lambda paper, selected_modules: current
+
+        stale = service._stale_report(bundle)
+
+        assert stale["changed_dependencies"] == ["evidence_ref", "page_asset", "source_pdf"]
+        assert stale["dependency_details"][independent_target["plan_item_id"]] == ["evidence_ref", "page_asset"]
+        assert stale["dependency_details"][pdf_target["plan_item_id"]] == ["source_pdf"]

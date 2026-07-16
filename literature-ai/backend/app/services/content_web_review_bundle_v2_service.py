@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.models import (
-    ContentEvidenceItem,
     ContentWebReviewBundleV2,
+    ContentWebReviewLocalVerificationResult,
     EvidenceLocator,
     MechanismClaim,
     Paper,
@@ -24,6 +24,7 @@ from app.db.models import (
     WritingCard,
 )
 from app.utils.artifact_paths import resolve_paper_pdf_path, resolve_persisted_artifact_path
+from app.utils.review_safety import CONTENT_OBJECT_GATE_POLICY_VERSION, content_object_gate
 
 
 POLICY_VERSION = "content_web_review_bundle_v2.1"
@@ -31,6 +32,9 @@ RESULT_SCHEMA = "content_web_review_proposal_v2"
 DECISIONS = {"PASS", "REVISE", "REJECT", "NEEDS_HUMAN"}
 MODULES = {"abstract", "sections", "mechanism_knowledge", "writing_cards"}
 PLAN_ITEM_NAMESPACE = UUID("4fc7b45c-08f3-58e6-bdf7-8e8420cb1c16")
+TRUSTED_LAYOUT_VERIFIER_SOURCES = {"layout_verifier", "content_layout_verifier"}
+TRUSTED_LAYOUT_STATUSES = {"verified", "consistent", "verified_consistent"}
+TRUSTED_LAYOUT_MIN_CONFIDENCE = 0.95
 TARGET_TYPE_ALIASES = {
     "paper_abstract": {"paper_abstract", "paper", "papers", "Paper"},
     "paper_section": {"paper_section", "paper_sections", "PaperSection"},
@@ -207,7 +211,8 @@ class ContentWebReviewBundleV2Service:
                 blockers.append("page_unlocated")
             if not str(excerpt or "").strip():
                 blockers.append("evidence_excerpt_missing")
-            qualification = self._existing_formal_qualification(paper.id, target_type, target_id)
+            formal_gate = self._formal_gate_snapshot(paper.id, target_type, target_id)
+            qualification = bool(formal_gate["can_use_for_writing"] or formal_gate["can_use_for_citation"])
             evidence = {
                 "evidence_ref_id": evidence_id,
                 "source_paper_id": str(paper.id),
@@ -225,7 +230,8 @@ class ContentWebReviewBundleV2Service:
                 "plan_item_id": plan_item_id, "target_type": target_type, "target_id": target_id,
                 "field_name": field_name, "current_value": value, "object_snapshot_hash": object_hash,
                 "target_label": label, "gate_blockers": sorted(set(blockers)),
-                "existing_formal_qualification": qualification, "evidence": evidence,
+                "existing_formal_qualification": qualification, "formal_gate_snapshot": formal_gate,
+                "evidence": evidence,
             })
         return targets
 
@@ -332,6 +338,7 @@ class ContentWebReviewBundleV2Service:
             required.append({
                 "plan_item_id": target["plan_item_id"], "target_type": target["target_type"], "target_id": target["target_id"],
                 "field_name": target["field_name"], "decision": decision, "object_snapshot_hash": target["object_snapshot_hash"],
+                "formal_gate_snapshot": target["formal_gate_snapshot"],
                 "source_paper_id": evidence["source_paper_id"], "source_pdf_sha256": evidence["source_pdf_sha256"],
                 "evidence_ref_id": evidence["evidence_ref_id"],
                 "page": evidence["page"], "page_asset_sha256": evidence["page_asset_sha256"],
@@ -349,12 +356,16 @@ class ContentWebReviewBundleV2Service:
         object_checks = list(required)
         evidence_checks = self._dedupe(required, ("evidence_ref_id", "evidence_asset_sha256"))
         page_checks = self._dedupe(
-            [item for item in evidence_checks if item["page"] is not None],
+            [item for item in evidence_checks if item["page"] is not None and item["requires_page_render"]],
+            ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"),
+        )
+        optional_page_refs = self._dedupe(
+            [item for item in evidence_checks if item["page"] is not None and not item["requires_page_render"]],
             ("source_paper_id", "source_pdf_sha256", "page", "page_asset_sha256"),
         )
         batches: dict[tuple[Any, Any, Any, Any], list[dict[str, Any]]] = {}
         for item in required:
-            if item["page"] is None:
+            if item["page"] is None or not item["requires_page_render"]:
                 continue
             batches.setdefault(
                 (item["source_paper_id"], item["source_pdf_sha256"], item["page"], item["page_asset_sha256"]),
@@ -378,6 +389,7 @@ class ContentWebReviewBundleV2Service:
             "local_skipped_target_count": sum(skipped.values()), "local_skipped_target_count_by_reason": skipped,
             "required_object_checks": object_checks, "required_evidence_checks": evidence_checks,
             "required_page_checks": page_checks, "unique_page_checks": page_checks,
+            "optional_page_refs": optional_page_refs,
             "unique_page_count": len(page_checks), "page_batches": page_batches,
             "unresolved_page_target_count": len(unresolved), "unresolved_page_blockers": unresolved,
             "local_ai_instruction": self._local_ai_instruction(bundle.id),
@@ -396,53 +408,142 @@ class ContentWebReviewBundleV2Service:
         asset_status = str(evidence.get("page_asset_status") or "")
         if evidence.get("page") is None or layout_status in {"page_unlocated", "page_not_materialized"}:
             return True
-        if "unchecked" in layout_status or asset_status not in {"materialized", "rendered_for_bundle"}:
+        if asset_status != "materialized" or layout_status not in {
+            "verified",
+            "consistent",
+            "verified_consistent",
+        }:
             return True
         if target["target_type"] in {"mechanism_claim", "writing_card"}:
             return True
         content = " ".join(str(value or "") for value in (target.get("current_value"), evidence.get("evidence_excerpt")))
-        return bool(re.search(r"\d|(?:eV|V|mA|A|%|cm|nm|μ|µ|mol|Table|Fig(?:ure)?|equation|formula)", content, re.IGNORECASE))
+        return bool(re.search(
+            r"\d|(?:\beV\b|\bV\b|\bmA\b|\bA\b|%|\bcm\b|\bnm\b|μ|µ|\bmol\b|"
+            r"\bTable\b|\bFig(?:ure)?\b|\bequation\b|\bformula\b)",
+            content,
+            re.IGNORECASE,
+        ))
 
     def _stale_report(self, bundle: ContentWebReviewBundleV2) -> dict[str, Any]:
         paper = self._paper(bundle.paper_id)
         previous = bundle.manifest or {}
         current = self._build_manifest(paper, selected_modules=list(previous.get("selected_modules") or []))
-        changed: list[str] = []
         previous_targets = {item["plan_item_id"]: item for item in previous.get("targets", [])}
         current_targets = {item["plan_item_id"]: item for item in current.get("targets", [])}
-        affected = sorted(set(previous_targets) ^ set(current_targets))
+        applied_results = list(self.session.scalars(
+            select(ContentWebReviewLocalVerificationResult).where(
+                ContentWebReviewLocalVerificationResult.bundle_id == bundle.id,
+                ContentWebReviewLocalVerificationResult.status == "applied",
+            ).order_by(ContentWebReviewLocalVerificationResult.applied_at)
+        ).all())
+        result_by_plan = {str(item.plan_item_id): item for item in applied_results}
+        latest_gate_by_object: dict[tuple[str, str], dict[str, Any]] = {}
+        for result in applied_results:
+            if result.formal_gate_after:
+                latest_gate_by_object[(result.target_type, result.target_id)] = result.formal_gate_after
+        dependency_details: dict[str, set[str]] = {
+            key: {"target"} for key in sorted(set(previous_targets) ^ set(current_targets))
+        }
         for key in sorted(set(previous_targets) & set(current_targets)):
             before, after = previous_targets[key], current_targets[key]
-            if before["object_snapshot_hash"] != after["object_snapshot_hash"]:
-                changed.append("target")
-                affected.append(key)
-            elif before["evidence"]["evidence_asset_sha256"] != after["evidence"]["evidence_asset_sha256"]:
-                changed.append("evidence_ref")
-                affected.append(key)
-            elif before["evidence"]["page_asset_sha256"] != after["evidence"]["page_asset_sha256"]:
-                changed.append("page_asset")
-                affected.append(key)
-        if previous.get("source_pdfs") != current.get("source_pdfs"):
-            changed.append("source_pdf")
-            # The evidence/page hashes derive from this source. Report the
-            # root invalidator once while still propagating to every target.
-            changed = [dependency for dependency in changed if dependency not in {"evidence_ref", "page_asset"}]
-            affected = list(current_targets)
+            applied = result_by_plan.get(key)
+            expected_object_hash = (
+                applied.applied_object_snapshot_hash
+                if applied is not None and applied.applied_object_snapshot_hash
+                else before["object_snapshot_hash"]
+            )
+            expected_gate = latest_gate_by_object.get(
+                (before["target_type"], before["target_id"]),
+                before.get("formal_gate_snapshot"),
+            )
+            target_changed = expected_object_hash != after["object_snapshot_hash"]
+            if target_changed:
+                dependency_details.setdefault(key, set()).add("target")
+            else:
+                if before["evidence"]["evidence_asset_sha256"] != after["evidence"]["evidence_asset_sha256"]:
+                    dependency_details.setdefault(key, set()).add("evidence_ref")
+                if before["evidence"]["page_asset_sha256"] != after["evidence"]["page_asset_sha256"]:
+                    dependency_details.setdefault(key, set()).add("page_asset")
+                if expected_gate != after.get("formal_gate_snapshot"):
+                    dependency_details.setdefault(key, set()).add("review_gate")
+        previous_pdfs = {item.get("paper_id"): item for item in previous.get("source_pdfs", [])}
+        current_pdfs = {item.get("paper_id"): item for item in current.get("source_pdfs", [])}
+        changed_pdf_ids = {
+            paper_id for paper_id in set(previous_pdfs) | set(current_pdfs)
+            if previous_pdfs.get(paper_id) != current_pdfs.get(paper_id)
+        }
+        for key in sorted(set(previous_targets) | set(current_targets)):
+            source_ids = {
+                target.get("evidence", {}).get("source_paper_id")
+                for target in (previous_targets.get(key), current_targets.get(key))
+                if target is not None
+            }
+            if source_ids & changed_pdf_ids:
+                details = dependency_details.setdefault(key, set())
+                # Evidence and page hashes normally derive from the changed
+                # source PDF. Suppress those child reasons only for this
+                # dependent target, never for unrelated targets in the bundle.
+                details.difference_update({"evidence_ref", "page_asset"})
+                details.add("source_pdf")
         if previous.get("policy_version") != current.get("policy_version"):
-            changed.append("policy_version")
-            affected = list(current_targets)
-        return {"is_stale": bool(changed), "changed_dependencies": sorted(set(changed)), "affected_plan_item_ids": sorted(set(affected)), "current_fingerprint": current["bundle_fingerprint"], "dependency_graph": "target -> evidence_ref -> page_asset -> source_pdf -> policy_version"}
+            for key in sorted(set(previous_targets) | set(current_targets)):
+                dependency_details.setdefault(key, set()).add("policy_version")
+        dependency_details = {key: value for key, value in dependency_details.items() if value}
+        changed = sorted({reason for reasons in dependency_details.values() for reason in reasons})
+        return {
+            "is_stale": bool(changed),
+            "changed_dependencies": changed,
+            "affected_plan_item_ids": sorted(dependency_details),
+            "dependency_details": {key: sorted(value) for key, value in sorted(dependency_details.items())},
+            "current_fingerprint": current["bundle_fingerprint"],
+            "dependency_graph": "target -> evidence_ref -> page_asset -> source_pdf -> policy_version",
+        }
 
     def _existing_formal_qualification(self, paper_id: UUID, target_type: str, target_id: str) -> bool:
-        source_types = {"mechanism_claim": "mechanism_claim", "writing_card": "writing_card"}
-        source_type = source_types.get(target_type)
-        if not source_type:
-            return False
-        row = self.session.scalar(select(ContentEvidenceItem).where(
-            ContentEvidenceItem.paper_id == paper_id, ContentEvidenceItem.source_type == source_type,
-            ContentEvidenceItem.source_id == target_id,
-        ))
-        return bool(row and row.citation_status == "citable" and row.review_status in {"validated", "approved", "safe_verified"})
+        gate = self._formal_gate_snapshot(paper_id, target_type, target_id)
+        return bool(gate["can_use_for_writing"] or gate["can_use_for_citation"])
+
+    def _formal_gate_snapshot(self, paper_id: UUID, target_type: str, target_id: str) -> dict[str, Any]:
+        canonical, target = self._resolve_formal_target(paper_id, target_type, target_id)
+        if target is None:
+            return {
+                "policy_version": CONTENT_OBJECT_GATE_POLICY_VERSION,
+                "can_use_for_writing": False,
+                "can_use_for_citation": False,
+                "review_gate_status": "blocked",
+                "locator_status": "unmapped",
+                "blocked_reasons": ["no_real_object_mapping"],
+            }
+        gate = content_object_gate(self.session, canonical, target)
+        return {
+            "policy_version": CONTENT_OBJECT_GATE_POLICY_VERSION,
+            "can_use_for_writing": bool(gate.can_use_for_writing),
+            "can_use_for_citation": bool(gate.can_use_for_citation),
+            "review_gate_status": gate.review_gate_status,
+            "locator_status": gate.locator_status,
+            "blocked_reasons": list(gate.blocked_reasons),
+        }
+
+    def _resolve_formal_target(self, paper_id: UUID, target_type: str, target_id: str) -> tuple[str, Any | None]:
+        if target_type == "paper_abstract":
+            target = self.session.get(Paper, paper_id)
+            return "abstract", target if target is not None and str(target.id) == str(target_id) else None
+        mapping = {
+            "paper_section": ("sections", PaperSection),
+            "mechanism_claim": ("mechanism_claims", MechanismClaim),
+            "writing_card": ("writing_cards", WritingCard),
+        }
+        spec = mapping.get(target_type)
+        if spec is None:
+            return target_type, None
+        canonical, model = spec
+        try:
+            target = self.session.get(model, UUID(str(target_id)))
+        except (TypeError, ValueError):
+            target = None
+        if target is None or getattr(target, "paper_id", None) != paper_id:
+            return canonical, None
+        return canonical, target
 
     @staticmethod
     def _selected_modules(*, module: str | None, modules: list[str] | None) -> list[str]:
@@ -508,10 +609,11 @@ class ContentWebReviewBundleV2Service:
             digest = hashlib.sha256(content).hexdigest()
             bundle_ref = f"evidence/pages/{digest}{asset.suffix.lower() or '.png'}"
             self._page_asset_bytes[bundle_ref] = content
+            layout_status = self._trusted_layout_consistency_status(locator, bbox)
             return {
                 "page_asset_sha256": digest, "page_asset_ref": bundle_ref,
                 "page_asset_status": "materialized", "page_asset_origin": "existing_preview",
-                "layout_consistency_status": "asset_available_unchecked",
+                "layout_consistency_status": layout_status,
             }
         rendered = self._render_selected_page(pdf, page)
         if rendered is not None:
@@ -529,6 +631,19 @@ class ContentWebReviewBundleV2Service:
             "page_asset_status": "not_materialized", "page_asset_origin": "render_failed",
             "layout_consistency_status": "page_unlocated" if page is None else "page_not_materialized",
         }
+
+    @staticmethod
+    def _trusted_layout_consistency_status(locator: EvidenceLocator | None, bbox: dict[str, Any]) -> str:
+        claimed = str(bbox.get("layout_consistency_status") or "").strip().lower()
+        trusted = bool(
+            locator is not None
+            and str(locator.parser_source or "").strip().lower() in TRUSTED_LAYOUT_VERIFIER_SOURCES
+            and str(locator.source_type or "").strip().lower() == "pdf"
+            and str(locator.locator_status or "").strip().lower() in {"exact_page", "exact_bbox"}
+            and float(locator.locator_confidence or 0.0) >= TRUSTED_LAYOUT_MIN_CONFIDENCE
+            and claimed in TRUSTED_LAYOUT_STATUSES
+        )
+        return claimed if trusted else "asset_available_unchecked"
 
     def _render_selected_page(self, pdf: dict[str, Any], page: int) -> bytes | None:
         cache_key = f"render:{pdf.get('sha256')}:{page}"

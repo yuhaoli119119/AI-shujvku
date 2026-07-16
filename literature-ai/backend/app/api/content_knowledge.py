@@ -21,6 +21,9 @@ from app.services.content_review_bundle_service import (
     ContentReviewBundleService,
 )
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
+from app.services.content_web_review_local_verification_service import (
+    ContentWebReviewLocalVerificationService,
+)
 from app.services.content_writing_plan_service import ContentWritingPlanService
 
 router = APIRouter()
@@ -221,6 +224,17 @@ def content_web_review_local_verification_plan_v2(
     except ValueError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/review-bundles/{bundle_id}/local-verification-status")
+def content_web_review_local_verification_status_v2(
+    bundle_id: UUID, session: Session = Depends(get_db_session)
+) -> dict:
+    """Read local-verification progress and canonical formal-gate deltas."""
+    try:
+        return ContentWebReviewLocalVerificationService(session).status(bundle_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/review-bundles/{bundle_id}/validate")

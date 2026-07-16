@@ -192,6 +192,145 @@ class ReviewService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def apply_content_verification_review(
+        self,
+        *,
+        paper_id: UUID,
+        collection: str,
+        target_id: str,
+        field_name: str,
+        original_value: Any,
+        reviewed_value: Any,
+        reviewer_status: str,
+        reviewer: str,
+        reviewer_note: str,
+        evidence_payload: dict[str, Any],
+        write_lock_tokens: list[str] | None,
+        write_lock_owner: str,
+        audit_payload: dict[str, Any] | None = None,
+    ) -> tuple[ExtractionFieldReview, EvidenceLocator | None]:
+        """Upsert one canonical content review under an authenticated module lock.
+
+        This is the controlled same-value/rejection seam used by local content
+        verification. Corrections still flow through ``approve_correction``.
+        """
+
+        aliases = {
+            "abstract": {"abstract", "paper_abstract", "summary", "paper_summary"},
+            "sections": {"sections", "section", "paper_section", "PaperSection"},
+            "mechanism_claims": {"mechanism_claims", "mechanism_claim", "MechanismClaim"},
+            "writing_cards": {"writing_cards", "writing_card", "WritingCard"},
+        }
+        if collection not in aliases:
+            raise ValueError("unsupported_content_verification_target")
+        if reviewer_status not in {"verified", "rejected"}:
+            raise ValueError("unsupported_content_verification_status")
+        module = ModuleWriteLockService.module_from_field(
+            "abstract" if collection == "abstract" else collection,
+            "abstract" if collection == "abstract" else f"{collection}:{target_id}:{field_name}",
+        )
+        ModuleWriteLockService(self.session).require_write(
+            paper_id=paper_id,
+            module_names=[module],
+            lock_tokens=write_lock_tokens,
+            locked_by=write_lock_owner,
+        )
+        anchor = first_pdf_evidence_anchor(evidence_payload)
+        evidence_text = str(
+            (anchor or {}).get("quoted_text") or (anchor or {}).get("evidence_text") or ""
+        ).strip()
+        if not anchor or anchor.get("page") in (None, "") or not evidence_text:
+            raise ValueError("content_verification_exact_pdf_anchor_required")
+
+        rows = list(self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_type.in_(aliases[collection]),
+                ExtractionFieldReview.target_id == str(target_id),
+                ExtractionFieldReview.field_name == field_name,
+            )
+        ).all())
+        canonical = next((row for row in rows if row.target_type == collection), None)
+        review = canonical or ExtractionFieldReview(
+            paper_id=paper_id,
+            target_type=collection,
+            target_id=str(target_id),
+            field_name=field_name,
+        )
+        history = []
+        if isinstance(review.review_payload, dict):
+            history = list(review.review_payload.get("verification_history") or [])
+            history.append({
+                "reviewer_status": review.reviewer_status,
+                "target_resolution_status": review.target_resolution_status,
+                "reviewer": review.reviewer,
+                "reviewed_value": review.reviewed_value,
+            })
+        review.original_value = original_value
+        review.reviewed_value = reviewed_value
+        review.evidence_text = evidence_text
+        review.reviewer_status = reviewer_status
+        review.target_resolution_status = "active" if reviewer_status == "verified" else "rejected"
+        review.reviewer = reviewer
+        review.reviewer_note = reviewer_note
+        review.review_payload = {
+            **(review.review_payload if isinstance(review.review_payload, dict) else {}),
+            "imported_evidence_payload": dict(anchor),
+            "local_verification": dict(audit_payload or {}),
+            "verification_history": history[-20:],
+        }
+        self.session.add(review)
+        for duplicate in rows:
+            if duplicate is review:
+                continue
+            duplicate.reviewer_status = "superseded"
+            duplicate.target_resolution_status = "superseded"
+            duplicate.reviewer_note = f"Superseded by canonical local verification review {review.id}."
+            self.session.add(duplicate)
+
+        locator: EvidenceLocator | None = None
+        if reviewer_status == "verified":
+            locators = list(self.session.scalars(
+                select(EvidenceLocator).where(
+                    EvidenceLocator.paper_id == paper_id,
+                    EvidenceLocator.target_type.in_(aliases[collection]),
+                    EvidenceLocator.target_id == str(target_id),
+                    EvidenceLocator.field_name == field_name,
+                    EvidenceLocator.parser_source.in_(["ide_ai_review", "content_web_local_verification"]),
+                )
+            ).all())
+            locator = next((row for row in locators if row.target_type == collection), None) or EvidenceLocator(
+                paper_id=paper_id,
+                target_type=collection,
+                target_id=str(target_id),
+                field_name=field_name,
+                evidence_text=evidence_text,
+            )
+            for duplicate in locators:
+                if duplicate is not locator:
+                    self.session.delete(duplicate)
+            locator.source_type = "pdf"
+            locator.page = int(anchor["page"])
+            locator.bbox = anchor.get("bbox") if isinstance(anchor.get("bbox"), dict) else None
+            locator.section = str(anchor.get("section") or anchor.get("section_title") or "").strip() or None
+            locator.evidence_text = evidence_text
+            locator.locator_status = "exact_bbox" if locator.bbox else "exact_page"
+            locator.locator_confidence = 1.0
+            locator.parser_source = "content_web_local_verification"
+            locator.warning_reason = None
+            self.session.add(locator)
+
+        self.session.add(AuditLog(
+            paper_id=paper_id,
+            action="apply_content_web_review_local_verification_review",
+            source=reviewer,
+            target_type=collection,
+            target_id=str(target_id),
+            payload={"field_name": field_name, "reviewer_status": reviewer_status, **(audit_payload or {})},
+        ))
+        self.session.flush()
+        return review, locator
+
     def list_corrections(self, status: str | None = "pending") -> list[PaperCorrection]:
         stmt = select(PaperCorrection).order_by(PaperCorrection.created_at.desc())
         if status:

@@ -204,7 +204,10 @@ class ModuleWriteLockService:
         try:
             self.session.flush()
         except IntegrityError as exc:
-            self.session.rollback()
+            # Nested object batches rely on their savepoint to isolate a lock
+            # race. A whole-Session rollback here would erase earlier objects.
+            if not self.session.in_nested_transaction():
+                self.session.rollback()
             raise ModuleWriteLockError("module_write_lock_conflict", "active lock already exists") from exc
         self._audit(lock, action="acquire_module_write_lock", source=owner)
         self.session.flush()

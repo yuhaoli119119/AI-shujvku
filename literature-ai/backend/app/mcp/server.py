@@ -24,6 +24,9 @@ from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, 
 from app.services.discovery_service import DiscoveryService
 from app.services.embedding import get_embedding_service
 from app.services.codex_context_service import CodexContextService
+from app.services.content_web_review_local_verification_service import (
+    ContentWebReviewLocalVerificationService,
+)
 from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
@@ -1094,6 +1097,33 @@ def propose_correction(
             )
         session.refresh(correction)
         return _serialize_correction(correction)
+
+
+@mcp_server.tool(
+    name="apply_content_web_review_local_verification",
+    description=(
+        "Apply authenticated local verification for server-planned content web-review objects. "
+        "The server ignores payload identity, revalidates every object/evidence/page/PDF/policy dependency, "
+        "and internally holds only a short per-object module lock."
+    ),
+)
+def apply_content_web_review_local_verification(
+    bundle_id: str,
+    results: list[dict[str, Any]],
+    partial: bool = False,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    if not auth.identity_verified or not str(auth.source_prefix or "").strip():
+        raise PermissionError("content_web_local_verification_identity_required")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return ContentWebReviewLocalVerificationService(session).apply(
+            bundle_id=UUID(bundle_id),
+            results=results,
+            partial=bool(partial),
+            source_prefix=auth.source_prefix,
+            identity_verified=auth.identity_verified,
+        )
 
 
 @mcp_server.tool(

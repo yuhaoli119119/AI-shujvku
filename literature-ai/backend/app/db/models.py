@@ -756,6 +756,53 @@ class ContentWebReviewBundleV2(Base):
     )
 
 
+class ContentWebReviewLocalVerificationResult(Base):
+    """Idempotent, object-level outcome from the authenticated local verifier."""
+
+    __tablename__ = "content_web_review_local_verification_results"
+    __table_args__ = (
+        sa.UniqueConstraint("bundle_id", "plan_item_id", name="uq_content_web_review_local_result_item"),
+        sa.Index("ix_content_web_review_local_result_bundle_status", "bundle_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    bundle_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("content_web_review_bundles_v2.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    plan_item_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False, index=True)
+    payload_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    target_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    target_id: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    field_name: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    object_snapshot_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    applied_object_snapshot_hash: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    outcome: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    checked_evidence_ids: Mapped[list] = mapped_column(json_type(), default=list)
+    checked_pages: Mapped[list] = mapped_column(json_type(), default=list)
+    verification_note: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    verified_value: Mapped[dict | list | str | int | float | bool | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
+    stale_reasons: Mapped[list] = mapped_column(json_type(), default=list)
+    error_code: Mapped[str | None] = mapped_column(sa.String(160), nullable=True)
+    formal_gate_before: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    formal_gate_after: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    correction_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("paper_corrections.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    review_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("extraction_field_reviews.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    locator_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("evidence_locators.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    applied_by: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    applied_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
 class SourceSnapshotReconciliation(Base):
     """Auditable proof that a legacy review bundle matches a canonical source snapshot."""
 

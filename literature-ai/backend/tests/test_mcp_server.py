@@ -11,7 +11,7 @@ from uuid import UUID
 import pytest
 from docx import Document
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
@@ -37,11 +37,12 @@ from app.db.models import (
 )
 from app.main import app
 from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
-from app.mcp.context import MCPAuthInfo, get_mcp_auth, mcp_auth_context
+from app.mcp.context import MCPAuthInfo, get_mcp_auth, mcp_auth_context, reset_mcp_auth, set_mcp_auth
 from app.mcp.server import (
     append_note,
     approve_correction,
     apply_analysis_review_rules,
+    apply_content_web_review_local_verification,
     acquire_module_write_lock,
     get_correction_detail,
     get_codex_context,
@@ -69,6 +70,7 @@ from app.mcp.server import (
 from app.services.paper_query import PaperQueryService
 from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
 
 
@@ -519,6 +521,83 @@ def test_mcp_query_note_and_correction_workflow(mcp_test_env):
             "propose_correction",
             "approve_correction",
         ]
+
+
+def test_apply_content_web_review_local_verification_uses_authenticated_internal_short_lock(mcp_test_env):
+    root = mcp_test_env["tmpdir"]
+    pdf = root / "content-local.pdf"
+    preview = root / "content-page.png"
+    pdf.write_bytes(b"%PDF-1.4\ncontent\n%%EOF")
+    preview.write_bytes(b"verified page asset")
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="content local MCP", paper_code="MCP-CONTENT", pdf_path=str(pdf), authors=[])
+        session.add(paper); session.flush()
+        section = PaperSection(paper_id=paper.id, section_title="Results", text="grounded statement", page_start=1, page_end=1)
+        session.add(section); session.flush()
+        session.add(EvidenceLocator(
+            paper_id=paper.id, target_type="paper_section", target_id=str(section.id), field_name="text",
+            source_type="pdf", page=1, evidence_text=section.text, locator_status="exact_page",
+            locator_confidence=1.0, parser_source="layout_verifier",
+            bbox={"full_page_image_path": str(preview), "layout_consistency_status": "verified"},
+        ))
+        session.flush()
+        bundle_service = ContentWebReviewBundleV2Service(session)
+        created = bundle_service.generate(paper_id=paper.id, module="sections")
+        target = created["manifest"]["targets"][0]
+        evidence = target["evidence"]
+        proposal = {
+            "schema_version": "content_web_review_proposal_v2",
+            "bundle_fingerprint": created["manifest"]["bundle_fingerprint"],
+            "paper_id": str(paper.id),
+            "paper_code": paper.paper_code,
+            "proposal_status": "web_ai_proposal",
+            "source_identity_verified": False,
+            "writes_final_truth": False,
+            "local_ai_verification": None,
+            "actions": [{
+                "plan_item_id": target["plan_item_id"], "target_type": target["target_type"],
+                "target_id": target["target_id"], "field_name": target["field_name"],
+                "object_snapshot_hash": target["object_snapshot_hash"], "decision": "PASS",
+                "evidence_ref_ids": [evidence["evidence_ref_id"]], "evidence_quote": evidence["evidence_excerpt"],
+                "evidence_asset_sha256": evidence["evidence_asset_sha256"], "page": evidence["page"],
+                "proposed_value": None, "verification_note": None,
+            }],
+            "discovery_proposals": [],
+        }
+        assert bundle_service.validate_web_proposal(UUID(created["bundle_id"]), proposal)["valid"]
+        check = bundle_service.local_verification_plan(UUID(created["bundle_id"]))["required_object_checks"][0]
+        assert check["requires_page_render"] is False
+        session.commit()
+        bundle_id = created["bundle_id"]
+        result = {
+            "plan_item_id": check["plan_item_id"],
+            "object_snapshot_hash": check["object_snapshot_hash"],
+            "outcome": "CONFIRMED",
+            "checked_evidence_ids": [check["evidence_ref_id"]],
+            "checked_pages": [],
+            "verification_note": "authenticated local conclusion",
+        }
+
+    with mcp_auth_context(_auth()):
+        applied = apply_content_web_review_local_verification(bundle_id=bundle_id, results=[result])
+    assert applied["status"] == "finalized"
+    assert applied["submitted_results"][0]["applied_by"] == "claude"
+    with Session(mcp_test_env["engine"]) as session:
+        assert session.scalar(select(func.count()).select_from(ModuleWriteLock).where(ModuleWriteLock.status == "active")) == 0
+
+    with mcp_auth_context(_export_auth()):
+        with pytest.raises(PermissionError, match="propose_corrections"):
+            apply_content_web_review_local_verification(bundle_id=bundle_id, results=[result])
+
+    token = set_mcp_auth(MCPAuthInfo(
+        source_prefix="open_mcp", display_name="Open", capabilities=frozenset({"propose_corrections"}),
+        raw_key="", source_identity="mcp:open_mcp", identity_verified=False,
+    ))
+    try:
+        with pytest.raises(PermissionError, match="identity_required"):
+            apply_content_web_review_local_verification(bundle_id=bundle_id, results=[result])
+    finally:
+        reset_mcp_auth(token)
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
