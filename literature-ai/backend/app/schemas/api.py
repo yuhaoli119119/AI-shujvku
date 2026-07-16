@@ -305,6 +305,10 @@ class MechanismClaimResponse(BaseModel):
     evidence_types: list[Any] = Field(default_factory=list)
     confidence: float | None = None
     evidence_text: str | None = None
+    candidate_status: str = "candidate_unverified"
+    review_status: str = "missing"
+    can_use_for_writing: bool = False
+    can_use_for_citation: bool = False
     evidence_status: str = "missing"
     locator_status: str = "missing_locator"
     confidence_status: str = "missing"
@@ -345,6 +349,8 @@ class WritingCardResponse(BaseModel):
     introduction_logic: str | None = None
     discussion_logic: str | None = None
     evidence_chain_status: str = "missing"
+    candidate_status: str = "candidate_unverified"
+    review_status: str = "missing"
     review_gate_status: str = "blocked"
     can_use_for_writing: bool = False
     blocked_reasons: list[str] = Field(default_factory=list)

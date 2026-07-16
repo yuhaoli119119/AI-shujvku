@@ -38,7 +38,7 @@ function renderWorkspaceHeader(paper) {
             badge(counts.figures, "\u56fe\u7247\u6570\u91cf") +
             badge(counts.dft_results, "DFT \u6570\u91cf") +
             badge(counts.sections, "\u7ae0\u8282\u6570\u91cf") +
-            badge(counts.mechanism_claims, "\u673a\u7406\u58e0\u660e\u6570\u91cf") +
+            badge(counts.mechanism_claims, "\u673a\u7406\u58f0\u660e\u6570\u91cf") +
             badge(counts.writing_cards, "\u5199\u4f5c\u5361\u7247\u6570\u91cf");
     }
     if (topicEl) topicEl.value = paper.title_zh || paper.title || "";
@@ -491,6 +491,9 @@ const DETAIL_FIELD_LABELS = {
     catalyst: "催化剂",
     catalyst_sample_id: "关联催化剂样本 ID",
     candidate_status: "候选状态",
+    review_status: "审核状态",
+    can_use_for_writing: "可用于写作",
+    can_use_for_citation: "可用于引用",
     adsorbate: "吸附物",
     energy_type: "能量类型",
     property_type: "能量类型",

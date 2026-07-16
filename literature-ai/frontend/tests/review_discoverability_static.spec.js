@@ -46,4 +46,9 @@ test('review center exposes the canonical text_review prompt action', () => {
   expect(page).toContain('kind: "text_review"');
   expect(page).toContain('buildIdePromptForCopy(actionConfig)');
   expect(page).toContain('const template = profileTemplates[kind] || templates[kind] || compositeTemplates[kind];');
+  expect(page).toContain('每个要用于正式写作的 section、writing_card、mechanism_claim');
+  expect(page).toContain('[AI_REVIEWED] review note 只能作为说明，不能授予 RAG、写作或引用资格');
+  expect(page).toContain('get_codex_item、get_paper 或 retrieve_evidence 回读');
+  expect(page).toContain('安全门未通过时必须报告仍为候选');
+  expect(page).not.toContain('也必须写 [AI_REVIEWED] review_notes');
 });

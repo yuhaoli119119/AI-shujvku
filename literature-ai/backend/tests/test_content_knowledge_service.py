@@ -123,12 +123,15 @@ def test_content_knowledge_unifies_sources_and_preserves_safety_policies(setup_t
     assert mechanism["category"] == "mechanism_evidence"
     assert mechanism["citation_policy"] == "needs_review"
     assert mechanism["can_use_for_citation"] is False
-    assert mechanism["review_status"] == "needs_review"
+    assert mechanism["review_status"] == "missing"
 
     writing = grouped["writing_card"][0]
     assert writing["category"] == "writing_material"
-    assert writing["citation_policy"] == "writing_only"
-    assert writing["can_use_for_writing"] is True
+    assert writing["candidate_status"] == "candidate_unverified"
+    assert writing["review_status"] == "needs_review"
+    assert writing["review_gate_status"] == "blocked"
+    assert writing["citation_policy"] == "needs_review"
+    assert writing["can_use_for_writing"] is False
     assert writing["can_use_for_citation"] is False
     assert "verified" not in writing["citation_policy"]
 

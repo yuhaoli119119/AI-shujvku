@@ -10,6 +10,8 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
+    ExtractionFieldReview,
     MechanismClaim,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
@@ -525,7 +527,7 @@ def test_figure_detail_marks_duplicate_figure_number_as_direct_delete_eligible()
         engine.dispose()
 
 
-def test_detail_review_status_recognizes_legacy_ai_materialized_records():
+def test_detail_review_status_legacy_notes_and_unlocated_correction_do_not_unlock_sections():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -588,13 +590,14 @@ def test_detail_review_status_recognizes_legacy_ai_materialized_records():
 
             detail = PaperQueryService(session).get_paper_detail(paper.id)
 
-            assert detail.sections_review_status == "ai_verified"
+            assert detail.abstract_review_status == "raw_only"
+            assert detail.sections_review_status == "raw_only"
             assert detail.figures_review_status == "ai_verified"
 
         engine.dispose()
 
 
-def test_detail_review_status_recognizes_approved_ide_ai_corrections():
+def test_detail_review_status_rejects_approved_section_correction_without_exact_pdf_evidence():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -628,7 +631,251 @@ def test_detail_review_status_recognizes_approved_ide_ai_corrections():
 
             detail = PaperQueryService(session).get_paper_detail(paper.id)
 
+            assert detail.sections_review_status == "raw_only"
+
+        engine.dispose()
+
+
+def test_detail_review_status_requires_verified_review_and_exact_page_locator_for_section():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Safe section summary", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            section = PaperSection(
+                paper_id=paper.id,
+                section_title="Results",
+                section_type="results",
+                text="The verified section is supported by exact PDF evidence.",
+                page_start=4,
+                page_end=4,
+            )
+            session.add(section)
+            session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="sections",
+                        target_id=str(section.id),
+                        field_name="text",
+                        reviewed_value=section.text,
+                        evidence_text="The verified section is supported by exact PDF evidence.",
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        page=4,
+                        target_type="sections",
+                        target_id=str(section.id),
+                        field_name="text",
+                        evidence_text="The verified section is supported by exact PDF evidence.",
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
             assert detail.sections_review_status == "ai_verified"
+
+        engine.dispose()
+
+
+def test_detail_review_status_mixed_sections_is_partially_verified():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(title="Mixed section summary", pdf_path="paper.pdf", authors=["A"])
+            session.add(paper)
+            session.flush()
+            reviewed = PaperSection(
+                paper_id=paper.id,
+                section_title="Results",
+                section_type="results",
+                text="Reviewed exact-page section.",
+                page_start=5,
+                page_end=5,
+            )
+            raw = PaperSection(
+                paper_id=paper.id,
+                section_title="Discussion",
+                section_type="discussion",
+                text="Unreviewed section remains raw.",
+                page_start=6,
+                page_end=6,
+            )
+            session.add_all([reviewed, raw])
+            session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="sections",
+                        target_id=str(reviewed.id),
+                        field_name="text",
+                        reviewed_value=reviewed.text,
+                        evidence_text=reviewed.text,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        page=5,
+                        target_type="sections",
+                        target_id=str(reviewed.id),
+                        field_name="text",
+                        evidence_text=reviewed.text,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail.sections_review_status == "partially_verified"
+
+        engine.dispose()
+
+
+def test_detail_review_status_notes_do_not_unlock_abstract_sections_or_writing_card():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(
+                title="Note-only summary",
+                abstract="An unreviewed abstract.",
+                pdf_path="paper.pdf",
+                authors=["A"],
+            )
+            session.add(paper)
+            session.flush()
+            section = PaperSection(
+                paper_id=paper.id,
+                section_title="Introduction",
+                section_type="introduction",
+                text="An unreviewed section.",
+                page_start=1,
+                page_end=1,
+            )
+            card = WritingCard(
+                paper_id=paper.id,
+                paper_type="research",
+                research_gap="A grounded but unreviewed research gap.",
+                proposed_solution="A grounded but unreviewed proposed solution.",
+                evidence_chain=[
+                    {
+                        "text": "A grounded but unreviewed research gap.",
+                        "page": 1,
+                        "source": "Introduction",
+                        "locator_status": "exact_page",
+                        "supports_fields": ["research_gap"],
+                    },
+                    {
+                        "text": "A grounded but unreviewed proposed solution.",
+                        "page": 1,
+                        "source": "Introduction",
+                        "locator_status": "exact_page",
+                        "supports_fields": ["proposed_solution"],
+                    },
+                ],
+            )
+            session.add_all([section, card])
+            session.flush()
+            session.add_all(
+                [
+                    PaperNote(
+                        paper_id=paper.id,
+                        source="ide_ai",
+                        field_name="abstract",
+                        content="[AI_REVIEWED] abstract checked",
+                    ),
+                    PaperNote(
+                        paper_id=paper.id,
+                        source="ide_ai",
+                        field_name="sections",
+                        content="[AI_REVIEWED] sections checked",
+                    ),
+                    PaperNote(
+                        paper_id=paper.id,
+                        source="ide_ai",
+                        field_name="writing_cards",
+                        content="[AI_REVIEWED] writing cards checked",
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail.abstract_review_status == "raw_only"
+            assert detail.sections_review_status == "raw_only"
+            assert detail.writing_cards_review_status == "raw_only"
+
+        engine.dispose()
+
+
+def test_detail_review_status_accepts_abstract_only_with_safe_review_and_exact_page_locator():
+    with TemporaryDirectory() as tmpdir:
+        engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+        Base.metadata.create_all(engine)
+
+        with Session(engine) as session:
+            paper = Paper(
+                title="Safe abstract summary",
+                abstract="A PDF-verified abstract.",
+                pdf_path="paper.pdf",
+                authors=["A"],
+            )
+            session.add(paper)
+            session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="abstract",
+                        target_id=str(paper.id),
+                        field_name="abstract",
+                        reviewed_value=paper.abstract,
+                        evidence_text="A PDF-verified abstract.",
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        page=1,
+                        target_type="abstract",
+                        target_id=str(paper.id),
+                        field_name="abstract",
+                        evidence_text="A PDF-verified abstract.",
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
+            session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+
+            assert detail.abstract_review_status == "ai_verified"
 
         engine.dispose()
 
@@ -801,19 +1048,55 @@ def test_list_papers_with_filters():
             session.add(pa)
             session.flush()
             session.add(DFTResult(paper_id=pa.id, property_type="adsorption_energy", value=-1.0))
-            session.add(WritingCard(paper_id=pa.id, paper_type="mixed"))
-            session.add(
-                PaperCorrection(
-                    paper_id=pa.id,
-                    source="ide_ai",
-                    field_name="writing_cards",
-                    target_path="writing_cards",
-                    operation="replace",
-                    proposed_value={"status": "reviewed"},
-                    reason="IDE AI approved writing card.",
-                    status="approved",
-                    reviewed_by="ide_ai",
-                )
+            reviewed_card = WritingCard(
+                paper_id=pa.id,
+                paper_type="mixed",
+                research_gap="Verified writing-card research gap.",
+                proposed_solution="Verified writing-card proposed solution.",
+                evidence_chain=[
+                    {
+                        "text": "Verified writing-card research gap.",
+                        "page": 2,
+                        "source": "Introduction",
+                        "locator_status": "exact_page",
+                        "supports_fields": ["research_gap"],
+                    },
+                    {
+                        "text": "Verified writing-card proposed solution.",
+                        "page": 2,
+                        "source": "Introduction",
+                        "locator_status": "exact_page",
+                        "supports_fields": ["proposed_solution"],
+                    },
+                ],
+            )
+            session.add(reviewed_card)
+            session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=pa.id,
+                        target_type="writing_cards",
+                        target_id=str(reviewed_card.id),
+                        field_name="research_gap",
+                        reviewed_value=reviewed_card.research_gap,
+                        evidence_text=reviewed_card.research_gap,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                    ),
+                    EvidenceLocator(
+                        paper_id=pa.id,
+                        source_type="pdf",
+                        page=2,
+                        target_type="writing_cards",
+                        target_id=str(reviewed_card.id),
+                        field_name="research_gap",
+                        evidence_text=reviewed_card.research_gap,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
             )
 
             # Paper B: 2023, JACS, no DFT, no writing cards

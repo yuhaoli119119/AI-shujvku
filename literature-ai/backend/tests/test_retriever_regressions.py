@@ -19,6 +19,7 @@ from app.db.models import (
     ContentReviewBundle,
     DFTResult,
     EvidenceClaim,
+    EvidenceLocator,
     EvidenceSpan,
     ExtractionFieldReview,
     FigureDataPoint,
@@ -332,6 +333,32 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
                     evidence_text=dft.evidence_text,
                 )
             )
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="writing_cards",
+                        target_id=str(writing_card.id),
+                        field_name="research_gap",
+                        reviewed_value=writing_card.research_gap,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text=writing_card.research_gap,
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="writing_cards",
+                        target_id=str(writing_card.id),
+                        field_name="research_gap",
+                        evidence_text=writing_card.research_gap,
+                        page=6,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
             session.commit()
 
             retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption energy Figure 2", [paper.id], 5)
@@ -364,7 +391,7 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
             assert retrieved["writing_cards"][0]["source_id"] == str(writing_card.id)
             assert retrieved["writing_cards"][0]["paper_code"] == "A0002"
             assert retrieved["writing_cards"][0]["page"] == 6
-            assert retrieved["writing_cards"][0]["review_status"] == "content_verified"
+            assert retrieved["writing_cards"][0]["review_status"] == "safe_verified"
 
         engine.dispose()
 

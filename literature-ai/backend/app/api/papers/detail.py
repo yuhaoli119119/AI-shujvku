@@ -277,6 +277,7 @@ def get_paper(
             chart_run_id=chart_run_id,
             include_expensive_status=(mode == "full"),
             include_dft_payload=(mode == "full"),
+            include_mechanism_claims_payload=(mode in {"content", "full"}),
         )
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")

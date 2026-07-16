@@ -154,7 +154,7 @@ def test_ide_prompts_always_require_http_mcp_key(monkeypatch):
     assert payload["mcp_url"].endswith("/mcp")
     assert payload["cursor_config"]["mcpServers"]["literature-ai"]["command"] in {"npx", "npx.cmd"}
     assert "--header" in payload["cursor_config"]["mcpServers"]["literature-ai"]["args"]
-    assert payload["prompt_schema_version"] == "ide_review_prompt_v18"
+    assert payload["prompt_schema_version"] == "ide_review_prompt_v19"
     by_source = {item["source_prefix"]: item for item in payload["mcp_key_role_examples"]}
     assert "dft_primary_repair" not in by_source
     assert "repair_dft_issues" not in by_source["ide_ai"]["capabilities"]

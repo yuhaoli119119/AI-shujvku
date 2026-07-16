@@ -41,7 +41,7 @@ def build_rag_quality_summary(
     writing_summary = _summarize_items(
         writing_cards,
         lambda item: writing_card_is_rag_eligible(session, item),
-        _writing_card_block_reasons,
+        lambda item: _writing_card_block_reasons(session, item),
     )
     return {
         "figures": figure_summary,
@@ -224,8 +224,8 @@ def _dft_minimum_field_reasons(row: DFTResult) -> list[str]:
     return reasons
 
 
-def _writing_card_block_reasons(card: WritingCard) -> list[str]:
-    gate = writing_card_gate(card)
+def _writing_card_block_reasons(session: Session, card: WritingCard) -> list[str]:
+    gate = writing_card_gate(session, card)
     if gate.blocked_reasons:
         return list(gate.blocked_reasons)
     return ["unreviewed"]

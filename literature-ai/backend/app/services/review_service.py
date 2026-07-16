@@ -16,6 +16,7 @@ from app.db.models import (
     DFTSetting,
     ElectrochemicalPerformance,
     EvidenceLocator,
+    ExtractionFieldReview,
     MechanismClaim,
     Paper,
     PaperCorrection,
@@ -27,7 +28,12 @@ from app.db.models import (
 )
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
-from app.utils.evidence_anchors import first_evidence_anchor, has_evidence_anchor, has_material_correction_anchor
+from app.utils.evidence_anchors import (
+    first_evidence_anchor,
+    first_pdf_evidence_anchor,
+    has_evidence_anchor,
+    has_material_correction_anchor,
+)
 from app.utils.figure_delete_policy import direct_delete_eligibility, normalized_figure_identity
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
 from app.services.catalyst_sample_identity import clean_sample_payload, resolve_sample_identity
@@ -43,6 +49,9 @@ class ReviewService:
     TRUSTED_LOCK_BYPASS_REVIEWERS = {"admin", "human", "curator", "system"}
     DIRECT_AI_LOCK_REVIEWERS = {"ide_ai", "ai_writer", "codex", "gemini", "claude", "glm", "openai", "chatgpt"}
     DIRECT_AI_LOCK_PREFIXES = ("ai_", "ide_ai", "codex_", "gemini_", "claude_", "glm_", "openai_")
+    CONTENT_REVIEW_TARGETS = frozenset(
+        {"abstract", "sections", "writing_cards", "mechanism_claims", "electrochemical_performance"}
+    )
     ALLOWED_PAPER_FIELDS = {
         "doi",
         "title",
@@ -501,6 +510,13 @@ class ReviewService:
 
             setattr(paper, correction.field_name, correction.proposed_value)
             self.session.add(paper)
+            if correction.field_name == "abstract":
+                self._sync_content_review_records(
+                    correction,
+                    collection="abstract",
+                    record=paper,
+                    field_values={"abstract": correction.proposed_value},
+                )
             return
 
         if correction.field_name in self.STRUCTURED_TARGETS:
@@ -837,6 +853,7 @@ class ReviewService:
 
     def _apply_structured_correction(self, correction: PaperCorrection) -> None:
         record, spec, attribute = self._resolve_structured_target(correction)
+        original_value = getattr(record, attribute, None)
         proposed_value = correction.proposed_value
         if spec.model is PaperFigure and attribute == "image_path":
             proposed_value = self._validated_relative_artifact_path(proposed_value)
@@ -881,6 +898,130 @@ class ReviewService:
         if isinstance(record, PaperFigure) and attribute in {"caption", "content_summary"}:
             record.content_summary = normalize_figure_content_summary(record.content_summary, record.caption)
         self.session.add(record)
+        self._sync_content_review_records(
+            correction,
+            collection=correction.field_name,
+            record=record,
+            field_values={attribute: getattr(record, attribute, None)},
+            original_values={attribute: original_value},
+        )
+
+    def _sync_content_review_records(
+        self,
+        correction: PaperCorrection,
+        *,
+        collection: str,
+        record: Any,
+        field_values: dict[str, Any],
+        original_values: dict[str, Any] | None = None,
+    ) -> None:
+        if collection not in self.CONTENT_REVIEW_TARGETS:
+            return
+        source = str(correction.source or "").strip().lower()
+        reviewer = str(correction.reviewed_by or "").strip().lower()
+        if (
+            source != "ide_ai"
+            and not self._reviewer_requires_module_lock(source)
+            and not self._reviewer_requires_module_lock(reviewer)
+        ):
+            return
+        target_id = getattr(record, "id", None)
+        if target_id is None or str(target_id).strip().lower() in {"", "new"}:
+            raise ValueError("content_review_target_id_missing")
+        anchor = first_pdf_evidence_anchor(correction.evidence_payload)
+        evidence_text = str(
+            (anchor or {}).get("quoted_text") or (anchor or {}).get("evidence_text") or ""
+        ).strip()
+        safe_anchor = bool(anchor and anchor.get("page") not in (None, "") and evidence_text)
+        for field_name, reviewed_value in field_values.items():
+            review = self.session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == correction.paper_id,
+                    ExtractionFieldReview.target_type == collection,
+                    ExtractionFieldReview.target_id == str(target_id),
+                    ExtractionFieldReview.field_name == field_name,
+                )
+            ).first()
+            if not safe_anchor:
+                if review is not None:
+                    review.reviewer_status = "stale"
+                    review.target_resolution_status = "stale"
+                    review.reviewer_note = "Object changed without exact PDF page and quoted evidence."
+                    self.session.add(review)
+                continue
+            review_payload = dict(review.review_payload or {}) if review is not None and isinstance(review.review_payload, dict) else {}
+            review_payload.update(
+                {
+                    "source_correction_id": str(correction.id),
+                    "source_pdf": dict(correction.evidence_payload or {}).get("source_pdf")
+                    if isinstance(correction.evidence_payload, dict)
+                    else None,
+                    "imported_evidence_payload": dict(anchor),
+                }
+            )
+            if review is None:
+                review = ExtractionFieldReview(
+                    paper_id=correction.paper_id,
+                    target_type=collection,
+                    target_id=str(target_id),
+                    field_name=field_name,
+                )
+            review.original_value = (original_values or {}).get(field_name)
+            review.reviewed_value = reviewed_value
+            review.evidence_text = evidence_text
+            review.reviewer_status = "verified"
+            review.target_resolution_status = "active"
+            review.reviewer = correction.reviewed_by or correction.source
+            review.reviewer_note = correction.reason
+            review.review_payload = review_payload
+            self.session.add(review)
+            self._upsert_content_evidence_locator(
+                correction,
+                collection=collection,
+                target_id=str(target_id),
+                field_name=field_name,
+                anchor=dict(anchor),
+                evidence_text=evidence_text,
+            )
+
+    def _upsert_content_evidence_locator(
+        self,
+        correction: PaperCorrection,
+        *,
+        collection: str,
+        target_id: str,
+        field_name: str,
+        anchor: dict[str, Any],
+        evidence_text: str,
+    ) -> None:
+        rows = self.session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id == correction.paper_id,
+                EvidenceLocator.target_type == collection,
+                EvidenceLocator.target_id == target_id,
+                EvidenceLocator.field_name == field_name,
+                EvidenceLocator.parser_source == "ide_ai_review",
+            )
+        ).all()
+        locator = rows[0] if rows else EvidenceLocator(
+            paper_id=correction.paper_id,
+            target_type=collection,
+            target_id=target_id,
+            field_name=field_name,
+            evidence_text=evidence_text,
+        )
+        for duplicate in rows[1:]:
+            self.session.delete(duplicate)
+        locator.source_type = "pdf"
+        locator.page = int(anchor["page"])
+        locator.bbox = anchor.get("bbox") if isinstance(anchor.get("bbox"), dict) else None
+        locator.section = str(anchor.get("section") or anchor.get("section_title") or "").strip() or None
+        locator.evidence_text = evidence_text
+        locator.locator_status = "exact_bbox" if locator.bbox else "exact_page"
+        locator.locator_confidence = 1.0
+        locator.parser_source = "ide_ai_review"
+        locator.warning_reason = None
+        self.session.add(locator)
 
     def _apply_structured_delete(self, correction: PaperCorrection) -> None:
         collection, row_id_text, attribute = self._parse_structured_target_path(correction.target_path)
@@ -1046,6 +1187,12 @@ class ReviewService:
             },
         }
         self.session.add(correction)
+        self._sync_content_review_records(
+            correction,
+            collection=collection,
+            record=record,
+            field_values={field: getattr(record, field, None) for field in cleaned},
+        )
         self.session.add(
             AuditLog(
                 paper_id=correction.paper_id,

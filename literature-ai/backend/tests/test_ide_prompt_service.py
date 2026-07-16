@@ -12,7 +12,7 @@ NON_DFT_KINDS = {"overall", "figure", "table", "sections_writing", "text_review"
 def test_prompt_contract_has_separate_templates_and_no_composite_prompt():
     contract = prompt_contract()
 
-    assert contract["schema_version"] == PROMPT_SCHEMA_VERSION == "ide_review_prompt_v18"
+    assert contract["schema_version"] == PROMPT_SCHEMA_VERSION == "ide_review_prompt_v19"
     assert contract["canonical_mcp_path"] == CANONICAL_MCP_PATH == "/mcp"
     assert set(contract["supported_kinds"]) == {
         "overall",
@@ -103,6 +103,11 @@ def test_text_modules_have_non_overlapping_scopes():
     assert "只处理 abstract 和 mechanism_claims" in text
     assert "claim_text" in text
     for prompt in (sections, text):
+        assert "对象级" in prompt
+        assert "真实对象 UUID" in prompt
+        assert "不能只写 [AI_REVIEWED] note" in prompt
+        assert "retrieve_evidence" in prompt
+        assert "仍为候选" in prompt
         assert "update_table" not in prompt
         assert "review_figure" not in prompt
         assert "repair_dft" not in prompt

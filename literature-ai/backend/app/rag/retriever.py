@@ -512,6 +512,8 @@ class Retriever:
                 continue
             locator = self._primary_evidence_locator(row, target_type="mechanism_claims")
             locator_page = locator.get("page") if isinstance(locator, dict) else None
+            locator_evidence_text = locator.get("evidence_text") if isinstance(locator, dict) else None
+            evidence_text = locator_evidence_text or row.evidence_text or row.claim_text
             results.append(
                 {
                     "type": "mechanism_claim",
@@ -520,7 +522,7 @@ class Retriever:
                         source_type="mechanism_claim",
                         source_id=row.id,
                         paper_id=row.paper_id,
-                        evidence_text=row.evidence_text or row.claim_text,
+                        evidence_text=evidence_text,
                         review_status=gate.review_status,
                         page=locator_page,
                     ),
@@ -530,7 +532,7 @@ class Retriever:
                     "score_breakdown": score_info,
                     "text": row.claim_text,
                     "claim_type": row.claim_type,
-                    "evidence_text": row.evidence_text,
+                    "evidence_text": evidence_text,
                     "evidence_types": row.evidence_types or [],
                     "page_start": locator_page,
                     "page_end": locator_page,
@@ -570,7 +572,7 @@ class Retriever:
         )
         results = []
         for row in rows:
-            gate = writing_card_gate(row)
+            gate = writing_card_gate(self.session, row)
             if not is_rag_eligible(self.session, row, "writing_card"):
                 continue
             haystack = " ".join(

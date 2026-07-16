@@ -13,7 +13,7 @@ from app.domain.project_library_context import (
 from app.domain.reaction_taxonomy import REACTION_TYPES, get_reaction_profile, normalize_reaction_type
 
 
-PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v18"
+PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v19"
 CANONICAL_MCP_PATH: Final = "/mcp"
 TARGET_LIST_TOKEN: Final = "{{TARGET_LIST}}"
 SOURCE_LABEL_TOKEN: Final = "{{SOURCE_LABEL}}"
@@ -51,7 +51,8 @@ _COMMON_RULES = """你正在执行 Literature AI 的单篇论文审核任务。
 3. 先调用 get_codex_context；只有 pdf_quality_status 为 A_text_readable 或 B_text_partial、parse_allowed 不是 false 且证据入口可用时继续，否则报告明确的 blocked_by_* 原因。
 4. 用 get_codex_item 和 read_paper_page 核对原 PDF；禁止用本地下载、pdftotext 或自写脚本绕过证据入口。
 5. 所有修改必须带页码和本模块对应的结构化证据，并在写入后回读确认。
-6. 只有回读确认成功才能报告 completed；证据冲突报告 needs_manual_review，工具或证据不可用报告 blocked。"""
+6. review note 只能作为说明，不能授予 RAG、写作或引用资格；正式写作对象必须留下绑定真实对象 UUID 的对象级审核和 PDF 页证据。
+7. 写回后使用 get_codex_item、get_paper 或 retrieve_evidence 回读；只有安全门通过才能报告 completed，仍未通过时必须报告 candidate，证据冲突报告 needs_manual_review，工具或证据不可用报告 blocked。"""
 
 
 _DFT_SHARED_RULES = """目标文献：
@@ -109,11 +110,13 @@ _MODULE_RULES = {
     "sections_writing": """任务：审核章节与写作卡。
 - 章节核对 section_title、section_type、text、page_start/page_end、section_level、section_number、parent_heading 和 heading_path。
 - 写作卡只能引用已核对的 PDF 证据；修正或创建使用 import_analysis，并附 page、quoted_text 和 source_pdf。
-- 只处理 sections 和 writing_cards；其他问题交给对应专项任务。写入后回读确认。""",
+- 每个要用于正式写作的 section 和 writing_card 都必须有对象 UUID、对象级受控 correction 审核以及精确 PDF 页证据；已有对象无须改字时也要对真实字段提交值不变的受控 replace，不能只写 [AI_REVIEWED] note。
+- 只处理 sections 和 writing_cards；其他问题交给对应专项任务。写入后用 get_codex_item/get_paper/retrieve_evidence 回读，安全门未通过时明确报告仍为候选。""",
     "text_review": """任务：审核摘要与机理声明。
 - 摘要必须忠实于原文；机理声明核对 claim_text、claim_type、key_species、mechanism_direction 和 evidence_text。
 - 修正或创建使用 import_analysis，并附 page、quoted_text 和 source_pdf。
-- 只处理 abstract 和 mechanism_claims；其他问题交给对应专项任务。写入后回读确认。""",
+- 每个要用于正式写作或引用的 mechanism_claim 都必须有对象 UUID、对象级受控 correction 审核以及精确 PDF 页证据；已有对象无须改字时也要对真实字段提交值不变的受控 replace，不能只写 [AI_REVIEWED] note。
+- 只处理 abstract 和 mechanism_claims；其他问题交给对应专项任务。写入后用 get_codex_item/get_paper/retrieve_evidence 回读，安全门未通过时明确报告仍为候选。""",
 }
 
 

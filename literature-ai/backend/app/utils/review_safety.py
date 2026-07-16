@@ -17,8 +17,11 @@ from app.db.models import (
     EvidenceSpan,
     ExtractionFieldReview,
     ExternalAnalysisCandidate,
+    PaperCorrection,
+    PaperSection,
     WritingCard,
 )
+from app.utils.evidence_anchors import first_pdf_evidence_anchor
 from app.utils.locator_degradation import locator_degradation
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_identity_service import (
@@ -31,8 +34,19 @@ from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES
 
 SAFE_REVIEWER_STATUS = "verified"
 SAFE_TARGET_RESOLUTION_STATUSES = {"active", "remapped"}
-UNSAFE_REVIEWER_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "pending", ""}
-UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", ""}
+UNSAFE_REVIEWER_STATUSES = {
+    "stale",
+    "ambiguous",
+    "unresolved",
+    "unknown",
+    "pending",
+    "rejected",
+    "conflict",
+    "failed",
+    "needs_human",
+    "",
+}
+UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "conflict", "rejected", ""}
 
 DFT_RESULT_CONFLICT_ISSUE_TYPES = {"duplicate_suspected", "negative_consensus"}
 DFT_RESULT_CONFLICT_CODES = {"binding_conflict", "scientific_conflict", "identity_conflict"}
@@ -60,6 +74,7 @@ TARGET_TYPE_ALIASES: dict[str, set[str]] = {
     "catalyst_samples": {"catalyst_samples", "catalyst_sample", "CatalystSample"},
     "dft_settings": {"dft_settings", "dft_setting", "DFTSetting"},
     "writing_cards": {"writing_cards", "writing_card", "WritingCard"},
+    "sections": {"sections", "section", "paper_section", "PaperSection"},
 }
 
 LOCATOR_PAYLOAD_KEYS = {
@@ -250,6 +265,10 @@ def has_required_evidence_text(row: Any) -> bool:
         return not _is_blank(row.evidence_text)
     if isinstance(row, CatalystSample):
         return not _is_blank(row.evidence_strength)
+    if isinstance(row, PaperSection):
+        return not _is_blank(row.text)
+    if isinstance(row, WritingCard):
+        return writing_card_content_gate(row).can_use_for_writing
     return not _is_blank(getattr(row, "evidence_text", None))
 
 
@@ -514,6 +533,9 @@ def is_export_eligible_extraction(
     *,
     target_type: str,
 ) -> ExportGateResult:
+    is_dft_target = _normalized(target_type) in {
+        _normalized(value) for value in _target_type_values("dft_results")
+    }
     reviews = get_target_reviews(
         session,
         paper_id=row.paper_id,
@@ -522,13 +544,17 @@ def is_export_eligible_extraction(
     )
     has_review = bool(reviews)
     safe_review = next((review for review in reviews if is_safe_verified_review(review)), None)
+    has_unsafe_review = any(is_unsafe_review_status(review) for review in reviews)
+    effective_safe_review = safe_review if (is_dft_target or not has_unsafe_review) else None
     has_evidence_reference = has_required_evidence_reference(
         session,
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
     )
-    has_evidence_text = has_required_evidence_text(row)
+    has_evidence_text = has_required_evidence_text(row) or (
+        not is_dft_target and has_evidence_reference
+    )
     provenance_level, locator_status = _locator_summary(
         session,
         paper_id=row.paper_id,
@@ -538,14 +564,13 @@ def is_export_eligible_extraction(
     )
     reasons = build_export_gate_reason(
         has_review=has_review,
-        has_safe_review=safe_review is not None,
+        has_safe_review=effective_safe_review is not None,
         has_evidence_reference=has_evidence_reference,
         has_evidence_text=has_evidence_text,
         has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
         has_material_identity=has_required_material_identity(session, row),
         borrowed_supporting_reference=is_borrowed_supporting_reference(row),
     )
-    is_dft_target = _normalized(target_type) in {_normalized(value) for value in _target_type_values("dft_results")}
     if is_dft_target and has_evidence_text:
         reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
     if is_dft_target and _normalized(getattr(row, "candidate_status", None)) in DFT_REJECTED_STATUSES and "target_rejected" not in reasons:
@@ -556,7 +581,7 @@ def is_export_eligible_extraction(
             if str(row.id) in _open_dft_result_conflict_ids(session, [row]):
                 reasons = (*reasons, "open_result_level_conflict")
         reasons = tuple(dict.fromkeys(reasons))
-    review_status = safe_review.reviewer_status if safe_review is not None else (
+    review_status = effective_safe_review.reviewer_status if effective_safe_review is not None else (
         ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews})) if reviews else "missing"
     )
     return ExportGateResult(
@@ -662,6 +687,8 @@ def bulk_export_gate_results(
     for target_id, row in row_by_id.items():
         reviews = reviews_by_target.get(target_id, [])
         safe_review = next((review for review in reviews if is_safe_verified_review(review)), None)
+        has_unsafe_review = any(is_unsafe_review_status(review) for review in reviews)
+        effective_safe_review = safe_review if (is_dft_target or not has_unsafe_review) else None
         provenance_level, locator_status = _bulk_locator_summary(
             locators_by_target.get(target_id, []),
             span_pages_by_target.get(target_id, []),
@@ -670,9 +697,11 @@ def bulk_export_gate_results(
         )
         reasons = build_export_gate_reason(
             has_review=bool(reviews),
-            has_safe_review=safe_review is not None,
+            has_safe_review=effective_safe_review is not None,
             has_evidence_reference=target_id in evidence_reference_ids,
-            has_evidence_text=has_required_evidence_text(row),
+            has_evidence_text=has_required_evidence_text(row) or (
+                not is_dft_target and target_id in evidence_reference_ids
+            ),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
             has_material_identity=(
                 _dft_payload_has_material_identity(row) or str(row.catalyst_sample_id) in material_identity_ids
@@ -691,7 +720,7 @@ def bulk_export_gate_results(
                 if target_id in open_conflict_ids:
                     reasons = (*reasons, "open_result_level_conflict")
             reasons = tuple(dict.fromkeys(reasons))
-        review_status = safe_review.reviewer_status if safe_review is not None else (
+        review_status = effective_safe_review.reviewer_status if effective_safe_review is not None else (
             ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))
             if reviews
             else "missing"
@@ -946,9 +975,115 @@ def writing_card_content_gate(card: WritingCard) -> WritingGateResult:
     )
 
 
-def writing_card_gate(card: WritingCard) -> WritingGateResult:
-    """Compatibility entry point; content quality is now the non-bypassable gate."""
-    return writing_card_content_gate(card)
+def writing_card_gate(session: Session, card: WritingCard) -> WritingGateResult:
+    """Final writing admission gate: grounded content plus object-level safe review."""
+
+    content_gate = writing_card_content_gate(card)
+    if not content_gate.can_use_for_writing:
+        return content_gate
+
+    export_gate = bulk_export_gate_results(session, [card], target_type="writing_cards")[str(card.id)]
+    correction_approved = _writing_card_has_safe_approved_ide_correction(session, card)
+    if export_gate.eligible or correction_approved:
+        return WritingGateResult(
+            can_use_for_writing=True,
+            evidence_chain_status=content_gate.evidence_chain_status,
+            review_gate_status="safe_verified",
+            blocked_reasons=(),
+        )
+    return WritingGateResult(
+        can_use_for_writing=False,
+        evidence_chain_status=content_gate.evidence_chain_status,
+        review_gate_status="blocked",
+        blocked_reasons=tuple(dict.fromkeys((*content_gate.blocked_reasons, *export_gate.reasons))),
+    )
+
+
+def _writing_card_has_safe_approved_ide_correction(session: Session, card: WritingCard) -> bool:
+    reviews = get_target_reviews(
+        session,
+        paper_id=card.paper_id,
+        target_type="writing_cards",
+        target_id=card.id,
+    )
+    if any(is_unsafe_review_status(review) for review in reviews):
+        return False
+    corrections = session.scalars(
+        select(PaperCorrection)
+        .where(PaperCorrection.paper_id == card.paper_id)
+        .where(PaperCorrection.status == "approved")
+        .where(PaperCorrection.field_name.in_(["writing_cards", "writing_card"]))
+        .order_by(PaperCorrection.created_at.desc())
+        .limit(100)
+    ).all()
+    for correction in corrections:
+        source = _normalized(correction.source)
+        reviewer = _normalized(correction.reviewed_by)
+        if source != "ide_ai" and "ide_ai" not in reviewer:
+            continue
+        anchor = first_pdf_evidence_anchor(correction.evidence_payload)
+        if not isinstance(anchor, dict):
+            continue
+        evidence_text = str(anchor.get("quoted_text") or anchor.get("evidence_text") or "").strip()
+        if not evidence_text or not _safe_locator_from_parts(
+            page=anchor.get("page"),
+            locator_status="exact_page",
+            evidence_text=evidence_text,
+            bbox=anchor.get("bbox"),
+        ):
+            continue
+        if correction.operation == "replace" and _writing_card_replace_matches(correction, card):
+            return True
+        if correction.operation == "create" and _writing_card_create_matches(correction, card):
+            return True
+    return False
+
+
+def _writing_card_replace_matches(correction: PaperCorrection, card: WritingCard) -> bool:
+    parts = str(correction.target_path or "").split(":", 2)
+    if len(parts) != 3 or _normalized(parts[0]) not in {"writing_cards", "writing_card"}:
+        return False
+    if parts[1] != str(card.id):
+        return False
+    field_name = parts[2]
+    if field_name not in _WRITING_CORE_FIELDS and field_name not in {
+        "paper_type",
+        "evidence_chain",
+        "section_strategy",
+        "figure_logic",
+        "abstract_logic",
+        "introduction_logic",
+        "discussion_logic",
+    }:
+        return False
+    return getattr(card, field_name, None) == correction.proposed_value
+
+
+def _writing_card_create_matches(correction: PaperCorrection, card: WritingCard) -> bool:
+    if str(correction.target_path or "") != "writing_cards:new:create":
+        return False
+    payload = correction.evidence_payload if isinstance(correction.evidence_payload, dict) else {}
+    structured = payload.get("structured_create") if isinstance(payload.get("structured_create"), dict) else {}
+    target_id = str(structured.get("target_id") or "").strip()
+    if target_id and target_id != str(card.id):
+        return False
+    proposed = correction.proposed_value if isinstance(correction.proposed_value, dict) else {}
+    checked = 0
+    for field_name in (
+        "paper_type",
+        "research_gap",
+        "proposed_solution",
+        "core_hypothesis",
+        "abstract_logic",
+        "introduction_logic",
+        "discussion_logic",
+    ):
+        if field_name not in proposed:
+            continue
+        checked += 1
+        if getattr(card, field_name, None) != proposed.get(field_name):
+            return False
+    return checked > 0
 
 
 def external_candidate_has_evidence(candidate: ExternalAnalysisCandidate) -> bool:

@@ -126,6 +126,10 @@ const PAPER_DETAIL = {
     claim_type: 'adsorption_mechanism',
     claim_text: 'Associative pathway is favored by defect-driven charge redistribution.',
     evidence_text: 'The discussion links defect sites with charge redistribution and stronger adsorption.',
+    candidate_status: 'candidate_unverified',
+    review_status: 'missing',
+    can_use_for_writing: false,
+    can_use_for_citation: false,
     evidence_status: 'present',
     locator_status: 'text_only',
     confidence: 0.71,
@@ -4810,6 +4814,11 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
   test('business flow: literature library mechanism claims show read-only audit summaries', async ({ page }) => {
     const unsafeWrites = [];
+    const detailModes = [];
+    await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, async route => {
+      detailModes.push(new URL(route.request().url()).searchParams.get('mode'));
+      return route.fallback();
+    });
     await page.route(/\/api\/papers\/paper-1\/dft-results\/.*\/(verify|reject)$|\/api\/external-analysis\/runs\/.*\/materialize$|\/api\/papers\/paper-1\/corrections/, async route => {
       unsafeWrites.push({ method: route.request().method(), url: route.request().url() });
       return jsonResponse(route, { error: 'unexpected write' }, 500);
@@ -4822,14 +4831,21 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     const mechanism = page.locator('#mechanismContent');
     await expect(mechanism).toContainText('机理类型');
-    await expect(mechanism).toContainText('evidence statuspresent');
-    await expect(mechanism).toContainText('locator statustext_only');
+    await expect(mechanism).toContainText('候选状态candidate_unverified');
+    await expect(mechanism).toContainText('审核状态missing');
+    await expect(mechanism).toContainText('可用于写作否');
+    await expect(mechanism).toContainText('可用于引用否');
+    await expect(mechanism).toContainText('Evidence status: present');
+    await expect(mechanism).toContainText('Locator: text only');
     await expect(mechanism).toContainText('置信度0.71');
-    await expect(mechanism).toContainText('object review audit count1');
+    await expect(mechanism).toContainText('Object audits 1');
+    await expect(mechanism).toContainText('Latest audit: GLM mechanism audit');
+    await expect(mechanism).toContainText('verification=unverified');
     await expect(mechanism).toContainText('机理描述');
     await expect(mechanism).toContainText('证据原文');
 
     await expect.poll(() => unsafeWrites.length).toBe(0);
+    expect(detailModes).toContain('content');
   });
 
   test('business flow: review tab exposes MCP guide instead of legacy internal AI trigger', async ({ page }) => {

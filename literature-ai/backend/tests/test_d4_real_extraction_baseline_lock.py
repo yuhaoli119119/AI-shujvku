@@ -9,7 +9,7 @@ from app.config import Settings
 from app.db.models import Base, DFTResult, EvidenceLocator, EvidenceSpan, ExtractionFieldReview, Paper, WritingCard
 from app.rag.retriever import Retriever
 from app.services.extraction_pipeline import ExtractionPipelineService
-from app.utils.review_safety import is_export_eligible_extraction, writing_card_gate
+from app.utils.review_safety import is_export_eligible_extraction, writing_card_content_gate
 
 
 def _session(tmp_path):
@@ -166,7 +166,7 @@ def test_text_only_writing_evidence_without_safe_review_payload_is_blocked(tmp_p
             session.add(card)
             session.commit()
 
-            gate = writing_card_gate(card)
+            gate = writing_card_content_gate(card)
 
             assert gate.can_use_for_writing is False
             assert gate.evidence_chain_status == "present"

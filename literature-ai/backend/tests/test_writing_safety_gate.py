@@ -10,6 +10,7 @@ from app.db.models import (
     Base,
     CatalystSample,
     DFTResult,
+    EvidenceLocator,
     EvidenceSpan,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
@@ -66,6 +67,8 @@ def test_writing_card_missing_evidence_chain_is_blocked(tmp_path):
             detail = PaperQueryService(session).get_paper_detail(paper.id)
 
             card = detail.writing_cards_items[0]
+            assert card.candidate_status == "candidate_unverified"
+            assert card.review_status == "missing"
             assert card.can_use_for_writing is False
             assert card.evidence_chain_status == "missing"
             assert card.review_gate_status == "blocked"
@@ -119,21 +122,63 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
                     evidence_chain=[{"text": "Evidence", "reviewer_status": "unknown"}],
                 )
             )
-            session.add(
-                WritingCard(
-                    paper_id=paper.id,
-                    research_gap="A documented conversion limitation remains unresolved in current hosts.",
-                    proposed_solution="This work develops a documented catalyst solution for conversion.",
-                    evidence_chain=_safe_evidence_chain(),
-                )
+            unreviewed = WritingCard(
+                paper_id=paper.id,
+                research_gap="A documented conversion limitation remains unresolved in current hosts.",
+                proposed_solution="This work develops a documented catalyst solution for conversion.",
+                evidence_chain=_safe_evidence_chain(),
+            )
+            reviewed = WritingCard(
+                paper_id=paper.id,
+                research_gap="A documented conversion limitation remains unresolved in current hosts.",
+                proposed_solution="This work develops a documented catalyst solution for conversion.",
+                evidence_chain=_safe_evidence_chain(),
+            )
+            session.add_all([unreviewed, reviewed])
+            session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="writing_cards",
+                        target_id=str(reviewed.id),
+                        field_name="research_gap",
+                        reviewed_value=reviewed.research_gap,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text="A documented conversion limitation remains unresolved.",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="writing_cards",
+                        target_id=str(reviewed.id),
+                        field_name="research_gap",
+                        evidence_text="A documented conversion limitation remains unresolved.",
+                        page=1,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
             )
             session.commit()
+
+            detail = PaperQueryService(session).get_paper_detail(paper.id)
+            detail_by_id = {item.id: item for item in detail.writing_cards_items}
+            assert detail_by_id[unreviewed.id].candidate_status == "candidate_unverified"
+            assert detail_by_id[unreviewed.id].review_status == "missing"
+            assert detail_by_id[unreviewed.id].can_use_for_writing is False
+            assert detail_by_id[reviewed.id].candidate_status == "reviewed_exportable"
+            assert detail_by_id[reviewed.id].review_status == "safe_verified"
+            assert detail_by_id[reviewed.id].can_use_for_writing is True
 
             retrieved = Retriever(session).retrieve("safe unsafe gap solution", [paper.id], 5)
 
             assert len(retrieved["writing_cards"]) == 1
-            assert retrieved["writing_cards"][0]["research_gap"].startswith("A documented")
+            assert retrieved["writing_cards"][0]["object_id"] == reviewed.id
             assert retrieved["writing_cards"][0]["can_use_for_writing"] is True
+            assert retrieved["writing_cards"][0]["review_status"] == "safe_verified"
     finally:
         engine.dispose()
 

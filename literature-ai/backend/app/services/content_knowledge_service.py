@@ -22,7 +22,7 @@ from app.db.models import (
 )
 from app.services.content_knowledge_search import content_item_filters, content_search_score
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import writing_card_content_gate, writing_card_gate
+from app.utils.review_safety import bulk_export_gate_results, writing_card_content_gate, writing_card_gate
 from app.services.embedding import get_embedding_service
 from app.config import get_settings
 
@@ -489,11 +489,13 @@ class ContentKnowledgeService:
         rows = self.session.scalars(
             select(MechanismClaim).where(MechanismClaim.paper_id.in_(paper_ids)).limit(500)
         ).all()
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="mechanism_claims")
         items: list[ContentKnowledgeItem] = []
         for row in rows:
             paper = paper_by_id.get(row.paper_id)
             content = _clean_text(row.claim_text)
-            risks = []
+            gate = gate_by_id[str(row.id)]
+            risks = list(gate.reasons)
             if not _clean_text(row.evidence_text):
                 risks.append("missing_evidence_text")
             items.append(
@@ -505,11 +507,11 @@ class ContentKnowledgeService:
                     source_table="mechanism_claims",
                     content=content,
                     evidence_text=row.evidence_text,
-                    review_status="needs_review",
-                    review_gate_status="needs_review",
-                    citation_policy="needs_review",
-                    can_use_for_writing=bool(content),
-                    can_use_for_citation=False,
+                    review_status=gate.review_status,
+                    review_gate_status=gate.review_gate_status,
+                    citation_policy="citable" if gate.eligible else "needs_review",
+                    can_use_for_writing=bool(content and gate.eligible),
+                    can_use_for_citation=gate.eligible,
                     risk_flags=risks,
                     recommended_action="review_mechanism_claim_evidence",
                     updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
@@ -535,11 +537,11 @@ class ContentKnowledgeService:
             paper = paper_by_id.get(row.paper_id)
             content = _writing_card_content(row)
             content_gate = writing_card_content_gate(row)
-            gate = writing_card_gate(row)
+            gate = writing_card_gate(self.session, row)
             can_write = bool(gate.can_use_for_writing and content)
             risks = list(gate.blocked_reasons)
             citation_policy = "writing_only" if can_write else "needs_review"
-            review_status = "content_ready" if can_write else "needs_review"
+            review_status = "safe_verified" if can_write else "needs_review"
             items.append(
                 self._item(
                     paper,
@@ -552,6 +554,7 @@ class ContentKnowledgeService:
                     evidence_locator=_first_locator(row.evidence_chain),
                     review_status=review_status,
                     review_gate_status=gate.review_gate_status,
+                    candidate_status="reviewed_exportable" if can_write else "candidate_unverified",
                     citation_policy=citation_policy,
                     can_use_for_writing=can_write,
                     can_use_for_citation=False,

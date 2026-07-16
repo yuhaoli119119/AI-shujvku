@@ -774,6 +774,7 @@ const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
     "DFT 候选结果": "dft_result",
     "电化学性能": "electrochemical_performance",
     "机理声明": "mechanism_claim",
+    "机理知识": "mechanism_claim",
     "写作卡片": "writing_card",
     "表格": "table"
 };

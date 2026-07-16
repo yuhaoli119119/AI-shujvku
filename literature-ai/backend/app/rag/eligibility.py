@@ -27,25 +27,19 @@ def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:
 
 
 def writing_card_is_rag_eligible(session: Session, item: Any) -> bool:
-    """Writing cards enter formal RAG only when content quality cannot be bypassed."""
+    """Writing cards enter formal RAG only through the final object-level gate."""
 
     if not isinstance(item, WritingCard):
         return False
-    content_quality_passed = writing_card_content_gate(item).can_use_for_writing
-    return bool(content_quality_passed and (
-        writing_card_gate(item).can_use_for_writing
-        or _writing_card_has_ai_verified_review(session, item)
-    ))
+    return writing_card_gate(session, item).can_use_for_writing
 
 
 def writing_card_rag_review_status(session: Session, item: Any) -> str:
     if not isinstance(item, WritingCard):
         return "blocked"
-    gate = writing_card_gate(item)
+    gate = writing_card_gate(session, item)
     if gate.can_use_for_writing:
-        return "content_verified"
-    if writing_card_content_gate(item).can_use_for_writing and _writing_card_has_ai_verified_review(session, item):
-        return "ai_verified"
+        return "safe_verified"
     return gate.review_gate_status
 
 
@@ -128,27 +122,13 @@ def _section_item_is_eligible(session: Session, item: Any) -> bool:
     paper_id = getattr(item, "paper_id", None)
     if paper_id is None:
         return False
-    target_ids = [getattr(item, "id", None)]
-    if isinstance(item, PaperChunk) and item.section_id is not None:
-        target_ids.insert(0, item.section_id)
-    for target_id in target_ids:
-        if target_id is None:
-            continue
-        if has_safe_verified_review(
-            session,
-            paper_id=paper_id,
-            target_type="sections",
-            target_id=target_id,
-        ):
-            return True
-        if _object_has_ai_verified_content(
-            session,
-            paper_id=paper_id,
-            target_id=target_id,
-            field_names={"sections", "section"},
-        ):
-            return True
-    return False
+    section = item if isinstance(item, PaperSection) else (
+        session.get(PaperSection, item.section_id) if isinstance(item, PaperChunk) and item.section_id else None
+    )
+    if section is None:
+        return False
+    gate = bulk_export_gate_results(session, [section], target_type="sections").get(str(section.id))
+    return bool(gate and gate.eligible)
 
 
 def _figure_item_is_eligible(session: Session, item: Any) -> bool:

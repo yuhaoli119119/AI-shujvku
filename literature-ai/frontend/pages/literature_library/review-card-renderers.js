@@ -720,6 +720,7 @@ function renderReadableCards(title, items, options) {
         "DFT 候选结果": ["candidate_status", "catalyst_sample_id", "active_site_instance_key", "catalyst", "material_identity", "adsorbate", "energy_type", "property_type", "value", "unit", "reaction_step", "source_section", "source_figure", "evidence_text", "confidence"],
         "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
         "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
+        "机理知识": ["candidate_status", "review_status", "can_use_for_writing", "can_use_for_citation", "claim_type", "claim_text", "evidence_text", "confidence"],
         "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
         "表格": ["source_document_type", "related_paper_code", "caption", "page", "markdown_content"],
         "出站关联": ["relationship_type", "target_title", "target_doi", "reason"],

@@ -15,12 +15,13 @@ from app.config import Settings, get_settings
 from app.db.models import AuditLog, Base, CatalystSample, DFTAuditIssue, DFTResult, ElectrochemicalPerformance, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperRelationship, PaperSection, PaperTable, WorkflowJob, WritingCard
 from app.db.session import get_db_session
 from app.main import app
+from app.rag.retriever import Retriever
 from app.services.external_analysis_service import ExternalAnalysisNormalizedModel, ExternalAnalysisService
 from app.services.external_analysis_models import ExternalObjectReviewAuditModel
 from app.services.workflow_jobs import build_job_summary, serialize_job
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.services.verification_session_service import VerificationSessionService
-from app.utils.review_safety import is_export_eligible_extraction
+from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction
 
 
 def _make_external_audit_ready(paper: Paper, root: Path) -> None:
@@ -1778,6 +1779,7 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
             with Session(engine) as session:
                 paper = Paper(
                     title="Non-DFT Structured Auto Apply Paper",
+                    paper_code="NDFT001",
                     abstract="Original abstract.",
                     pdf_path="non-dft-auto.pdf",
                     authors=[],
@@ -1855,11 +1857,52 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
                 stored_performance = session.get(ElectrochemicalPerformance, performance_id)
                 corrections = session.query(PaperCorrection).order_by(PaperCorrection.created_at.asc()).all()
                 candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                claim_reviews = session.scalars(
+                    select(ExtractionFieldReview).where(
+                        ExtractionFieldReview.paper_id == paper_id,
+                        ExtractionFieldReview.target_type == "mechanism_claims",
+                        ExtractionFieldReview.target_id == str(claim_id),
+                    )
+                ).all()
+                claim_locators = session.scalars(
+                    select(EvidenceLocator).where(
+                        EvidenceLocator.paper_id == paper_id,
+                        EvidenceLocator.target_type == "mechanism_claims",
+                        EvidenceLocator.target_id == str(claim_id),
+                    )
+                ).all()
+                claim_gate = bulk_export_gate_results(
+                    session,
+                    [stored_claim],
+                    target_type="mechanism_claims",
+                )[str(claim_id)]
+                retrieved_claims = Retriever(session).retrieve(
+                    "Fe-N-C polysulfide conversion",
+                    [paper_id],
+                    5,
+                )["mechanism_claims"]
 
             assert stored_sample is not None
             assert stored_sample.catalyst_type == "single_atom_catalyst"
             assert stored_claim is not None
             assert stored_claim.claim_text == "Fe-N-C promotes polysulfide conversion under the reported conditions."
+            assert len(claim_reviews) == 1
+            assert claim_reviews[0].target_id == str(claim_id)
+            assert claim_reviews[0].field_name == "claim_text"
+            assert claim_reviews[0].reviewer_status == "verified"
+            assert claim_reviews[0].target_resolution_status == "active"
+            assert len(claim_locators) == 1
+            assert claim_locators[0].page == 4
+            assert claim_locators[0].locator_status == "exact_page"
+            assert claim_gate.eligible is True
+            assert claim_gate.review_status == "verified"
+            assert len(retrieved_claims) == 1
+            assert retrieved_claims[0]["object_id"] == claim_id
+            assert retrieved_claims[0]["paper_code"] == "NDFT001"
+            assert retrieved_claims[0]["page"] == 4
+            assert retrieved_claims[0]["evidence_text"] == "Fe-N-C promotes conversion."
+            assert retrieved_claims[0]["review_status"] == "verified"
+            assert retrieved_claims[0]["evidence_locator"]["locator_status"] == "exact_page"
             assert stored_performance is not None
             assert stored_performance.capacity_value == 720.0
             assert len(corrections) == 3
@@ -1868,6 +1911,370 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "evidence_payload",
+    [
+        {"quoted_text": "The revised mechanism is supported, but the page is missing."},
+        {"page": 4, "section": "Results"},
+    ],
+    ids=["missing_page", "missing_quoted_text"],
+)
+def test_ide_ai_mechanism_correction_without_exact_pdf_evidence_stays_blocked(evidence_payload):
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db_session():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        with Session(engine) as session:
+            paper = Paper(
+                title="Unsafe mechanism correction",
+                paper_code="NDFT002",
+                pdf_path="unsafe-mechanism.pdf",
+                authors=[],
+            )
+            session.add(paper)
+            session.flush()
+            claim = MechanismClaim(
+                paper_id=paper.id,
+                claim_type="conversion",
+                claim_text="Original mechanism claim.",
+                evidence_types=[],
+                evidence_text="Original evidence text.",
+            )
+            session.add(claim)
+            session.commit()
+            paper_id, claim_id = paper.id, claim.id
+
+        imported = TestClient(app).post(
+            "/api/external-analysis/import",
+            json={
+                "paper_id": str(paper_id),
+                "source": "ide_ai",
+                "source_label": "unsafe-mechanism-evidence",
+                "auto_apply_review_rules": True,
+                "reviewer": "ide_ai",
+                "raw_payload": {
+                    "correction_proposals": [
+                        {
+                            "field_name": "mechanism_claims",
+                            "target_path": f"mechanism_claims:{claim_id}:claim_text",
+                            "operation": "replace",
+                            "proposed_value": "Updated but still unsafe mechanism claim.",
+                            "reason": "The object may be updated, but the evidence is incomplete.",
+                            "evidence_payload": evidence_payload,
+                        }
+                    ]
+                },
+            },
+        )
+        assert imported.status_code == 200, imported.text
+
+        with Session(engine) as session:
+            stored_claim = session.get(MechanismClaim, claim_id)
+            reviews = session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_type == "mechanism_claims",
+                    ExtractionFieldReview.target_id == str(claim_id),
+                )
+            ).all()
+            locators = session.scalars(
+                select(EvidenceLocator).where(
+                    EvidenceLocator.paper_id == paper_id,
+                    EvidenceLocator.target_type == "mechanism_claims",
+                    EvidenceLocator.target_id == str(claim_id),
+                )
+            ).all()
+            gate = bulk_export_gate_results(
+                session,
+                [stored_claim],
+                target_type="mechanism_claims",
+            )[str(claim_id)]
+            retrieved = Retriever(session).retrieve("unsafe mechanism claim", [paper_id], 5)
+
+        assert stored_claim.claim_text == "Updated but still unsafe mechanism claim."
+        assert reviews == []
+        assert locators == []
+        assert gate.eligible is False
+        assert gate.review_status == "missing"
+        assert retrieved["mechanism_claims"] == []
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_ide_ai_mechanism_create_binds_review_and_locator_to_real_uuid_idempotently():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db_session():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        with Session(engine) as session:
+            paper = Paper(
+                title="Mechanism create closure",
+                paper_code="NDFT003",
+                pdf_path="mechanism-create.pdf",
+                authors=[],
+            )
+            session.add(paper)
+            session.commit()
+            paper_id = paper.id
+
+        payload = {
+            "paper_id": str(paper_id),
+            "source": "ide_ai",
+            "source_label": "mechanism-create-review",
+            "auto_apply_review_rules": True,
+            "reviewer": "ide_ai",
+            "raw_payload": {
+                "correction_proposals": [
+                    {
+                        "field_name": "mechanism_claims",
+                        "target_path": "mechanism_claims:new:create",
+                        "operation": "create",
+                        "proposed_value": {
+                            "claim_type": "conversion",
+                            "claim_text": "New verified mechanism claim from the discussion.",
+                        },
+                        "reason": "Create the PDF-supported mechanism claim.",
+                        "evidence_payload": {
+                            "page": 7,
+                            "section": "Discussion",
+                            "quoted_text": "The active site accelerates polysulfide conversion.",
+                            "source_pdf": "main.pdf",
+                        },
+                    }
+                ]
+            },
+        }
+        client = TestClient(app)
+        first = client.post("/api/external-analysis/import", json=payload)
+        second = client.post("/api/external-analysis/import", json=payload)
+        assert first.status_code == second.status_code == 200
+
+        with Session(engine) as session:
+            claims = session.scalars(
+                select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)
+            ).all()
+            assert len(claims) == 1
+            claim = claims[0]
+            corrections = session.scalars(
+                select(PaperCorrection).where(
+                    PaperCorrection.paper_id == paper_id,
+                    PaperCorrection.field_name == "mechanism_claims",
+                )
+            ).all()
+            reviews = session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_type == "mechanism_claims",
+                    ExtractionFieldReview.target_id == str(claim.id),
+                )
+            ).all()
+            locators = session.scalars(
+                select(EvidenceLocator).where(
+                    EvidenceLocator.paper_id == paper_id,
+                    EvidenceLocator.target_type == "mechanism_claims",
+                    EvidenceLocator.target_id == str(claim.id),
+                    EvidenceLocator.parser_source == "ide_ai_review",
+                )
+            ).all()
+            gate = bulk_export_gate_results(
+                session,
+                [claim],
+                target_type="mechanism_claims",
+            )[str(claim.id)]
+
+        assert corrections
+        assert all(correction.status == "approved" for correction in corrections)
+        assert all(
+            correction.evidence_payload["structured_create"]["target_id"] == str(claim.id)
+            for correction in corrections
+        )
+        assert all(
+            correction.evidence_payload["structured_create"]["target_id"] != "new"
+            for correction in corrections
+        )
+        assert len(reviews) == 2
+        assert {review.field_name for review in reviews} == {"claim_type", "claim_text"}
+        assert all(review.reviewer_status == "verified" for review in reviews)
+        assert all(review.target_resolution_status == "active" for review in reviews)
+        assert len(locators) == 2
+        assert all(locator.page == 7 for locator in locators)
+        assert all(locator.locator_status == "exact_page" for locator in locators)
+        assert gate.eligible is True
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
+
+
+def test_ide_ai_section_and_writing_card_review_close_formal_rag_without_note_unlock():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    def override_get_db_session():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+    try:
+        reviewed_gap = "Verified conversion limitations remain unresolved in conventional hosts."
+        solution = "The study uses atomically dispersed sites to accelerate conversion."
+        evidence_chain = [
+            {
+                "text": reviewed_gap,
+                "source": "Introduction",
+                "page": 2,
+                "locator_status": "exact_page",
+                "supports_fields": ["research_gap"],
+            },
+            {
+                "text": solution,
+                "source": "Introduction",
+                "page": 2,
+                "locator_status": "exact_page",
+                "supports_fields": ["proposed_solution"],
+            },
+        ]
+        with Session(engine) as session:
+            paper = Paper(
+                title="Text review closure",
+                paper_code="NDFT004",
+                pdf_path="text-review.pdf",
+                authors=[],
+            )
+            session.add(paper)
+            session.flush()
+            reviewed_section = PaperSection(
+                paper_id=paper.id,
+                section_title="Reviewed Results",
+                section_type="results",
+                text="Original reviewed conversion section.",
+                page_start=5,
+                page_end=5,
+            )
+            note_only_section = PaperSection(
+                paper_id=paper.id,
+                section_title="Note-only Results",
+                section_type="results",
+                text="AI_REVIEWED note-only conversion section remains a candidate.",
+                page_start=6,
+                page_end=6,
+            )
+            reviewed_card = WritingCard(
+                paper_id=paper.id,
+                paper_type="A",
+                research_gap=reviewed_gap,
+                proposed_solution=solution,
+                evidence_chain=evidence_chain,
+            )
+            unreviewed_card = WritingCard(
+                paper_id=paper.id,
+                paper_type="A",
+                research_gap=reviewed_gap,
+                proposed_solution=solution,
+                evidence_chain=evidence_chain,
+            )
+            session.add_all([reviewed_section, note_only_section, reviewed_card, unreviewed_card])
+            session.commit()
+            paper_id = paper.id
+            reviewed_section_id = reviewed_section.id
+            note_only_section_id = note_only_section.id
+            reviewed_card_id = reviewed_card.id
+            unreviewed_card_id = unreviewed_card.id
+
+        imported = TestClient(app).post(
+            "/api/external-analysis/import",
+            json={
+                "paper_id": str(paper_id),
+                "source": "ide_ai",
+                "source_label": "section-writing-review",
+                "auto_apply_review_rules": True,
+                "reviewer": "ide_ai",
+                "raw_payload": {
+                    "review_notes": [
+                        {
+                            "field_name": "sections",
+                            "content": "[AI_REVIEWED] This note is explanatory only.",
+                            "page": 6,
+                            "quoted_text": "Note-only section evidence.",
+                        }
+                    ],
+                    "correction_proposals": [
+                        {
+                            "field_name": "sections",
+                            "target_path": f"sections:{reviewed_section_id}:text",
+                            "operation": "replace",
+                            "proposed_value": "Verified conversion section with exact PDF evidence.",
+                            "reason": "Object-level section review.",
+                            "evidence_payload": {
+                                "page": 5,
+                                "section": "Results",
+                                "quoted_text": "Verified conversion section with exact PDF evidence.",
+                            },
+                        },
+                        {
+                            "field_name": "writing_cards",
+                            "target_path": f"writing_cards:{reviewed_card_id}:research_gap",
+                            "operation": "replace",
+                            "proposed_value": reviewed_gap,
+                            "reason": "Object-level writing-card review.",
+                            "evidence_payload": {
+                                "page": 2,
+                                "section": "Introduction",
+                                "quoted_text": reviewed_gap,
+                            },
+                        },
+                    ],
+                },
+            },
+        )
+        assert imported.status_code == 200, imported.text
+
+        with Session(engine) as session:
+            retrieved = Retriever(session).retrieve("verified conversion", [paper_id], 10)
+            sections = {str(item["section_id"]): item for item in retrieved["sections"]}
+            writing_ids = {str(item["object_id"]) for item in retrieved["writing_cards"]}
+            note_only_reviews = session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_type == "sections",
+                    ExtractionFieldReview.target_id == str(note_only_section_id),
+                )
+            ).all()
+
+        assert sections[str(reviewed_section_id)]["retrieval_tier"] == "formal_evidence"
+        assert sections[str(reviewed_section_id)]["can_use_for_writing"] is True
+        assert sections[str(note_only_section_id)]["retrieval_tier"] == "discovery_candidate"
+        assert sections[str(note_only_section_id)]["can_use_for_writing"] is False
+        assert str(reviewed_card_id) in writing_ids
+        assert str(unreviewed_card_id) not in writing_ids
+        assert note_only_reviews == []
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
 
 
 def test_external_analysis_import_rejects_empty_payload():

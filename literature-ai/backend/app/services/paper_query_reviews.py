@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -17,7 +18,7 @@ from app.db.models import (
     PaperSection,
     WritingCard,
 )
-from app.utils.review_safety import writing_card_gate
+from app.utils.review_safety import bulk_export_gate_results, writing_card_gate
 
 
 class PaperQueryReviewMixin:
@@ -38,206 +39,79 @@ class PaperQueryReviewMixin:
         dft_result_audits: dict[str, list[dict[str, Any]]],
         dft_result_conflicts: dict[str, list[dict[str, Any]]],
     ) -> dict[str, str]:
-        reviewed_fields = self._batch_ai_reviewed_fields(paper_id)
-
-        def collection_status(name: str, has_content: bool) -> str:
-            if not has_content:
-                return "missing"
-            aliases = {name, name.rstrip("s")}
-            return "ai_verified" if aliases.intersection(reviewed_fields) else "raw_only"
-
-        if not writing_cards:
-            writing_status = "missing"
-        elif any(self._audit_list_marks_ai_verified(audits_by_card) for audits_by_card in writing_card_audits.values()):
-            writing_status = "ai_verified"
-        elif any(writing_card_gate(card).can_use_for_writing for card in writing_cards):
-            writing_status = "ai_verified"
-        else:
-            writing_status = collection_status("writing_cards", True)
-
-        if not figures:
-            figure_status = "missing"
-        elif any(figure_conflicts.get(str(figure.id)) for figure in figures) or any(
-            self._figure_has_risk(figure) for figure in figures
-        ):
-            figure_status = "risk"
-        elif any(
-            self._audit_list_marks_ai_verified(figure_audits.get(str(figure.id), []))
-            for figure in figures
-        ):
-            figure_status = "ai_verified"
-        else:
-            figure_status = collection_status("figures", True)
+        abstract_status = self._abstract_review_status(paper)
+        sections_status = self._safe_collection_review_status(sections, target_type="sections")
+        writing_status = self._writing_cards_review_status(writing_cards)
+        figure_status = self._figures_review_status(
+            paper.id,
+            figures,
+            figure_audits,
+            figure_conflicts,
+        )
 
         return {
-            "abstract_review_status": collection_status("abstract", bool(paper.abstract)),
-            "sections_review_status": collection_status("sections", bool(sections)),
+            "abstract_review_status": abstract_status,
+            "sections_review_status": sections_status,
             "writing_cards_review_status": writing_status,
             "translation_review_status": "final_trusted" if full_translation else "missing",
             "figures_review_status": figure_status,
             "dft_review_status": self._dft_review_status(dft_results, dft_result_audits, dft_result_conflicts),
         }
 
-    def _batch_ai_reviewed_fields(self, paper_id: UUID) -> set[str]:
-        reviewed: set[str] = set()
-        expected_decisions = {"approve", "approved", "accept", "verified", "revise", "update"}
-        for note in self.session.scalars(select(PaperNote).where(PaperNote.paper_id == paper_id)).all():
-            source = str(note.source or "").lower()
-            content = str(note.content or "").lower()
-            if source == "ide_ai" or "[ai_reviewed]" in content:
-                field_name = str(note.field_name or "").strip().lower()
-                reviewed.add(field_name)
-                reviewed.add(field_name.split(":", 1)[0])
-        for correction in self.session.scalars(
-            select(PaperCorrection).where(
-                PaperCorrection.paper_id == paper_id,
-                PaperCorrection.status == "approved",
-            )
-        ).all():
-            source = str(correction.source or "").lower()
-            reviewer = str(correction.reviewed_by or "").lower()
-            if source == "ide_ai" or "ide" in reviewer:
-                reviewed.add(str(correction.field_name or "").strip().lower())
-                reviewed.add(str(correction.target_path or "").split(":", 1)[0].strip().lower())
-        for candidate in self.session.scalars(
-            select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
-        ).all():
-            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            decision = str(payload.get("decision") or payload.get("verdict") or "").strip().lower()
-            verification = str(payload.get("verification_status") or "").strip().lower()
-            source = str(payload.get("source") or "").lower()
-            is_reviewed = candidate.status in {"ai_applied", "ai_reviewed", "materialized"} or (
-                ("ide" in source or "[ai_reviewed]" in str(payload).lower())
-                and (decision in expected_decisions or verification in {"verified", "ai_verified", "reviewed"})
-            )
-            if not is_reviewed:
-                continue
-            field_name = str(payload.get("field_name") or "").strip().lower()
-            reviewed.add(field_name)
-            reviewed.add(field_name.split(":", 1)[0])
-            reviewed.add(str(payload.get("target_type") or "").strip().lower())
-            reviewed.add(str(payload.get("target_path") or "").split(":", 1)[0].strip().lower())
-        reviewed.discard("")
-        return reviewed
-
-
-    def _scalar_content_review_status(self, paper_id: UUID, field_name: str, has_content: bool) -> str:
-        if not has_content:
+    def _abstract_review_status(self, paper: Paper) -> str:
+        if not str(paper.abstract or "").strip():
             return "missing"
-        if self._has_ai_applied_candidate(paper_id, field_names={field_name}, target_prefixes={field_name}):
+        abstract_row = SimpleNamespace(
+            id=paper.id,
+            paper_id=paper.id,
+            evidence_text=paper.abstract,
+        )
+        gate = bulk_export_gate_results(
+            self.session,
+            [abstract_row],
+            target_type="abstract",
+        )[str(paper.id)]
+        return "ai_verified" if gate.eligible else "raw_only"
+
+    def _safe_collection_review_status(self, rows: list[Any], *, target_type: str) -> str:
+        if not rows:
+            return "missing"
+        gates = bulk_export_gate_results(self.session, rows, target_type=target_type)
+        safe_count = sum(bool(gates[str(row.id)].eligible) for row in rows)
+        if safe_count == len(rows):
             return "ai_verified"
-        if self._has_ai_approved_correction(paper_id, field_names={field_name}, target_prefixes={field_name}):
-            return "ai_verified"
-        if self._has_ai_review_note(paper_id, field_names={field_name}):
-            return "ai_verified"
+        if safe_count:
+            return "partially_verified"
         return "raw_only"
 
-
-    def _collection_review_status(self, paper_id: UUID, collection: str, has_content: bool) -> str:
-        if not has_content:
-            return "missing"
-        if self._has_ai_applied_candidate(paper_id, field_names={collection}, target_prefixes={collection}):
-            return "ai_verified"
-        if self._has_ai_approved_correction(paper_id, field_names={collection}, target_prefixes={collection}):
-            return "ai_verified"
-        if self._has_ai_review_note(paper_id, field_names={collection, collection.rstrip("s")}):
-            return "ai_verified"
-        return "raw_only"
-
-
-    def _writing_cards_review_status(
-        self,
-        paper_id: UUID,
-        writing_cards: list[WritingCard],
-        audits_by_card: dict[str, list[dict[str, Any]]],
-        conflicts_by_card: dict[str, list[dict[str, Any]]],
-    ) -> str:
+    def _writing_cards_review_status(self, writing_cards: list[WritingCard]) -> str:
         if not writing_cards:
             return "missing"
-        if any(self._audit_list_marks_ai_verified(audits_by_card.get(str(card.id), [])) for card in writing_cards):
+        safe_count = sum(
+            bool(writing_card_gate(self.session, card).can_use_for_writing)
+            for card in writing_cards
+        )
+        if safe_count == len(writing_cards):
             return "ai_verified"
-        if any(writing_card_gate(card).can_use_for_writing for card in writing_cards):
-            return "ai_verified"
-        if any(conflicts_by_card.get(str(card.id)) for card in writing_cards):
-            return "raw_only"
-        return self._collection_review_status(paper_id, "writing_cards", True)
+        if safe_count:
+            return "partially_verified"
+        return "raw_only"
 
 
     def _reviewed_writing_card_paper_ids(self, paper_ids: set[UUID]) -> set[UUID]:
         if not paper_ids:
             return set()
 
-        writing_card_rows = self.session.execute(
-            select(WritingCard.id, WritingCard.paper_id).where(WritingCard.paper_id.in_(paper_ids))
+        writing_card_rows = self.session.scalars(
+            select(WritingCard).where(WritingCard.paper_id.in_(paper_ids))
         ).all()
         if not writing_card_rows:
             return set()
-
-        candidate_paper_ids = {paper_id for _, paper_id in writing_card_rows}
-        reviewed_paper_ids: set[UUID] = set()
-        expected_fields = {"writing_cards", "writing_card"}
-
-        notes = self.session.scalars(
-            select(PaperNote).where(PaperNote.paper_id.in_(candidate_paper_ids))
-        ).all()
-        for note in notes:
-            field = str(note.field_name or "").strip().lower()
-            if not self._review_field_matches(field, expected_fields):
-                continue
-            source = str(note.source or "").lower()
-            content = str(note.content or "").lower()
-            if source == "ide_ai" or "[ai_reviewed]" in content:
-                reviewed_paper_ids.add(note.paper_id)
-
-        corrections = self.session.scalars(
-            select(PaperCorrection)
-            .where(PaperCorrection.paper_id.in_(candidate_paper_ids))
-            .where(PaperCorrection.status == "approved")
-        ).all()
-        for correction in corrections:
-            source = str(correction.source or "").lower()
-            reviewer = str(correction.reviewed_by or "").lower()
-            if source != "ide_ai" and "ide" not in reviewer:
-                continue
-            field = str(correction.field_name or "").strip().lower()
-            target = str(correction.target_path or "").strip().lower()
-            if self._review_field_matches(field, expected_fields) or self._review_field_matches(target, expected_fields):
-                reviewed_paper_ids.add(correction.paper_id)
-
-        applied_candidates = self.session.scalars(
-            select(ExternalAnalysisCandidate)
-            .where(ExternalAnalysisCandidate.paper_id.in_(candidate_paper_ids))
-            .where(ExternalAnalysisCandidate.status.in_(["ai_applied", "ai_reviewed", "materialized"]))
-        ).all()
-        for candidate in applied_candidates:
-            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            field = str(payload.get("field_name") or "").strip().lower()
-            target = str(payload.get("target_path") or "").strip().lower()
-            if self._review_field_matches(field, expected_fields) or self._review_field_matches(target, expected_fields):
-                reviewed_paper_ids.add(candidate.paper_id)
-
-        audit_candidates = self.session.execute(
-            select(ExternalAnalysisCandidate, ExternalAnalysisRun)
-            .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
-            .where(ExternalAnalysisCandidate.paper_id.in_(candidate_paper_ids))
-            .where(ExternalAnalysisCandidate.candidate_type == "object_review_audit")
-        ).all()
-        for candidate, run in audit_candidates:
-            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
-            target_type = str(payload.get("target_type") or "").strip().lower()
-            if target_type not in expected_fields:
-                continue
-            source = str(run.source or "").lower()
-            source_label = str(run.source_label or "").lower()
-            decision = str(payload.get("decision") or "").strip().lower()
-            verification = str(payload.get("verification_status") or "").strip().lower()
-            if ("ide_ai" in source or "ide" in source_label or "[ai_reviewed]" in json.dumps(payload, ensure_ascii=False).lower()) and (
-                decision in {"approve", "approved", "accept", "verified", "revise", "update"}
-                or verification in {"verified", "ai_verified", "reviewed"}
-            ):
-                reviewed_paper_ids.add(candidate.paper_id)
-
-        return reviewed_paper_ids
+        return {
+            card.paper_id
+            for card in writing_card_rows
+            if writing_card_gate(self.session, card).can_use_for_writing
+        }
 
 
     def _figures_review_status(

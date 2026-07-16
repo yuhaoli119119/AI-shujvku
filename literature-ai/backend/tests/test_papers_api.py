@@ -292,6 +292,15 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
                 for i in range(120)
             ]
         )
+        unreviewed_claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="candidate_pathway",
+            claim_text="An unreviewed mechanism candidate remains visible in content mode.",
+            evidence_types=["section"],
+            evidence_text="The parsed section proposes a candidate pathway.",
+            confidence=0.64,
+        )
+        session.add(unreviewed_claim)
         session.commit()
         paper_id = str(paper.id)
 
@@ -332,6 +341,17 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
         content_payload = content.json()
         assert content_payload["dft_results_items"] == []
         assert content_payload["dft_results_page"]["total"] == 120
+        assert content_payload["counts"]["mechanism_claims"] == 1
+        assert len(content_payload["mechanism_claims_items"]) == content_payload["counts"]["mechanism_claims"]
+        unreviewed_candidate = content_payload["mechanism_claims_items"][0]
+        assert unreviewed_candidate["candidate_status"] == "candidate_unverified"
+        assert unreviewed_candidate["review_status"] == "missing"
+        assert unreviewed_candidate["can_use_for_writing"] is False
+        assert unreviewed_candidate["can_use_for_citation"] is False
+        assert unreviewed_candidate["locator_status"] == "missing_locator"
+        assert unreviewed_candidate["object_review_audit_count"] == 0
+        assert unreviewed_candidate["latest_object_review_audit"] is None
+
         assert content_payload["chart_review_status"] == {}
         assert content_payload["rag_quality"] == {}
         assert len(statements) < 100
@@ -341,6 +361,7 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
         assert full.status_code == 200
         full_payload = full.json()
         assert len(full_payload["dft_results_items"]) == 28
+        assert len(full_payload["mechanism_claims_items"]) == 1
         assert full_payload["dft_results_page"]["total"] == 120
         assert full_payload["dft_results_page"]["has_more"] is True
         assert len(statements) < 100
@@ -352,6 +373,65 @@ def test_large_dft_detail_is_lightweight_batched_and_paginated(setup_test_db):
         assert all("export_safety" in item and "is_exportable" in item for item in page.json()["items"])
     finally:
         event.remove(engine, "before_cursor_execute", record_statement)
+
+
+def test_content_detail_uses_real_gate_for_verified_exact_page_mechanism_claim(setup_test_db):
+    engine = setup_test_db
+    Session = sessionmaker(bind=engine)
+    with Session() as session:
+        paper = Paper(title="Verified mechanism detail", pdf_path="verified-mechanism.pdf")
+        session.add(paper)
+        session.flush()
+        verified_claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="verified_pathway",
+            claim_text="A verified mechanism claim has exact-page evidence.",
+            evidence_types=["section"],
+            evidence_text="The verified pathway is stated on the exact PDF page.",
+            confidence=0.91,
+        )
+        session.add(verified_claim)
+        session.flush()
+        session.add_all(
+            [
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="mechanism_claims",
+                    target_id=str(verified_claim.id),
+                    field_name="claim_text",
+                    reviewer_status="verified",
+                    target_resolution_status="active",
+                    evidence_text=verified_claim.evidence_text,
+                ),
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="pdf",
+                    page=7,
+                    target_type="mechanism_claims",
+                    target_id=str(verified_claim.id),
+                    field_name="claim_text",
+                    evidence_text=verified_claim.evidence_text,
+                    locator_status="exact_page",
+                    locator_confidence=1.0,
+                    parser_source="test",
+                ),
+            ]
+        )
+        session.commit()
+        paper_id = str(paper.id)
+
+    response = TestClient(app).get(f"/api/papers/{paper_id}", params={"mode": "content"})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["counts"]["mechanism_claims"] == 1
+    assert payload["dft_results_items"] == []
+    verified_candidate = payload["mechanism_claims_items"][0]
+    assert verified_candidate["candidate_status"] == "reviewed_exportable"
+    assert verified_candidate["review_status"] == "verified"
+    assert verified_candidate["can_use_for_writing"] is True
+    assert verified_candidate["can_use_for_citation"] is True
+    assert verified_candidate["locator_status"] == "exact_page"
 
 
 def test_unified_jobs_endpoint_lists_and_reuses_active_retry(setup_test_db):
@@ -625,7 +705,7 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
-    assert data["prompt_schema_version"] == "ide_review_prompt_v18"
+    assert data["prompt_schema_version"] == "ide_review_prompt_v19"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]
     assert "li_s_sac_dac" in data["prompt_contract"]["project_library_contexts"]

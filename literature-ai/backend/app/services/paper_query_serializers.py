@@ -44,7 +44,7 @@ from app.utils.figure_delete_policy import direct_delete_eligibility, normalized
 from app.utils.figure_reliability import build_figure_image_review
 from app.utils.figure_summary import normalize_figure_key_elements
 from app.utils.library_names import normalize_library_name
-from app.utils.review_safety import writing_card_gate
+from app.utils.review_safety import ExportGateResult, bulk_export_gate_results, writing_card_gate
 from app.utils.text_cleaning import repair_mojibake_text
 
 
@@ -716,8 +716,8 @@ class PaperQuerySerializationMixin:
         return cached_pdf_size_for_storage(stored_path, str(settings.storage_root))
 
 
-    @staticmethod
     def _serialize_writing_card(
+        self,
         item: WritingCard,
         *,
         object_review_audits: list[dict[str, Any]] | None = None,
@@ -729,7 +729,12 @@ class PaperQuerySerializationMixin:
                 figure_logic = json.loads(figure_logic)
             except json.JSONDecodeError:
                 pass
-        gate = writing_card_gate(item)
+        gate = writing_card_gate(self.session, item)
+        review_gate = bulk_export_gate_results(
+            self.session,
+            [item],
+            target_type="writing_cards",
+        )[str(item.id)]
         audits = object_review_audits or []
         conflicts = field_conflicts or []
         return WritingCardResponse(
@@ -745,6 +750,8 @@ class PaperQuerySerializationMixin:
             introduction_logic=item.introduction_logic,
             discussion_logic=item.discussion_logic,
             evidence_chain_status=gate.evidence_chain_status,
+            candidate_status="reviewed_exportable" if gate.can_use_for_writing else "candidate_unverified",
+            review_status="safe_verified" if gate.can_use_for_writing else review_gate.review_status,
             review_gate_status=gate.review_gate_status,
             can_use_for_writing=gate.can_use_for_writing,
             blocked_reasons=list(gate.blocked_reasons),
@@ -763,6 +770,7 @@ class PaperQuerySerializationMixin:
     def _serialize_mechanism_claim(
         item: MechanismClaim,
         *,
+        review_gate: ExportGateResult,
         object_review_audits: list[dict[str, Any]] | None = None,
         field_conflicts: list[dict[str, Any]] | None = None,
     ) -> MechanismClaimResponse:
@@ -786,8 +794,12 @@ class PaperQuerySerializationMixin:
             evidence_types=item.evidence_types or [],
             confidence=confidence,
             evidence_text=item.evidence_text,
+            candidate_status="reviewed_exportable" if review_gate.eligible else "candidate_unverified",
+            review_status=review_gate.review_status,
+            can_use_for_writing=review_gate.eligible,
+            can_use_for_citation=review_gate.eligible,
             evidence_status=evidence_status,
-            locator_status="text_only" if evidence_status == "present" else "missing_locator",
+            locator_status=review_gate.locator_status,
             confidence_status=confidence_status,
             object_review_audit_count=len(audits),
             object_review_audits=audits[:5],

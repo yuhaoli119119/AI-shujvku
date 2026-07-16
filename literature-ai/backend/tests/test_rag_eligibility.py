@@ -9,6 +9,7 @@ from app.db.models import (
     Base,
     CatalystSample,
     DFTResult,
+    EvidenceLocator,
     EvidenceSpan,
     ExtractionFieldReview,
     ExternalAnalysisCandidate,
@@ -25,7 +26,7 @@ from app.rag.quality import build_rag_quality_summary
 from app.services.retrieval_service import RetrievalService
 
 
-def test_rag_eligibility_recognizes_legacy_materialized_ai_records():
+def test_paper_level_ai_reviewed_note_does_not_unlock_sections():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -72,7 +73,7 @@ def test_rag_eligibility_recognizes_legacy_materialized_ai_records():
             session.flush()
 
             assert is_rag_eligible(session, raw_section, "section") is False
-            assert is_rag_eligible(session, reviewed_section, "section") is True
+            assert is_rag_eligible(session, reviewed_section, "section") is False
 
         engine.dispose()
 
@@ -117,6 +118,32 @@ def test_full_context_retrieval_requires_ai_reviewed_sections():
                     reviewed_by="ide_ai",
                 )
             )
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="sections",
+                        target_id=str(reviewed_section.id),
+                        field_name="text",
+                        reviewed_value=reviewed_section.text,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text="AI-reviewed section text may enter full context retrieval.",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="sections",
+                        target_id=str(reviewed_section.id),
+                        field_name="text",
+                        evidence_text="AI-reviewed section text may enter full context retrieval.",
+                        page=3,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
             session.flush()
 
             service = object.__new__(RetrievalService)
@@ -129,7 +156,7 @@ def test_full_context_retrieval_requires_ai_reviewed_sections():
         engine.dispose()
 
 
-def test_rag_eligibility_recognizes_approved_ide_ai_corrections():
+def test_approved_ide_ai_correction_without_exact_evidence_does_not_unlock_section():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -166,7 +193,7 @@ def test_rag_eligibility_recognizes_approved_ide_ai_corrections():
             )
             session.flush()
 
-            assert is_rag_eligible(session, section, "section") is True
+            assert is_rag_eligible(session, section, "section") is False
 
         engine.dispose()
 
@@ -229,6 +256,32 @@ def test_rag_eligibility_does_not_promote_chunks_from_paper_level_ai_records():
                     status="approved",
                     reviewed_by="ide_ai",
                 )
+            )
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="sections",
+                        target_id=str(section.id),
+                        field_name="text",
+                        reviewed_value="Reviewed section text",
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text="Raw section text",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="sections",
+                        target_id=str(section.id),
+                        field_name="text",
+                        evidence_text="Raw section text",
+                        page=4,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
             )
             session.flush()
 
@@ -698,6 +751,32 @@ def test_rag_quality_summary_counts_eligible_and_blocked_reasons():
             )
             session.add_all([eligible_figure, blocked_figure, blocked_dft, eligible_card])
             session.flush()
+            session.add_all(
+                [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="writing_cards",
+                        target_id=str(eligible_card.id),
+                        field_name="research_gap",
+                        reviewed_value=eligible_card.research_gap,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text=eligible_card.research_gap,
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="writing_cards",
+                        target_id=str(eligible_card.id),
+                        field_name="research_gap",
+                        evidence_text=eligible_card.research_gap,
+                        page=1,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                ]
+            )
             session.add(
                 PaperCorrection(
                     paper_id=paper.id,
