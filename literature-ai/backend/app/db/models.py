@@ -737,6 +737,25 @@ class ContentReviewBundle(Base):
     )
 
 
+class ContentWebReviewBundleV2(Base):
+    """Proposal-only web review package; never holds applied review truth."""
+
+    __tablename__ = "content_web_review_bundles_v2"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
+    policy_version: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    snapshot_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    manifest: Mapped[dict] = mapped_column(json_type(), nullable=False, default=dict)
+    proposal_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="generated", index=True)
+    created_by: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
+    )
+
+
 class SourceSnapshotReconciliation(Base):
     """Auditable proof that a legacy review bundle matches a canonical source snapshot."""
 

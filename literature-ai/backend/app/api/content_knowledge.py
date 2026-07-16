@@ -3,6 +3,8 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from io import BytesIO
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
@@ -15,6 +17,7 @@ from app.services.content_knowledge_review_service import (
 )
 from app.services.content_knowledge_service import ContentKnowledgeService
 from app.services.content_review_bundle_service import ContentReviewBundleService
+from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 from app.services.content_writing_plan_service import ContentWritingPlanService
 
 router = APIRouter()
@@ -139,6 +142,68 @@ def generate_content_review_bundle(
     except (ValueError, TypeError) as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/review-bundles/v2")
+def generate_content_web_review_bundle_v2(
+    payload: dict = Body(...), session: Session = Depends(get_db_session)
+) -> dict:
+    """Create a proposal-only content web-AI review package; it has no apply path."""
+    try:
+        result = ContentWebReviewBundleV2Service(session).generate(
+            paper_id=UUID(str(payload.get("paper_id"))),
+            created_by=str(payload.get("created_by") or "user"),
+        )
+        session.commit()
+        return result
+    except (ValueError, TypeError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/review-bundles/{bundle_id}/download")
+def download_content_web_review_bundle_v2(
+    bundle_id: UUID, session: Session = Depends(get_db_session)
+) -> StreamingResponse:
+    try:
+        result = ContentWebReviewBundleV2Service(session).download(bundle_id)
+        return StreamingResponse(
+            BytesIO(result["content"]), media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+                "Content-Length": str(len(result["content"])),
+                "Cache-Control": "no-store",
+                "X-LitAI-Bundle-Fingerprint": result["fingerprint"],
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/review-bundles/{bundle_id}/web-proposal/validate")
+def validate_content_web_review_proposal_v2(
+    bundle_id: UUID, payload: dict = Body(...), session: Session = Depends(get_db_session)
+) -> dict:
+    try:
+        result = ContentWebReviewBundleV2Service(session).validate_web_proposal(bundle_id, payload)
+        session.commit()
+        return result
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/review-bundles/{bundle_id}/local-verification-plan")
+def content_web_review_local_verification_plan_v2(
+    bundle_id: UUID, session: Session = Depends(get_db_session)
+) -> dict:
+    try:
+        result = ContentWebReviewBundleV2Service(session).local_verification_plan(bundle_id)
+        session.commit()
+        return result
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/review-bundles/{bundle_id}/validate")

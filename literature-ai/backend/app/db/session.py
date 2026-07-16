@@ -21,6 +21,7 @@ from app.migrations.external_analysis_candidate_retention_v1 import (
     upgrade as upgrade_external_analysis_candidate_retention_v1,
 )
 from app.migrations.source_snapshot_reconciliation_v1 import upgrade as upgrade_source_snapshot_reconciliation_v1
+from app.migrations.content_web_review_bundle_v2 import upgrade as upgrade_content_web_review_bundle_v2
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATABASE: This project uses PostgreSQL (with pgvector extension) as its
@@ -120,6 +121,7 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                 source_backfill["error_counts"],
             )
         upgrade_source_snapshot_reconciliation_v1(connection)
+        upgrade_content_web_review_bundle_v2(connection)
     with engine.begin() as connection:
         # A snapshot may be exported to both web AI and IDE AI; bundles are
         # distinct audit records even when they start from the same snapshot.
