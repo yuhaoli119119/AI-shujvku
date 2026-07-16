@@ -437,7 +437,28 @@ function renderPlan(plan) {
 async function copyLocalInstruction() {
   if (!currentPlan) return showMessage('请先通过网页 AI 建议校验。', true);
   const supplied = currentPlan.local_ai_instruction || currentPlan.instruction || '';
-  const text = `不要读取整包；按唯一证据页读取；逐对象返回；无锁阅读后短锁回填。\n${supplied}`.trim();
+  const counts = {
+    web_reviewed_target_count: countOf(currentPlan, 'web_reviewed_target_count'),
+    local_required_target_count: countOf(currentPlan, 'local_required_target_count'),
+    local_skipped_target_count: countOf(currentPlan, 'local_skipped_target_count'),
+    unique_page_count: countOf(currentPlan, 'unique_page_count'),
+    unresolved_page_target_count: countOf(currentPlan, 'unresolved_page_target_count'),
+  };
+  const text = JSON.stringify({
+    bundle_id: currentPlan.bundle_id || currentBundle?.bundle_id,
+    required_object_checks: Array.isArray(currentPlan.required_object_checks) ? currentPlan.required_object_checks : [],
+    required_evidence_checks: Array.isArray(currentPlan.required_evidence_checks) ? currentPlan.required_evidence_checks : [],
+    required_page_checks: Array.isArray(currentPlan.required_page_checks) ? currentPlan.required_page_checks : [],
+    page_batches: Array.isArray(currentPlan.page_batches) ? currentPlan.page_batches : [],
+    counts,
+    metrics: currentPlan.metrics || {},
+    local_ai_instruction: [
+      '先调用认证 MCP get_content_web_review_local_verification_plan 获取并确认本计划。',
+      '再严格按 required_page_checks 和 page_batches 调用 read_content_web_review_page_asset；每个唯一证据页只读一次，不读取网页整包或整篇 PDF。',
+      '完成页面与证据核对后，最后才调用 apply_content_web_review_local_verification；逐个返回 required_object_checks 的结果，未解决页面不得应用。',
+      supplied,
+    ].filter(Boolean).join('\n'),
+  }, null, 2);
   try {
     await navigator.clipboard.writeText(text);
     showMessage('精简本地 AI 核验指令已复制。');

@@ -1,5 +1,5 @@
 const { test, expect } = require('@playwright/test');
-const BASE_URL = 'http://127.0.0.1:4174';
+const BASE_URL = process.env.TEST_BASE_URL || 'http://127.0.0.1:4173';
 const PAPER_ID = '11111111-1111-4111-8111-111111111111';
 
 const firstItem = {
@@ -138,6 +138,13 @@ test('run-scoped figure evidence routes to chart review and cannot create a cont
 test('v2 bundle flow selects a module, validates proposal, and shows readonly local plan', async ({ page }) => {
   const calls = [];
   page.on('dialog', (dialog) => dialog.accept());
+  await page.addInitScript(() => {
+    window.__clipboardText = '';
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async (text) => { window.__clipboardText = text; } },
+    });
+  });
   await page.route('**/api/content-knowledge**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -171,7 +178,14 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
     }
     if (url.pathname.endsWith('/local-verification-plan')) {
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, page_batches: [{ page: 4, checks: ['page_text'], plan_item_ids: ['a'] }, { page: '<img src=x onerror=alert(1)>', target_count: 2, page_asset_ref: 'asset-7' }], metrics: { logical_page_read_count: 3, unresolved_page_target_count: 1 }, local_ai_instruction: 'Do not read the whole bundle.' }) });
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        bundle_id: 'bundle-1', web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, unresolved_page_target_count: 1,
+        required_object_checks: [{ plan_item_id: 'plan-item-a', evidence_ref_id: 'evidence-1', object_snapshot_hash: 'object-hash-a', evidence_asset_sha256: 'evidence-hash-a', page: 4, page_asset_ref: 'asset-7' }],
+        required_evidence_checks: [{ evidence_ref_id: 'evidence-1', page: 4, page_asset_ref: 'asset-7' }],
+        required_page_checks: [{ source_paper_id: PAPER_ID, source_pdf_sha256: 'pdf-hash-a', page: 4, page_asset_ref: 'asset-7', page_asset_sha256: 'page-hash-a' }],
+        page_batches: [{ page: 4, checks: ['page_text'], plan_item_ids: ['plan-item-a'], page_asset_ref: 'asset-7' }, { page: '<img src=x onerror=alert(1)>', target_count: 2, page_asset_ref: 'asset-8' }],
+        metrics: { logical_page_read_count: 3, unresolved_page_target_count: 1 }, local_ai_instruction: 'Do not read the whole bundle.',
+      }) });
     }
     if (url.pathname.endsWith('/local-verification-status')) {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
@@ -230,6 +244,25 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   await expect(page.getByRole('button', { name: '复制精简本地 AI 核验指令' })).toBeVisible();
   await page.getByRole('button', { name: '复制精简本地 AI 核验指令' }).click();
   await expect(page.getByText(/精简本地 AI 核验指令已复制|无法使用剪贴板/)).toBeVisible();
+  const copiedPlan = await page.evaluate(() => JSON.parse(window.__clipboardText));
+  expect(copiedPlan.bundle_id).toBe('bundle-1');
+  expect(copiedPlan.required_object_checks[0].plan_item_id).toBe('plan-item-a');
+  expect(copiedPlan.required_object_checks[0].object_snapshot_hash).toBe('object-hash-a');
+  expect(copiedPlan.required_object_checks[0].evidence_asset_sha256).toBe('evidence-hash-a');
+  expect(copiedPlan.required_evidence_checks[0].evidence_ref_id).toBe('evidence-1');
+  expect(copiedPlan.required_page_checks[0].source_paper_id).toBe(PAPER_ID);
+  expect(copiedPlan.required_page_checks[0].source_pdf_sha256).toBe('pdf-hash-a');
+  expect(copiedPlan.required_page_checks[0].page).toBe(4);
+  expect(copiedPlan.required_page_checks[0].page_asset_ref).toBe('asset-7');
+  expect(copiedPlan.required_page_checks[0].page_asset_sha256).toBe('page-hash-a');
+  expect(copiedPlan.local_ai_instruction).toContain('get_content_web_review_local_verification_plan');
+  expect(copiedPlan.local_ai_instruction).toContain('read_content_web_review_page_asset');
+  expect(copiedPlan.local_ai_instruction).toContain('apply_content_web_review_local_verification');
+  expect(copiedPlan.local_ai_instruction.indexOf('get_content_web_review_local_verification_plan')).toBeLessThan(copiedPlan.local_ai_instruction.indexOf('read_content_web_review_page_asset'));
+  expect(copiedPlan.local_ai_instruction.indexOf('read_content_web_review_page_asset')).toBeLessThan(copiedPlan.local_ai_instruction.indexOf('apply_content_web_review_local_verification'));
+  const copiedText = await page.evaluate(() => window.__clipboardText);
+  expect(copiedText).toContain('\n  "required_object_checks"');
+  expect(copiedText).not.toContain('Review B0078 safely');
   const lastModified = await page.locator('#bundleFile').evaluate((input) => input.files[0].lastModified);
   await page.locator('#bundleDropZone').evaluate((element, modified) => {
     const file = new File(['{"targets":[]}'], 'proposal.json', { type: 'application/json', lastModified: modified });
