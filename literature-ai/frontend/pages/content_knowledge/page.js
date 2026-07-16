@@ -8,6 +8,7 @@ import {
   createReviewBundleV2,
   validateReviewBundleProposal,
   getLocalVerificationPlan,
+  getLocalVerificationStatus,
   downloadReviewBundle,
   createWritingPlan,
 } from './api.js';
@@ -20,6 +21,7 @@ const detailRoot = document.querySelector('#detailRoot');
 const reviewRoot = document.querySelector('#reviewRoot');
 let currentBundle = null;
 let currentPlan = null;
+let currentVerificationStatus = null;
 let uploadedProposalKey = null;
 const MAX_PROPOSAL_BYTES = 5 * 1024 * 1024;
 
@@ -217,13 +219,121 @@ function renderBundleStatus(text) {
   document.querySelector('#bundleStatus').textContent = text;
 }
 
+const VERIFICATION_STATUS_LABELS = {
+  awaiting_local_verification: '待本地核验',
+  partial: '部分完成',
+  awaiting_human: '待人工',
+  finalized: '已完成',
+  stale: '已失效',
+  failed: '失败',
+};
+
+function displayValue(value, fallback = '—') {
+  return value === 0 ? '0' : (value == null || value === '' ? fallback : String(value));
+}
+
+function renderVerificationStatus(status) {
+  currentVerificationStatus = status;
+  const root = document.querySelector('#localVerificationStatus');
+  root.hidden = false;
+  root.replaceChildren();
+  const title = document.createElement('h3');
+  title.textContent = '本地核验最终状态';
+  root.append(title);
+  if (!status || typeof status !== 'object') {
+    const empty = document.createElement('p');
+    empty.textContent = '暂无本地核验状态。';
+    root.append(empty);
+    return;
+  }
+  const statusLine = document.createElement('p');
+  statusLine.className = 'verification-status-line';
+  statusLine.textContent = `总状态：${VERIFICATION_STATUS_LABELS[status.status] || '待本地核验'}（${status.status || 'unknown'}）`;
+  root.append(statusLine);
+
+  const counts = status.object_counts || {};
+  const countLine = document.createElement('p');
+  countLine.textContent = `对象计数：必需 ${displayValue(counts.required, '0')}；已应用 ${displayValue(counts.applied, '0')}；待处理 ${displayValue(counts.pending, '0')}；已失效 ${displayValue(counts.stale, '0')}；失败 ${displayValue(counts.failed, '0')}；待人工 ${displayValue(counts.awaiting_human, '0')}`;
+  root.append(countLine);
+
+  const before = status.formal_eligibility_before || {};
+  const after = status.formal_eligibility_after || {};
+  const delta = status.formal_eligibility_delta || {};
+  const eligibility = document.createElement('p');
+  eligibility.textContent = `正式资格（前 → 后，变化）：可写作 ${displayValue(before.writing, '0')} → ${displayValue(after.writing, '0')}（${displayValue(delta.writing, '0')}）；可引用 ${displayValue(before.citation, '0')} → ${displayValue(after.citation, '0')}（${displayValue(delta.citation, '0')}）；RAG ${displayValue(before.rag, '0')} → ${displayValue(after.rag, '0')}（${displayValue(delta.rag, '0')}）`;
+  root.append(eligibility);
+
+  const metrics = status.metrics || {};
+  const metricLine = document.createElement('p');
+  metricLine.textContent = `读取指标：逻辑读取 ${displayValue(metrics.logical_page_read_count ?? metrics.logical_reads, '—')}；物理读取 ${displayValue(metrics.physical_page_read_attempt_count ?? metrics.physical_reads, '—')}；重试 ${displayValue(metrics.page_read_retry_count ?? metrics.retries, '—')}；缓存命中 ${displayValue(metrics.page_cache_hit_count ?? metrics.cache_hits, '—')}`;
+  root.append(metricLine);
+
+  const results = Array.isArray(status.results) ? status.results.filter((result) => ['stale', 'failed', 'awaiting_human'].includes(result.status)) : [];
+  const resultTitle = document.createElement('p');
+  resultTitle.textContent = '需关注结果：';
+  root.append(resultTitle);
+  if (!results.length) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = '暂无已失效、失败或待人工结果。';
+    root.append(empty);
+  } else {
+    const list = document.createElement('ul');
+    results.forEach((result) => {
+      const item = document.createElement('li');
+      const targetType = result.target_type || result.object_type || '对象信息不可用';
+      const targetId = result.target_id || result.plan_item_id || '—';
+      const field = result.field_name || result.field || `对象信息不可用（计划项 ${result.plan_item_id || '—'}）`;
+      const reason = result.reason || result.error_code || (Array.isArray(result.stale_reasons) ? result.stale_reasons.join('、') : result.stale_reasons) || result.verification_note || '—';
+      item.textContent = `目标类型 ${targetType}；字段 ${field}；状态 ${VERIFICATION_STATUS_LABELS[result.status] || result.status || '—'}；原因 ${reason}；目标 ${targetId}`;
+      list.append(item);
+    });
+    root.append(list);
+  }
+  const gate = document.createElement('p');
+  gate.className = 'safety-gate';
+  gate.textContent = '安全提示：网页 AI 全部 PASS 仍不会直接解锁；只有认证本地 AI 完成 PDF 核验与受控应用后，正式资格才变化。此页面仅读取状态，不提供应用或写入入口。';
+  root.append(gate);
+}
+
+function renderVerificationStatusLoading() {
+  const root = document.querySelector('#localVerificationStatus');
+  root.hidden = false;
+  root.replaceChildren();
+  const message = document.createElement('p');
+  message.textContent = '正在读取本地核验状态…';
+  root.append(message);
+}
+
+function renderVerificationStatusError(error) {
+  const root = document.querySelector('#localVerificationStatus');
+  root.hidden = false;
+  root.replaceChildren();
+  const message = document.createElement('p');
+  message.className = 'error';
+  message.textContent = `本地核验状态读取失败：${error.message}`;
+  root.append(message);
+}
+
+async function loadVerificationStatus() {
+  if (!currentBundle?.bundle_id) return;
+  renderVerificationStatusLoading();
+  try {
+    renderVerificationStatus(await getLocalVerificationStatus(currentBundle.bundle_id));
+  } catch (error) {
+    renderVerificationStatusError(error);
+  }
+}
+
 async function generateBundle() {
   const paperId = selectedPaperId();
   if (!paperId) return showMessage('请先选择一篇论文，再生成审核包。', true);
   try {
     currentBundle = await createReviewBundleV2({ paper_id: paperId, module: selectedModule() });
     uploadedProposalKey = null;
+    currentVerificationStatus = null;
     renderPlan(null);
+    renderVerificationStatus(null);
     renderBundleStatus(bundleSummary(currentBundle));
     document.querySelector('#bundleDownloadButton').disabled = false;
     document.querySelector('#bundleFile').value = '';
@@ -274,6 +384,7 @@ async function validateBundle() {
       return;
     }
     await loadLocalPlan();
+    await loadVerificationStatus();
   } catch (error) {
     showMessage(error instanceof SyntaxError ? 'JSON 解析失败：请上传严格有效的 JSON。' : `网页 AI 回传校验失败：${error.message}`, true);
   }
@@ -407,6 +518,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('#createBundleButton').addEventListener('click', generateBundle);
   document.querySelector('#copyBundleButton').addEventListener('click', copyBundleInstruction);
   document.querySelector('#validateBundleButton').addEventListener('click', validateBundle);
+  document.querySelector('#refreshVerificationStatusButton').addEventListener('click', loadVerificationStatus);
   document.querySelector('#bundleDownloadButton').addEventListener('click', downloadBundle);
   const bundleFile = document.querySelector('#bundleFile');
   bundleFile.addEventListener('click', (event) => { event.currentTarget.value = ''; });

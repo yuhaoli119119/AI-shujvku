@@ -80,6 +80,10 @@ export function getLocalVerificationPlan(bundleId) {
   return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/local-verification-plan`);
 }
 
+export function getLocalVerificationStatus(bundleId) {
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/local-verification-status`);
+}
+
 export function downloadReviewBundle(bundleId, downloadUrl) {
   return fetch(downloadUrl || `/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/download`);
 }

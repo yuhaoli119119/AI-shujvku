@@ -381,6 +381,14 @@ textarea {
   font-weight: 750;
 }
 
+.verification-status-line {
+  font-weight: 750;
+}
+
+.verification-status h3 {
+  margin-top: 0;
+}
+
 @media (max-width: 1100px) {
   .workbench {
     grid-template-columns: minmax(240px, .8fr) minmax(360px, 1.2fr);

@@ -144,6 +144,14 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
     if (url.pathname.endsWith('/local-verification-plan')) {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, page_batches: [{ page: 4, checks: ['page_text'], plan_item_ids: ['a'] }, { page: '<img src=x onerror=alert(1)>', target_count: 2, page_asset_ref: 'asset-7' }], metrics: { logical_page_read_count: 3, unresolved_page_target_count: 1 }, local_ai_instruction: 'Do not read the whole bundle.' }) });
     }
+    if (url.pathname.endsWith('/local-verification-status')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        bundle_id: 'bundle-1', status: 'finalized',
+        object_counts: { required: 2, applied: 2, pending: 0, stale: 0, failed: 0, awaiting_human: 0 },
+        formal_eligibility_before: { writing: 1, citation: 0, rag: 1 }, formal_eligibility_after: { writing: 2, citation: 1, rag: 2 }, formal_eligibility_delta: { writing: 1, citation: 1, rag: 1 },
+        metrics: { logical_page_read_count: 4, physical_page_read_attempt_count: 3, page_read_retry_count: 1, page_cache_hit_count: 1 }, results: [],
+      }) });
+    }
     if (url.pathname.endsWith('/download')) {
       return route.fulfill({ contentType: 'application/zip', body: 'PK\u0003\u0004' });
     }
@@ -183,6 +191,10 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
   await expect(page.getByText(/网页 AI 回传校验完成：通过/)).toBeVisible();
   await expect(page.getByText(/本地核验计划：网页已核验 1/)).toBeVisible();
+  await expect(page.getByText('总状态：已完成（finalized）')).toBeVisible();
+  await expect(page.getByText(/对象计数：必需 2；已应用 2；待处理 0/)).toBeVisible();
+  await expect(page.getByText(/可写作 1 → 2（1）；可引用 0 → 1（1）；RAG 1 → 2（1）/)).toBeVisible();
+  await expect(page.getByText(/逻辑读取 4；物理读取 3；重试 1；缓存命中 1/)).toBeVisible();
   await expect(page.getByText(/逻辑页读取 3；未解决页目标 1/)).toBeVisible();
   await expect(page.getByText('第 4 页批次：1 个对象')).toBeVisible();
   await expect(page.getByText(/第 <img src=x onerror=alert\(1\)> 页批次/)).toBeVisible();
@@ -215,6 +227,68 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   expect(calls.some((call) => call.path.endsWith('/local-verification-plan'))).toBeTruthy();
   expect(calls.some((call) => call.path.endsWith('/apply'))).toBeFalsy();
   expect(calls.some((call) => call.path.endsWith('/finalize'))).toBeFalsy();
+});
+
+test('local verification status refresh maps lifecycle states and remains read-only', async ({ page }) => {
+  const calls = [];
+  let statusCall = 0;
+  const statuses = ['partial', 'stale', 'awaiting_human', 'finalized'];
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    calls.push({ method: request.method(), path: url.pathname });
+    if (url.pathname === '/api/content-knowledge') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }) });
+    if (url.pathname.includes('/items/')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ item: firstItem }) });
+    if (url.pathname.endsWith('/v2')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ bundle_id: 'bundle-status', status: 'created', manifest: { targets: [], allowed_pages: [] } }) });
+    if (url.pathname.endsWith('/web-proposal/validate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
+    if (url.pathname.endsWith('/local-verification-plan')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ summary: {}, page_batches: [] }) });
+    if (url.pathname.endsWith('/local-verification-status')) {
+      const status = statuses[Math.min(statusCall++, statuses.length - 1)];
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ bundle_id: 'bundle-status', status, object_counts: { required: 4, applied: status === 'finalized' ? 4 : 2, pending: status === 'partial' ? 2 : 0, stale: status === 'stale' ? 1 : 0, failed: 0, awaiting_human: status === 'awaiting_human' ? 1 : 0 }, formal_eligibility_before: { writing: 0, citation: 0, rag: 0 }, formal_eligibility_after: { writing: 1, citation: 1, rag: 1 }, formal_eligibility_delta: { writing: 1, citation: 1, rag: 1 }, metrics: {}, results: status === 'stale' ? [{ plan_item_id: 'plan-1', status: 'stale', target_type: 'section', field_name: 'text', stale_reasons: ['source_changed'] }] : [] }) });
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await page.locator('#bundleResultInput').fill('{}');
+  await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
+  await expect(page.getByText('总状态：部分完成（partial）')).toBeVisible();
+  await page.getByRole('button', { name: '刷新本地核验状态' }).click();
+  await expect(page.getByText('总状态：已失效（stale）')).toBeVisible();
+  await expect(page.getByText(/目标类型 section；字段 text；状态 已失效；原因 source_changed/)).toBeVisible();
+  await page.getByRole('button', { name: '刷新本地核验状态' }).click();
+  await expect(page.getByText('总状态：待人工（awaiting_human）')).toBeVisible();
+  await page.getByRole('button', { name: '刷新本地核验状态' }).click();
+  await expect(page.getByText('总状态：已完成（finalized）')).toBeVisible();
+  expect(calls.filter((call) => call.path.endsWith('/local-verification-status')).length).toBe(4);
+  expect(calls.some((call) => call.path.endsWith('/local-verification/apply'))).toBeFalsy();
+  expect(calls.some((call) => call.path.endsWith('/finalize'))).toBeFalsy();
+  await expect(page.getByRole('button', { name: /应用|批准|写入正式状态/ })).toHaveCount(0);
+});
+
+test('local verification status failure does not break proposal flow', async ({ page }) => {
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/content-knowledge') return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }) });
+    if (url.pathname.includes('/items/')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ item: firstItem }) });
+    if (url.pathname.endsWith('/v2')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ bundle_id: 'bundle-status-error', manifest: { targets: [], allowed_pages: [] } }) });
+    if (url.pathname.endsWith('/web-proposal/validate')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
+    if (url.pathname.endsWith('/local-verification-plan')) return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ summary: {}, page_batches: [], local_ai_instruction: 'read PDF' }) });
+    if (url.pathname.endsWith('/local-verification-status')) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ detail: 'temporarily unavailable' }) });
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await page.locator('#bundleResultInput').fill('{}');
+  await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
+  await expect(page.getByText(/网页 AI 回传校验完成：通过/)).toBeVisible();
+  await expect(page.getByText(/本地核验状态读取失败：temporarily unavailable/)).toBeVisible();
+  await page.getByRole('button', { name: '复制精简本地 AI 核验指令' }).click();
+  await expect(page.getByText(/精简本地 AI 核验指令已复制|无法使用剪贴板/)).toBeVisible();
 });
 
 test('a paper-code deep link resolves the UUID before creating a v2 review bundle', async ({ page }) => {

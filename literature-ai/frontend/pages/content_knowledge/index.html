@@ -73,6 +73,11 @@
         <textarea id="bundleResultInput" rows="6" placeholder="也可以粘贴与审核包匹配的严格 JSON 回传"></textarea>
         <button id="validateBundleButton" class="secondary-btn" type="button">校验网页 AI 建议</button>
         <section id="localPlan" class="local-plan" hidden aria-live="polite"></section>
+        <section id="localVerificationStatus" class="local-plan verification-status" hidden aria-live="polite">
+          <h3>本地核验最终状态</h3>
+          <p>校验网页 AI 建议后读取状态。</p>
+        </section>
+        <button id="refreshVerificationStatusButton" class="secondary-btn" type="button">刷新本地核验状态</button>
       </section>
       <label class="field" for="writingPlanQuery">
         <span>写作计划查询</span>
