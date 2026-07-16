@@ -21,6 +21,11 @@ export function renderReview(root, item, onReview) {
   }
   const risks = (item.risk_flags || item.risks || []).map((risk) => `<li>${escapeHtml(risk)}</li>`).join('') || '<li>未返回风险标记</li>';
   const sourceCorrectionLink = item.paper_id ? `<a class="source-correction-link" href="../review_center/index.html?paper_id=${encodeURIComponent(item.paper_id)}">去审核中心修正源内容</a>` : '';
+  const metadata = item.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  const runId = metadata.external_analysis_run_id || metadata.run_id;
+  const chartReviewLink = item.category === 'figure_table_evidence' && item.paper_id && runId
+    ? `<a class="source-correction-link" href="../review_center/index.html?paper_id=${encodeURIComponent(item.paper_id)}&run_id=${encodeURIComponent(runId)}&mode=evidence">转到图表审核</a>`
+    : '';
   const reviewable = isReviewable(item);
   const disabled = reviewable ? '' : ' disabled';
   const sourceTrust = item.source_identity_verified
@@ -36,6 +41,7 @@ export function renderReview(root, item, onReview) {
     '<div class="panel-heading"><h2>审核与来源风险</h2></div>',
     '<p class="muted">这里审核证据与引用资格，不会直接编辑 MechanismClaim 或 WritingCard 源内容。</p>',
     sourceCorrectionLink,
+    chartReviewLink,
     `<p class="muted">来源可信度：${escapeHtml(sourceTrust)}</p>`,
     `<ul class="risk-list">${risks}</ul>`,
     reviewable ? '' : '<p class="state-card">先同步索引后审核</p>',

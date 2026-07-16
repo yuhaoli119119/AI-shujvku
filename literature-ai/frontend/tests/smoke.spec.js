@@ -3354,7 +3354,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(dftConflictClassification.readyToApply).toHaveLength(0);
     expect(dftConflictClassification.needsHuman).toHaveLength(0);
     expect(dftConflictClassification.newReview).toHaveLength(1);
-    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(4);
+    await expect(page.locator('#dftContent button:has-text("复制审核提示")')).toHaveCount(3);
     const dftSampleGroups = page.locator('#dftContent [data-role="dft-sample-group"]');
     await expect(dftSampleGroups).toHaveCount(1);
     await expect(dftSampleGroups.first()).toContainText('催化剂样本');

@@ -328,6 +328,12 @@ async function loadVerificationStatus() {
 async function generateBundle() {
   const paperId = selectedPaperId();
   if (!paperId) return showMessage('请先选择一篇论文，再生成审核包。', true);
+  const item = selectedItem();
+  const metadata = item?.metadata && typeof item.metadata === 'object' ? item.metadata : {};
+  const itemRunId = metadata.external_analysis_run_id || metadata.run_id;
+  if (state.filters.run_id && item?.category === 'figure_table_evidence' && itemRunId === state.filters.run_id) {
+    return showMessage('当前是图表字段审核任务，请使用“转到图表审核”，不要生成内容审核包。', true);
+  }
   try {
     currentBundle = await createReviewBundleV2({ paper_id: paperId, module: selectedModule() });
     uploadedProposalKey = null;

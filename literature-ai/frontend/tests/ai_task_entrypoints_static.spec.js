@@ -89,9 +89,11 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   expect(topnav).toContain('label: "内容知识"');
   expect(page).toContain('/api/content-knowledge?');
   expect(page).toContain('/api/content-knowledge/sync?');
-  expect(page).toContain('/validate');
-  expect(page).toContain('/apply');
-  expect(page).toContain('/finalize');
+  expect(page).toContain('/web-proposal/validate');
+  expect(page).toContain('/local-verification-plan');
+  expect(page).toContain('/local-verification-status');
+  expect(page).not.toContain('/apply');
+  expect(page).not.toContain('/finalize');
   expect(page).toContain('先同步索引后审核');
   expect(page).toContain('mechanism_evidence');
   expect(page).toContain('writing_material');
@@ -104,8 +106,8 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   expect(page).toContain('scopeBanner');
   expect(page).toContain('当前审核范围：AI 批次');
   expect(page).toContain('item_count');
-  expect(page).toContain('finalizeReviewBundle');
-  expect(page).toContain('完成审核');
-  expect(page).toContain('项未解决');
+  expect(page).toContain('网页阶段只校验建议，不会改变系统审核状态');
+  expect(page).toContain('网页 AI 全部 PASS 仍不会直接解锁');
+  expect(page).toContain('此页面仅读取状态，不提供应用或写入入口');
   expect(page).toContain('来源仅为声明，身份未认证');
 });

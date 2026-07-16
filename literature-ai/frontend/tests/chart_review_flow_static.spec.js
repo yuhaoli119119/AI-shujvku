@@ -32,9 +32,12 @@ test('review center exposes local AI chart review copy instruction and status fi
 });
 
 test('content knowledge routes run-scoped figure field reminders to chart review', () => {
-  const contentKnowledge = readFrontendFile('pages/content_knowledge/index.html');
+  const contentKnowledge = [
+    'pages/content_knowledge/page.js',
+    'pages/content_knowledge/review-actions.js',
+  ].map(readFrontendFile).join('\n');
   expect(contentKnowledge).toContain('转到图表审核');
-  expect(contentKnowledge).toContain('category === "figure_table_evidence"');
+  expect(contentKnowledge).toContain("category === 'figure_table_evidence'");
   expect(contentKnowledge).toContain('不要生成内容审核包');
 });
 

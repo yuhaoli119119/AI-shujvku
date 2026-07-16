@@ -106,6 +106,35 @@ test('legacy projection requires index sync and never sends its source-shaped ID
   expect(reviewRequested).toBeFalsy();
 });
 
+test('run-scoped figure evidence routes to chart review and cannot create a content bundle', async ({ page }) => {
+  const figureItem = {
+    ...firstItem,
+    item_id: 'figure:1',
+    reviewable: false,
+    category: 'figure_table_evidence',
+    category_label: '图表证据卡',
+    paper_title: 'Figure paper',
+    metadata: { external_analysis_run_id: 'run-1' },
+  };
+  let bundleRequested = false;
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname.endsWith('/v2')) bundleRequested = true;
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [figureItem], total: 1, offset: 0, limit: 25, has_more: false }),
+    });
+  });
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html?run_id=run-1`);
+  await page.getByRole('button', { name: /Figure paper/ }).click();
+  await expect(page.getByRole('link', { name: '转到图表审核' })).toHaveAttribute('href', /paper_id=.*run_id=run-1&mode=evidence/);
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await expect(page.getByText(/当前是图表字段审核任务.*不要生成内容审核包/)).toBeVisible();
+  expect(bundleRequested).toBeFalsy();
+});
+
 test('v2 bundle flow selects a module, validates proposal, and shows readonly local plan', async ({ page }) => {
   const calls = [];
   page.on('dialog', (dialog) => dialog.accept());
