@@ -223,6 +223,9 @@ def test_revised_is_atomic_updates_value_and_materializes_canonical_review(setup
         )
         result = applied["submitted_results"][0]
         assert result["status"] == "applied" and result["correction_id"]
+        assert result["target_type"] == "paper_section"
+        assert result["target_id"] == seeded["first_section_id"]
+        assert result["field_name"] == "text"
         assert result["review_id"] and result["locator_id"]
         assert session.get(PaperSection, UUID(seeded["first_section_id"])).text == "revised grounded statement"
         correction = session.get(PaperCorrection, UUID(result["correction_id"]))
