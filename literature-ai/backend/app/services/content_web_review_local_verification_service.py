@@ -27,6 +27,15 @@ from app.services.review_service import ReviewService
 
 
 OUTCOMES = {"CONFIRMED", "REVISED", "REJECTED", "NEEDS_HUMAN"}
+ALLOWED_OUTCOMES_BY_DECISION = {
+    # A local verifier may decline to decide, but it must never reinterpret a
+    # validated web proposal into a different state transition.  In
+    # particular, a web PASS cannot become a correction just because the
+    # local verifier supplied a replacement value.
+    "PASS": {"CONFIRMED", "NEEDS_HUMAN"},
+    "REVISE": {"REVISED", "NEEDS_HUMAN"},
+    "REJECT": {"REJECTED", "NEEDS_HUMAN"},
+}
 RESULT_FIELDS = {
     "plan_item_id",
     "object_snapshot_hash",
@@ -87,6 +96,9 @@ class ContentWebReviewLocalVerificationService:
             )
         ).all())
         existing = {str(row.plan_item_id): row for row in existing_rows}
+        terminal_existing_plan_item_ids = {
+            plan_item_id for plan_item_id, row in existing.items() if row.status != "failed"
+        }
         for item in normalized:
             row = existing.get(item["plan_item_id"])
             if row is not None and row.payload_hash != item["payload_hash"]:
@@ -95,7 +107,7 @@ class ContentWebReviewLocalVerificationService:
                     item["plan_item_id"],
                 )
         if not partial:
-            covered = set(existing) | {item["plan_item_id"] for item in normalized}
+            covered = terminal_existing_plan_item_ids | {item["plan_item_id"] for item in normalized}
             missing = sorted(set(expected) - covered)
             if missing:
                 raise ContentWebReviewLocalVerificationError(
@@ -115,7 +127,17 @@ class ContentWebReviewLocalVerificationService:
             "page_read_retry_count": 0,
             "page_cache_hit_count": 0,
         }
-        actionable = [item for item in normalized if item["plan_item_id"] not in existing]
+        retrying_plan_item_ids = {
+            item["plan_item_id"]
+            for item in normalized
+            if existing.get(item["plan_item_id"]) is not None
+            and existing[item["plan_item_id"]].status == "failed"
+        }
+        actionable = [
+            item
+            for item in normalized
+            if item["plan_item_id"] not in existing or item["plan_item_id"] in retrying_plan_item_ids
+        ]
         for item in actionable:
             current = preflight_targets.get(item["plan_item_id"])
             if current is not None:
@@ -125,7 +147,7 @@ class ContentWebReviewLocalVerificationService:
         response_rows: list[ContentWebReviewLocalVerificationResult] = []
         for item in normalized:
             prior = existing.get(item["plan_item_id"])
-            if prior is not None:
+            if prior is not None and prior.status != "failed":
                 response_rows.append(prior)
                 continue
             target = expected[item["plan_item_id"]]
@@ -146,6 +168,7 @@ class ContentWebReviewLocalVerificationService:
                     status="stale",
                     stale_reasons=stale_reasons,
                     error_code="content_web_local_verification_stale",
+                    existing_row=prior,
                 )
                 response_rows.append(row)
                 continue
@@ -159,6 +182,7 @@ class ContentWebReviewLocalVerificationService:
                     status="awaiting_human",
                     formal_gate_before=before,
                     formal_gate_after=before,
+                    existing_row=prior,
                 )
                 response_rows.append(row)
                 continue
@@ -202,7 +226,9 @@ class ContentWebReviewLocalVerificationService:
                             "content_web_local_verification_locked_stale",
                             ",".join(locked_stale),
                         )
-                    row = self._apply_one(bundle, target, item, actor, lock.lock_token)
+                    row = self._apply_one(
+                        bundle, target, item, actor, lock.lock_token, existing_row=prior
+                    )
                 response_rows.append(row)
             except ContentWebReviewLocalVerificationError as exc:
                 status = "stale" if exc.code == "content_web_local_verification_locked_stale" else "failed"
@@ -215,6 +241,7 @@ class ContentWebReviewLocalVerificationService:
                     status=status,
                     stale_reasons=reasons,
                     error_code=exc.code,
+                    existing_row=prior,
                 )
                 response_rows.append(row)
             except Exception as exc:
@@ -225,6 +252,7 @@ class ContentWebReviewLocalVerificationService:
                     actor=actor,
                     status="failed",
                     error_code=f"content_web_local_verification_apply_failed:{type(exc).__name__}",
+                    existing_row=prior,
                 )
                 response_rows.append(row)
             finally:
@@ -253,7 +281,9 @@ class ContentWebReviewLocalVerificationService:
         self.session.flush()
         return {
             **status,
-            "idempotent": all(item["plan_item_id"] in existing for item in normalized),
+            "idempotent": not retrying_plan_item_ids and all(
+                item["plan_item_id"] in terminal_existing_plan_item_ids for item in normalized
+            ),
             "submitted_results": [self._serialize_result(row) for row in response_rows],
             "metrics": metrics,
         }
@@ -351,6 +381,12 @@ class ContentWebReviewLocalVerificationService:
             outcome = raw.get("outcome")
             if outcome not in OUTCOMES:
                 raise ContentWebReviewLocalVerificationError("content_web_local_verification_invalid_outcome", plan_item_id)
+            decision = target.get("decision")
+            if outcome not in ALLOWED_OUTCOMES_BY_DECISION.get(decision, set()):
+                raise ContentWebReviewLocalVerificationError(
+                    "content_web_local_verification_outcome_not_allowed",
+                    plan_item_id,
+                )
             if raw.get("object_snapshot_hash") != target["object_snapshot_hash"]:
                 raise ContentWebReviewLocalVerificationError("content_web_local_verification_wrong_object_hash", plan_item_id)
             evidence_ids = raw.get("checked_evidence_ids")
@@ -377,6 +413,11 @@ class ContentWebReviewLocalVerificationService:
                 raise ContentWebReviewLocalVerificationError("content_web_local_verification_revised_value_required", plan_item_id)
             if outcome != "REVISED" and verified_value is not None:
                 raise ContentWebReviewLocalVerificationError("content_web_local_verification_unexpected_verified_value", plan_item_id)
+            if outcome == "REVISED" and verified_value != target.get("proposed_value"):
+                raise ContentWebReviewLocalVerificationError(
+                    "content_web_local_verification_revised_value_mismatch",
+                    plan_item_id,
+                )
             item = {
                 "plan_item_id": plan_item_id,
                 "object_snapshot_hash": raw["object_snapshot_hash"],
@@ -445,6 +486,7 @@ class ContentWebReviewLocalVerificationService:
         item: dict[str, Any],
         actor: str,
         lock_token: str,
+        existing_row: ContentWebReviewLocalVerificationResult | None = None,
     ) -> ContentWebReviewLocalVerificationResult:
         canonical, record = self.bundle_service._resolve_formal_target(
             bundle.paper_id, target["target_type"], target["target_id"]
@@ -546,6 +588,7 @@ class ContentWebReviewLocalVerificationService:
             review_id=review.id if review else None,
             locator_id=locator.id if locator else None,
             applied_object_snapshot_hash=applied_hash,
+            existing_row=existing_row,
         )
 
     def _review_and_locator(
@@ -581,32 +624,33 @@ class ContentWebReviewLocalVerificationService:
         review_id: UUID | None = None,
         locator_id: UUID | None = None,
         applied_object_snapshot_hash: str | None = None,
+        existing_row: ContentWebReviewLocalVerificationResult | None = None,
     ) -> ContentWebReviewLocalVerificationResult:
-        row = ContentWebReviewLocalVerificationResult(
+        row = existing_row or ContentWebReviewLocalVerificationResult(
             bundle_id=bundle.id,
             plan_item_id=UUID(item["plan_item_id"]),
-            payload_hash=item["payload_hash"],
-            target_type=target["target_type"],
-            target_id=target["target_id"],
-            field_name=target["field_name"],
-            object_snapshot_hash=item["object_snapshot_hash"],
-            applied_object_snapshot_hash=applied_object_snapshot_hash,
-            outcome=item["outcome"],
-            checked_evidence_ids=item["checked_evidence_ids"],
-            checked_pages=item["checked_pages"],
-            verification_note=item["verification_note"],
-            verified_value=item["verified_value"],
-            status=status,
-            stale_reasons=stale_reasons or [],
-            error_code=error_code,
-            formal_gate_before=formal_gate_before,
-            formal_gate_after=formal_gate_after,
-            correction_id=correction_id,
-            review_id=review_id,
-            locator_id=locator_id,
-            applied_by=actor,
-            applied_at=utcnow(),
         )
+        row.payload_hash = item["payload_hash"]
+        row.target_type = target["target_type"]
+        row.target_id = target["target_id"]
+        row.field_name = target["field_name"]
+        row.object_snapshot_hash = item["object_snapshot_hash"]
+        row.applied_object_snapshot_hash = applied_object_snapshot_hash
+        row.outcome = item["outcome"]
+        row.checked_evidence_ids = item["checked_evidence_ids"]
+        row.checked_pages = item["checked_pages"]
+        row.verification_note = item["verification_note"]
+        row.verified_value = item["verified_value"]
+        row.status = status
+        row.stale_reasons = stale_reasons or []
+        row.error_code = error_code
+        row.formal_gate_before = formal_gate_before
+        row.formal_gate_after = formal_gate_after
+        row.correction_id = correction_id
+        row.review_id = review_id
+        row.locator_id = locator_id
+        row.applied_by = actor
+        row.applied_at = utcnow()
         self.session.add(row)
         self.session.add(AuditLog(
             paper_id=bundle.paper_id,

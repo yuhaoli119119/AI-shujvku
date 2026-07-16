@@ -104,20 +104,47 @@ class ContentWebReviewBundleV2Service:
 
         errors = self._validate_proposal(bundle, proposal)
         if errors:
+            # Never let an invalid retry downgrade a previously accepted
+            # proposal.  It is still rejected, but its immutable audit chain
+            # and lifecycle status remain intact.
+            if bundle.proposal_payload:
+                return {
+                    "valid": False,
+                    "bundle_id": str(bundle.id),
+                    "status": bundle.status,
+                    "errors": errors,
+                }
             bundle.status = "proposal_invalid"
             bundle.manifest = {**(bundle.manifest or {}), "last_validation_errors": errors}
             self.session.add(bundle)
             return {"valid": False, "bundle_id": str(bundle.id), "status": bundle.status, "errors": errors}
 
+        canonical_proposal = self._canonical_web_proposal(proposal)
+        if bundle.proposal_payload:
+            # A proposal establishes the exact local-verification plan.  It
+            # must stay immutable so later web uploads cannot reinterpret an
+            # already stored local result (or alter a pending object's scope).
+            if canonical_proposal != bundle.proposal_payload:
+                return {
+                    "valid": False,
+                    "bundle_id": str(bundle.id),
+                    "status": bundle.status,
+                    "errors": ["content_web_review_v2_proposal_immutable_conflict"],
+                }
+            plan = self._local_plan(bundle)
+            return {
+                "valid": True,
+                "idempotent": True,
+                "bundle_id": str(bundle.id),
+                "status": bundle.status,
+                "web_reviewed_target_count": plan["web_reviewed_target_count"],
+                "local_required_target_count": plan["local_required_target_count"],
+                "local_skipped_target_count": plan["local_skipped_target_count"],
+            }
+
         # Canonicalize server-owned safety fields; client declarations cannot
         # turn this web proposal into an identity-verified or final truth write.
-        bundle.proposal_payload = {
-            **proposal,
-            "proposal_status": "web_ai_proposal",
-            "source_identity_verified": False,
-            "writes_final_truth": False,
-            "local_ai_verification": None,
-        }
+        bundle.proposal_payload = canonical_proposal
         bundle.status = "web_proposal_validated"
         self.session.add(bundle)
         plan = self._local_plan(bundle)
@@ -130,6 +157,16 @@ class ContentWebReviewBundleV2Service:
             "web_reviewed_target_count": plan["web_reviewed_target_count"],
             "local_required_target_count": plan["local_required_target_count"],
             "local_skipped_target_count": plan["local_skipped_target_count"],
+        }
+
+    @staticmethod
+    def _canonical_web_proposal(proposal: dict[str, Any]) -> dict[str, Any]:
+        return {
+            **proposal,
+            "proposal_status": "web_ai_proposal",
+            "source_identity_verified": False,
+            "writes_final_truth": False,
+            "local_ai_verification": None,
         }
 
     def local_verification_plan(self, bundle_id: UUID) -> dict[str, Any]:

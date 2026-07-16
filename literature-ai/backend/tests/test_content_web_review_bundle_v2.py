@@ -110,6 +110,32 @@ def test_v2_rejects_incomplete_forged_and_wrong_page_payloads(setup_test_db, tmp
         assert any(error.startswith("forged_quote:") for error in result["errors"])
 
 
+def test_v2_validated_web_proposal_is_idempotent_but_immutable(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="sections")
+        proposal = _proposal(bundle["manifest"])
+        first = service.validate_web_proposal(UUID(bundle["bundle_id"]), proposal)
+        assert first["valid"] is True and first.get("idempotent") is None
+        repeated = service.validate_web_proposal(UUID(bundle["bundle_id"]), proposal)
+        assert repeated["valid"] is True and repeated["idempotent"] is True
+        saved = dict(service._bundle(UUID(bundle["bundle_id"])).proposal_payload)
+        forged = deepcopy(proposal)
+        forged["source_identity_verified"] = True
+        forged_rejected = service.validate_web_proposal(UUID(bundle["bundle_id"]), forged)
+        assert forged_rejected["valid"] is False
+        assert "forged_source_identity" in forged_rejected["errors"]
+        conflicting = deepcopy(proposal)
+        conflicting["actions"][0]["decision"] = "REJECT"
+        rejected = service.validate_web_proposal(UUID(bundle["bundle_id"]), conflicting)
+        assert rejected["valid"] is False
+        assert rejected["errors"] == ["content_web_review_v2_proposal_immutable_conflict"]
+        current = service._bundle(UUID(bundle["bundle_id"]))
+        assert current.proposal_payload == saved
+        assert current.status == first["status"]
+
+
 def test_v2_stale_dependency_report_is_target_scoped(setup_test_db, tmp_path):
     paper_id, section_id = _seed(setup_test_db, tmp_path)
     with _factory(setup_test_db).begin() as session:

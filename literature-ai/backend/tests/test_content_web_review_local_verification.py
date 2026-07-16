@@ -45,12 +45,12 @@ def _pdf(path: Path, pages: int = 2) -> None:
     document.close()
 
 
-def _seed(engine, tmp_path, suffix: str = "") -> dict[str, str]:
+def _seed(engine, tmp_path, suffix: str = "", *, paper_code: str | None = None) -> dict[str, str]:
     pdf = tmp_path / f"local-verification{suffix}.pdf"
     _pdf(pdf)
     with _factory(engine).begin() as session:
         paper = Paper(
-            paper_code=f"WV301{suffix}",
+            paper_code=paper_code or f"WV301{suffix}",
             title="Local verification",
             abstract="Grounded abstract evidence",
             pdf_path=str(pdf),
@@ -179,6 +179,41 @@ def _result(check, outcome="CONFIRMED", verified_value=None):
     return payload
 
 
+def _content_state(session, paper_id: str) -> dict[str, list[tuple]]:
+    paper_uuid = UUID(paper_id)
+    return {
+        "reviews": [
+            (str(row.id), row.target_type, row.target_id, row.field_name, row.original_value,
+             row.reviewed_value, row.reviewer_status, row.target_resolution_status, row.evidence_text)
+            for row in session.scalars(
+                select(ExtractionFieldReview).where(ExtractionFieldReview.paper_id == paper_uuid)
+                .order_by(ExtractionFieldReview.created_at, ExtractionFieldReview.id)
+            )
+        ],
+        "locators": [
+            (str(row.id), row.target_type, row.target_id, row.field_name, row.page, row.evidence_text,
+             row.locator_status, row.parser_source, row.bbox)
+            for row in session.scalars(
+                select(EvidenceLocator).where(EvidenceLocator.paper_id == paper_uuid)
+                .order_by(EvidenceLocator.created_at, EvidenceLocator.id)
+            )
+        ],
+        "corrections": [
+            (str(row.id), row.field_name, row.target_path, row.proposed_value, row.status, row.reason)
+            for row in session.scalars(
+                select(PaperCorrection).where(PaperCorrection.paper_id == paper_uuid)
+                .order_by(PaperCorrection.created_at, PaperCorrection.id)
+            )
+        ],
+        "objects": [
+            (str(row.id), row.section_title, row.text, row.page_start, row.page_end)
+            for row in session.scalars(
+                select(PaperSection).where(PaperSection.paper_id == paper_uuid).order_by(PaperSection.id)
+            )
+        ],
+    }
+
+
 def test_validate_and_plan_never_change_formal_eligibility(setup_test_db, tmp_path):
     seeded = _seed(setup_test_db, tmp_path)
     with _factory(setup_test_db).begin() as session:
@@ -214,7 +249,19 @@ def test_confirmed_creates_review_and_locator_without_correction_and_dedupes_pag
 def test_revised_is_atomic_updates_value_and_materializes_canonical_review(setup_test_db, tmp_path):
     seeded = _seed(setup_test_db, tmp_path)
     with _factory(setup_test_db).begin() as session:
-        created, plan = _bundle(session, seeded["paper_id"], "sections")
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=UUID(seeded["paper_id"]), module="sections")
+        proposal = _proposal(created["manifest"])
+        revised_action = next(
+            action for action in proposal["actions"] if action["target_id"] == seeded["first_section_id"]
+        )
+        revised_action.update({
+            "decision": "REVISE",
+            "proposed_value": "revised grounded statement",
+            "verification_note": "web proposal for exact grounded correction",
+        })
+        assert service.validate_web_proposal(UUID(created["bundle_id"]), proposal)["valid"] is True
+        plan = service.local_verification_plan(UUID(created["bundle_id"]))
         check = next(row for row in plan["required_object_checks"] if row["target_id"] == seeded["first_section_id"])
         applied = ContentWebReviewLocalVerificationService(session).apply(
             bundle_id=UUID(created["bundle_id"]),
@@ -230,6 +277,112 @@ def test_revised_is_atomic_updates_value_and_materializes_canonical_review(setup
         assert session.get(PaperSection, UUID(seeded["first_section_id"])).text == "revised grounded statement"
         correction = session.get(PaperCorrection, UUID(result["correction_id"]))
         assert correction.status == "approved" and correction.source == "ide_ai"
+
+
+def test_local_result_cannot_escalate_or_replace_validated_web_decision(setup_test_db, tmp_path):
+    seeded = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        created, plan = _bundle(session, seeded["paper_id"], "sections")
+        pass_check = plan["required_object_checks"][0]
+        original_value = session.get(PaperSection, UUID(pass_check["target_id"])).text
+        with pytest.raises(ContentWebReviewLocalVerificationError, match="outcome_not_allowed"):
+            ContentWebReviewLocalVerificationService(session).apply(
+                bundle_id=UUID(created["bundle_id"]),
+                results=[_result(pass_check, "REVISED", "unapproved replacement")],
+                partial=True,
+                source_prefix="ide_ai",
+                identity_verified=True,
+            )
+        assert session.get(PaperSection, UUID(pass_check["target_id"])).text == original_value
+        assert session.scalar(select(func.count()).select_from(PaperCorrection)) == 0
+
+        service = ContentWebReviewBundleV2Service(session)
+        revised = service.generate(paper_id=UUID(seeded["paper_id"]), module="sections")
+        proposal = _proposal(revised["manifest"])
+        action = next(item for item in proposal["actions"] if item["target_id"] == seeded["first_section_id"])
+        action.update({
+            "decision": "REVISE",
+            "proposed_value": "validated replacement",
+            "verification_note": "proposal is scoped to this exact replacement",
+        })
+        assert service.validate_web_proposal(UUID(revised["bundle_id"]), proposal)["valid"] is True
+        revise_check = next(
+            item for item in service.local_verification_plan(UUID(revised["bundle_id"]))["required_object_checks"]
+            if item["target_id"] == seeded["first_section_id"]
+        )
+        with pytest.raises(ContentWebReviewLocalVerificationError, match="revised_value_mismatch"):
+            ContentWebReviewLocalVerificationService(session).apply(
+                bundle_id=UUID(revised["bundle_id"]),
+                results=[_result(revise_check, "REVISED", "different replacement")],
+                partial=True,
+                source_prefix="ide_ai",
+                identity_verified=True,
+            )
+        with pytest.raises(ContentWebReviewLocalVerificationError, match="outcome_not_allowed"):
+            ContentWebReviewLocalVerificationService(session).apply(
+                bundle_id=UUID(revised["bundle_id"]),
+                results=[_result(revise_check, "CONFIRMED")],
+                partial=True,
+                source_prefix="ide_ai",
+                identity_verified=True,
+            )
+
+
+def test_b0102_isolated_database_acceptance_uses_paper_code_and_safe_pass_flow(setup_test_db, tmp_path):
+    seeded = _seed(setup_test_db, tmp_path, "-B0102", paper_code="B0102")
+    with _factory(setup_test_db).begin() as session:
+        assert session.get(Paper, UUID(seeded["paper_id"])).paper_code == "B0102"
+        baseline = _content_state(session, seeded["paper_id"])
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=UUID(seeded["paper_id"]), module="sections")
+        assert created["manifest"]["paper_code"] == "B0102"
+        assert _content_state(session, seeded["paper_id"]) == baseline
+        proposal = _proposal(created["manifest"])
+        validated = service.validate_web_proposal(UUID(created["bundle_id"]), proposal)
+        assert validated["valid"] is True
+        assert _content_state(session, seeded["paper_id"]) == baseline
+        plan = service.local_verification_plan(UUID(created["bundle_id"]))
+        before = ContentWebReviewLocalVerificationService(session).status(UUID(created["bundle_id"]))
+        assert before["formal_eligibility_delta"] == {"writing": 0, "citation": 0, "rag": 0}
+
+        applied = ContentWebReviewLocalVerificationService(session).apply(
+            bundle_id=UUID(created["bundle_id"]),
+            results=[_result(check) for check in plan["required_object_checks"]],
+            partial=False,
+            source_prefix="ide_ai",
+            identity_verified=True,
+        )
+        assert applied["status"] == "finalized"
+        assert applied["metrics"] == {
+            "logical_page_read_count": 1,
+            "physical_page_read_attempt_count": 1,
+            "page_read_retry_count": 0,
+            "page_cache_hit_count": 3,
+        }
+        after = _content_state(session, seeded["paper_id"])
+        assert after["objects"] == baseline["objects"]
+        assert after["corrections"] == baseline["corrections"]
+        added_reviews = after["reviews"][len(baseline["reviews"]):]
+        added_locators = after["locators"][len(baseline["locators"]):]
+        target_ids = {check["target_id"] for check in plan["required_object_checks"]}
+        assert len(added_reviews) == len(target_ids)
+        assert len(added_locators) == len(target_ids)
+        assert all(
+            row[1] == "sections" and row[2] in target_ids and row[3] == "text" and row[6] == "verified"
+            for row in added_reviews
+        )
+        assert all(
+            row[1] == "sections" and row[2] in target_ids and row[3] == "text"
+            and row[6] in {"exact_page", "exact_bbox"} and row[7] == "content_web_local_verification"
+            for row in added_locators
+        )
+        assert applied["formal_eligibility_delta"] == {
+            "writing": len(target_ids), "citation": len(target_ids), "rag": len(target_ids),
+        }
+        assert all(
+            content_object_gate(session, "sections", session.get(PaperSection, UUID(target_id))).can_use_for_writing
+            for target_id in target_ids
+        )
 
 
 def test_rejected_suppresses_real_old_gate_but_projection_flags_do_not_define_plan(setup_test_db, tmp_path):
@@ -616,4 +769,28 @@ def test_unknown_duplicate_and_same_owner_preexisting_lock_are_rejected_or_isola
         assert failed["status"] == "failed"
         assert failed["error_code"] == "module_write_lock_conflict"
         assert session.get(type(lock), lock.id).status == "active"
+        other_check = next(item for item in plan["required_object_checks"] if item != check)
+        with pytest.raises(ContentWebReviewLocalVerificationError, match="incomplete_batch"):
+            service.apply(
+                bundle_id=UUID(created["bundle_id"]), results=[_result(other_check)], partial=False,
+                source_prefix="ide_ai", identity_verified=True,
+            )
         ModuleWriteLockService(session).release(lock_token=lock.lock_token, released_by="ide_ai")
+        recovered = service.apply(
+            bundle_id=UUID(created["bundle_id"]), results=[_result(check)], partial=True,
+            source_prefix="ide_ai", identity_verified=True,
+        )
+        assert recovered["idempotent"] is False
+        assert recovered["submitted_results"][0]["status"] == "applied"
+        assert session.scalar(select(func.count()).select_from(ContentWebReviewLocalVerificationResult)) == 1
+        idempotent = service.apply(
+            bundle_id=UUID(created["bundle_id"]), results=[_result(check)], partial=True,
+            source_prefix="ide_ai", identity_verified=True,
+        )
+        assert idempotent["idempotent"] is True
+        conflict = _result(check); conflict["verification_note"] = "same plan but conflicting retry payload"
+        with pytest.raises(ContentWebReviewLocalVerificationError, match="idempotency_conflict"):
+            service.apply(
+                bundle_id=UUID(created["bundle_id"]), results=[conflict], partial=True,
+                source_prefix="ide_ai", identity_verified=True,
+            )
