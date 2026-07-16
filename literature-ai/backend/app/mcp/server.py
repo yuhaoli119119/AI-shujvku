@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi.concurrency import run_in_threadpool
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
@@ -27,6 +27,7 @@ from app.services.codex_context_service import CodexContextService
 from app.services.content_web_review_local_verification_service import (
     ContentWebReviewLocalVerificationService,
 )
+from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
@@ -1124,6 +1125,86 @@ def apply_content_web_review_local_verification(
             source_prefix=auth.source_prefix,
             identity_verified=auth.identity_verified,
         )
+
+
+def _content_web_local_read_auth() -> MCPAuthInfo:
+    """Authorize the read half of the local content-review protocol."""
+    auth = require_mcp_capability("propose_corrections")
+    if not auth.identity_verified or not str(auth.source_prefix or "").strip():
+        raise PermissionError("content_web_local_verification_identity_required")
+    return auth
+
+
+@mcp_server.tool(
+    name="get_content_web_review_local_verification_plan",
+    description=(
+        "Read the minimal server-owned local-verification plan for a strictly validated content web-review bundle. "
+        "Read-only: rejects stale or unvalidated bundles and never applies review results."
+    ),
+)
+def get_content_web_review_local_verification_plan(bundle_id: str) -> dict[str, Any]:
+    _content_web_local_read_auth()
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        plan = ContentWebReviewBundleV2Service(session).local_verification_plan(
+            UUID(bundle_id), persist_stale=False
+        )
+    if plan["status"] == "stale":
+        raise ValueError("content_web_review_v2_bundle_stale")
+    return {
+        "bundle_id": plan["bundle_id"],
+        "status": plan["status"],
+        "proposal_only": True,
+        "web_reviewed_target_count": plan["web_reviewed_target_count"],
+        "local_required_target_count": plan["local_required_target_count"],
+        "local_skipped_target_count": plan["local_skipped_target_count"],
+        "local_skipped_target_count_by_reason": plan["local_skipped_target_count_by_reason"],
+        "required_object_checks": plan["required_object_checks"],
+        "required_evidence_checks": plan["required_evidence_checks"],
+        "required_page_checks": plan["required_page_checks"],
+        "page_batches": plan["page_batches"],
+        "unique_page_count": plan["unique_page_count"],
+        "unresolved_page_target_count": plan["unresolved_page_target_count"],
+        "metrics": plan["metrics"],
+        "local_ai_instruction": plan["local_ai_instruction"],
+        "writes_final_truth": False,
+        "local_ai_verification": None,
+    }
+
+
+@mcp_server.tool(
+    name="read_content_web_review_page_asset",
+    description=(
+        "Read one image page explicitly required by get_content_web_review_local_verification_plan. "
+        "Pass the complete required-page identity (source_paper_id, source_pdf_sha256, page, "
+        "page_asset_sha256, page_asset_ref). The tool returns an MCP image content block plus binding metadata. "
+        "Read-only: paths from callers are never opened."
+    ),
+)
+def read_content_web_review_page_asset(
+    bundle_id: str,
+    source_paper_id: str,
+    source_pdf_sha256: str,
+    page: int,
+    page_asset_ref: str,
+    page_asset_sha256: str,
+) -> Any:
+    _content_web_local_read_auth()
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        asset = ContentWebReviewBundleV2Service(session).read_local_verification_page_asset(
+            UUID(bundle_id),
+            source_paper_id=source_paper_id,
+            source_pdf_sha256=source_pdf_sha256,
+            page=page,
+            page_asset_ref=page_asset_ref,
+            page_asset_sha256=page_asset_sha256,
+        )
+    content = asset.pop("content")
+    mime_type = asset["mime_type"]
+    if not mime_type.startswith("image/"):
+        raise ValueError("content_web_review_v2_page_asset_not_an_image")
+    return [asset, Image(data=content, format=mime_type.split("/", 1)[1])]
 
 
 @mcp_server.tool(

@@ -169,17 +169,110 @@ class ContentWebReviewBundleV2Service:
             "local_ai_verification": None,
         }
 
-    def local_verification_plan(self, bundle_id: UUID) -> dict[str, Any]:
+    def local_verification_plan(
+        self, bundle_id: UUID, *, persist_stale: bool = True
+    ) -> dict[str, Any]:
+        """Return the server-owned local verification plan.
+
+        The normal API lifecycle records a stale observation on the bundle.
+        MCP evidence reads must be genuinely read-only, so they set
+        ``persist_stale=False`` and receive the same stale blocker without a
+        database mutation.
+        """
         bundle = self._bundle(bundle_id)
         stale = self._stale_report(bundle)
         if stale["is_stale"]:
-            bundle.status = "stale"
-            bundle.manifest = {**(bundle.manifest or {}), "last_stale_report": stale}
-            self.session.add(bundle)
+            if persist_stale:
+                bundle.status = "stale"
+                bundle.manifest = {**(bundle.manifest or {}), "last_stale_report": stale}
+                self.session.add(bundle)
             return {"bundle_id": str(bundle.id), "status": "stale", "stale": stale, "local_verification_plan": None}
         if bundle.status not in {"web_proposal_validated", "awaiting_local_verification", "awaiting_human"} or not bundle.proposal_payload:
             raise ValueError("content_web_review_v2_proposal_must_be_validated")
         return self._local_plan(bundle)
+
+    def read_local_verification_page_asset(
+        self,
+        bundle_id: UUID,
+        *,
+        source_paper_id: str,
+        source_pdf_sha256: str,
+        page: int,
+        page_asset_ref: str,
+        page_asset_sha256: str,
+    ) -> dict[str, Any]:
+        """Read one page asset explicitly required by a fresh local plan.
+
+        Caller-supplied values are selectors only.  The bundle's validated
+        proposal and freshly rebuilt dependency graph remain authoritative.
+        No path supplied by the MCP client is ever opened.
+        """
+        bundle = self._bundle(bundle_id)
+        plan = self.local_verification_plan(bundle_id, persist_stale=False)
+        if plan["status"] == "stale":
+            raise ValueError("content_web_review_v2_bundle_stale")
+        manifest = bundle.manifest or {}
+        if bundle.policy_version != POLICY_VERSION or manifest.get("policy_version") != POLICY_VERSION:
+            raise ValueError("content_web_review_v2_policy_mismatch")
+
+        requested = {
+            "source_paper_id": str(source_paper_id or ""),
+            "source_pdf_sha256": str(source_pdf_sha256 or ""),
+            "page": page,
+            "page_asset_ref": str(page_asset_ref or ""),
+            "page_asset_sha256": str(page_asset_sha256 or ""),
+        }
+        candidates = [
+            item
+            for item in plan["required_page_checks"]
+            if all(item.get(key) == value for key, value in requested.items())
+        ]
+        if len(candidates) != 1:
+            raise ValueError("content_web_review_v2_unknown_required_page_asset")
+        check = candidates[0]
+        evidence = next(
+            (
+                target.get("evidence", {})
+                for target in manifest.get("targets", [])
+                if target.get("plan_item_id") == check["plan_item_id"]
+                and target.get("evidence", {}).get("evidence_ref_id") == check["evidence_ref_id"]
+            ),
+            None,
+        )
+        expected = {
+            "source_paper_id": check["source_paper_id"],
+            "source_pdf_sha256": check["source_pdf_sha256"],
+            "page": check["page"],
+            "page_asset_ref": check["page_asset_ref"],
+            "page_asset_sha256": check["page_asset_sha256"],
+        }
+        if evidence is None or any(evidence.get(key) != value for key, value in expected.items()):
+            raise ValueError("content_web_review_v2_page_asset_contract_mismatch")
+        content = self._asset_bytes_for_evidence(evidence)
+        if content is None or hashlib.sha256(content).hexdigest() != check["page_asset_sha256"]:
+            raise ValueError("content_web_review_v2_page_asset_changed_or_unavailable")
+        return {
+            **expected,
+            "mime_type": self._page_asset_mime_type(check["page_asset_ref"], content),
+            "byte_count": len(content),
+            "content": content,
+        }
+
+    @staticmethod
+    def _page_asset_mime_type(page_asset_ref: str, content: bytes) -> str:
+        if content.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if content.startswith(b"\xff\xd8\xff"):
+            return "image/jpeg"
+        if content.startswith((b"GIF87a", b"GIF89a")):
+            return "image/gif"
+        if content.startswith(b"RIFF") and content[8:12] == b"WEBP":
+            return "image/webp"
+        suffix = Path(page_asset_ref).suffix.lower()
+        return {
+            ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif", ".webp": "image/webp",
+        }.get(suffix, "application/octet-stream")
 
     def _build_manifest(self, paper: Paper, *, selected_modules: list[str]) -> dict[str, Any]:
         pdf = self._pdf_descriptor(paper)
@@ -866,11 +959,13 @@ class ContentWebReviewBundleV2Service:
     @staticmethod
     def _local_ai_instruction(bundle_id: UUID) -> str:
         return (
-            f"Use local-verification plan for bundle_id={bundle_id}. Read only required_object_checks and unique "
-            "page_batches; do not read the whole web package or full paper. Read each unique PDF page once, then "
-            "return one result per object. When available, use the controlled MCP entry "
-            "apply_content_web_review_local_verification after evidence checks; perform unlocked reads first and "
-            "keep any write lock short. Unresolved page targets remain blockers and must not be applied."
+            f"For bundle_id={bundle_id}, first call get_content_web_review_local_verification_plan. Then call "
+            "read_content_web_review_page_asset once for each required_page_check, using its complete page identity "
+            "(source_paper_id, source_pdf_sha256, page, page_asset_sha256, page_asset_ref). Do not read the whole "
+            "web package or full paper; deduplicate identical required pages and read each once. Return one result "
+            "per required object through apply_content_web_review_local_verification only after evidence checks. "
+            "Perform unlocked reads first and keep any write lock short. Unresolved page targets remain blockers "
+            "and must not be applied."
         )
 
     def _paper(self, paper_id: UUID) -> Paper:

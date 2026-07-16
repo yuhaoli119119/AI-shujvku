@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
+import base64
+import hashlib
 import json
 import os
 
 import tempfile
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from docx import Document
@@ -19,6 +22,8 @@ from app.db.models import (
     AuditLog,
     Base,
     CatalystSample,
+    ContentWebReviewBundleV2,
+    ContentWebReviewLocalVerificationResult,
     DFTResult,
     ElectrochemicalPerformance,
     EvidenceLocator,
@@ -50,6 +55,7 @@ from app.mcp.server import (
     get_codex_item,
     get_dft_review_queue,
     get_paper_knowledge,
+    get_content_web_review_local_verification_plan,
     get_parse_status,
     ingest_pdf_batch,
     insert_word_citation,
@@ -61,10 +67,12 @@ from app.mcp.server import (
     reject_dft_result,
     release_module_write_lock,
     review_figure,
+    read_content_web_review_page_asset,
     query_papers,
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
+    mcp_server,
     _mcp_review_identity,
 )
 from app.services.paper_query import PaperQueryService
@@ -303,6 +311,74 @@ def _dft_primary_repair_auth() -> str:
 
 def _ai_reviewer_auth() -> str:
     return "litmcp_ai_pc_1"
+
+
+def _validated_content_web_bundle(engine, root: Path) -> tuple[str, dict, UUID]:
+    """Create one validated bundle with a page that local AI must inspect."""
+    suffix = uuid4().hex[:10]
+    pdf = root / f"content-local-{suffix}.pdf"
+    preview = root / f"content-page-{suffix}.png"
+    pdf.write_bytes(b"%PDF-1.4\ncontent\n%%EOF")
+    preview.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"
+        "pZ7q8QAAAABJRU5ErkJggg=="
+    ))
+    with Session(engine) as session:
+        paper = Paper(title="content local MCP", paper_code=f"C{suffix}", pdf_path=str(pdf), authors=[])
+        session.add(paper); session.flush()
+        section = PaperSection(
+            paper_id=paper.id, section_title="Results", text="grounded 2.0 eV statement", page_start=1, page_end=1,
+        )
+        session.add(section); session.flush()
+        session.add(EvidenceLocator(
+            paper_id=paper.id, target_type="paper_section", target_id=str(section.id), field_name="text",
+            source_type="pdf", page=1, evidence_text=section.text, locator_status="exact_page",
+            locator_confidence=1.0, parser_source="layout_verifier",
+            bbox={"full_page_image_path": str(preview), "layout_consistency_status": "verified"},
+        ))
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=paper.id, module="sections")
+        target = created["manifest"]["targets"][0]
+        evidence = target["evidence"]
+        proposal = {
+            "schema_version": "content_web_review_proposal_v2",
+            "bundle_fingerprint": created["manifest"]["bundle_fingerprint"],
+            "paper_id": str(paper.id), "paper_code": paper.paper_code,
+            "proposal_status": "web_ai_proposal", "source_identity_verified": False,
+            "writes_final_truth": False, "local_ai_verification": None,
+            "actions": [{
+                "plan_item_id": target["plan_item_id"], "target_type": target["target_type"],
+                "target_id": target["target_id"], "field_name": target["field_name"],
+                "object_snapshot_hash": target["object_snapshot_hash"], "decision": "PASS",
+                "evidence_ref_ids": [evidence["evidence_ref_id"]], "evidence_quote": evidence["evidence_excerpt"],
+                "evidence_asset_sha256": evidence["evidence_asset_sha256"], "page": evidence["page"],
+                "proposed_value": None, "verification_note": None,
+            }],
+            "discovery_proposals": [],
+        }
+        assert service.validate_web_proposal(UUID(created["bundle_id"]), proposal)["valid"]
+        plan = service.local_verification_plan(UUID(created["bundle_id"]))
+        assert len(plan["required_page_checks"]) == 1
+        session.commit()
+        return created["bundle_id"], plan["required_page_checks"][0], section.id
+
+
+def _content_read_snapshot(engine, bundle_id: str) -> dict:
+    with Session(engine) as session:
+        bundle = session.get(ContentWebReviewBundleV2, UUID(bundle_id))
+        assert bundle is not None
+        return {
+            "bundle": {
+                "status": bundle.status, "manifest": deepcopy(bundle.manifest),
+                "proposal_payload": deepcopy(bundle.proposal_payload), "updated_at": bundle.updated_at,
+            },
+            "sections": [(str(row.id), row.text) for row in session.scalars(select(PaperSection).order_by(PaperSection.id))],
+            "locators": [(str(row.id), deepcopy(row.bbox), row.locator_status) for row in session.scalars(select(EvidenceLocator).order_by(EvidenceLocator.id))],
+            "correction_count": session.scalar(select(func.count()).select_from(PaperCorrection)),
+            "review_count": session.scalar(select(func.count()).select_from(ExtractionFieldReview)),
+            "result_count": session.scalar(select(func.count()).select_from(ContentWebReviewLocalVerificationResult)),
+            "audit_count": session.scalar(select(func.count()).select_from(AuditLog)),
+        }
 
 
 def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_env):
@@ -598,6 +674,133 @@ def test_apply_content_web_review_local_verification_uses_authenticated_internal
             apply_content_web_review_local_verification(bundle_id=bundle_id, results=[result])
     finally:
         reset_mcp_auth(token)
+
+
+def test_content_web_local_verification_read_tools_return_only_planned_image_and_do_not_mutate(mcp_test_env):
+    bundle_id, page_check, _ = _validated_content_web_bundle(mcp_test_env["engine"], mcp_test_env["tmpdir"])
+    before = _content_read_snapshot(mcp_test_env["engine"], bundle_id)
+
+    with mcp_auth_context(_auth()):
+        plan = get_content_web_review_local_verification_plan(bundle_id)
+        assert plan["required_page_checks"] == [page_check]
+        direct = read_content_web_review_page_asset(bundle_id=bundle_id, **{
+            key: page_check[key]
+            for key in ("source_paper_id", "source_pdf_sha256", "page", "page_asset_ref", "page_asset_sha256")
+        })
+        metadata, image = direct
+        assert metadata["page_asset_sha256"] == page_check["page_asset_sha256"]
+        assert hashlib.sha256(image.data).hexdigest() == page_check["page_asset_sha256"]
+        content = asyncio.run(mcp_server.call_tool(
+            "read_content_web_review_page_asset",
+            {"bundle_id": bundle_id, **{
+                key: page_check[key]
+                for key in ("source_paper_id", "source_pdf_sha256", "page", "page_asset_ref", "page_asset_sha256")
+            }},
+        ))
+    image_blocks = [block for block in content if getattr(block, "type", None) == "image"]
+    assert len(image_blocks) == 1
+    assert hashlib.sha256(base64.b64decode(image_blocks[0].data)).hexdigest() == page_check["page_asset_sha256"]
+    assert _content_read_snapshot(mcp_test_env["engine"], bundle_id) == before
+
+
+def test_content_web_local_verification_read_tools_reject_unsafe_requests_without_mutation(mcp_test_env):
+    bundle_id, page_check, section_id = _validated_content_web_bundle(mcp_test_env["engine"], mcp_test_env["tmpdir"])
+    before = _content_read_snapshot(mcp_test_env["engine"], bundle_id)
+    with pytest.raises(PermissionError, match="authentication context is missing"):
+        get_content_web_review_local_verification_plan(bundle_id)
+    with mcp_auth_context(_export_auth()):
+        with pytest.raises(PermissionError, match="propose_corrections"):
+            get_content_web_review_local_verification_plan(bundle_id)
+    token = set_mcp_auth(MCPAuthInfo(
+        source_prefix="unverified", display_name="Unverified", capabilities=frozenset({"propose_corrections"}),
+        raw_key="", source_identity="mcp:unverified", identity_verified=False,
+    ))
+    try:
+        with pytest.raises(PermissionError, match="identity_required"):
+            get_content_web_review_local_verification_plan(bundle_id)
+    finally:
+        reset_mcp_auth(token)
+    with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError, match="unknown_required_page_asset"):
+            read_content_web_review_page_asset(
+                bundle_id=bundle_id, source_paper_id=page_check["source_paper_id"],
+                source_pdf_sha256=page_check["source_pdf_sha256"], page=page_check["page"],
+                page_asset_ref="evidence/pages/untrusted.png", page_asset_sha256=page_check["page_asset_sha256"],
+            )
+    assert _content_read_snapshot(mcp_test_env["engine"], bundle_id) == before
+
+    # A stale read is blocked but never writes stale status/manifest/audit state.
+    with Session(mcp_test_env["engine"]) as session:
+        section = session.get(PaperSection, section_id)
+        assert section is not None
+        section.text = "changed after web proposal"
+        session.commit()
+    stale_before = _content_read_snapshot(mcp_test_env["engine"], bundle_id)
+    with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError, match="bundle_stale"):
+            get_content_web_review_local_verification_plan(bundle_id)
+        with pytest.raises(ValueError, match="bundle_stale"):
+            read_content_web_review_page_asset(bundle_id=bundle_id, **{
+                key: page_check[key]
+                for key in ("source_paper_id", "source_pdf_sha256", "page", "page_asset_ref", "page_asset_sha256")
+            })
+    assert _content_read_snapshot(mcp_test_env["engine"], bundle_id) == stale_before
+
+
+def test_content_web_local_read_tools_reject_unvalidated_and_cross_bundle_assets_without_mutation(mcp_test_env):
+    root = mcp_test_env["tmpdir"]
+    pdf = root / "unvalidated-content.pdf"
+    preview = root / "unvalidated-page.png"
+    pdf.write_bytes(b"%PDF-1.4\nunvalidated\n%%EOF")
+    preview.write_bytes(base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"
+        "pZ7q8QAAAABJRU5ErkJggg=="
+    ))
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="unvalidated", paper_code="MCP-UNVALIDATED", pdf_path=str(pdf), authors=[])
+        session.add(paper); session.flush()
+        section = PaperSection(paper_id=paper.id, section_title="Results", text="2.0 eV", page_start=1, page_end=1)
+        session.add(section); session.flush()
+        session.add(EvidenceLocator(
+            paper_id=paper.id, target_type="paper_section", target_id=str(section.id), field_name="text",
+            source_type="pdf", page=1, evidence_text=section.text, locator_status="exact_page",
+            locator_confidence=1.0, parser_source="layout_verifier",
+            bbox={"full_page_image_path": str(preview), "layout_consistency_status": "verified"},
+        ))
+        created = ContentWebReviewBundleV2Service(session).generate(paper_id=paper.id, module="sections")
+        unvalidated_asset = created["manifest"]["targets"][0]["evidence"]
+        session.commit()
+    unvalidated_before = _content_read_snapshot(mcp_test_env["engine"], created["bundle_id"])
+    with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError, match="proposal_must_be_validated"):
+            get_content_web_review_local_verification_plan(created["bundle_id"])
+        with pytest.raises(ValueError, match="proposal_must_be_validated"):
+            read_content_web_review_page_asset(
+                bundle_id=created["bundle_id"], source_paper_id=unvalidated_asset["source_paper_id"],
+                source_pdf_sha256=unvalidated_asset["source_pdf_sha256"], page=unvalidated_asset["page"],
+                page_asset_ref=unvalidated_asset["page_asset_ref"], page_asset_sha256=unvalidated_asset["page_asset_sha256"],
+            )
+    assert _content_read_snapshot(mcp_test_env["engine"], created["bundle_id"]) == unvalidated_before
+
+    bundle_a, page_a, _ = _validated_content_web_bundle(mcp_test_env["engine"], root)
+    bundle_b, _, _ = _validated_content_web_bundle(mcp_test_env["engine"], root)
+    bundle_b_before = _content_read_snapshot(mcp_test_env["engine"], bundle_b)
+    with mcp_auth_context(_auth()):
+        with pytest.raises(ValueError, match="unknown_required_page_asset"):
+            read_content_web_review_page_asset(bundle_id=bundle_b, **{
+                key: page_a[key]
+                for key in ("source_paper_id", "source_pdf_sha256", "page", "page_asset_ref", "page_asset_sha256")
+            })
+    assert bundle_a != bundle_b
+    assert _content_read_snapshot(mcp_test_env["engine"], bundle_b) == bundle_b_before
+
+
+@pytest.mark.no_test_database
+def test_content_web_local_verification_read_tools_are_listed_by_fastmcp():
+    tools = asyncio.run(mcp_server.list_tools())
+    names = {tool.name for tool in tools}
+    assert "get_content_web_review_local_verification_plan" in names
+    assert "read_content_web_review_page_asset" in names
 
 
 def test_review_figure_is_idempotent_and_persists_one_authoritative_verdict(mcp_test_env):
