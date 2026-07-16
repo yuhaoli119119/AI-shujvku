@@ -60,36 +60,28 @@ export function syncIndex(scope) {
   return request(`/api/content-knowledge/sync?${params}`, { method: 'POST' });
 }
 
-export function createReviewBundle(body) {
-  return request('/api/content-knowledge/review-bundles', {
+export function createReviewBundleV2(body) {
+  return request('/api/content-knowledge/review-bundles/v2', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
 }
 
-export function validateReviewBundle(bundleId, result) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/validate`, {
+export function validateReviewBundleProposal(bundleId, result) {
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/web-proposal/validate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(result),
   });
 }
 
-export function applyReviewBundle(bundleId) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/apply`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reviewer: 'human-ui' }),
-  });
+export function getLocalVerificationPlan(bundleId) {
+  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/local-verification-plan`);
 }
 
-export function finalizeReviewBundle(bundleId) {
-  return request(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/finalize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ reviewer: 'human-ui' }),
-  });
+export function downloadReviewBundle(bundleId) {
+  return fetch(`/api/content-knowledge/review-bundles/${encodeURIComponent(bundleId)}/download`);
 }
 
 export function createWritingPlan(query, paperIds) {

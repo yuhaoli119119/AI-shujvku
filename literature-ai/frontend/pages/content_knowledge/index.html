@@ -57,19 +57,21 @@
 
     <details class="advanced-actions">
       <summary>批量与高级操作</summary>
-      <p>这些操作面向索引维护或离线审核；日常审核请使用右侧的逐卡决定。</p>
+      <p>这些操作面向索引维护或网页 AI 离线审核；网页阶段只校验建议，不会改变系统审核状态。</p>
       <p id="syncScope" class="muted">同步范围：请先选择论文或文献库。</p>
       <div class="advanced-buttons">
         <button data-advanced="sync" class="secondary-btn" type="button">同步内容索引</button>
-        <button id="createBundleButton" class="secondary-btn" type="button">生成 AI 审核包</button>
-        <button id="copyBundleButton" class="secondary-btn" type="button">复制 IDE AI 指令</button>
+        <label class="field bundle-module" for="bundleModule"><span>审核模块</span><select id="bundleModule"><option value="abstract">摘要</option><option value="sections">章节</option><option value="mechanism_knowledge">机理知识</option><option value="writing_cards">写作卡</option></select></label>
+        <button id="createBundleButton" class="secondary-btn" type="button">生成 v2 审核包</button>
+        <button id="copyBundleButton" class="secondary-btn" type="button">复制网页 AI 指令</button>
       </div>
       <section id="bundleControls" hidden>
         <p id="bundleStatus"></p>
-        <textarea id="bundleResultInput" rows="6" placeholder="粘贴与审核包匹配的 JSON 回传"></textarea>
-        <button id="validateBundleButton" class="secondary-btn" type="button">校验回传</button>
-        <button id="applyBundleButton" class="secondary-btn" type="button">应用审核回传</button>
-        <button id="finalizeBundleButton" class="secondary-btn" type="button" hidden>完成审核</button>
+        <button id="bundleDownloadButton" class="secondary-btn" type="button" disabled>下载审核包 ZIP</button>
+        <div id="bundleDropZone" class="bundle-drop-zone" tabindex="0">拖入网页 AI JSON，或<label for="bundleFile">选择文件</label><input id="bundleFile" type="file" accept="application/json,.json"></div>
+        <textarea id="bundleResultInput" rows="6" placeholder="也可以粘贴与审核包匹配的严格 JSON 回传"></textarea>
+        <button id="validateBundleButton" class="secondary-btn" type="button">校验网页 AI 建议</button>
+        <section id="localPlan" class="local-plan" hidden aria-live="polite"></section>
       </section>
       <label class="field" for="writingPlanQuery">
         <span>写作计划查询</span>

@@ -5,10 +5,10 @@ import {
   getItem,
   reviewItem,
   syncIndex,
-  createReviewBundle,
-  validateReviewBundle,
-  applyReviewBundle,
-  finalizeReviewBundle,
+  createReviewBundleV2,
+  validateReviewBundleProposal,
+  getLocalVerificationPlan,
+  downloadReviewBundle,
   createWritingPlan,
 } from './api.js';
 import { renderList, renderListError } from './render-list.js';
@@ -19,6 +19,9 @@ const listRoot = document.querySelector('#listRoot');
 const detailRoot = document.querySelector('#detailRoot');
 const reviewRoot = document.querySelector('#reviewRoot');
 let currentBundle = null;
+let currentPlan = null;
+let uploadedProposalKey = null;
+const MAX_PROPOSAL_BYTES = 5 * 1024 * 1024;
 
 function showMessage(text, isError = false) {
   const element = document.querySelector('#actionMessage');
@@ -181,6 +184,25 @@ function selectedPaperId() {
   return scopedItem?.paper_id || null;
 }
 
+function selectedModule() {
+  return document.querySelector('#bundleModule').value;
+}
+
+function countOf(source, ...keys) {
+  for (const key of keys) {
+    if (source && source[key] != null) return source[key];
+  }
+  return 0;
+}
+
+function bundleSummary(bundle) {
+  const manifest = bundle.manifest || bundle.summary || {};
+  const objectCount = countOf(bundle, 'object_count', 'target_count', 'item_count') || countOf(manifest, 'object_count', 'target_count', 'item_count', 'item_count');
+  const pageCount = countOf(bundle, 'unique_evidence_page_count', 'unique_page_count') || countOf(manifest, 'unique_evidence_page_count', 'unique_page_count');
+  const status = bundle.status || manifest.status || 'created';
+  return `审核包已生成：${bundle.bundle_id}；对象 ${objectCount}；唯一证据页 ${pageCount}；状态 ${status}。`;
+}
+
 function renderBundleStatus(text) {
   document.querySelector('#bundleControls').hidden = false;
   document.querySelector('#bundleStatus').textContent = text;
@@ -190,9 +212,12 @@ async function generateBundle() {
   const paperId = selectedPaperId();
   if (!paperId) return showMessage('请先选择一篇论文，再生成审核包。', true);
   try {
-    currentBundle = await createReviewBundle({ paper_id: paperId, run_id: state.filters.run_id || undefined });
-    const manifest = currentBundle.manifest || {};
-    renderBundleStatus(`审核包已生成：${currentBundle.bundle_id}；范围 ${manifest.scope_type || 'paper'}；项目 ${manifest.item_count ?? (manifest.items || []).length}。`);
+    currentBundle = await createReviewBundleV2({ paper_id: paperId, module: selectedModule() });
+    uploadedProposalKey = null;
+    renderBundleStatus(bundleSummary(currentBundle));
+    document.querySelector('#bundleDownloadButton').disabled = false;
+    document.querySelector('#bundleFile').value = '';
+    renderPlan(null);
   } catch (error) {
     showMessage(`生成审核包失败：${error.message}`, true);
   }
@@ -201,12 +226,12 @@ async function generateBundle() {
 async function copyBundleInstruction() {
   if (!currentBundle) await generateBundle();
   if (!currentBundle) return;
-  const text = `${currentBundle.manifest?.instructions || ''}\n\nRETURN TEMPLATE:\n${JSON.stringify(currentBundle.return_template || {}, null, 2)}`;
+  const text = currentBundle.web_ai_instruction || currentBundle.instructions || currentBundle.manifest?.instructions || `${currentBundle.prompt || ''}\n\nRETURN TEMPLATE:\n${JSON.stringify(currentBundle.return_template || {}, null, 2)}`;
   try {
     await navigator.clipboard.writeText(text);
     showMessage('IDE AI 指令与 JSON 模板已复制。');
   } catch (_) {
-    document.querySelector('#bundleResultInput').value = text;
+    showMessage('无法使用剪贴板，请手动复制页面中的指令。', true);
     showMessage('无法使用剪贴板，指令已显示在输入框。');
   }
 }
@@ -214,35 +239,94 @@ async function copyBundleInstruction() {
 async function validateBundle() {
   if (!currentBundle) return showMessage('请先生成审核包。', true);
   try {
-    const result = JSON.parse(document.querySelector('#bundleResultInput').value);
-    const response = await validateReviewBundle(currentBundle.bundle_id, result);
-    renderBundleStatus(`回传校验通过。${response.unresolved?.length ? `仍有 ${response.unresolved.length} 项未解决。` : '可应用审核回传。'}`);
+    const input = document.querySelector('#bundleResultInput').value.trim();
+    if (!input) throw new Error('请先上传或粘贴网页 AI JSON。');
+    const result = JSON.parse(input);
+    const response = await validateReviewBundleProposal(currentBundle.bundle_id, result);
+    renderBundleStatus(`网页 AI 回传校验完成：${response.valid === false ? '未通过' : '通过'}。${response.message || ''}`);
+    if (response.valid === false) return;
+    await loadLocalPlan();
   } catch (error) {
-    showMessage(`回传校验失败：${error.message}`, true);
+    showMessage(error instanceof SyntaxError ? 'JSON 解析失败：请上传严格有效的 JSON。' : `网页 AI 回传校验失败：${error.message}`, true);
   }
 }
 
-async function applyBundle() {
-  if (!currentBundle) return showMessage('请先生成并校验审核包。', true);
+function renderPlan(plan) {
+  currentPlan = plan;
+  const root = document.querySelector('#localPlan');
+  if (!plan) { root.hidden = true; root.replaceChildren(); return; }
+  root.hidden = false;
+  root.replaceChildren();
+  const summary = plan.summary || plan;
+  const stats = document.createElement('p');
+  stats.textContent = `本地核验计划：网页已核验 ${countOf(summary, 'web_reviewed_target_count')}；本地需核验 ${countOf(summary, 'local_required_target_count')}；本地跳过 ${countOf(summary, 'local_skipped_target_count')}；唯一页 ${countOf(summary, 'unique_page_count')}`;
+  root.append(stats);
+  const batches = plan.page_batches || plan.batches || [];
+  if (batches.length) {
+    const list = document.createElement('ul');
+    batches.forEach((batch) => { const item = document.createElement('li'); item.textContent = `第 ${batch.page_start ?? batch.page ?? '?'} 页批次：${batch.target_count ?? batch.object_count ?? 0} 个对象`; list.append(item); });
+    root.append(list);
+  }
+  const gate = document.createElement('p');
+  gate.className = 'safety-gate';
+  gate.textContent = '安全门：只读。未完成本地核验，写作资格与引用资格未改变。';
+  root.append(gate);
+  const copyButton = document.createElement('button');
+  copyButton.type = 'button';
+  copyButton.id = 'copyLocalInstructionButton';
+  copyButton.className = 'secondary-btn';
+  copyButton.textContent = '复制精简本地 AI 核验指令';
+  copyButton.addEventListener('click', copyLocalInstruction);
+  root.append(copyButton);
+}
+
+async function copyLocalInstruction() {
+  if (!currentPlan) return showMessage('请先通过网页 AI 建议校验。', true);
+  const supplied = currentPlan.local_ai_instruction || currentPlan.instruction || '';
+  const text = `不要读取整包；按唯一证据页读取；逐对象返回；无锁阅读后短锁回填。\n${supplied}`.trim();
   try {
-    const response = await applyReviewBundle(currentBundle.bundle_id);
-    const unresolved = response.needs_human || response.unresolved?.length || 0;
-    renderBundleStatus(`已应用 ${response.applied ?? 0} 项。${unresolved ? `仍有 ${unresolved} 项未解决。` : '可完成审核。'}`);
-    document.querySelector('#finalizeBundleButton').hidden = Boolean(unresolved);
-    await loadItems();
-  } catch (error) {
-    showMessage(`应用审核回传失败：${error.message}`, true);
+    await navigator.clipboard.writeText(text);
+    showMessage('精简本地 AI 核验指令已复制。');
+  } catch (_) {
+    showMessage('无法使用剪贴板，请手动复制本地核验指令。', true);
   }
 }
 
-async function finalizeBundle() {
-  if (!currentBundle) return;
+async function loadLocalPlan() {
   try {
-    await finalizeReviewBundle(currentBundle.bundle_id);
-    renderBundleStatus('审核已完成。');
-    await loadItems();
+    const plan = await getLocalVerificationPlan(currentBundle.bundle_id);
+    renderPlan(plan);
   } catch (error) {
-    showMessage(`无法完成审核：${error.message}`, true);
+    showMessage(`获取本地核验计划失败：${error.message}`, true);
+  }
+}
+
+async function downloadBundle() {
+  if (!currentBundle) return showMessage('请先生成审核包。', true);
+  try {
+    const response = await downloadReviewBundle(currentBundle.bundle_id);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement('a'); link.href = url; link.download = `${currentBundle.bundle_id}.zip`; link.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    showMessage(`下载审核包失败：${error.message}`, true);
+  }
+}
+
+async function readProposalFile(file) {
+  if (!file) return;
+  const key = `${file.name}:${file.size}:${file.lastModified}`;
+  if (key === uploadedProposalKey) return showMessage('该 JSON 已上传过，请选择新的文件。', true);
+  if (file.size > MAX_PROPOSAL_BYTES) return showMessage('网页 AI JSON 超过 5 MB 大小限制。', true);
+  try {
+    const text = await file.text();
+    JSON.parse(text);
+    document.querySelector('#bundleResultInput').value = text;
+    uploadedProposalKey = key;
+    showMessage(`已载入网页 AI JSON：${file.name}`);
+  } catch (error) {
+    showMessage(error instanceof SyntaxError ? 'JSON 解析失败：请上传严格有效的 JSON。' : `读取文件失败：${error.message}`, true);
   }
 }
 
@@ -277,8 +361,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelector('#createBundleButton').addEventListener('click', generateBundle);
   document.querySelector('#copyBundleButton').addEventListener('click', copyBundleInstruction);
   document.querySelector('#validateBundleButton').addEventListener('click', validateBundle);
-  document.querySelector('#applyBundleButton').addEventListener('click', applyBundle);
-  document.querySelector('#finalizeBundleButton').addEventListener('click', finalizeBundle);
+  document.querySelector('#bundleDownloadButton').addEventListener('click', downloadBundle);
+  const bundleFile = document.querySelector('#bundleFile');
+  bundleFile.addEventListener('click', (event) => { event.currentTarget.value = ''; });
+  bundleFile.addEventListener('change', (event) => readProposalFile(event.target.files[0]));
+  const dropZone = document.querySelector('#bundleDropZone');
+  ['dragenter', 'dragover'].forEach((eventName) => dropZone.addEventListener(eventName, (event) => { event.preventDefault(); dropZone.classList.add('is-dragging'); }));
+  ['dragleave', 'drop'].forEach((eventName) => dropZone.addEventListener(eventName, (event) => { event.preventDefault(); dropZone.classList.remove('is-dragging'); }));
+  dropZone.addEventListener('drop', (event) => readProposalFile(event.dataTransfer.files[0]));
   document.querySelector('#writingPlanButton').addEventListener('click', generateWritingPlan);
   updateSyncScope();
   loadItems();

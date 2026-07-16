@@ -106,7 +106,7 @@ test('legacy projection requires index sync and never sends its source-shaped ID
   expect(reviewRequested).toBeFalsy();
 });
 
-test('advanced actions keep run scope and call the real scoped workflow endpoints', async ({ page }) => {
+test('v2 bundle flow selects a module, validates proposal, and shows readonly local plan', async ({ page }) => {
   const calls = [];
   page.on('dialog', (dialog) => dialog.accept());
   await page.route('**/api/content-knowledge**', async (route) => {
@@ -127,24 +127,24 @@ test('advanced actions keep run scope and call the real scoped workflow endpoint
     if (url.pathname === '/api/content-knowledge/sync') {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ synced: true }) });
     }
-    if (url.pathname === '/api/content-knowledge/review-bundles') {
+    if (url.pathname === '/api/content-knowledge/review-bundles/v2') {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
           bundle_id: 'bundle-1',
-          manifest: { scope_type: 'external_analysis_run', item_count: 1, instructions: 'Review B0078' },
+          object_count: 1, unique_evidence_page_count: 2, status: 'created', web_ai_instruction: 'Review B0078 safely',
           return_template: { schema_version: 'content_evidence_review_result_v1' },
         }),
       });
     }
-    if (url.pathname.endsWith('/validate')) {
+    if (url.pathname.endsWith('/web-proposal/validate')) {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ valid: true }) });
     }
-    if (url.pathname.endsWith('/apply')) {
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ applied: 1, needs_human: 0 }) });
+    if (url.pathname.endsWith('/local-verification-plan')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ web_reviewed_target_count: 1, local_required_target_count: 1, local_skipped_target_count: 0, unique_page_count: 2, page_batches: [{ page_start: 4, target_count: 1 }], local_ai_instruction: 'Do not read the whole bundle.' }) });
     }
-    if (url.pathname.endsWith('/finalize')) {
-      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ finalized: true }) });
+    if (url.pathname.endsWith('/download')) {
+      return route.fulfill({ contentType: 'application/zip', body: 'PK\u0003\u0004' });
     }
     if (url.pathname === '/api/content-knowledge/writing-plan') {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ query: body.query, citations: [] }) });
@@ -165,46 +165,53 @@ test('advanced actions keep run scope and call the real scoped workflow endpoint
   expect(syncCall.search).toContain(`paper_id=${PAPER_ID}`);
   expect(syncCall.body).toBeNull();
 
-  await page.getByRole('button', { name: '生成 AI 审核包' }).click();
+  await page.locator('#bundleModule').selectOption('writing_cards');
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
   await expect(page.getByText(/审核包已生成：bundle-1/)).toBeVisible();
-  const bundleCall = calls.find((call) => call.path.endsWith('/review-bundles'));
-  expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, run_id: 'run-1' });
+  const bundleCall = calls.find((call) => call.path.endsWith('/review-bundles/v2'));
+  expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, module: 'writing_cards' });
 
+  const proposalFile = { name: 'proposal.json', mimeType: 'application/json', buffer: Buffer.from('{"targets":[]}') };
+  await page.locator('#bundleFile').setInputFiles(proposalFile);
+  await expect(page.getByText('已载入网页 AI JSON：proposal.json')).toBeVisible();
+  await page.locator('#bundleResultInput').fill('{not-json');
+  await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
+  await expect(page.getByText('JSON 解析失败：请上传严格有效的 JSON。')).toBeVisible();
   await page.locator('#bundleResultInput').fill('{}');
-  await page.getByRole('button', { name: '校验回传' }).click();
-  await expect(page.getByText(/回传校验通过/)).toBeVisible();
-  await page.getByRole('button', { name: '应用审核回传' }).click();
-  await expect(page.getByText(/已应用 1 项/)).toBeVisible();
-  await page.getByRole('button', { name: '完成审核' }).click();
-  await expect(page.getByText('审核已完成。')).toBeVisible();
+  await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
+  await expect(page.getByText(/网页 AI 回传校验完成：通过/)).toBeVisible();
+  await expect(page.getByText(/本地核验计划：网页已核验 1/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '复制精简本地 AI 核验指令' })).toBeVisible();
+  await page.getByRole('button', { name: '下载审核包 ZIP' }).click();
 
   await page.locator('#writingPlanQuery').fill('Li2S conversion');
   await page.getByRole('button', { name: '生成写作证据计划' }).click();
   await expect(page.locator('#writingPlanResult')).toContainText('Li2S conversion');
   const writingCall = calls.find((call) => call.path.endsWith('/writing-plan'));
   expect(writingCall.body).toEqual({ query: 'Li2S conversion', paper_ids: [PAPER_ID] });
-  expect(calls.some((call) => call.path.endsWith('/validate'))).toBeTruthy();
-  expect(calls.some((call) => call.path.endsWith('/apply'))).toBeTruthy();
-  expect(calls.some((call) => call.path.endsWith('/finalize'))).toBeTruthy();
+  expect(calls.some((call) => call.path.endsWith('/web-proposal/validate'))).toBeTruthy();
+  expect(calls.some((call) => call.path.endsWith('/local-verification-plan'))).toBeTruthy();
+  expect(calls.some((call) => call.path.endsWith('/apply'))).toBeFalsy();
+  expect(calls.some((call) => call.path.endsWith('/finalize'))).toBeFalsy();
 });
 
-test('a paper-code deep link resolves the UUID before creating a review bundle', async ({ page }) => {
+test('a paper-code deep link resolves the UUID before creating a v2 review bundle', async ({ page }) => {
   let bundleBody = null;
   await mockKnowledge(page);
-  await page.route('**/api/content-knowledge/review-bundles', async (route) => {
+  await page.route('**/api/content-knowledge/review-bundles/v2', async (route) => {
     bundleBody = JSON.parse(route.request().postData() || '{}');
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ bundle_id: 'bundle-paper-code', manifest: { item_count: 1 } }),
+      body: JSON.stringify({ bundle_id: 'bundle-paper-code', object_count: 1, unique_evidence_page_count: 1 }),
     });
   });
 
   await page.goto(`${BASE_URL}/pages/content_knowledge/index.html?paper_id=B0078`);
   await page.getByText('批量与高级操作').click();
-  await page.getByRole('button', { name: '生成 AI 审核包' }).click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
 
   await expect(page.getByText(/审核包已生成：bundle-paper-code/)).toBeVisible();
-  expect(bundleBody).toEqual({ paper_id: PAPER_ID });
+  expect(bundleBody).toEqual({ paper_id: PAPER_ID, module: 'abstract' });
 });
 
 test('structured evidence shows its quote and locator instead of a JSON wall', async ({ page }) => {
