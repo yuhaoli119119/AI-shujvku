@@ -330,8 +330,6 @@
     async function fetchJSON(url, options) {
       options = options || {};
       options.headers = options.headers || {};
-      const token = sessionStorage.getItem("litai-settings-token");
-      if (token) options.headers["X-Settings-Token"] = token;
       const resp = await fetch(url, options);
       const text = await resp.text();
       let data = null;

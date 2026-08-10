@@ -75,9 +75,9 @@
                     <option value="false">无 DFT 候选</option>
                 </select>
                 <select id="filterWC" class="small-input">
-                    <option value="">写作卡审核：全部</option>
-                    <option value="true">有可用写作卡</option>
-                    <option value="false">无可用写作卡</option>
+                    <option value="">论文内容：全部</option>
+                    <option value="true">有可用论文重点</option>
+                    <option value="false">无可用论文重点</option>
                 </select>
                 <select id="filterPdf" class="small-input">
                     <option value="">PDF：全部</option>
@@ -109,7 +109,7 @@
                 <div id="workspaceEmpty" class="workspace-empty">
                     <div>
                         <h2>选择一篇文献查看详情</h2>
-                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、文字审核、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>
+                        <p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、论文内容、图表、候选 DFT 数据和 IDE AI 回写结果。</p>
                     </div>
                 </div>
 
@@ -132,7 +132,6 @@
                                     <div id="paperMoreMenu" class="dropdown-menu right">
                                         <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
                                         <button type="button" onclick="triggerSupplementaryUpload()">上传支撑文献 / 上传 SI</button>
-                                        <button type="button" onclick="exportSelectedDftReviewBundle()">导出 AI 核验包</button>
                                         <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
                                         <button type="button" onclick="openAggregateView()">查看聚合视图</button>
                                         <button type="button" onclick="promptAddRelationship(state.selectedPaperId)">添加关联文献</button>
@@ -148,9 +147,7 @@
                         <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
                         <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
                         <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">候选 DFT 数据</button>
-                        <button class="tab-btn" data-tab="mechanism" onclick="switchTab('mechanism')">机理知识</button>
-                        <button class="tab-btn" data-tab="sections" onclick="switchTab('sections')">正文审核</button>
-                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">写作卡</button>
+                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">论文内容</button>
                         <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
                         <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI任务中心</button>
                     </div>
@@ -168,19 +165,11 @@
                         <div id="aggregateResult"></div>
                     </section>
 
-                    <section id="tab-mechanism" class="tab-panel">
-                        <div id="mechanismContent"></div>
-                    </section>
-
-                    <section id="tab-sections" class="tab-panel">
-                        <div id="sectionsContent"></div>
-                    </section>
-
                     <section id="tab-writing" class="tab-panel">
                         <div id="writingContent"></div>
                         <div class="writer-block compact-writer">
                             <h3>IDE AI 写作整理</h3>
-                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">网页端写作模型已停用。需要写作整理时，请在 IDE AI 中读取文献证据、候选 DFT 数据和写作卡，再回到网页核对证据状态。</div>
+                            <div id="writerStatusBox" class="subtle" style="margin-bottom:12px;">网页端写作模型已停用。需要写作整理时，请在 IDE AI 中读取已审核的论文内容、关联图表和候选 DFT 数据，再回到网页核对证据状态。</div>
                             <div class="writer-toolbar">
                                 <button class="btn ghost" onclick="loadAgentGuide()">显示 IDE AI 指南</button>
                             </div>

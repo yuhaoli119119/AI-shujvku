@@ -211,8 +211,8 @@ function applyQueryParams() {
     if (params.get("review_paper_id")) state.currentTab = "review";
     if (paperId && rawTargetType && targetId) {
         const typeMap = {
-            section: { itemType: "section", tab: "sections" },
-            sections: { itemType: "section", tab: "sections" },
+            section: { itemType: "section", tab: "writing" },
+            sections: { itemType: "section", tab: "writing" },
             dft_setting: { itemType: "dft_setting", tab: "dft" },
             dft_settings: { itemType: "dft_setting", tab: "dft" },
             catalyst_sample: { itemType: "catalyst_sample", tab: "dft" },
@@ -221,8 +221,8 @@ function applyQueryParams() {
             electrochemical_performance: { itemType: "electrochemical_performance", tab: "dft" },
             writing_card: { itemType: "writing_card", tab: "writing" },
             writing_cards: { itemType: "writing_card", tab: "writing" },
-            mechanism_claim: { itemType: "mechanism_claim", tab: "mechanism" },
-            mechanism_claims: { itemType: "mechanism_claim", tab: "mechanism" },
+            mechanism_claim: { itemType: "mechanism_claim", tab: "writing" },
+            mechanism_claims: { itemType: "mechanism_claim", tab: "writing" },
             table: { itemType: "table", tab: "figures" },
             tables: { itemType: "table", tab: "figures" },
             figure: { itemType: "figure", tab: "figures" },
@@ -254,10 +254,10 @@ function applyQueryParams() {
         writer: "writing",
         aggregate: "dft",
         summary: "summary",
-        sections: "sections",
+        sections: "writing",
         figures: "figures",
         dft: "dft",
-        mechanism: "mechanism",
+        mechanism: "writing",
         writing: "writing",
         translation: "translation",
         review: "review"
@@ -285,7 +285,7 @@ function syncQueryParams() {
 }
 
 function switchTab(tab) {
-    if (!["summary", "sections", "figures", "dft", "mechanism", "writing", "translation", "review"].includes(tab)) {
+    if (!["summary", "figures", "dft", "writing", "translation", "review"].includes(tab)) {
         tab = "summary";
     }
     state.currentTab = tab;
@@ -358,7 +358,7 @@ function renderNoSelectionState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>选择一篇文献查看详情</h2>' +
-                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、文字审核、图表、候选 DFT 数据、写作卡和 IDE AI 回写结果。</p>' +
+                    '<p>左侧用于浏览、搜索和筛选文献。选中文献后，这里会显示摘要、论文内容、图表、候选 DFT 数据和 IDE AI 回写结果。</p>' +
             '</div>';
     }
     showEmptyWorkspace();

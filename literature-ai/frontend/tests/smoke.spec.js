@@ -9,7 +9,7 @@ const PAGES = [
   { name: 'Data Visuals', path: '/pages/visuals/index.html', coreSelector: '#metrics' },
   { name: 'Content Knowledge', path: '/pages/content_knowledge/index.html', coreSelector: '.knowledge-item' },
   { name: 'Mechanism Knowledge', path: '/pages/mechanism_knowledge/index.html', coreSelector: '#mechanismTabs' },
-  { name: 'AI Writing Studio', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
+  { name: 'AI Evidence Plan', path: '/pages/ai_writer/index.html', coreSelector: '#paperChecklist' },
   { name: 'Extraction Review Workbench', path: '/pages/external_analysis_workbench/index.html', coreSelector: '#schemaForm' },
   { name: 'Settings', path: '/pages/settings/index.html', coreSelector: '.field' },
   { name: 'Literature Screening', path: '/pages/literature_screening/index.html', coreSelector: '.screening-table' },
@@ -1915,8 +1915,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('button[onclick="exportCSV()"]')).toBeVisible();
           await expect(page.locator('.confidence-badge.unknown')).toHaveText('未记录');
           await expect(page.locator('.confidence-badge.unknown')).not.toHaveText('0%');
-        } else if (pageInfo.name === 'AI Writing Studio') {
-          await expect(page.locator('button[onclick="generateAcademicDraft()"]')).toBeVisible();
+        } else if (pageInfo.name === 'AI Evidence Plan') {
+          await expect(page.locator('#buildPlanBtn')).toBeVisible();
+          await expect(page.locator('button[onclick="generateAcademicDraft()"]')).toHaveCount(0);
         } else if (pageInfo.name === 'Extraction Review Workbench') {
           await expect(page.locator('#schemaSelect')).toBeVisible();
           await page.click('button[onclick="validateCurrent()"]');
@@ -2107,22 +2108,54 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(consoleErrors.filter(msg => !msg.includes('Failed to load resource'))).toEqual([]);
   });
 
-  test('business flow: open Writing Studio, add evidence, generate draft, and view Citation Audit', async ({ page }) => {
+  test('business flow: build a bounded read-only AI evidence plan', async ({ page }) => {
+    await page.route('**/api/content-knowledge/writing-plan', async route => {
+      const request = route.request().postDataJSON();
+      return jsonResponse(route, {
+        plan_fingerprint: 'smoke-plan',
+        query: request.query,
+        retrieval_mode: 'narrative',
+        selected_evidence_types: ['writing_cards'],
+        dft_included: false,
+        dft_included_reason: 'not_requested',
+        requested_paper_count: 1,
+        valid_paper_count: 1,
+        represented_paper_count: 1,
+        budgets: { evidence_budget: 24, used: 1, remaining: 23 },
+        coverage: {
+          coverage_complete: true,
+          by_paper: [{ paper_id: 'paper-1', paper_code: 'B0001', status: 'represented' }],
+        },
+        warnings: [],
+        batches: [{
+          batch_id: 'batch-001',
+          paper_ids: ['paper-1'],
+          paper_codes: ['B0001'],
+          selected_evidence_ids: ['evidence-1'],
+          budget: { used: 1 },
+        }],
+        batch_prompt_contexts: [{
+          batch_id: 'batch-001',
+          paper_ids: ['paper-1'],
+          evidence_cards: [{ evidence_id: 'evidence-1', excerpt: 'Bounded smoke evidence.' }],
+          full_text_included: false,
+        }],
+        selected_evidence: [],
+        database_writes: false,
+      });
+    });
     await page.goto(`${BASE_URL}/pages/ai_writer/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.step')).toContainText(['1 主题', '2 检索证据', '3 整理证据', '4 生成草稿', '5 引文核查']);
-    await expect(page.locator('button:has-text("搜索证据")')).toBeVisible();
-    await expect(page.locator('button:has-text("运行引文核查")')).toBeVisible();
-    await expect(page.locator('#evidencePanel')).toBeVisible();
-    await expect(page.locator('body')).not.toContainText(/Export final|Final conclusion|Direct export/i);
+    await expect(page.locator('body')).toContainText('网页不生成论文草稿');
+    await expect(page.locator('button:has-text("生成草稿")')).toHaveCount(0);
+    await expect(page.locator('button:has-text("运行引文核查")')).toHaveCount(0);
     await page.fill('#writingTopic', 'Li2S4 adsorption energy Fe-N4');
     await page.check('#paperChecklist input[type="checkbox"]');
-    await page.click('button:has-text("搜索证据")');
-    await expect(page.locator('#evidencePanel')).toContainText('得分');
-    await page.click('button[onclick="generateAcademicDraft()"]');
-    await expect(page.locator('#tab-outline')).toContainText('Intro');
-    await page.click('button:has-text("运行引文核查")');
-    await expect(page.locator('#tab-audit')).toContainText('引文核查');
+    await page.click('#buildPlanInlineBtn');
+    await expect(page.locator('#coverageBadge')).toHaveText('覆盖完成');
+    await expect(page.locator('#dftStatus')).toContainText('DFT 未启用 / 未检索');
+    await expect(page.locator('.copy-batch-btn')).toHaveCount(1);
+    await expect(page.locator('#metricRepresented')).toHaveText('1');
   });
 
   test('business flow: Paper Detail shows evidence panel and claim detail', async ({ page }) => {
@@ -2287,7 +2320,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
-    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}(\\?.*)?$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
@@ -2342,7 +2375,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const preparePayloads = [];
 
     await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
-    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}(\\?.*)?$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => {
       return jsonResponse(route, prepared ? PILOT_EXTRACTION_RESULTS : makePilotExtractionWithoutPendingReviews());
     });
@@ -2416,7 +2449,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     let prepareCalls = 0;
 
     await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
-    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
+    await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}(\\?.*)?$`), route => jsonResponse(route, PILOT_PAPER));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
     await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
@@ -3404,6 +3437,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect.poll(() => verifyPayload).not.toBeNull();
     expect(verifyPayload.confirm_reviewed_against_pdf).toBe(true);
     expect(verifyPayload.reviewer).toBe('literature_library_dft');
+    await page.evaluate(async () => {
+      await refreshSelectedPaperDetail({ reason: 'smoke_accept_sync', mode: 'dft', forceRefresh: true });
+    });
     await page.locator('#dftContent [data-role="dft-sample-group"]').first().evaluate(group => group.setAttribute('open', ''));
     await expect(page.locator('#dftEditDialog')).toHaveCount(0);
     await page.evaluate(() => openDftEditDialog('dft-1'));
@@ -4827,9 +4863,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
     await page.click('.paper-row');
-    await page.click('button[data-tab="mechanism"]');
+    await page.click('button[data-tab="writing"]');
 
-    const mechanism = page.locator('#mechanismContent');
+    const mechanism = page.locator('#writingContent');
     await expect(mechanism).toContainText('机理类型');
     await expect(mechanism).toContainText('候选状态candidate_unverified');
     await expect(mechanism).toContainText('审核状态missing');
@@ -6093,19 +6129,26 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
   });
 
   test.describe('G2B Review Stability & Audit Tests', () => {
-    test('1. Audit all green shows matching normal banner', async ({ page }) => {
-      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
-        return jsonResponse(route, {
-          paper_id: 'paper-1',
-          total_reviews: 2,
-          active: 1,
-          remapped: 1,
-          stale: 0,
-          ambiguous: 0,
-          unresolved: 0,
-          items: []
-        });
-      });
+    test('1. Embedded reviews all green show matching normal banner', async ({ page }) => {
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => jsonResponse(route, {
+        ...EXTRACTION_RESULTS,
+        field_reviews: [
+          {
+            target_id: 'target-1',
+            target_type: 'DFTResult',
+            field_name: 'value',
+            target_resolution_status: 'active',
+            reviewer_status: 'verified',
+          },
+          {
+            target_id: 'target-1',
+            target_type: 'DFTResult',
+            field_name: 'catalyst',
+            target_resolution_status: 'remapped',
+            reviewer_status: 'verified',
+          },
+        ],
+      }));
 
       await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
       await page.waitForTimeout(500);
@@ -6118,21 +6161,20 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     test('2. Audit with stale reviews shows needs confirmation banner and overrides verified status', async ({ page }) => {
-      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
-        return jsonResponse(route, {
-          paper_id: 'paper-1',
-          total_reviews: 1,
-          active: 0,
-          remapped: 0,
-          stale: 1,
-          ambiguous: 0,
-          unresolved: 0,
-          items: []
-        });
-      });
-
       const mockStaleResults = {
         ...EXTRACTION_RESULTS,
+        field_reviews: [
+          {
+            target_id: 'target-1',
+            target_type: 'DFTResult',
+            field_name: 'value',
+            target_resolution_status: 'stale',
+            reviewer_status: 'verified',
+            target_label: 'Pt(111)',
+            field_path: 'DFTResult.value',
+            target_fingerprint: 'fp-stale',
+          },
+        ],
         results: {
           ...EXTRACTION_RESULTS.results,
           DFTResult: [
@@ -6366,8 +6408,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       expect(refetchCalled).toBe(true);
     });
 
-    test('7. Audit API 404 gracefully handles degradation', async ({ page }) => {
+    test('7. Missing embedded reviews degrade to an empty summary without an initial audit GET', async ({ page }) => {
+      let auditCalls = 0;
       await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
+        auditCalls++;
         return route.fulfill({
           status: 404,
           contentType: 'application/json',
@@ -6380,7 +6424,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
       const summaryBox = page.locator('#stabilitySummaryBox');
       await expect(summaryBox).toBeVisible();
-      await expect(summaryBox).toContainText('review audit 暂不可用');
+      await expect(summaryBox).toContainText('暂无确认记录');
+      expect(auditCalls).toBe(0);
     });
 
     test('8. Literature Library detail page surfaces warning banner', async ({ page }) => {
@@ -6430,21 +6475,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     });
 
     test('9. Orphan stale/unknown review renders properly in dedicated section without safe verified state and respects filters', async ({ page }) => {
-      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
-        return jsonResponse(route, EXTRACTION_RESULTS);
-      });
-
-      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
-        return jsonResponse(route, {
-          paper_id: 'paper-1',
-          total_reviews: 2,
-          active: 0,
-          remapped: 0,
-          stale: 1,
-          ambiguous: 0,
-          unresolved: 0,
-          unknown: 1,
-          items: [
+      const orphanReviews = [
             {
               target_id: 'old-target-1',
               target_type: 'DFTResult',
@@ -6473,8 +6504,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
               remapped_from_target_id: 'original-id-2',
               target_fingerprint: 'fingerprint-456'
             }
-          ]
-        });
+          ];
+      await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
+        return jsonResponse(route, { ...EXTRACTION_RESULTS, field_reviews: orphanReviews });
       });
 
       await page.goto(`${BASE_URL}/pages/external_analysis_workbench/index.html?paper_id=paper-1`);
@@ -6580,20 +6612,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     test('11. Orphan review with empty/non-standard target_resolution_status is normalized to unknown', async ({ page }) => {
       await page.route(/\/api\/extraction\/results\/paper-1$/, route => {
-        return jsonResponse(route, EXTRACTION_RESULTS);
-      });
-
-      await page.route(/\/api\/extraction\/results\/paper-1\/reviews\/audit$/, route => {
         return jsonResponse(route, {
-          paper_id: 'paper-1',
-          total_reviews: 1,
-          active: 0,
-          remapped: 0,
-          stale: 0,
-          ambiguous: 0,
-          unresolved: 0,
-          unknown: 0,
-          items: [
+          ...EXTRACTION_RESULTS,
+          field_reviews: [
             {
               target_id: "old-target-empty-status",
               target_type: "DFTResult",
@@ -7227,9 +7248,16 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         }
       ];
 
+      const repairedExtractionResults = cloneJson(PILOT_EXTRACTION_RESULTS);
+      mockRepairedLocators.forEach(locator => {
+        const target = repairedExtractionResults.results[locator.target_type]
+          .find(item => item.target_id === locator.target_id);
+        target[locator.field_name].evidence_locator = locator;
+      });
+
     await page.route(/\/api\/papers\/?\?limit=200$/, route => jsonResponse(route, [PILOT_PAPER]));
-      await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_PAPER));
-      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, PILOT_EXTRACTION_RESULTS));
+      await page.route(new RegExp(`/api/papers/${PILOT_PAPER_ID}(\\?.*)?$`), route => jsonResponse(route, PILOT_PAPER));
+      await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}$`), route => jsonResponse(route, repairedExtractionResults));
       await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews$`), route => jsonResponse(route, PILOT_PENDING_REVIEWS));
       await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/reviews/audit$`), route => jsonResponse(route, PILOT_AUDIT));
       await page.route(new RegExp(`/api/extraction/results/${PILOT_PAPER_ID}/evidence-locators$`), route => jsonResponse(route, mockRepairedLocators));

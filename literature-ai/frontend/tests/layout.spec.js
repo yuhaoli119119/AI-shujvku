@@ -37,7 +37,7 @@ test.describe('Layout Constraints', () => {
   });
 
   test('ai_writer sticky nav', async ({ page }) => {
-    await page.goto('file:///' + __dirname.replace(/\\/g, '/') + '/../pages/ai_writer/index.html');
+    await page.goto('http://127.0.0.1:4173/pages/ai_writer/index.html');
     await page.waitForSelector('#topnav-mount .topnav');
 
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));

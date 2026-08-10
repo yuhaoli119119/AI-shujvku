@@ -3,10 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const { readPageSource } = require('./helpers/read-page-source');
 
-const REVIEW_CENTER = readPageSource('pages/review_center/index.html');
-const FEATURE_SCOPE = REVIEW_CENTER.slice(
-  REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_START'),
-  REVIEW_CENTER.indexOf('// WEB_AI_RETURN_FEATURE_END')
+const REVIEW_CENTER_HTML = fs.readFileSync(path.resolve(__dirname, '../pages/review_center/index.html'), 'utf8');
+const REVIEW_CENTER_PAGE = fs.readFileSync(path.resolve(__dirname, '../pages/review_center/page.js'), 'utf8');
+const WEB_AI_RETURN = fs.readFileSync(path.resolve(__dirname, '../pages/review_center/web-ai-return.js'), 'utf8');
+const REVIEW_CENTER = [readPageSource('pages/review_center/index.html'), WEB_AI_RETURN].join('\n');
+const FEATURE_SCOPE = WEB_AI_RETURN.slice(
+  WEB_AI_RETURN.indexOf('// WEB_AI_RETURN_FEATURE_START'),
+  WEB_AI_RETURN.indexOf('// WEB_AI_RETURN_FEATURE_END')
 );
 const FILE_DROP_SCOPE = FEATURE_SCOPE.slice(
   FEATURE_SCOPE.indexOf('async function handleWebAiFileDrop'),
@@ -17,6 +20,20 @@ const EVIDENCE_INSTRUCTION_SCOPE = FEATURE_SCOPE.slice(
   FEATURE_SCOPE.indexOf('if (webAiReturnState.mode === "evidence")', BUILD_INSTRUCTION_START),
   FEATURE_SCOPE.indexOf('if (webAiReturnState.mode !== "dft")')
 );
+
+test('review center loads the classic web AI return split after page dependencies', () => {
+  const pageScript = '<script src="./page.js"></script>';
+  const webAiReturnScript = '<script src="./web-ai-return.js"></script>';
+  expect(REVIEW_CENTER_HTML).toContain(pageScript);
+  expect(REVIEW_CENTER_HTML).toContain(webAiReturnScript);
+  expect(REVIEW_CENTER_HTML.indexOf(pageScript)).toBeLessThan(REVIEW_CENTER_HTML.indexOf(webAiReturnScript));
+  expect(WEB_AI_RETURN).not.toMatch(/^\s*(?:import|export)\s/m);
+  expect(REVIEW_CENTER_PAGE).not.toContain('// WEB_AI_RETURN_FEATURE_START');
+  expect(REVIEW_CENTER_PAGE).not.toContain('function selectedWebAiReturnTarget()');
+  expect(REVIEW_CENTER_PAGE).not.toContain('function validateWebAiReturnJson()');
+  expect(WEB_AI_RETURN).toContain('function selectedWebAiReturnTarget()');
+  expect(WEB_AI_RETURN).toContain('function validateWebAiReturnJson()');
+});
 
 test('review center exposes a selected-paper web AI result return entry', () => {
   expect(REVIEW_CENTER).toContain('id="returnDftWorkflowOption" value="return_dft"');

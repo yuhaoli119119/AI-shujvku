@@ -391,8 +391,6 @@
         async function fetchJSON(url, options) {
             const requestOptions = options || {};
             requestOptions.headers = requestOptions.headers || {};
-            const token = sessionStorage.getItem("litai-settings-token");
-            if (token) requestOptions.headers["X-Settings-Token"] = token;
 
             const resp = await fetch(url, requestOptions);
             const text = await resp.text();

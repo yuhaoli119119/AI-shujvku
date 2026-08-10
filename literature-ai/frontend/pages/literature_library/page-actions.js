@@ -140,7 +140,7 @@ function switchAcquisitionMode(mode) {
 function addToEvidencePack() {
     closeDropdowns();
     switchTab("writing");
-    showToast("已切到写作卡与整理区，可基于当前文献生成证据整理。", "info");
+    showToast("已切到论文内容与整理区，可基于已审核内容生成证据整理。", "info");
 }
 
 function reviewBundleErrorMessage(data, status) {

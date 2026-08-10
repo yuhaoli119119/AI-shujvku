@@ -10,8 +10,15 @@ function readFrontendFile(relativePath) {
   return fs.readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
 }
 
+function readReviewCenterSource() {
+  return [
+    readPageSource('pages/review_center/index.html'),
+    readFrontendFile('pages/review_center/web-ai-return.js'),
+  ].join('\n');
+}
+
 test('review center exposes local AI chart review copy instruction and status fields', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
 
   expect(reviewCenter).toContain('复制本地 AI 全量图片复核指令');
   expect(reviewCenter).toContain('get_chart_review_task(paper_id)');
@@ -42,7 +49,7 @@ test('content knowledge routes run-scoped figure field reminders to chart review
 });
 
 test('run-scoped chart review keeps and verifies its fixed manual scope', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
   expect(reviewCenter).toContain('REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY');
   expect(reviewCenter).toContain('restoreManualReviewContext()');
   expect(reviewCenter).toContain('updateManualReviewUrl()');
@@ -58,7 +65,7 @@ test('run-scoped chart review keeps and verifies its fixed manual scope', () => 
 });
 
 test('chart review validation errors are merged by code and message', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
   expect(reviewCenter).toContain('function dedupeValidationIssues(issues)');
   expect(reviewCenter).toContain('code + "\\u0000" + message');
   expect(reviewCenter).toContain('action_ref');
@@ -66,7 +73,7 @@ test('chart review validation errors are merged by code and message', () => {
 });
 
 test('review center defaults to an unconfirmed scope and exposes explicit scope choices', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
   expect(reviewCenter).toContain('请先选择 AI 批次或明确选择整篇论文审核');
   expect(reviewCenter).toContain('图表审核范围（高级）');
   expect(reviewCenter).toContain('整篇论文审核');
@@ -97,7 +104,7 @@ test('main-paper DFT entry restores the completed recommended chart run', () => 
 });
 
 test('DFT export stays paper-scoped and completed chart runs are not shown as pending work', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
 
   expect(reviewCenter).toContain('DFT 数据查漏不需要选择 AI 批次。');
   expect(reviewCenter).toContain('待补充图表（');
@@ -112,7 +119,7 @@ test('DFT export stays paper-scoped and completed chart runs are not shown as pe
 });
 
 test('review center shares the live chart stage across a main and supplementary group only', () => {
-  const reviewCenter = readPageSource('pages/review_center/index.html');
+  const reviewCenter = readReviewCenterSource();
 
   expect(reviewCenter).toContain('function applyLiveChartStageToSupplementaryGroup(paperId, stage)');
   expect(reviewCenter).toContain('const mainPaperId = String(targetGroup && targetGroup.main_paper_id || targetRow.paper_id || "")');

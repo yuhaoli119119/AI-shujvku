@@ -128,7 +128,7 @@
     </div>
   </div>
   <script>
-    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {}, prepareSummary: null, preparingReviews: false, reviewVersions: {} };
+    const state = { papers: [], paper: null, extraction: null, selectedEvidence: null, locatorCache: {}, prepareSummary: null, preparingReviews: false, reviewVersions: {}, loadSeq: 0, paperListSeq: 0 };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     function escAttr(value) { return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
     function ellipsis(text, limit) { var t = String(text || ""); return t.length > limit ? t.slice(0, limit) + "…" : t; }
@@ -155,7 +155,6 @@
     }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
-      const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
       const resp = await fetch(url, options); const text = await resp.text();
       let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
       if (!resp.ok) {
@@ -224,35 +223,92 @@
       }
       showToast(fallbackMessage + error.message);
     }
-    async function loadPapers() {
+    function ensurePaperOption(paperId, title) {
+      const select = document.getElementById("paperSelect");
+      if (!select || !paperId) return;
+      let option = Array.from(select.options).find(item => item.value === paperId);
+      if (!option) {
+        option = document.createElement("option");
+        option.value = paperId;
+        select.prepend(option);
+      }
+      option.textContent = title || `指定文献 ${paperId}`;
+      select.value = paperId;
+    }
+
+    function renderPaperOptions(papers, selectedPaperId) {
+      const select = document.getElementById("paperSelect");
+      if (!select) return;
+      const items = Array.isArray(papers) ? papers : [];
+      const currentPaper = state.paper && state.paper.id === selectedPaperId ? state.paper : null;
+      const options = items.map(p => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`);
+      if (selectedPaperId && !items.some(p => String(p.id) === String(selectedPaperId))) {
+        options.unshift(`<option value="${esc(selectedPaperId)}">${esc((currentPaper && currentPaper.title) || `指定文献 ${selectedPaperId}`)}</option>`);
+      }
+      select.innerHTML = options.join("");
+      if (selectedPaperId) select.value = selectedPaperId;
+    }
+
+    function buildAuditFromFieldReviews(fieldReviews, paperId) {
+      const items = Array.isArray(fieldReviews) ? fieldReviews : [];
+      const counts = { active: 0, remapped: 0, stale: 0, ambiguous: 0, unresolved: 0, unknown: 0 };
+      items.forEach(item => {
+        const status = normalizeReviewResolutionStatus(item && item.target_resolution_status, "unknown");
+        if (Object.prototype.hasOwnProperty.call(counts, status)) counts[status] += 1;
+        else counts.unknown += 1;
+      });
+      return {
+        paper_id: paperId,
+        total_reviews: items.length,
+        ...counts,
+        items
+      };
+    }
+
+    async function loadPapers(options) {
+      options = options || {};
+      const initialPaperId = String(options.initialPaperId || "");
+      const autoLoadFirst = options.autoLoadFirst !== false;
+      const listSeq = ++state.paperListSeq;
+      const detailSeqAtStart = options.detailSeqAtStart == null ? state.loadSeq : options.detailSeqAtStart;
       try {
-        state.papers = await fetchJSON("/api/papers?limit=200");
+        const papers = await fetchJSON("/api/papers?limit=200");
+        if (listSeq !== state.paperListSeq) return;
+        state.papers = Array.isArray(papers) ? papers : [];
         const select = document.getElementById("paperSelect");
-        select.innerHTML = state.papers.map(p => `<option value="${esc(p.id)}">${esc(p.title || p.id)}</option>`).join("");
-        const params = new URLSearchParams(location.search);
-        if (params.get("paper_id")) select.value = params.get("paper_id");
-        await loadSelectedPaper();
+        const selectedPaperId = select.value || initialPaperId || (state.paper && state.paper.id) || "";
+        renderPaperOptions(state.papers, selectedPaperId);
+        if (!initialPaperId && autoLoadFirst && select.value) {
+          await loadSelectedPaper(select.value);
+        }
       } catch (error) {
+        if (listSeq !== state.paperListSeq) return;
+        if (initialPaperId && state.loadSeq !== detailSeqAtStart && document.getElementById("paperSelect").value !== initialPaperId) return;
         showToast("文献加载失败：" + error.message);
       }
     }
-    async function loadSelectedPaper() {
-      const paperId = document.getElementById("paperSelect").value;
+    async function loadSelectedPaper(paperIdOverride) {
+      const paperId = String(paperIdOverride || document.getElementById("paperSelect").value || "");
       if (!paperId) return;
+      const requestSeq = ++state.loadSeq;
       try {
         state.prepareSummary = null;
-        state.paper = await fetchJSON(`/api/papers/${paperId}`);
-        state.extraction = await fetchJSON(`/api/extraction/results/${paperId}`);
-        
-        try {
-          state.audit = await fetchJSON(`/api/extraction/results/${paperId}/reviews/audit`);
-        } catch (e) {
-          state.audit = { _error: true, message: e.message };
-          console.warn("Audit API failed", e);
-        }
+        // 首屏只请求 paper content 与 extraction；review 和 locator 均使用 extraction 内嵌数据。
+        const [paper, extraction] = await Promise.all([
+          fetchJSON(`/api/papers/${encodeURIComponent(paperId)}?mode=content`),
+          fetchJSON(`/api/extraction/results/${encodeURIComponent(paperId)}`)
+        ]);
+        if (requestSeq !== state.loadSeq) return;  // 已发起更新的加载，丢弃本次结果
+        const audit = buildAuditFromFieldReviews(extraction && extraction.field_reviews, paperId);
+        Object.assign(state, {
+          paper,
+          extraction,
+          audit,
+          locatorCache: {},
+          selectedEvidence: null
+        });
+        ensurePaperOption(paperId, paper && paper.title);
         rebuildReviewVersions();
-
-        await loadExtractionLocators();
 
         renderPaper();
         renderWarnings(state.extraction.validation_warnings || []);
@@ -260,6 +316,7 @@
         renderStabilitySummary();
         renderPrepareReviewPanel();
       } catch (error) {
+        if (requestSeq !== state.loadSeq) return;  // 过期请求的错误不得覆盖新论文的成功状态
         showToast("抽取结果加载失败：" + error.message);
       }
     }
@@ -979,27 +1036,38 @@
       if (iframe) iframe.src = "";
     }
 
-    async function loadExtractionLocators() {
-      if (!state.paper) return;
+    function buildLocatorCache(result) {
+      var cache = {};
+      if (Array.isArray(result)) {
+        result.forEach(function(loc) {
+          if (loc.target_id && loc.field_name) {
+            cache[loc.target_id + ":" + loc.field_name] = loc;
+          }
+          if (loc.target_type && loc.field_name) {
+            cache[loc.target_type + ":" + loc.field_name] = loc;
+            cache[loc.target_type.toLowerCase() + ":" + loc.field_name] = loc;
+          }
+        });
+      }
+      return cache;
+    }
+
+    async function fetchExtractionLocators(paperId) {
+      // 只取数据、不写全局状态；由调用方在校验通过后统一提交，避免失败时跨论文混合状态
       try {
-        var result = await fetchJSON("/api/extraction/results/" + encodeURIComponent(state.paper.id) + "/evidence-locators");
-        if (Array.isArray(result)) {
-          state.locatorCache = {};
-          result.forEach(function(loc) {
-            if (loc.target_id && loc.field_name) {
-              var key1 = loc.target_id + ":" + loc.field_name;
-              state.locatorCache[key1] = loc;
-            }
-            if (loc.target_type && loc.field_name) {
-              var key2 = loc.target_type + ":" + loc.field_name;
-              state.locatorCache[key2] = loc;
-              var key3 = loc.target_type.toLowerCase() + ":" + loc.field_name;
-              state.locatorCache[key3] = loc;
-            }
-          });
-        }
+        return await fetchJSON("/api/extraction/results/" + encodeURIComponent(paperId) + "/evidence-locators");
       } catch (e) {
         console.warn("Evidence locators API unavailable:", e);
+        return null;
+      }
+    }
+
+    async function loadExtractionLocators(paperId) {
+      var id = paperId || (state.paper && state.paper.id);
+      if (!id) return;
+      var result = await fetchExtractionLocators(id);
+      if (Array.isArray(result)) {
+        state.locatorCache = buildLocatorCache(result);
       }
     }
 
@@ -1322,9 +1390,9 @@
         }
         rebuildReviewVersions();
         
-        // 4. GET /api/papers/{paper_id}
+        // 4. GET /api/papers/{paper_id}（与 loadSelectedPaper 同口径：workbench 只消费 id/meta/sections，content 模式即可）
         try {
-          state.paper = await fetchJSON(`/api/papers/${paperId}`);
+          state.paper = await fetchJSON(`/api/papers/${paperId}?mode=content`);
         } catch (err) {
           console.warn("GET paper metadata failed", err);
         }
@@ -1583,7 +1651,14 @@
     document.addEventListener("DOMContentLoaded", () => {
       applyReadableWorkbenchLabels();
       TopNav.init({ currentPage: "external", mountId: "topnav-mount" });
-      loadPapers();
+      const urlPaperId = String(new URLSearchParams(location.search).get("paper_id") || "");
+      if (urlPaperId) {
+        ensurePaperOption(urlPaperId, `正在加载 ${urlPaperId}`);
+        loadSelectedPaper(urlPaperId);
+        loadPapers({ initialPaperId: urlPaperId, autoLoadFirst: false, detailSeqAtStart: state.loadSeq });
+      } else {
+        loadPapers({ autoLoadFirst: true });
+      }
     });
   </script>
 </body>

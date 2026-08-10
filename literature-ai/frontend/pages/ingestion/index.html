@@ -874,6 +874,8 @@
             selectedDate: toDateKey(new Date()),
             calendarMonth: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
             pollTimer: null,
+            pollInFlight: null,
+            pollTrailing: null,
             statsPollTick: 0,
             refreshSeq: 0,
         };
@@ -908,8 +910,6 @@
         async function fetchJSON(url, options) {
             const requestOptions = options || {};
             requestOptions.headers = requestOptions.headers || {};
-            const token = sessionStorage.getItem("litai-settings-token");
-            if (token) requestOptions.headers["X-Settings-Token"] = token;
 
             const resp = await fetch(url, requestOptions);
             const text = await resp.text();
@@ -1497,31 +1497,63 @@
         }
 
         async function pollJobs(options = {}) {
-            const refreshStats = options.refreshStats !== false;
-            const seq = options.seq || state.refreshSeq;
-            const libraryAtRequest = state.currentLibrary;
-            if (!state.currentLibrary) {
-                state.jobs = [];
-                if (refreshStats) await loadArticleStats(seq);
-                renderAllJobs();
-                return;
-            }
-            try {
-                const data = await fetchIngestionJobs(state.currentLibrary);
-                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
-                state.jobs = data;
-                syncSelectedJobDateWithJobs();
-                state.statsPollTick += 1;
-                const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
-                if (refreshStats && (state.statsPollTick === 1 || !hasActiveJobs || state.statsPollTick % 3 === 0)) {
-                    await loadArticleStats(seq);
+            // 请求互斥：仅「同库 + 同代 + 同选项」的调用合并到进行中请求；
+            // 库切换或代际变更的调用登记为 trailing，当前请求结束后立即以最新参数执行，
+            // 避免新库刷新被旧库请求吞掉（旧结果会被序列号门禁丢弃）。
+            const callKey = [
+                state.currentLibrary,
+                options.seq || state.refreshSeq,
+                options.refreshStats !== false ? "1" : "0"
+            ].join("@");
+            if (state.pollInFlight) {
+                if (state.pollInFlight.key === callKey) return state.pollInFlight.promise;
+                if (state.pollTrailing) {
+                    state.pollTrailing.options = options;
+                    return state.pollTrailing.promise;
                 }
-            } catch (error) {
-                if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
-                state.jobs = [];
-                showToast(`入库记录加载失败：${error.message}`, "error");
+                let resolveTrailing;
+                const promise = new Promise(resolve => { resolveTrailing = resolve; });
+                state.pollTrailing = { options, promise, resolve: resolveTrailing };
+                return promise;
             }
-            renderAllJobs();
+            const run = (async () => {
+                const refreshStats = options.refreshStats !== false;
+                const seq = options.seq || state.refreshSeq;
+                const libraryAtRequest = state.currentLibrary;
+                if (!state.currentLibrary) {
+                    state.jobs = [];
+                    if (refreshStats) await loadArticleStats(seq);
+                    renderAllJobs();
+                    return;
+                }
+                try {
+                    const data = await fetchIngestionJobs(state.currentLibrary);
+                    if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
+                    state.jobs = data;
+                    syncSelectedJobDateWithJobs();
+                    state.statsPollTick += 1;
+                    const hasActiveJobs = state.jobs.some(job => ["queued", "running"].includes(job.status));
+                    if (refreshStats && (state.statsPollTick === 1 || !hasActiveJobs || state.statsPollTick % 3 === 0)) {
+                        await loadArticleStats(seq);
+                    }
+                } catch (error) {
+                    if (seq !== state.refreshSeq || libraryAtRequest !== state.currentLibrary) return;
+                    state.jobs = [];
+                    showToast(`入库记录加载失败：${error.message}`, "error");
+                }
+                renderAllJobs();
+            })();
+            state.pollInFlight = { key: callKey, promise: run };
+            try {
+                return await run;
+            } finally {
+                if (state.pollInFlight && state.pollInFlight.promise === run) state.pollInFlight = null;
+                if (state.pollTrailing) {
+                    const trailing = state.pollTrailing;
+                    state.pollTrailing = null;
+                    trailing.resolve(pollJobs(trailing.options));
+                }
+            }
         }
 
         async function fetchIngestionJobs(libraryName) {
@@ -1940,7 +1972,12 @@
             bindDropzone();
             loadLibraries();
             renderAllJobs();
-            state.pollTimer = setInterval(pollJobs, 12000);
+            state.pollTimer = setInterval(() => {
+                if (!document.hidden) pollJobs();   // 后台标签页暂停轮询
+            }, 12000);
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden) pollJobs();   // 回到前台立即补一次
+            });
         });
     </script>
 </body>

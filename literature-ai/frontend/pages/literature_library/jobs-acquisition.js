@@ -154,26 +154,122 @@ async function runAIWorkflow() {
     showToast("网页端 AI 工作流已停用，请使用在线检索或 IDE AI；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
 }
 
+// ---- 任务轮询调度：单链 / 隐藏与离线暂停 / 恢复即查 / 错误去重 / 最大持续时间 ----
+const JOB_POLL_INTERVAL_MS = 3000;
+const JOB_POLL_RETRY_INTERVAL_MS = 15000;
+const JOB_POLL_MAX_DURATION_MS = 10 * 60 * 1000;
+const jobPollChains = {};
+
+function jobPollKey(kind, jobId) {
+    return kind + ":" + String(jobId || "");
+}
+
+function ensureJobPollChain(kind, jobId, context) {
+    const key = jobPollKey(kind, jobId);
+    if (!jobPollChains[key]) {
+        jobPollChains[key] = {
+            kind: kind,
+            jobId: jobId,
+            context: context || null,
+            startedAt: Date.now(),
+            running: false,
+            scheduled: false,
+            timerId: null,
+            errorNotified: false
+        };
+    } else if (context) {
+        jobPollChains[key].context = context;
+    }
+    return jobPollChains[key];
+}
+
+function finishJobPollChain(kind, jobId) {
+    const key = jobPollKey(kind, jobId);
+    const chain = jobPollChains[key];
+    if (chain && chain.timerId) clearTimeout(chain.timerId);
+    delete jobPollChains[key];
+}
+
+function scheduleJobPoll(kind, jobId, context, delay) {
+    const key = jobPollKey(kind, jobId);
+    const chain = jobPollChains[key];
+    if (!chain || chain.scheduled) return;
+    if (Date.now() - chain.startedAt > JOB_POLL_MAX_DURATION_MS) {
+        finishJobPollChain(kind, jobId);
+        showToast("任务状态查询超时，请刷新页面确认任务状态。", "info");
+        return;
+    }
+    chain.scheduled = true;
+    chain.timerId = setTimeout(function() {
+        const current = jobPollChains[key];
+        if (!current) return;
+        current.scheduled = false;
+        current.timerId = null;
+        if (document.hidden || navigator.onLine === false) {
+            scheduleJobPoll(kind, jobId, context, JOB_POLL_RETRY_INTERVAL_MS);
+            return;
+        }
+        if (kind === "ai_workflow") pollAIWorkflowJob(jobId);
+        else pollWorkflowIngestJob(jobId, context);
+    }, delay);
+}
+
+function handleJobPollError(kind, jobId, context, error) {
+    const chain = ensureJobPollChain(kind, jobId, context);
+    if (!chain.errorNotified) {
+        chain.errorNotified = true;
+        showToast("任务状态查询失败，将自动低频重试：" + (error && error.message ? error.message : error), "info");
+    }
+    scheduleJobPoll(kind, jobId, context, JOB_POLL_RETRY_INTERVAL_MS);
+}
+
+function resumeJobPolls() {
+    Object.keys(jobPollChains).forEach(function(key) {
+        const chain = jobPollChains[key];
+        if (!chain || chain.running) return;
+        // 恢复即查：撤销尚未触发的定时器，立即轮询，不再等待原有延迟
+        if (chain.timerId) {
+            clearTimeout(chain.timerId);
+            chain.timerId = null;
+        }
+        chain.scheduled = false;
+        if (chain.kind === "ai_workflow") pollAIWorkflowJob(chain.jobId);
+        else pollWorkflowIngestJob(chain.jobId, chain.context);
+    });
+}
+
+document.addEventListener("visibilitychange", function() {
+    if (!document.hidden) resumeJobPolls();
+});
+window.addEventListener("online", resumeJobPolls);
+
 async function pollAIWorkflowJob(jobId) {
     if (!jobId) return;
+    const chain = ensureJobPollChain("ai_workflow", jobId);
+    if (chain.running) return;
+    chain.running = true;
     try {
         const job = await fetchJSON(API_BASE + "/ai_workflow/jobs/" + encodeURIComponent(jobId));
         renderAIWorkflowJob(job);
+        chain.errorNotified = false;
         if (job.status === "queued" || job.status === "running") {
-            setTimeout(function() { pollAIWorkflowJob(jobId); }, 3000);
+            scheduleJobPoll("ai_workflow", jobId, null, JOB_POLL_INTERVAL_MS);
         } else if (job.status === "completed") {
+            finishJobPollChain("ai_workflow", jobId);
             showToast("AI 工作流完成，文献列表已刷新。", "success");
             if (typeof resetLibraryPagination === "function") resetLibraryPagination();
             else state.currentOffset = 0;
             refreshLibraryData({ preserveDetail: true, loadingMessage: "正在同步 AI 工作流结果..." });
         } else if (job.status === "failed") {
+            finishJobPollChain("ai_workflow", jobId);
             showToast("AI 工作流失败：" + (job.error || ""), "error");
+        } else {
+            finishJobPollChain("ai_workflow", jobId);
         }
     } catch (error) {
-        const el = acquisitionResultEl();
-        if (el) {
-            el.insertAdjacentHTML("afterbegin", '<div class="section-card"><h3>任务轮询失败</h3><div class="subtle">' + esc(error.message) + "</div></div>");
-        }
+        handleJobPollError("ai_workflow", jobId, null, error);
+    } finally {
+        chain.running = false;
     }
 }
 
@@ -200,12 +296,17 @@ function renderQueuedIngestJob(job) {
 
 async function pollWorkflowIngestJob(jobId, context) {
     if (!jobId) return;
+    const chain = ensureJobPollChain("ingest", jobId, context);
+    if (chain.running) return;
+    chain.running = true;
     try {
         const job = await fetchJSON("/api/jobs/" + encodeURIComponent(jobId));
         renderQueuedIngestJob(job);
+        chain.errorNotified = false;
         if (job.status === "queued" || job.status === "running") {
-            setTimeout(function() { pollWorkflowIngestJob(jobId, context); }, 3000);
+            scheduleJobPoll("ingest", jobId, context, JOB_POLL_INTERVAL_MS);
         } else if (job.status === "completed") {
+            finishJobPollChain("ingest", jobId);
             const result = job.result || {};
             if (result.status === "already_exists") {
                 showToast("文献已在库中：" + (result.title || ""), "info");
@@ -234,12 +335,14 @@ async function pollWorkflowIngestJob(jobId, context) {
                 reason: "ingest_job_completed"
             });
         } else if (job.status === "failed") {
+            finishJobPollChain("ingest", jobId);
             showToast("后台收录失败：" + (job.error || ""), "error");
+        } else {
+            finishJobPollChain("ingest", jobId);
         }
     } catch (error) {
-        const el = acquisitionResultEl();
-        if (el) {
-            el.insertAdjacentHTML("afterbegin", '<div class="section-card"><h3>任务轮询失败</h3><div class="subtle">' + esc(error.message) + "</div></div>");
-        }
+        handleJobPollError("ingest", jobId, context, error);
+    } finally {
+        chain.running = false;
     }
 }

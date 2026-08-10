@@ -15,6 +15,10 @@
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
+    <section class="manual-review-scope-card" aria-live="polite">
+      <span class="manual-review-scope-title">AI 自动验收异常队列</span>
+      <span class="manual-review-scope-details">单一获授权 AI 默认自动核验、修正或拒绝；人工只处理无法定位、原文含糊或关键冲突仍未消除的 exception，不要求逐条点击已通过项目。</span>
+    </section>
     <div class="review-topline">
       <section class="stats" id="stats"></section>
       <div class="page-actions">
@@ -39,7 +43,7 @@
           <option value="">复制单篇任务提示词</option>
           <option value="figure_table">整篇主文+DFT相关SI图表审核提示词</option>
           <option value="dft">DFT 数据审核与入库提示词</option>
-          <option value="text_review">正文、机理与写作审核提示词</option>
+          <option value="text_review">论文内容审核提示词</option>
         </select>
       </div>
     </div>
@@ -181,5 +185,6 @@
   </div>
 
   <script src="./page.js"></script>
+  <script src="./web-ai-return.js"></script>
 </body>
 </html>

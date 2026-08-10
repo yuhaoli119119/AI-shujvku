@@ -7,6 +7,7 @@ const frontendRoot = path.resolve(__dirname, '..');
 test('Playwright uses an isolated server and never reuses the owner gateway', () => {
   const config = fs.readFileSync(path.join(frontendRoot, 'playwright.config.js'), 'utf8');
   const contentKnowledgeConfig = fs.readFileSync(path.join(frontendRoot, 'playwright.content-knowledge.config.js'), 'utf8');
+  const optimizationFixesSpec = fs.readFileSync(path.join(frontendRoot, 'tests', 'optimization_p1_p2_fixes.spec.js'), 'utf8');
   const packageJson = JSON.parse(fs.readFileSync(path.join(frontendRoot, 'package.json'), 'utf8'));
 
   expect(config).toContain("url: 'http://127.0.0.1:4173'");
@@ -16,4 +17,6 @@ test('Playwright uses an isolated server and never reuses the owner gateway', ()
   expect(contentKnowledgeConfig).toContain("url: 'http://127.0.0.1:4173'");
   expect(contentKnowledgeConfig).not.toContain('4174');
   expect(packageJson.scripts['test:serve']).toBe('python -m http.server 4173');
+  expect(optimizationFixesSpec).toContain("const BASE_URL = process.env.TEST_BASE_URL || 'http://127.0.0.1:4173';");
+  expect(optimizationFixesSpec).not.toMatch(/TEST_BASE_URL\s*\|\|\s*['"]http:\/\/127\.0\.0\.1:8000['"]/);
 });
