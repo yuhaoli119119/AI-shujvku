@@ -9,7 +9,7 @@
 - 其它电脑不直接修改本机共享文件夹、数据库文件、JSON 或图片文件。
 - DFT 与非 DFT 内容统一走“单一 AI 自动验收，人工只处理异常”。
 - 禁止对同一候选安排第二 AI、模型投票、AI 共识或第三 AI 仲裁。
-- 非 DFT 模块允许 AI 直接修正，但必须先获取模块写入锁。
+- 普通非 DFT `import_analysis` 只保留候选/审核意见。非受信任的 `propose_correction` 直接写入中，服务端只对顶层 `abstract` 及结构化 `sections`、`mechanism_claims`、`writing_cards` 强制模块锁；表格、图像遵守专用工具的 capability/evidence 契约。
 - 所有操作应优先通过 MCP/API，并在数据库中留下审计日志；如果当前 IDE 会话没有暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 后备路径，再将结果通过 MCP/API 风格的候选/审计写回。
 
 ## 1. 主机职责
@@ -65,7 +65,7 @@ single_verifier|Single AI Verifier|<key>|read_papers,ai_verify_content
 其它客户端：处理另一篇文献或互不重叠的模块
 ```
 
-更细的模块名：
+可用于强制锁或额外操作协调的模块名：
 
 ```text
 sections        章节
@@ -73,8 +73,10 @@ writing_cards   写作模块
 figures         图片、截图、裁图、figure 元数据
 tables          表格
 content         元数据 + 章节 + 写作模块 + notes
-all_non_dft     所有非 DFT 直接写入模块
+all_non_dft     可选的跨非 DFT 协调范围
 ```
+
+这些 scope 的存在不表示每个字段都由服务端强制锁。`ReviewService` 对非受信任直接写入的强制范围仅为顶层 `abstract`，以及 `sections`、`mechanism_claims`、`writing_cards`；`title`、`year`、`journal`、`authors` 等其他允许字段可按操作需要额外加锁，但不能描述为必然强制锁。
 
 ## 4. DFT 数据规则
 
@@ -102,39 +104,29 @@ DFT 推荐流程：
 - 可安全修正的项目自动修正后通过；证据不符自动拒绝；条件不足或冲突未解进入 `exception`。
 - 普通 AI 不直接调用最终验收工具，人工只处理 `exception` 队列。
 
-## 5. 非 DFT 直接写入规则
+## 5. 非 DFT 候选与真实修改入口
 
-章节、写作模块、图片、表格等非 DFT 模块可以由 AI 直接修正，但必须先拿模块写入锁。
+`import_analysis` 用于导入普通候选和审核意见。当前非 DFT 分支会保留对象并标记 `authenticated_human_review_required` / `no_ai_overwrite`；即使传入 `auto_apply_review_rules=true` 和锁，也不会执行后写覆盖。
 
-MCP 流程：
+真实修改入口按对象类型区分：
+
+- `propose_correction`：对允许的元数据、章节、写作卡、机理声明等执行受控修改；非受信任直接应用顶层 `abstract` 或结构化 `sections`、`mechanism_claims`、`writing_cards` 时必须使用相应模块写入锁，其他允许字段不由服务端普遍强制。
+- `update_table` / `create_table` / `merge_table` / `delete_table`：表格对象直接工具，使用其专用 capability 与结构化证据。
+- `review_figure` / `recrop_figure` / `create_figure_from_bbox`：图像审核、重裁和补图直接工具；不得把 bbox/裁图请求伪装成 `import_analysis`。
+- `import_analysis`：只记录候选/意见；DFT `new_candidate` 是受控物化为未验证候选的例外，但不是最终验收。
+
+服务端强制锁字段或主动采用额外协调锁时的 `propose_correction` 流程：
 
 ```text
 1. acquire_module_write_lock(paper_id, module_name, locked_by)
 2. get_codex_context(paper_id)
 3. get_codex_item(...) 或 read_paper_page(...)
-4. import_analysis(..., auto_apply_review_rules=true, reviewer=locked_by, write_lock_token=token)
-5. release_module_write_lock(lock_token)
+4. propose_correction(..., write_lock_token=token)
+5. 回读目标对象
+6. release_module_write_lock(lock_token)
 ```
 
-HTTP API 流程：
-
-```text
-POST /api/module-locks/acquire
-POST /api/external-analysis/import
-POST /api/module-locks/release
-```
-
-如果没有 `write_lock_token`，`auto_apply_review_rules=true` 的非 DFT 直接写入会被拒绝。
-
-如果只想提交候选意见、不直接改数据，可以设置：
-
-```json
-{
-  "auto_apply_review_rules": false
-}
-```
-
-这种候选导入不需要写入锁。
+只提交候选意见时直接调用 `import_analysis`，不需要申请用于真实修改的模块锁。
 
 ## 6. 写入锁示例
 
@@ -160,37 +152,27 @@ POST /api/module-locks/release
 }
 ```
 
-导入并直接应用非 DFT 修正：
+使用锁执行受控非 DFT 修正：
 
 ```json
 {
   "paper_id": "PAPER_UUID",
-  "source": "assigned_content_audit",
-  "source_label": "AI PC 2 content audit",
-  "reviewer": "ai_pc_2",
-  "auto_apply_review_rules": true,
-  "write_lock_token": "TOKEN",
-  "raw_payload": {
-    "correction_proposals": [
-      {
-        "field_name": "sections",
-        "target_path": "sections:new:create",
-        "operation": "create",
-        "proposed_value": {
-          "section_title": "Results",
-          "section_type": "results",
-          "text": "Recovered section text.",
-          "page_start": 3,
-          "page_end": 4
-        },
-        "reason": "The parser missed this section.",
-        "evidence_payload": {
-          "page": 3,
-          "quoted_text": "Recovered section text."
-        }
-      }
-    ]
-  }
+  "field_name": "sections",
+  "target_path": "sections:new:create",
+  "operation": "create",
+  "proposed_value": {
+    "section_title": "Results",
+    "section_type": "results",
+    "text": "Recovered section text.",
+    "page_start": 3,
+    "page_end": 4
+  },
+  "reason": "The parser missed this section.",
+  "evidence_payload": {
+    "page": 3,
+    "quoted_text": "Recovered section text."
+  },
+  "write_lock_token": "TOKEN"
 }
 ```
 
@@ -211,9 +193,8 @@ POST /api/module-locks/release
 通过 MCP 和 API 核验 A0005 文章的章节和写作模块。
 优先走 MCP 和 API；如果当前 IDE 会话没有暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。
 不允许直接修改文件夹。
-开始前获取 content 模块写入锁。
-所有工作必须留痕。
-完成后释放写入锁。
+import_analysis 只导入候选/审核意见；需要实际修改章节或写作卡时，获取 content 模块写入锁并调用 propose_correction。
+所有工作必须留痕并回读；完成后释放写入锁。
 ```
 
 图片任务：
@@ -221,7 +202,7 @@ POST /api/module-locks/release
 ```text
 通过 MCP 和 API 核验 A0005 文章的图片、截图和 figure 元数据。
 优先走 MCP 和 API；如果当前 IDE 会话没有暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。
-开始前获取 figures 模块写入锁。
+import_analysis 只记录候选意见；figure 元数据受控修改使用 figures 锁和 propose_correction，图像重裁/补图使用专用直接工具。
 需要核对 PDF 原文页。
 所有工作必须留痕。
 完成后释放写入锁。

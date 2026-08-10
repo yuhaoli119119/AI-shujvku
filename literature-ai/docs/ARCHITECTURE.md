@@ -18,12 +18,20 @@ Compose 中核心依赖均有健康检查。后端和 worker 等待依赖健康�
 ## 后端边界
 
 - `app/api/`：HTTP 路由、请求校验和响应组装；不承载大型领域算法。
-- `app/services/`：工作流编排和领域服务。跨 DFT/图表 bundle 的公共逻辑在 `review_bundle_shared.py`，人工复核进度兼容逻辑在 `manual_review_progress.py`。
-- `app/db/`：模型、会话和启动初始化。`bootstrap.py` 负责启动锁与结果契约；初始化只有完全成功后才缓存 URL。
+- `app/services/`：工作流编排和领域服务。`ai_verification_service.py` 负责专用单 AI 验收及确定性门禁；`evidence_page_recovery.py` 负责从真实 PDF 恢复页证据；`section_page_fragment_materialization_service.py` 只将通过服务端复核的页片段物化为未审核候选。`app/rag/multi_paper_evidence_plan.py` 生成有界、只读的多论文证据计划。跨 DFT/图表 bundle 的公共逻辑在 `review_bundle_shared.py`，人工复核进度兼容逻辑在 `manual_review_progress.py`。
+- `app/db/`：模型、会话和启动初始化。`bootstrap.py` 负责启动锁与结果契约；初始化只有完全成功后才缓存 URL。数据库 bootstrap/DDL 只由 backend lifespan 执行，worker 在 Compose 中等待 backend 健康，Celery import 不执行迁移。
 - `app/mcp/`：认证后的 MCP 工具面。HTTP MCP 必须使用服务配置中的 Bearer key。
 - `app/security/`、`app/utils/`：安全边界与无状态公共函数。
 
 同步导入的事务规则是：业务写入失败后先 `rollback()`，重新读取 workflow job，记录原始错误，再返回 API 错误。不要在 failed transaction 上继续查询或提交。
+
+## 内容审核与写作边界
+
+- 普通 `import_analysis` 只导入候选或审核意见。非 DFT 候选保留为 `authenticated_human_review_required` / `no_ai_overwrite`，不会覆盖既有正式对象；DFT `new_candidate` 可被受控物化，但仍是未验证候选。
+- 自动权威验收仅由具有 `ai_verify_content` 的身份调用 `get_ai_verification_tasks` 与 `submit_ai_verification_batch`。该路径可写 `ai_verified`，不能伪造人工 `verified`；确定性门禁仍无法解决的对象才进入 Owner-session 异常处理。
+- 对非受信任的 `propose_correction` 直接写入，服务端强制模块锁的范围仅为顶层 `abstract`，以及结构化 `sections`、`mechanism_claims`、`writing_cards`。`title`、`year`、`journal`、`authors` 等其他允许字段不应描述为服务端必然强制锁；表格和图像遵守各自专用工具的 capability/evidence 契约。锁不把 `import_analysis` 变成非 DFT 覆盖通道。
+- Content web review bundle v1 已废弃。v2 只校验 proposal，没有直接 apply 路径；history 展示生命周期。retention 默认 dry-run，候选删除的共同安全前提是状态为 `generated`/`stale`、`proposal_payload IS NULL` 且无本地结果，并始终排除 `exclude_bundle_ids`（包括当前 active bundle）。duplicate 路径为每组保留一个可复用 keeper、删除其余重复包且不要求年龄阈值；expired 路径则要求达到 `older_than_days` 且当前 scope fingerprint 与包 snapshot 不同。`limit=100` 是单次扫描、处理及删除上限，不是保留数量。
+- AI Writer 只调用 `/api/content-knowledge/writing-plan`，每批最多 10 篇；`can_use_for_writing` 与 `can_use_for_citation` 分开，blocked 内容不进入上下文，也不调用 `/api/writer/draft`。
 
 ## 前端边界
 

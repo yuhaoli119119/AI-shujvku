@@ -21,8 +21,13 @@ test('review center is the formal AI prompt entrypoint surface', () => {
   expect(reviewCenter).toContain('表格审核提示词');
   expect(reviewCenter).toContain('DFT 数据审核与入库提示词');
   expect(reviewCenter).not.toContain('value="dft_primary"');
-  expect(dftReviewerScope).toContain('一份证据合格的 AI 意见即可通过受控入口直接确认、修正、拒绝或新增');
-  expect(dftReviewerScope).toContain('不需要第二 AI、主 AI 或按 AI 身份计票');
+  expect(dftReviewerScope).toContain('普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见');
+  expect(dftReviewerScope).toContain('new_candidate 只物化未验证候选');
+  expect(dftReviewerScope).toContain('专用 ai_verify_content 身份');
+  expect(dftReviewerScope).toContain('get_ai_verification_tasks');
+  expect(dftReviewerScope).toContain('submit_ai_verification_batch');
+  expect(dftReviewerScope).toContain('exception 才进入 Owner-session 人工处理');
+  expect(dftReviewerScope).toContain('不使用第二模型、投票、共识或第三 AI 仲裁');
   expect(reviewCenter).toContain('一次只能选择一个目标');
   expect(reviewCenter).toContain('return actionConfig.scopeNote + "\\n\\n" + rendered;');
   expect(reviewCenter).toContain('const template = profileTemplates[kind] || templates[kind] || compositeTemplates[kind];');
@@ -110,4 +115,18 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   expect(page).toContain('网页 AI 全部 PASS 仍不会直接解锁');
   expect(page).toContain('此页面仅读取状态，不提供应用或写入入口');
   expect(page).toContain('来源仅为声明，身份未认证');
+});
+
+test('extraction workflow recommends the dedicated DFT verification path', () => {
+  const extractionWorkflow = readPageSource('pages/extraction_workflow/index.html');
+
+  expect(extractionWorkflow).toContain('专用 AI 批量验收');
+  expect(extractionWorkflow).toContain('专用 <code>ai_verify_content</code> 身份');
+  expect(extractionWorkflow).toContain('<code>get_ai_verification_tasks</code>');
+  expect(extractionWorkflow).toContain('<code>submit_ai_verification_batch</code>');
+  expect(extractionWorkflow).toContain('只有 <code>exception</code> 进入 Owner-session 人工处理');
+  expect(extractionWorkflow).toContain('仅为兼容入口');
+  expect(extractionWorkflow).toContain('不是当前推荐的 DFT finalization 路径');
+  expect(extractionWorkflow).not.toContain('<h3 class="tool-name">批量确认</h3>');
+  expect(extractionWorkflow).not.toContain('用 <code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 批量审核 DFT 结果');
 });

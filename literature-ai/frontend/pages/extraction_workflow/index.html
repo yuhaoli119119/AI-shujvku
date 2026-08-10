@@ -667,7 +667,7 @@
           </span>
           <span class="hero-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
-            Second AI Audit
+            Authoritative AI Verification
           </span>
         </div>
       </div>
@@ -675,8 +675,7 @@
 
     <section class="advanced-note">
       <strong>主流程已经迁移：</strong>
-      非 DFT 内容由 IDE AI 在审核中心复制指令后直接通过 <code>import_analysis</code> 修正或新增入库；
-      DFT 数据继续走多 AI 冲突核验。这里展示的是底层协议和调试工具，不要求用户逐项操作。
+      普通 <code>import_analysis</code> 只导入候选/审核意见；实际非 DFT 修改使用受控修改工具，DFT 权威自动验收由专用 <code>ai_verify_content</code> 身份完成，exception 才进入 Owner-session 人工处理。这里展示的是底层协议和调试工具，不要求用户逐项操作。
     </section>
 
     <!-- ===== Protocol Status Bar ===== -->
@@ -830,9 +829,9 @@
         <div class="tool-item">
           <div class="tool-top">
             <div class="tool-icon lime">✅</div>
-            <h3 class="tool-name">批量确认</h3>
+            <h3 class="tool-name">专用 AI 批量验收</h3>
           </div>
-          <p class="tool-desc">用 <code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 批量审核 DFT 结果；用 <code>approve_corrections_batch</code> / <code>reject_corrections_batch</code> 批量处理修正提案。减少重复操作。</p>
+          <p class="tool-desc">推荐由专用 <code>ai_verify_content</code> 身份先调用 <code>get_ai_verification_tasks</code>，再调用 <code>submit_ai_verification_batch</code> 完成 DFT 权威验收；只有 <code>exception</code> 进入 Owner-session 人工处理。<code>verify_dft_results_batch</code> / <code>reject_dft_results_batch</code> 仅为兼容入口，不写 AI 最终事实，也不是当前推荐的 DFT finalization 路径。</p>
         </div>
         <div class="tool-item">
           <div class="tool-top">
@@ -956,11 +955,11 @@
       },
       {
         id: "audit",
-        title: "Second AI / Human Audit",
-        sub: "可信入库",
-        description: "指定 AI、其它第二 AI 或确认者依据明文协议和证据包复核。AI 可重点审图，指定 AI 可重点审 DFT 行；角色可变，但记录必须可追溯。只有已审核、证据完整、PDF 定位准确且通过最终闸门的数据才进入 DFT 数据库和可信可视化。",
-        worker: ["读取第二 AI 审核协议。", "记录 agent_role、model_name、protocol version/hash。", "先用 get_review_coverage 查看 latest_external_audits、external_audit_count、source_distribution 和未审核盲区。", "复核候选字段、证据、定位、重复和既有外部审核意见。", "输出 internal_data_read_status 与可否 promote_to_exportable_database。"],
-        review: ["accept 仍需满足项目设定的人审或最终门槛。", "未读取到 artifact_status、review coverage 或 prior external audits 时，不得输出可入库。", "reject/needs_fix/suspected_missing 留在审核中心。", "所有 AI 操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
+        title: "Authoritative AI Verification",
+        sub: "单一验收",
+        description: "普通 AI 先依据明文协议和 PDF 证据提交候选/审核意见；专用 ai_verify_content 身份再读取稳定任务页并通过确定性门禁提交权威 AI 决定。ai_verified 与人工 verified 分离，只有 exception 进入 Owner-session 人工处理。",
+        worker: ["读取候选证据审核协议。", "记录 agent_role、model_name、protocol version/hash。", "先用 get_review_coverage 查看未审核盲区和既有意见。", "专用验收身份调用 get_ai_verification_tasks。", "每批最多 20 项调用 submit_ai_verification_batch，并回读 ai_verification 审计。"],
+        review: ["普通 PASS/REVISE/REJECT 不等于权威验收。", "未读取 artifact_status、review coverage 或原 PDF 证据时不得提交 accept。", "确定性门禁无法处理的对象提交 exception。", "所有操作写入任务中心、AuditLog、字段 review、共享笔记或外部分析记录。"],
         prompt: "任务：按 evidence audit protocol 审核候选记录。记录当前 agent_name 仅用于审计；先读取 artifact_status 与 get_review_coverage，检查 latest_external_audits/external_audit_count/source_distribution。不要发明值；不要从常识修复；只基于 evidence packet 和内部核验数据给出 decision、reasons、internal_data_read_status、prior_external_audit_summary、protocol version/hash 和 evidence location。完整协议请查看设置页 → 提取协议。"
       }
     ];

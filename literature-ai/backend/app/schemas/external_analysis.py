@@ -15,21 +15,22 @@ class ExternalAnalysisImportRequest(BaseModel):
     auto_apply_review_rules: bool | None = Field(
         default=None,
         description=(
-            "When True, immediately apply IDE-AI review rules; when False, explicitly defer them. "
-            "When omitted, DFT object-review imports apply automatically so AI opinions cannot silently stall."
+            "Compatibility switch for running import review rules. Ordinary non-DFT output remains a candidate "
+            "requiring authenticated human review and is never an AI overwrite. For DFT, decision=new_candidate "
+            "may materialize an unverified candidate; PASS/REVISE/REJECT still require authoritative verification."
         ),
     )
     reviewer: str | None = Field(
         default=None,
-        description="Reviewer label recorded when auto_apply_review_rules materializes eligible results.",
+        description="Audit label recorded while import review rules retain or materialize eligible candidates.",
     )
     write_lock_token: str | None = Field(
         default=None,
-        description="Module write lock token required when auto_apply_review_rules directly applies non-DFT outputs.",
+        description="Compatibility lock token accepted by the import pipeline; it does not enable non-DFT AI overwrite.",
     )
     write_lock_tokens: list[str] = Field(
         default_factory=list,
-        description="Additional module write lock tokens for multi-module direct AI writes.",
+        description="Additional compatibility lock tokens; controlled edits should use propose_correction or dedicated tools.",
     )
     raw_payload: dict[str, Any] | list[Any] | str | None = Field(
         default=None,
@@ -90,15 +91,15 @@ class ExternalAnalysisMaterializeRequest(BaseModel):
 class ExternalAnalysisApplyReviewRulesRequest(BaseModel):
     reviewer: str | None = Field(
         default=None,
-        description="Reviewer label recorded when auto-applying review rules. Defaults to source_label/source/ide_ai.",
+        description="Reviewer label recorded while applying compatibility import rules. Defaults to source_label/source/ide_ai.",
     )
     write_lock_token: str | None = Field(
         default=None,
-        description="Optional pre-acquired dft_results write lock token. When omitted the service auto-acquires one.",
+        description="Optional pre-acquired dft_results lock for DFT candidate materialization. When omitted the service auto-acquires one.",
     )
     write_lock_tokens: list[str] = Field(
         default_factory=list,
-        description="Additional pre-acquired write lock tokens for multi-module direct AI writes.",
+        description="Additional compatibility lock tokens; they do not authorize non-DFT AI overwrite.",
     )
 
 

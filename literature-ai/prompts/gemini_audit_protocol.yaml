@@ -1,6 +1,6 @@
-name: second_ai_dft_and_image_audit_protocol
-version: system_candidate_dft_v1_1
-stage: second_ai_or_judge_review
+name: candidate_dft_and_image_evidence_review_protocol
+version: system_candidate_dft_v1_2
+stage: candidate_evidence_review
 
 role:
   title: Materials computation and evidence reviewer
@@ -9,8 +9,8 @@ role:
     - The assigned VLM-capable model may act as image_auditor for figure crops, captions, full-page screenshots, and chart interpretation.
     - The assigned science/text model may act as dft_data_auditor for DFT rows and extraction completeness.
     - The reviewer role is not fixed by model name; it is fixed by the evidence package, task instruction, and recorded agent_role/model_name.
-    - A reviewer must not silently promote its own extraction. Independent confirmation by an authorized reviewer, human or AI, is required.
-    - First compare the paper type inferred from the original PDF with the system-parsed paper type; if they differ, directly correct the parsed type and use the corrected type for the rest of the audit.
+    - This compatibility-named file defines candidate review only. Ordinary results are imported through import_analysis and cannot write ai_verified or human verified.
+    - First compare the paper type inferred from the original PDF with the system-parsed paper type; if they differ, submit a controlled correction candidate instead of silently changing it.
   forbidden:
     - Do not invent values.
     - Do not repair values from general knowledge.
@@ -134,11 +134,13 @@ output_format:
   blocking_errors: list
 
 promotion_policy:
-  - accept alone from second AI is not enough if the workflow requires independent confirmation.
-  - PASS from one AI only confirms the checked fields; it does not establish full-row consensus.
-  - PROPOSED must include material, property, value, unit, method/condition, and evidence_location before it can be auto-adopted.
+  - can_promote_to_exportable_database must remain false for this candidate-review protocol; only the dedicated ai_verify_content service plus export safety gates can authorize later use.
+  - PASS imported through import_analysis is an ordinary audit opinion; it does not perform authoritative acceptance.
+  - PROPOSED must include material, property, value, unit, method/condition, and evidence_location before it can become a reviewable candidate.
   - REJECT duplicate must include duplicate_of when possible.
-  - Records with PROPOSED, REJECT, NEEDS_HUMAN, new_candidate, or missing locator remain candidates until the system adopts the opinion and the safety gate passes.
+  - Records with PASS, PROPOSED, REJECT, NEEDS_HUMAN, new_candidate, or missing locator remain candidates until the dedicated ai_verify_content path runs.
+  - The authoritative verifier calls get_ai_verification_tasks and submit_ai_verification_batch; task pages are capped at 50 and submission batches at 20.
+  - No additional model, vote, consensus, or adjudicator is used. Only deterministic-gate exceptions enter Owner-session human handling.
   - Only reviewed/exportable records can appear in the final DFT database, ML export, and trusted matrix.
   - Image audit accept only confirms the visual evidence/crop; it does not validate a DFT numeric row unless the row is checked separately.
   - If internal_data_read_status is incomplete or unreadable, can_promote_to_exportable_database must be false.

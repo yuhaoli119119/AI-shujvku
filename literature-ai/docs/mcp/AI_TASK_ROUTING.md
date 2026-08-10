@@ -16,8 +16,8 @@ Ordinary AI output remains candidate or audit evidence. Only the dedicated, auth
 - If the current IDE session does not expose MCP tools, use the repository-native backend path in `literature-ai/backend` and call `app.mcp.context.mcp_auth_context` plus `app.mcp.server` directly instead of stopping at tool-missing.
 - Use `append_note` for non-final reviewer notes.
 - Use `propose_correction` or `propose_dft_result_correction` for suggested data changes.
-- Use `acquire_module_write_lock` before directly applying non-DFT AI edits through `import_analysis(auto_apply_review_rules=true)`.
-- Use `release_module_write_lock` after the assigned non-DFT write task is complete.
+- For an untrusted direct `propose_correction`, acquire a module write lock when the target is top-level `abstract` or structured `sections`, `mechanism_claims`, or `writing_cards`. Other allowed metadata fields such as `title`, `year`, `journal`, and `authors` are not universally server-lock-enforced; table and figure tools follow their dedicated capability/evidence contracts.
+- Use `release_module_write_lock` after the assigned lock-protected write task is complete.
 - Route normal acceptance through `get_ai_verification_tasks` and `submit_ai_verification_batch` with a dedicated `ai_verify_content` key. Reserve legacy approve/reject tools for explicit exception handling.
 
 Recommended capability set for ordinary IDE AI keys:
@@ -40,14 +40,15 @@ Content verification:
 - Multiple workers may run concurrently only when their paper/target sets do not overlap.
 - Items that cannot pass automatically become `exception` and enter the human exception queue; ordinary accepted items do not wait for human review.
 
-Non-DFT direct writes:
+Non-DFT candidates and controlled writes:
 
 - Sections, writing cards, figures, tables, notes, relationships, and paper metadata are unique paper objects.
-- Before an AI directly applies non-DFT edits, it must acquire a module write lock.
+- `import_analysis` retains ordinary non-DFT candidates under `authenticated_human_review_required` / `no_ai_overwrite`; it is not a direct-write route.
+- Before an untrusted `propose_correction` directly applies a top-level `abstract` or structured `sections`, `mechanism_claims`, or `writing_cards` edit, acquire the relevant module write lock. Other allowed metadata fields are not universally server-lock-enforced.
 - A candidate-only import with `auto_apply_review_rules=false` does not need a write lock.
-- The `reviewer` passed to `import_analysis` should match the `locked_by` identity used for the lock.
+- The identity using a lock-protected `propose_correction` should match the lock owner recorded by the server.
 
-Module scopes:
+Module scopes (also available for optional operational coordination; listing a scope does not make every field server-lock-enforced):
 
 ```text
 sections
@@ -121,7 +122,7 @@ Recommended tool order:
 
 Required capability:
 
-`read_papers` and `propose_corrections`. Use `review_corrections` or `review_dft` only for trusted final reviewers.
+`read_papers` and `propose_corrections`. Ordinary DFT audit does not use final-review capabilities; authoritative AI acceptance requires `ai_verify_content`, while `review_corrections`/`review_dft` are reserved for the Owner-session exception path where applicable.
 Do not use `repair_dft_issues` for this audit role.
 
 Recommended provenance:
@@ -154,7 +155,7 @@ Expected verification order for high-risk DFT data:
 2. It accepts, safely corrects and accepts, rejects, or marks the item `exception` in one bounded submission.
 3. Only `exception` items are routed to a human; there is no second-AI vote or third-AI adjudication.
 
-If a DFT row refers to a material or structure that has no `catalyst_sample`, first use `import_analysis` to propose `catalyst_samples:new:create` with an original-PDF anchor. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit its `catalyst_sample_id` field to the single-AI verification gate.
+If a DFT row refers to a material or structure that has no `catalyst_sample`, create it through an authorized, evidence-backed `propose_correction`; `catalyst_samples` is not universally server-lock-enforced, though an operator may take an additional coordination lock. An ordinary `import_analysis` payload may only record the candidate need. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit its `catalyst_sample_id` field to the single-AI verification gate.
 
 DFT page-locator boundary:
 
@@ -178,12 +179,12 @@ If MCP tools are unavailable in the current IDE session, use the repository-nati
 Recommended tool order:
 
 1. `query_papers` or use the provided `paper_id`.
-2. If the assigned AI will directly apply figure fixes, call `acquire_module_write_lock` with `module_name="figures"` before writing.
+2. If the operator wants extra coordination around an authorized figure-metadata edit, it may call `acquire_module_write_lock` with `module_name="figures"`; this is not a universal server requirement for figure metadata.
 3. `get_codex_context` with enough `max_figures`.
 4. `read_paper_page` for the original PDF page that contains the figure or chart. This is mandatory before trusting figure crops or parser figure metadata.
 5. `get_codex_item` with `item_type="figure"` for each figure needing inspection.
-6. `append_note` for non-final visual caveats, `propose_correction` for candidate fixes, or `import_analysis` with `write_lock_token` for direct non-DFT application.
-7. `release_module_write_lock` when the direct write task is complete.
+6. `append_note` for non-final visual caveats, `import_analysis` for candidate audit opinions, evidence-backed `propose_correction` for controlled metadata edits, or dedicated figure tools for image/review operations.
+7. If an optional coordination lock was acquired, release it when the direct write task is complete.
 
 Required capability:
 
@@ -199,7 +200,7 @@ Standard output or writeback:
 
 Return inspected figure ids, crop/page/caption status, evidence notes, and proposed fixes. Use candidate notes, object-level audit candidates, or corrections; final figure trust remains a later review decision.
 
-For direct figure metadata or crop-status application, `import_analysis` must include `write_lock_token`.
+For controlled figure metadata correction, use evidence-backed `propose_correction`; the server does not universally require a figures lock for this field, though an operator may take one as additional coordination. Use `review_figure`, `recrop_figure`, or `create_figure_from_bbox` directly under their capability/evidence contracts for dedicated operations.
 
 Forbidden:
 
@@ -221,7 +222,7 @@ Recommended tool order:
 4. `get_paper_knowledge` for mechanism, gap, method, and writing logic candidates.
 5. `get_codex_item` with `item_type="writing_card"` for focused checks.
 6. `retrieve_evidence` for source-backed support.
-7. `append_note`, `propose_correction`, or `import_analysis` for review output. Direct non-DFT application requires `write_lock_token`.
+7. `append_note` or `import_analysis` for candidate review output; use `propose_correction` with a valid lock for an authorized writing-card edit.
 8. `release_module_write_lock` when the direct write task is complete.
 
 Required capability:
@@ -238,7 +239,7 @@ Standard output or writeback:
 
 Write review notes, candidate corrections, or an object-level `object_review_audits` entry with evidence examples and confidence. Keep citation support as draft/candidate unless evidence gates are satisfied later.
 
-If the user explicitly allowed non-DFT direct editing, `import_analysis(auto_apply_review_rules=true)` may apply eligible writing-card or section corrections only when a valid module write lock token is supplied.
+If the user explicitly allowed a non-DFT edit, use evidence-backed `propose_correction`. For untrusted direct writes, a valid module write lock token is server-required only for top-level `abstract` and structured `sections`, `mechanism_claims`, or `writing_cards`; broader locks are optional coordination. `import_analysis` remains a candidate/audit import.
 
 Forbidden:
 
@@ -258,7 +259,7 @@ Recommended tool order:
 3. `get_paper_knowledge` with mechanism-oriented categories when useful.
 4. `get_codex_item` with `item_type="mechanism_claim"`.
 5. `retrieve_evidence` or `read_paper_page` for support checks.
-6. `append_note`, `propose_correction`, or `import_analysis`.
+6. Use `append_note` or `import_analysis` for candidate observations; use lock-protected `propose_correction` only when an actual mechanism-claim edit is authorized.
 
 Required capability:
 
@@ -276,7 +277,7 @@ Flag overclaims, missing qualifiers, unsupported causality, or conflicting evide
 
 Forbidden:
 
-Do not promote mechanistic interpretation to final truth without direct evidence or human/final confirmation.
+Do not promote mechanistic interpretation to final truth without direct evidence and the authoritative object gate. `ai_verified` and human `verified` must remain distinct.
 
 ## Command: "核验表格"
 
@@ -292,7 +293,7 @@ Recommended tool order:
 3. `read_paper_page` for the original PDF page that contains the table. This is mandatory before trusting parser table split or cell alignment.
 4. `get_codex_item` with `item_type="table"` for each target table.
 5. `retrieve_evidence` for table-derived structured rows.
-6. `propose_correction` or `propose_dft_result_correction` for concrete fixes; `import_analysis` for paper-level or object-level table audit.
+6. Use `update_table`, `create_table`, `merge_table`, or `delete_table` for table object mutations; use `import_analysis` only for paper-level or object-level table audit opinions. Use `propose_dft_result_correction` for DFT candidates derived from table evidence.
 
 Required capability:
 
@@ -306,11 +307,11 @@ Recommended provenance:
 
 Standard output or writeback:
 
-Return table ids, row/column concerns, suspected missing candidates, and proposed fixes. Use candidate writes only.
+Return table ids, row/column concerns, suspected missing candidates, and evidence-backed direct table-tool results or candidate opinions. Read back each mutated table.
 
 Forbidden:
 
-Do not apply table-derived corrections directly. Do not create verified values from ambiguous table text.
+Do not apply table mutations through `import_analysis`. Do not create verified values from ambiguous table text.
 Do not trust parsed table structure without checking the original PDF page first.
 
 ## Command: "导入外部 AI 审核意见"

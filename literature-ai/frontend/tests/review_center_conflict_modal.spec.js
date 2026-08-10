@@ -89,7 +89,7 @@ test.describe('Review Center Conflict Modal', () => {
               figure: 'FIGURE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               figure_table: 'FIGURE TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
               table: 'TABLE TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
-              dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}',
+              dft: 'DFT TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}\n{{TARGET_REACTION}}\n普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见。\nnew_candidate 只物化未验证候选。\n专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch；exception 才进入 Owner-session 人工处理。\n不使用第二模型、投票、共识或第三 AI 仲裁。',
               text_review: 'TEXT REVIEW TEMPLATE\n{{TARGET_LIST}}\n{{SOURCE_LABEL}}',
             },
             composite_templates: {},
@@ -136,7 +136,13 @@ test.describe('Review Center Conflict Modal', () => {
     const dftPrompt = await page.evaluate(() => window.__clipboardText);
     expect(dftPrompt).toContain('paper_id: main-paper');
     expect(dftPrompt).toContain('role: main_paper');
-    expect(dftPrompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
+    expect(dftPrompt).toContain('普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见');
+    expect(dftPrompt).toContain('new_candidate 只物化未验证候选');
+    expect(dftPrompt).toContain('专用 ai_verify_content 身份');
+    expect(dftPrompt).toContain('get_ai_verification_tasks');
+    expect(dftPrompt).toContain('submit_ai_verification_batch');
+    expect(dftPrompt).toContain('exception 才进入 Owner-session 人工处理');
+    expect(dftPrompt).toContain('不使用第二模型、投票、共识或第三 AI 仲裁');
 
     await rowChecks.nth(0).uncheck();
     await rowChecks.nth(1).check();

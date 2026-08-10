@@ -52,7 +52,8 @@ _COMMON_RULES = """你正在执行 Literature AI 的单篇论文审核任务。
 4. 用 get_codex_item 和 read_paper_page 核对原 PDF；禁止用本地下载、pdftotext 或自写脚本绕过证据入口。
 5. 所有修改必须带页码和本模块对应的结构化证据，并在写入后回读确认。
 6. review note 只能作为说明，不能授予 RAG、写作或引用资格；正式写作对象必须留下绑定真实对象 UUID 的对象级审核和 PDF 页证据。
-7. 写回后使用 get_codex_item、get_paper 或 retrieve_evidence 回读；只有安全门通过才能报告 completed，仍未通过时必须报告 candidate，证据冲突报告 needs_manual_review，工具或证据不可用报告 blocked。"""
+7. import_analysis 只导入候选或审核意见。非受信任的 propose_correction 直接写入中，服务端只对顶层 abstract 及 sections、mechanism_claims、writing_cards 强制模块锁；title、year、journal、authors 等其他允许字段不属于必然强制锁范围。表格、图像遵守专用工具的 capability/evidence 契约。
+8. 写回后使用 get_codex_item、get_paper 或 retrieve_evidence 回读；只有安全门通过才能报告 completed，仍未通过时必须报告 candidate，证据冲突报告 needs_manual_review，工具或证据不可用报告 blocked。"""
 
 
 _DFT_SHARED_RULES = """目标文献：
@@ -62,7 +63,7 @@ _DFT_SHARED_RULES = """目标文献：
 
 范围与证据：
 - 只处理当前 paper_id 的 dft_results、DFT candidate 和 DFT audit issue；禁止修改图片、表格、章节、元数据或其他对象。
-- 本地 AI 主流程固定为：get_dft_review_task -> get_codex_item/read_paper_page -> acquire dft_results lock -> import_analysis(auto_apply_review_rules=true) -> readback。离线 DFT 审阅 ZIP 仅用于 web AI、第三方或离线审阅。
+- 普通审核主流程为：get_dft_review_task -> get_codex_item/read_paper_page -> import_analysis 导入意见或 new_candidate -> readback。权威自动验收由专用 ai_verify_content 身份执行 get_ai_verification_tasks -> submit_ai_verification_batch；离线 DFT 审阅 ZIP 只产生 proposal/candidate。
 - 先读取 get_dft_review_task，再用 get_codex_item、get_dft_audit_issues 和 read_paper_page 核对主文及已关联 SI 中与 DFT 直接相关的正文和表格证据。
 - SI 中的 DFT 数据写回 writeback_paper_id，并保留 source_paper_id、source_document_type、页码和原文证据。
 - 每条数据必须能定位到材料/结构/位点、性质或反应步、数值、单位及证据；不得猜测，不得把 ML prediction 当作 DFT 结果。
@@ -75,32 +76,35 @@ _DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
 职责：
 - 核验已有 DFT candidate，并检查主文和 SI 是否漏提 DFT 数据。
 - 已有数据提交 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项提交 new_candidate。
-- 一份证据合格的 AI 意见即可通过 import_analysis 的受控校验和写入入口直接确认、修正、拒绝或新增 DFT 数据；不需要第二个 AI，也不按 AI 身份计票。
-- 系统不得根据“没有报错”“已验证”或“没有冲突”自行推断可导出。只有本地 AI 或网页 AI 明确给出 PASS/REVISE，并同时设置 recommended_action="ready_for_ml_export"，才构成导出授权。
-- new_candidate、NEEDS_HUMAN、REJECT、缺少 recommended_action 或其他模糊建议都不得导出；单位缺失、占位单位或键相关性质缺少 bond/bond_pair 时也不得建议导出。
+- 普通 PASS、REVISE、REJECT 意见不能通过 import_analysis 完成最终验收；new_candidate 只物化未验证 DFTResult candidate。
+- 唯一自动权威验收路径由一个专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch；无法通过确定性门禁的 exception 才进入 Owner-session 人工处理。
+- 不使用第二模型、投票、共识或第三 AI 仲裁。
+- 普通本地/网页 AI 的 PASS、REVISE、REJECT、recommended_action 或“无冲突”都不构成导出授权；只有专用验收服务写入 ai_verified 且导出安全门通过后才允许导出。
+- new_candidate、NEEDS_HUMAN、REJECT、exception 或缺少权威验收的对象都不得导出；单位缺失、占位单位或键相关性质缺少 bond/bond_pair 时也不得建议导出。
 
 执行：
 1. 调用 get_dft_review_task 取得当前任务，再读取 DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
 2. 对每条已有 candidate 写入带证据的 object_review_audit。
 3. 漏项使用 target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"；corrected_value 至少包含 material_identity、property_type、value、unit，能确认时补充 adsorbate、reaction_step、method。
-4. 写入前获取 dft_results 模块写锁，然后使用 import_analysis(auto_apply_review_rules=true) 写入审核结果。PASS 会确认当前值，REVISE 会修改后确认，REJECT 会直接拒绝，new_candidate 会新增后确认；NEEDS_HUMAN 保持待人工，不得猜测。
-5. 回读本轮 object_review_audits、DFT rows、审核状态和失败记录；确认实际值、candidate_status 与 export_safety 后才能报告 completed。"""
+4. 使用 import_analysis 写入普通审核意见；只有 new_candidate 可通过 auto_apply_review_rules=true 进入受控物化，并保持未验证。
+5. 专用验收身份读取 get_ai_verification_tasks 后，以每批最多 20 项调用 submit_ai_verification_batch；提交前后均核对目标 fingerprint、DFT row、证据和 export_safety。
+6. accept/correct/reject 由权威验收服务处理；无法通过确定性门禁时提交 exception 并留给 Owner session。"""
 
 
 _MODULE_RULES = {
     "overall": """任务：总体质量检查。
 - 只核对论文身份信息、PDF 可用性、解析覆盖情况和各专项模块是否需要处理。
-- 元数据错误可通过 import_analysis 修正；专项对象问题只列入对应专项任务，不在本任务中处理。
+- 元数据错误按 PDF 证据使用 propose_correction 修正；顶层字段中只有 abstract 的非受信任直接写入由服务端强制模块锁，title、year、journal、authors 等其他允许字段不属于必然强制锁范围。import_analysis 只用于候选或审核意见。专项对象问题只列入对应专项任务，不在本任务中处理。
 - 回读元数据和模块状态后，简要列出已修正项及待处理专项。""",
     "figure": """任务：审核当前唯一目标文献的图片。
 - 按 PDF 核对图片总数、编号、页码、caption、子图、裁剪范围、figure_role、content_summary 和 key_elements；不处理表格或其他模块。
-- 审核结论使用 review_figure；元数据修正使用 import_analysis；重裁使用 recrop_figure；漏图使用 create_figure_from_bbox。
+- 审核结论使用 review_figure；元数据修正使用带证据的 propose_correction；重裁使用 recrop_figure；漏图使用 create_figure_from_bbox。图像相关写入遵守各专用工具的 capability/evidence 契约，不描述为服务端必然强制 figures 锁。
 - 每张科学图必须写回具体 figure_role，不能保留 unknown/unclassified/other。常用类型包括 structural_model、characterization、electrochemical_performance、computational_results、dft_calculation、electronic_property、free_energy_diagram、mechanism_diagram、schematic_illustration、property_data。
 - 非科学图片必须明确标为 noise、noisy、decorative 或 publisher_logo；不要把噪声图标成 verified scientific figure。
 - content_summary 应描述实际视觉内容，不能照抄 caption；所有修改必须附 page、figure、quoted_text 或 bbox 证据。
 - verified 图必须同时具备有效 figure_role、content_summary 和具体 key_elements；缺任一项不得报告图片审核完成。
 - 不从曲线估读、插值或推算精确数值。
-- 只有图片或图注明确给出 DFT 结果，且能确认数值、单位、property_type 及对应材料/结构/吸附物或反应步骤时，才用 import_analysis(auto_apply_review_rules=true) 创建未验证 DFT 候选：target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"。候选必须保留 figure_id/figure_label、page、图中标注或 bbox；不得直接确认、拒绝或标记为可导出。
+- 只有图片或图注明确给出 DFT 结果，且能确认数值、单位、property_type 及对应材料/结构/吸附物或反应步骤时，才用 import_analysis(auto_apply_review_rules=true) 创建未验证 DFT 候选：target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"。候选必须保留 figure_id/figure_label、page、图中标注或 bbox；不得将其改为已验收、已拒绝或可导出状态。
 - 写入后回读图片对象；创建 DFT 候选时还要回读候选是否已进入 DFT 专项处理链路。""",
     "table": """任务：审核当前主文献及其已关联 SI 的表格。
 - 只核对表格的 caption、page、markdown_content、列对齐、单位和跨页连续性。
@@ -109,12 +113,12 @@ _MODULE_RULES = {
 - 发现非表格问题时交给对应专项任务，不在本任务中处理。""",
     "sections_writing": """任务：审核章节与写作卡。
 - 章节核对 section_title、section_type、text、page_start/page_end、section_level、section_number、parent_heading 和 heading_path。
-- 写作卡只能引用已核对的 PDF 证据；修正或创建使用 import_analysis，并附 page、quoted_text 和 source_pdf。
+- 写作卡只能引用已核对的 PDF 证据；sections 和 writing_cards 的非受信任直接修正或创建使用带对应模块写入锁的 propose_correction，并附 page、quoted_text 和 source_pdf。
 - 每个要用于正式写作的 section 和 writing_card 都必须有对象 UUID、对象级受控 correction 审核以及精确 PDF 页证据；已有对象无须改字时也要对真实字段提交值不变的受控 replace，不能只写 [AI_REVIEWED] note。
 - 只处理 sections 和 writing_cards；其他问题交给对应专项任务。写入后用 get_codex_item/get_paper/retrieve_evidence 回读，安全门未通过时明确报告仍为候选。""",
     "text_review": """任务：审核摘要与机理声明。
 - 摘要必须忠实于原文；机理声明核对 claim_text、claim_type、key_species、mechanism_direction 和 evidence_text。
-- 修正或创建使用 import_analysis，并附 page、quoted_text 和 source_pdf。
+- abstract 和 mechanism_claims 的非受信任直接修正或创建使用带对应模块写入锁的 propose_correction，并附 page、quoted_text 和 source_pdf。
 - 每个要用于正式写作或引用的 mechanism_claim 都必须有对象 UUID、对象级受控 correction 审核以及精确 PDF 页证据；已有对象无须改字时也要对真实字段提交值不变的受控 replace，不能只写 [AI_REVIEWED] note。
 - 只处理 abstract 和 mechanism_claims；其他问题交给对应专项任务。写入后用 get_codex_item/get_paper/retrieve_evidence 回读，安全门未通过时明确报告仍为候选。""",
 }

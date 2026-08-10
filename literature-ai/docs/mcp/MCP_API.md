@@ -5,7 +5,7 @@
 The default acceptance workflow is single-AI-first. A server-authenticated MCP identity with the dedicated `ai_verify_content` capability may use:
 
 - `get_ai_verification_tasks`: read a bounded task list and current target fingerprints; this tool is read-only.
-- `submit_ai_verification_batch`: submit a configured bounded batch (default 20, hard maximum 50). `dry_run=true` is zero-write; formal mode reruns deterministic PDF-page, evidence-text, exact-locator, target-snapshot, version, numeric/unit and unresolved-conflict checks before writing `ai_verified`, `rejected`, or `needs_human`.
+- `submit_ai_verification_batch`: submit a configured bounded batch (default 20, hard maximum 20). `dry_run=true` is zero-write; formal mode reruns deterministic PDF-page, evidence-text, exact-locator, target-snapshot, version, numeric/unit and unresolved-conflict checks before writing `ai_verified`, `rejected`, or `exception`.
 
 `ai_verified` is not human `verified`. The audit payload records `actor_type=ai`, the authenticated source identity and label, model/agent identifier, capability, policy version, confidence, evidence and locator checks, target fingerprint, decision and time. Ordinary MCP keys, anonymous clients and request-body identity fields cannot create this status. The workflow never calls a second model and never uses AI consensus. Human Owner-session verification remains available only for the exception queue.
 
@@ -118,7 +118,7 @@ Natural-language tasks such as "parse this paper", "audit DFT data", "check imag
 For LAN multi-computer workflows, see [LAN_MULTI_AI_WORKFLOW.md](./LAN_MULTI_AI_WORKFLOW.md). The short version is:
 
 - One dedicated verifier handles each candidate. Parallel clients must use non-overlapping paper/target sets; no second-AI vote, AI consensus, or third-AI adjudication is used.
-- Non-DFT direct writes must first acquire a module write lock.
+- For untrusted direct `propose_correction` writes, the server requires a module lock only for top-level `abstract` and structured `sections`, `mechanism_claims`, and `writing_cards`. Other allowed metadata fields such as `title`, `year`, `journal`, and `authors` are not universally lock-enforced. Dedicated table/figure tools follow their capability/evidence contracts; `import_analysis` remains candidate-only for ordinary non-DFT output.
 - Ordinary candidate-only imports can set `auto_apply_review_rules=false` and do not require a write lock.
 - DFT `new_candidate` is the important exception: if you want missing DFT rows to enter the system's unverified DFT candidate queue automatically, send `decision=new_candidate` with a structured `corrected_value` and use `auto_apply_review_rules=true`. This materializes an unverified `DFTResult` candidate and still does not mark it exportable or final.
 - Other computers should use MCP/API only; they should not directly modify the host file folder.
@@ -169,7 +169,7 @@ The import creates an `external_audit_opinion` candidate with `verification_stat
 
 ## Module Write Locks
 
-Direct AI writes for non-DFT modules are guarded by short-lived leases. A client must acquire a lock before calling `import_analysis` with `auto_apply_review_rules=true` when the payload can directly apply notes, corrections, relationships, figure/table changes, sections, or writing-card changes.
+Short-lived leases protect the server-enforced subset of real non-DFT mutations. For an untrusted direct `propose_correction`, a lock is required only for top-level `abstract` and structured `sections`, `mechanism_claims`, and `writing_cards`. Other allowed fields such as `title`, `year`, `journal`, and `authors` are not universally server-lock-enforced. Use the capability and evidence contract of the dedicated table/figure tools for those object mutations. A lock does not convert ordinary `import_analysis` output into an overwrite: non-DFT imports remain `authenticated_human_review_required` under `no_ai_overwrite`.
 
 MCP tools:
 
@@ -187,7 +187,7 @@ POST /api/module-locks/validate
 GET  /api/module-locks
 ```
 
-Supported module scopes:
+Supported module scopes (some are also available for optional operational coordination; scope support does not mean every field is server-lock-enforced):
 
 ```text
 sections
@@ -201,15 +201,15 @@ relationships
 all_non_dft
 ```
 
-Typical flow:
+Typical controlled correction flow:
 
 ```text
 acquire_module_write_lock(paper_id, module_name="content", locked_by="ai_pc_2")
-import_analysis(..., reviewer="ai_pc_2", auto_apply_review_rules=true, write_lock_token="<token>")
+propose_correction(..., write_lock_token="<token>")
 release_module_write_lock("<token>")
 ```
 
-If another AI already holds the same paper/module lock, acquisition fails with `module_write_lock_conflict`. If a direct write is attempted without a valid token, it fails with `module_write_lock_required`.
+If another writer already holds the same paper/module lock, acquisition fails with `module_write_lock_conflict`. If an untrusted direct correction in the enforced set (`abstract`, `sections`, `mechanism_claims`, or `writing_cards`) is attempted without a valid token, it fails with `module_write_lock_required`.
 
 Object-level audit payload example:
 
@@ -320,6 +320,10 @@ Reader and AI review tools:
 - `import_analysis`
 - `append_note`
 - `propose_correction`
+- `get_ai_verification_tasks`
+- `submit_ai_verification_batch`
+- `materialize_ai_section_page_fragments`
+- `plan_multi_paper_evidence`
 
 `get_review_coverage` reports authoritative `content_object_gate` totals for
 `sections`, `mechanism_claims`, and `writing_cards`: `total`,
@@ -400,3 +404,7 @@ stale, approximate, forged, cross-paper, or cross-section references before stag
 AI/human verified review and never unlocks the parent Section. Materialized candidates can then be
 read through `get_ai_verification_tasks(target_type="section_page_fragments")` and evaluated through
 `submit_ai_verification_batch(dry_run=true)`.
+
+### Multi-paper evidence planning and AI Writer
+
+`plan_multi_paper_evidence` and `/api/content-knowledge/writing-plan` are bounded, read-only evidence planners. They accept at most 10 papers per batch, do not load all paper full text, and do not write review state. `content_object_gate` keeps `can_use_for_writing` separate from `can_use_for_citation`: writing-only evidence may appear in writing context but not citation plans, while blocked/unreviewed content appears in neither. AI Writer calls only `/api/content-knowledge/writing-plan`, never `/api/writer/draft`.

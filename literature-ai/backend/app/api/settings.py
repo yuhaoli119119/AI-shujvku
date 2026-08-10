@@ -51,15 +51,15 @@ _PROTOCOL_FILES = [
     },
     {
         "key": "dft_ai_protocol",
-        "title": "DFT/材料数据 AI 解析协议",
+        "title": "DFT/材料候选提取与权威验收协议",
         "path": "prompts/dft_ai_protocol.yaml",
-        "scope": "全文证据阅读、AI-A/AI-B/Judge、候选抽取字段、去重、完整性审计与入库闸门",
+        "scope": "全文证据阅读、候选抽取、去重、完整性审计、专用 ai_verify_content 验收与异常处理",
     },
     {
         "key": "gemini_audit_protocol",
-        "title": "Gemini/第二 AI 审核协议",
+        "title": "DFT/图像候选证据审核协议（兼容文件名）",
         "path": "prompts/gemini_audit_protocol.yaml",
-        "scope": "检查候选 DFT 数据是否被 PDF 证据支持，并输出 accept/reject/needs_fix 等审核结论",
+        "scope": "检查候选 DFT 数据与图像声明是否被 PDF 证据支持；普通审核结果仍是候选意见",
     },
     {
         "key": "dft_settings",
@@ -258,7 +258,7 @@ def _internal_parser_status_from_writer(writer_status: dict[str, Any]) -> dict[s
         "model": "IDE/MCP AI",
         "uses": "ide_mcp_ai",
         "missing": [],
-        "message": "网页端解析已停用；请使用 prepare-ai-context / codex-item / import_analysis 由 IDE AI 回写结果。",
+        "message": "网页端解析已停用；请使用 prepare-ai-context / codex-item 读取证据，以 import_analysis 导入候选/意见，并用受控修改或验收工具处理后续状态。",
     }
 
 
@@ -681,14 +681,21 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             "display_name": "Assigned DFT Audit AI",
             "sample_key": "litmcp_assigned_dft_audit",
             "capabilities": ["read_papers", "propose_corrections"],
-            "purpose": "DFT audit AI creates issue/candidate evidence; this authenticated identity may also enter the fast processing path",
+            "purpose": "DFT audit AI creates unverified issue/candidate evidence and cannot perform authoritative acceptance",
+        },
+        {
+            "source_prefix": "single_verifier",
+            "display_name": "Single AI Verifier",
+            "sample_key": "litmcp_single_verifier",
+            "capabilities": ["read_papers", "ai_verify_content"],
+            "purpose": "one designated verifier lists bounded tasks and submits authoritative AI verification batches",
         },
         {
             "source_prefix": "human_reviewer",
             "display_name": "Human Reviewer",
             "sample_key": "litmcp_human_reviewer",
             "capabilities": ["read_papers", "review_corrections", "review_dft"],
-            "purpose": "optional human/admin review identity; fast DFT processing does not wait for it",
+            "purpose": "Owner-session human exception reviewer; it does not impersonate ai_verified",
         },
     ]
     auth_required = True
@@ -725,17 +732,17 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "- Only if the user explicitly asks for manual MCP setup, use this fallback information: MCP URL = "
         f"{mcp_url}; Auth = {auth_text}; config = {json.dumps(cursor_config, ensure_ascii=False)}.\n\n"
         "Core workflow rules:\n"
-        "- The web-side writer/internal parser is disabled. Use MCP tools and import_analysis for review and write-back.\n"
-        "- Do not only write an audit report. For evidence-backed non-DFT content, write fixes back with import_analysis(auto_apply_review_rules=true); later AI writes may overwrite earlier AI writes and no module write lock is required.\n"
-        "- Non-DFT direct-write modules include metadata, sections, tables, figure metadata/captions/summaries, writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, notes, and relationships.\n"
-        "- DFT writes must use the controlled import/review APIs, a dft_results module lock, structured evidence, and readback. One evidence-backed AI opinion may directly PASS, REVISE, REJECT, or create a DFT result; NEEDS_HUMAN remains pending.\n"
+        "- The web-side writer/internal parser is disabled. Use MCP tools for evidence reads, candidate imports, and controlled edits.\n"
+        "- import_analysis records ordinary non-DFT output as candidates or audit opinions; it does not overwrite an earlier writer. For untrusted direct propose_correction writes, the server requires a module lock only for top-level abstract and structured sections, mechanism_claims, and writing_cards. Other allowed metadata fields such as title, year, journal, and authors are not universally lock-enforced.\n"
+        "- Direct non-DFT tools include propose_correction for eligible fields, update_table/create_table/merge_table/delete_table for table objects, and the dedicated figure tools for figure review or image operations.\n"
+        "- Ordinary DFT PASS/REVISE/REJECT imports are opinions. decision=new_candidate may materialize an unverified DFTResult candidate, but authoritative AI acceptance requires one ai_verify_content identity to call get_ai_verification_tasks and submit_ai_verification_batch; only exceptions go to the Owner session. No second model, vote, consensus, or third-AI adjudication is used.\n"
         "- Figure image/crop operations are direct MCP actions only: use recrop_figure or create_figure_from_bbox. Do not submit bbox/image crop requests through import_analysis.\n"
-        "- Use review_figure when you need to record a figure verdict such as verified, needs_repair, or rejected. Use import_analysis when you need to correct figure_role, content_summary, key_elements, page, or caption metadata.\n"
+        "- Use review_figure when you need to record a figure verdict such as verified, needs_repair, or rejected. Controlled figure metadata corrections use propose_correction with evidence; figure review and image operations follow their dedicated capability/evidence contracts rather than a universal module-lock requirement.\n"
         "- A scientific figure is not review-complete or RAG-ready while figure_role is missing, unknown, unclassified, or other. Use concrete roles such as structural_model, characterization, electrochemical_performance, computational_results, dft_calculation, electronic_property, free_energy_diagram, mechanism_diagram, schematic_illustration, or property_data; use noise/noisy/decorative/publisher_logo for non-scientific images.\n"
-        "- For auto-apply, prefer structured evidence dicts. object_review_audits.evidence_location and correction_proposals.evidence_payload should include anchor keys such as page, table, figure, section, quoted_text, bbox, or evidence_text.\n"
+        "- Prefer structured evidence dicts. object_review_audits.evidence_location and correction evidence_payload should include anchor keys such as page, table, figure, section, quoted_text, bbox, or evidence_text.\n"
         "- For RAG-ready facts, preserve source_type, source_id, paper_code, page, evidence_text, review_status, and evidence_locator when available.\n"
-        "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be shown as final content or used by RAG/writing until an IDE AI review writes back ai_reviewed/ai_applied content with PDF evidence.\n"
-        "- AI product names, source labels, and authenticated identities are audit metadata only; they are not counted as first/second/primary AI roles.\n"
+        "- Raw parser sections and parser-derived writing cards are not trusted knowledge. They must not be used by RAG/writing until the authoritative object gate records an eligible review with PDF evidence.\n"
+        "- AI product names, source labels, and authenticated identities are audit metadata only; they do not create voting or acceptance roles.\n"
         "- Catalyst samples must have a material identity and evidence anchor before being used for writing/RAG or linked to mechanism, electrochemical, or DFT records.\n"
         "- Writing support should use writing_cards, mechanism_claims, electrochemical_performance, catalyst_samples, figure cards, and verified DFT candidates where allowed by the safety gate.\n"
         "- Do not overwrite English evidence fields with Chinese translations. Put Chinese only in derived *_zh fields where available, writing cards, or review notes.\n"
@@ -743,7 +750,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
         "Useful tools:\n"
         "- query_papers, get_paper, get_codex_context, get_codex_item, get_paper_knowledge, retrieve_evidence, read_paper_page\n"
         "- import_analysis, append_note, propose_correction, propose_dft_result_correction\n"
-        "- get_dft_review_queue, verify_dft_result, reject_dft_result, approve_correction, reject_correction\n"
+        "- get_dft_review_queue, get_ai_verification_tasks, submit_ai_verification_batch, approve_correction, reject_correction\n"
         "- recrop_figure, create_figure_from_bbox, review_figure, get_review_coverage, get_chart_review_task, resolve_chart_review_actions, finalize_chart_review\n"
         "- compare_papers, insert_word_citation\n"
     )
@@ -771,7 +778,7 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             f"只有当用户明确要求手工配置 MCP 时，才使用下面的兜底信息：\n"
             f"服务地址：{mcp_url}\n"
             f"认证方式：Bearer {sample_key}\n"
-            f"DFT 使用统一受控入口：取得 dft_results 写锁后，一份证据合格的 AI 意见即可确认、修正、拒绝或新增；AI 名称和身份不参与计票。\n"
+            f"普通 DFT PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见；new_candidate 只物化未验证候选。权威自动验收由一个专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch，exception 才进入 Owner-session 人工处理；不使用第二模型、投票、共识或第三 AI 仲裁。\n"
             f"配置 JSON（仅在用户明确要求手工配置时使用）：\n"
             f"```json\n{json.dumps(cursor_config, indent=2, ensure_ascii=False)}\n```\n\n"
             f"连接成功后，你可以使用以下工具：\n"
@@ -783,7 +790,9 @@ async def get_ide_prompts(request: Request) -> dict[str, Any]:
             f"- review_figure：记录图表核验结论；需要写 verdict 时优先用它\n"
             f"- append_note：添加笔记\n"
             f"- propose_correction：提出修订建议\n"
-            f"- import_analysis：除 DFT 最终确认外，按证据将 AI 结果写回；非 DFT 直接 auto_apply，后写覆盖先写，不需要申请模块写锁\n"
+            f"- import_analysis：导入候选和审核意见；非 DFT 保留为待认证人工处理对象，不直接覆盖正式内容\n"
+            f"- propose_correction：用户授权后执行受控修正；非受信任直接写入时，服务端只对顶层 abstract 及 sections、mechanism_claims、writing_cards 强制模块锁，title/year/journal/authors 等其他允许字段不属于必然强制锁范围\n"
+            f"- get_ai_verification_tasks / submit_ai_verification_batch：专用 ai_verify_content 身份的只读任务获取与权威批量验收\n"
             f"- scan_local_pdfs：扫描本地 PDF\n"
             f"- ingest_pdf_batch：批量导入 PDF\n"
             f"- get_correction_queue：查看修订队列\n"

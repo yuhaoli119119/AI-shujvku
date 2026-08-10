@@ -709,8 +709,15 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "get_codex_item" in data["mcp"]["common_tools"]
     assert "get_paper_knowledge" in data["mcp"]["common_tools"]
     assert "get_dft_review_queue" in data["mcp"]["common_tools"]
-    assert "verify_dft_result" in data["mcp"]["common_tools"]
-    assert "reject_dft_result" in data["mcp"]["common_tools"]
+    assert "get_ai_verification_tasks" in data["mcp"]["common_tools"]
+    assert "submit_ai_verification_batch" in data["mcp"]["common_tools"]
+    assert "verify_dft_result" not in data["mcp"]["common_tools"]
+    assert "reject_dft_result" not in data["mcp"]["common_tools"]
+    assert "verify_dft_result" in data["mcp"]["compatibility_tools"]
+    assert "reject_dft_result" in data["mcp"]["compatibility_tools"]
+    assert "verify_dft_results_batch" in data["mcp"]["compatibility_tools"]
+    assert "reject_dft_results_batch" in data["mcp"]["compatibility_tools"]
+    assert "repair_dft_audit_issues_batch" in data["mcp"]["compatibility_tools"]
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
     assert "insert_word_citation" in data["mcp"]["common_tools"]
@@ -725,9 +732,30 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "只处理本提示词指定的模块" in data["suggested_client_prompt"]
     assert "不处理图片" not in data["suggested_client_prompt"]
     assert "只有图片或图注明确给出 DFT 结果" in data["prompt_contract"]["templates"]["figure"]
-    assert "Figure-derived DFT data must be submitted as DFT candidates" in data["legacy_suggested_client_prompt"]
+    assert "Figure-derived DFT data must be submitted as unverified DFT candidates" in data["legacy_suggested_client_prompt"]
     assert "never table correction_proposals through import_analysis" in data["legacy_suggested_client_prompt"]
     assert "table field corrections" not in data["legacy_suggested_client_prompt"]
+    legacy_prompt = data["legacy_suggested_client_prompt"]
+    assert "get_ai_verification_tasks -> dedicated ai_verify_content identity -> submit_ai_verification_batch" in legacy_prompt
+    assert "accept/correct/reject or exception" in legacy_prompt
+    assert "Only exception enters Owner-session human handling" in legacy_prompt
+    assert "There is no second model, vote, consensus, or third-AI adjudication" in legacy_prompt
+    assert "compatibility endpoints only" in legacy_prompt
+    assert "ordinary identities must not use them to write final truth" in legacy_prompt
+    assert "Ordinary non-DFT import_analysis output remains a candidate or audit opinion" in legacy_prompt
+    assert "never overwrites an earlier writer" in legacy_prompt
+    assert "This is evidence provenance, not an auto-apply format" in legacy_prompt
+    assert "acquire dft_results lock -> import_analysis" not in legacy_prompt
+    assert "one evidence-backed AI opinion may" not in legacy_prompt
+    assert "later AI writes may overwrite earlier AI writes" not in legacy_prompt
+    assert "one-call DFT repair/finalization" not in legacy_prompt
+    assert "can enter the fast processing path" not in legacy_prompt
+    verify_endpoint = next(item for item in data["http_endpoints"] if item["name"] == "verify_dft_result")
+    reject_endpoint = next(item for item in data["http_endpoints"] if item["name"] == "reject_dft_result")
+    for compatibility_endpoint in (verify_endpoint, reject_endpoint):
+        assert "Compatibility endpoint" in compatibility_endpoint["purpose"]
+        assert "not the recommended AI verification or finalization path" in compatibility_endpoint["purpose"]
+        assert "ordinary AI identities must not use it to write final truth" in compatibility_endpoint["purpose"]
     assert "section_level" in data["prompt_contract"]["templates"]["sections_writing"]
     ai_search = next(item for item in data["http_endpoints"] if item["name"] == "ai_search")
     assert "raw query" in ai_search["purpose"]

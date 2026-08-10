@@ -1,10 +1,21 @@
-# Non-DFT AI Direct Write and RAG Completion Plan
+# Historical / Archived / Superseded: Non-DFT AI Direct Write and RAG Completion Plan
 
-## Objective
+> This file is retained only as a historical design record. Its direct-write, keyless MCP, lock, completion, and DFT-finalization statements are superseded and must not be used as current operating instructions.
+
+## Current Contract Summary
+
+- Current workflow documentation: [Content Review Workflow](../CONTENT_REVIEW_WORKFLOW.md), [MCP API](../mcp/MCP_API.md), and [AI Task Routing](../mcp/AI_TASK_ROUTING.md).
+- HTTP MCP requires the configured Bearer authentication; private-network or local placement does not make an unauthenticated request trusted.
+- Ordinary `import_analysis` is a candidate/opinion path. DFT `new_candidate` may materialize only an unverified candidate; ordinary imports do not write final truth or overwrite an earlier writer.
+- For untrusted direct `propose_correction` writes, the server-enforced module-lock scope is only top-level `abstract` and structured `sections`, `mechanism_claims`, and `writing_cards`. Other allowed fields are not universally server-lock-enforced.
+- Table and figure mutations follow their dedicated tool capability/evidence contracts. Figure metadata corrections use evidence-backed `propose_correction` or the corresponding dedicated figure capability.
+- DFT authoritative AI verification uses `get_ai_verification_tasks` under a dedicated `ai_verify_content` identity followed by `submit_ai_verification_batch`; only `exception` enters Owner-session human handling. There is no second model, vote, consensus, or third-AI adjudication.
+
+## Historical Objective
 
 Let IDE AIs use the local MCP/API workflow without one-off human configuration, while keeping the only hard safety boundary on DFT truth export. Non-DFT content should be evidence-backed and directly writable by AI when module write locks and PDF anchors are present.
 
-## Current Rules
+## Historical Rules (Superseded)
 
 - MCP runs at `/mcp/` and trusted local/private-network clients do not require a key by default.
 - `import_analysis` with `auto_apply_review_rules=true` can auto-apply non-DFT outputs when a module write lock is supplied.
@@ -16,7 +27,7 @@ Let IDE AIs use the local MCP/API workflow without one-off human configuration, 
   - `recrop_figure`
   - `create_figure_from_bbox`
 
-## Direct-Write Non-DFT Modules
+## Historical Direct-Write Non-DFT Modules
 
 These modules are allowed for AI direct write when evidence and locks are valid:
 
@@ -33,7 +44,7 @@ These modules are allowed for AI direct write when evidence and locks are valid:
 
 `content` and `all_non_dft` module locks cover the above content modules. `catalyst_samples` still require material anchors such as page, section, quoted text, table, or figure.
 
-## Phase 1: Done in This Patch
+## Historical Phase 1 Status Claimed by the Original Plan
 
 - Expanded module write locks to cover `mechanism_claims`, `electrochemical_performance`, and `catalyst_samples`.
 - Expanded ReviewService structured creation and validation for non-DFT modules.
@@ -45,9 +56,9 @@ These modules are allowed for AI direct write when evidence and locks are valid:
   - `existing_structured_content`
   - task instructions for creating missing sections/writing cards and repairing non-DFT structured content.
 
-## Phase 2: High-Quality RAG
+## Historical Phase 2: High-Quality RAG
 
-Implemented or hardened retrieval cards for:
+The historical plan recorded implemented or hardened retrieval cards for:
 
 - Writing cards:
   - require evidence chain or safe AI-reviewed status before confirmed use.
@@ -62,13 +73,13 @@ Implemented or hardened retrieval cards for:
   - normalize material identity and aliases.
   - use material anchors before linking to mechanism/performance/DFT rows.
 
-Current implementation adds a shared evidence card shape for non-DFT structured
+At the time, the plan recorded a shared evidence card shape for non-DFT structured
 RAG outputs: `source_type`, `source_id`, `paper_code`, `page`,
 `evidence_text`, `review_status`, and `evidence_locator` when available.
 `catalyst_samples` are now returned by the retriever and included in writing
 evidence packs.
 
-## Phase 3: Review and Manuscript Writing
+## Historical Phase 3: Review and Manuscript Writing
 
 Build a writing-oriented RAG layer that can answer:
 
@@ -87,7 +98,7 @@ Word draft insertion must stay draft-safe:
 - do not generate a final bibliography unless explicitly requested.
 - preserve evidence links back to paper IDs and locators.
 
-## Phase 4: 0006 MCP End-to-End Test
+## Historical Phase 4: 0006 MCP End-to-End Test
 
 Use paper `0006` as the real workflow pilot:
 
@@ -101,7 +112,7 @@ Use paper `0006` as the real workflow pilot:
 6. Confirm the database changed for non-DFT outputs.
 7. Confirm DFT result/settings remain candidates and are not auto-verified.
 
-## Test Coverage
+## Historical Test Coverage Proposal
 
 - Unit/API tests should cover:
   - local keyless MCP prompt/config.

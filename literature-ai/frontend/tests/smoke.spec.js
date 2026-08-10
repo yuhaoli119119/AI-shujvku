@@ -1513,9 +1513,9 @@ async function mockApi(route) {
         url: '/mcp',
         common_tools: ['prepare-ai-context', 'codex-item', 'import_analysis'],
       },
-      prompt_schema_version: 'ide_review_prompt_v3',
+      prompt_schema_version: 'ide_review_prompt_v19',
       prompt_contract: {
-        schema_version: 'ide_review_prompt_v3',
+        schema_version: 'ide_review_prompt_v19',
         canonical_mcp_path: '/mcp',
         target_list_token: '{{TARGET_LIST}}',
         source_label_token: '{{SOURCE_LABEL}}',
@@ -1523,7 +1523,7 @@ async function mockApi(route) {
         supported_kinds: ['overall', 'dft', 'figure', 'table', 'sections_writing', 'text_review'],
         templates: {
           overall: '统一总体提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n受控调用 app.mcp.context.mcp_auth_context + app.mcp.server；禁止直接操作数据库。',
-          dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n一份证据合格的 AI 意见即可通过受控入口写入。',
+          dft: '统一 DFT 提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\n普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见。\nnew_candidate 只物化未验证候选。\n专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch；exception 才进入 Owner-session 人工处理。\n不使用第二模型、投票、共识或第三 AI 仲裁。',
           figure: '统一图片提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           table: '统一表格提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}',
           sections_writing: '统一章节提示词\n目标={{TARGET_LIST}}\nsource_label={{SOURCE_LABEL}}\nsection_level section_number parent_heading heading_path',
@@ -4909,7 +4909,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const prompt = await page.evaluate(() => canonicalIdePromptForSelectedPaper('dft'));
 
     expect(prompt).toContain('统一 DFT 提示词');
-    expect(prompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
+    expect(prompt).toContain('普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见');
+    expect(prompt).toContain('new_candidate 只物化未验证候选');
+    expect(prompt).toContain('get_ai_verification_tasks');
+    expect(prompt).toContain('submit_ai_verification_batch');
     expect(prompt).toContain('paper_id=paper-1');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
   });
@@ -4971,7 +4974,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(prompt).toContain('统一 DFT 提示词');
     expect(prompt).toContain('source_label=<agent_name>_dft_');
     expect(prompt).toContain('role: main_paper');
-    expect(prompt).toContain('一份证据合格的 AI 意见即可通过受控入口');
+    expect(prompt).toContain('普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见');
+    expect(prompt).toContain('new_candidate 只物化未验证候选');
+    expect(prompt).toContain('exception 才进入 Owner-session 人工处理');
     expect(prompt).not.toContain('{{TARGET_LIST}}');
     expect(prompt).not.toContain('{{SOURCE_LABEL}}');
   });
@@ -5000,7 +5005,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(prompts.figureTable).toContain('一次审核该主文全部图表、与 DFT 明确相关或可能相关的 SI 图片');
     expect(prompts.dft).toContain('统一 DFT 提示词');
     expect(prompts.dft).toContain('source_label=<agent_name>_dft_');
-    expect(prompts.dft).toContain('一份证据合格的 AI 意见即可通过受控入口');
+    expect(prompts.dft).toContain('普通 PASS/REVISE/REJECT 通过 import_analysis 导入后仍是审核意见');
+    expect(prompts.dft).toContain('new_candidate 只物化未验证候选');
+    expect(prompts.dft).toContain('不使用第二模型、投票、共识或第三 AI 仲裁');
   });
 
   test('business flow: review center legacy prompts keep table mutations on direct tools', async ({ page }) => {

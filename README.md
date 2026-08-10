@@ -6,15 +6,19 @@
 
 `literature-ai` 面向 Codex / IDE AI 的本地文献工具台，负责文献采集、PDF 解析、证据检索、候选结构化数据、审阅队列和受控导出。软件负责准备材料和维护受控流程；最终阅读、核对、归纳、写作和确认由 Codex 或人工完成。
 
-系统默认不把任何 AI 输出当作最终事实。
+普通 AI 输出默认只是候选、审核意见或待处理对象。只有专用 `ai_verify_content` 身份通过统一确定性门禁后才能写入 `ai_verified`；它仍不同于人工 `verified`。
 
-## 当前稳定基线（2026-07-13）
+## 当前稳定基线（2026-08-11）
 
 - **数据库**：`PostgreSQL + pgvector` 是唯一且默认的活跃业务数据源。
 - **MCP 协作面**：MCP 是 IDE AI 的首选受控协作入口；HTTP MCP 必须使用配置好的 Bearer key。
 - **IDE 后备路径**：若当前 IDE 会话未暴露 MCP 工具，可改走 `literature-ai/backend` 中 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 的仓库内后备路径。
 - **服务暴露**：Docker 默认暴露本机 `8000` Owner 网关，以及 `8080` 只读分享网关；数据库和内部服务不直接暴露到 LAN。
 - **DFT / project-library**：DFT 抽取结果默认只是候选，必须经过证据、审核、材料绑定和导出安全门。
+- **单 AI 权威验收**：`get_ai_verification_tasks` 只读分发待验收对象，`submit_ai_verification_batch` 由一个专用验收身份提交；自动门禁无法确定处理的对象才进入 Owner-session 人工异常队列。
+- **页片段恢复**：`materialize_ai_section_page_fragments` 只把服务端重新验证的页片段物化为未审核候选，不会解锁父章节或写作资格。
+- **Content Knowledge 与 AI Writer**：Content Knowledge 显示对象级门禁；AI Writer 只读取有界、只读的多论文 evidence plan，每批最多 10 篇，并分别遵守 `can_use_for_writing` 与 `can_use_for_citation`。
+- **网页审核包**：content review bundle v1 已废弃；v2 只接收 proposal，提供 history 与受保护 retention，不提供直接 apply 路径。
 - **本地产物边界**：`local/`、`literature-ai/outputs/tmp/`、`literature-ai/outputs/exports/`、`test-results/`、`.pytest_cache/` 和临时 scratch 脚本不属于源码，不应作为正式提交内容。
 - **启动与恢复**：核心容器带健康检查；后端与 worker 只在 PostgreSQL、Redis、MinIO、GROBID 就绪后启动。数据库初始化使用 PostgreSQL advisory lock（咨询锁）串行化，失败可重试。
 - **测试边界**：后端数据库测试使用独立随机 schema；前端 Playwright 使用 `4173`，不会复用 Owner 网关 `8000`。
@@ -75,6 +79,7 @@ AI-shujvku/
 | [literature-ai/docs/README.md](./literature-ai/docs/README.md) | 当前文档索引、有效基线和历史文档边界 |
 | [literature-ai/docs/mcp/MCP_API.md](./literature-ai/docs/mcp/MCP_API.md) | MCP API 与工具说明 |
 | [literature-ai/docs/ARCHITECTURE.md](./literature-ai/docs/ARCHITECTURE.md) | 当前架构、模块边界、启动与测试边界 |
+| [literature-ai/docs/CONTENT_REVIEW_WORKFLOW.md](./literature-ai/docs/CONTENT_REVIEW_WORKFLOW.md) | Content Knowledge、review bundle v2、AI Writer 与写作/引用资格边界 |
 | [literature-ai/README.md](./literature-ai/README.md) | `literature-ai/` 目录落点说明；不再承载完整主说明 |
 
 如果这些文档出现冲突，以本文件、`literature-ai/AGENTS.md`、当前代码行为和测试结果为准。

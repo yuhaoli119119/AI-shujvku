@@ -10,6 +10,7 @@
 - [SERVER_GITHUB_WORKFLOW.md](SERVER_GITHUB_WORKFLOW.md): 服务器优先改代码、SSH 推 GitHub、服务重启与验收步骤。
 - [mcp/MCP_API.md](mcp/MCP_API.md): MCP API 与工具说明。
 - [ARCHITECTURE.md](ARCHITECTURE.md): 当前架构、模块职责、健康检查和测试边界。
+- [CONTENT_REVIEW_WORKFLOW.md](CONTENT_REVIEW_WORKFLOW.md): Content Knowledge、review bundle v2、AI Writer、多论文证据计划与资格边界。
 - [schema/dft_ml_dataset_schema.md](schema/dft_ml_dataset_schema.md): DFT ML dataset 导出契约。
 - [schemas/dft_results_ml_v1.md](schemas/dft_results_ml_v1.md): DFT results 相关 schema 说明。
 - [plans/offline_web_ai_dft_review_bundle.md](plans/offline_web_ai_dft_review_bundle.md): 离线网页 AI DFT 核验包、返回校验和受控导入方案。
@@ -26,10 +27,13 @@
 - `potential_determining_step` 是表格上下文，不作为无数值 DFTResult 候选入库。
 - `outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 和 scratch 脚本默认不提交。
 
-## 2026-07-13 维护基线
+## 2026-08-11 维护基线
 
 - 同步 PDF 导入失败会先回滚数据库会话，再按原始错误更新 workflow job；路径导入、上传和附加 PDF 均有真实 PostgreSQL 回归测试。
 - 数据库初始化按 URL 成功后才缓存，并通过 advisory lock 防止多进程并发执行迁移；必需步骤失败会显式报错且允许重试。
+- 数据库 bootstrap/DDL 只由 backend lifespan 负责；worker 等待 backend 健康，不在 Celery import 时执行迁移。
+- `import_analysis` 导入普通候选和审核意见；非 DFT 不直接覆盖，DFT `new_candidate` 也只进入未验证候选队列。权威自动验收统一使用专用 `ai_verify_content` 身份。
+- Content web review bundle v1 已废弃；v2 是 proposal-only，并提供 history 与受保护 retention。AI Writer 只调用有界只读的 `/api/content-knowledge/writing-plan`。
 - Review Center 的 CSS/JS 已从 6000 多行 HTML 拆出；人工复核进度、bundle 来源文献和图像压缩逻辑已有共享模块。
 - Docker Compose 有核心服务健康检查和依赖门；Playwright 固定使用隔离端口 `4173`。
 - 统一验证入口为仓库根目录的 `python scripts/verify.py fast|full`。历史审计中的单次测试数字只代表当时快照，不应复制为当前结论。

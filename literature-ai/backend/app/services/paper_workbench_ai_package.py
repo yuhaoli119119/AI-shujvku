@@ -146,11 +146,13 @@ class PaperWorkbenchAiPackageMixin:
                     "image_or_chart_review": "Use a human reviewer or IDE visual inspection; text-only AI must not infer values from images.",
                     "web_llm_extract": "disabled",
                     "required_workflow": (
-                        "prepare-ai-context / codex-item -> IDE AI -> import_analysis. Non-DFT "
-                        "metadata, sections, figure metadata, writing_cards, mechanism_claims, "
-                        "electrochemical_performance, catalyst_samples, notes, and relationships may be "
-                        "auto-applied with PDF evidence anchors and module write locks. DFT results/settings "
-                        "remain candidates until the review/export gate passes. Table object lifecycle operations "
+                        "prepare-ai-context / codex-item -> IDE AI -> import_analysis for candidates/opinions. "
+                        "Ordinary non-DFT imports remain authenticated_human_review_required under no_ai_overwrite. "
+                        "For untrusted direct propose_correction writes, the server requires a module lock only for "
+                        "top-level abstract and structured sections, mechanism_claims, and writing_cards. Other allowed "
+                        "metadata fields are not universally lock-enforced; tables and figures use dedicated tool "
+                        "capability/evidence contracts. DFT new_candidate may materialize only an unverified candidate; authoritative acceptance "
+                        "uses get_ai_verification_tasks and submit_ai_verification_batch. Table object lifecycle operations "
                         "use direct MCP table tools: update_table, create_table, merge_table, and delete_table."
                     ),
                 },
@@ -164,7 +166,7 @@ class PaperWorkbenchAiPackageMixin:
                         "energy, dissociation energy, decomposition barrier, reaction barrier, free energy/Delta G, "
                         "Bader charge, charge transfer, or Li-S bond length/distance, extract them only as DFT "
                         "candidates with figure/page/text/value/unit/property/material anchors. They must not become "
-                        "ML_Ready until the existing DFT second review and export safety gate pass."
+                        "ML_Ready until the dedicated ai_verify_content verification and export safety gates pass."
                     ),
                 },
                 "figure_dft_candidate_extraction_policy": {
@@ -191,20 +193,10 @@ class PaperWorkbenchAiPackageMixin:
                     ],
                     "write_path": "import_analysis object_review_audits decision=new_candidate or existing DFT candidate audit path",
                     "must_not_set_status": "ML_Ready",
-                    "requires_second_review": True,
+                    "requires_second_review": False,
                 },
                 "non_dft_direct_write_policy": {
-                    "ai_can_apply_without_human_confirmation": [
-                        "paper metadata",
-                        "sections",
-                        "figure metadata/captions/content_summary",
-                        "writing_cards",
-                        "mechanism_claims",
-                        "electrochemical_performance",
-                        "catalyst_samples",
-                        "notes",
-                        "relationships",
-                    ],
+                    "ai_can_apply_without_human_confirmation": [],
                     "must_not_auto_apply": [
                         "dft_results",
                         "dft_settings",
@@ -218,8 +210,11 @@ class PaperWorkbenchAiPackageMixin:
                         "section creation requires a strong text/section/table/figure/bbox anchor",
                     ],
                     "write_path": (
-                        "Use import_analysis with auto_apply_review_rules=true plus a module write lock for ordinary "
-                        "non-DFT field writes. Use update_table/create_table/merge_table/delete_table directly for "
+                        "Use import_analysis only for ordinary candidates or audit opinions. For untrusted direct "
+                        "propose_correction writes, module locks are server-required only for top-level abstract and "
+                        "structured sections, mechanism_claims, and writing_cards; other allowed metadata fields are "
+                        "not universally lock-enforced. Use "
+                        "update_table/create_table/merge_table/delete_table directly for "
                         "table object lifecycle operations, then read back table count/status/audit records. "
                         "For figure image cropping, call recrop_figure or create_figure_from_bbox directly, "
                         "then read back the updated figure record."
@@ -359,10 +354,11 @@ class PaperWorkbenchAiPackageMixin:
                     for row in dft_rows
                 ],
                 "ai_task": (
-                    "Read the main text and any available supplementary_information source documents. First repair "
-                    "non-DFT content directly through import_analysis when there is checkable PDF evidence: metadata, "
-                    "sections, figure metadata/summaries, writing_cards, mechanism_claims, "
-                    "electrochemical_performance, catalyst_samples, notes, and relationships. For missing sections or "
+                    "Read the main text and any available supplementary_information source documents. Import ordinary "
+                    "audit opinions through import_analysis. When an actual non-DFT edit is authorized, use "
+                    "propose_correction with evidence. For untrusted direct writes, the server requires a module lock "
+                    "only for top-level abstract and structured sections, writing_cards, and mechanism_claims; title, "
+                    "year, journal, authors, figure metadata, electrochemical_performance, catalyst_samples, notes, and relationships are not universally lock-enforced. For missing sections or "
                     "writing_cards, create objects with target_path=<collection>:new:create. For existing objects, use "
                     "replace corrections with target_path=<collection>:<id>:<field>, except for tables. Every table object mutation "
                     "is a direct MCP call: update_table for table field fixes, create_table for missing tables, "

@@ -12,7 +12,7 @@
 - When uncertain, state that the display may be a local decoding problem instead of asserting that the project text itself is corrupted.
 
 
-本文件定义 `literature-ai` 的 AI 协作者最低协作规则。目标是减少误操作、减少误报、减少对当前 D2 数据底座状态的误导。
+本文件定义 `literature-ai` 的 AI 协作者最低协作规则。目标是减少误操作、减少误报、减少对当前数据与审核状态的误导。
 
 ## 0. 当前基线
 
@@ -20,7 +20,7 @@
 - PostgreSQL 是唯一数据库，禁止引入其它数据库实现或兼容层。
 - 默认不改 canonical registry。
 - 默认不删除真实 `data/`、`artifacts/`、shadow report。
-- **27-Tool MCP 系统** 已全面激活，涵盖提取、裁切、审核流程。
+- **MCP 工具面** 是 IDE AI 的首选受控入口，具体工具和能力以当前服务端工具清单及认证 capability 为准，不依赖固定工具数量。
 
 ## 0.2 服务器优先协作基线
 

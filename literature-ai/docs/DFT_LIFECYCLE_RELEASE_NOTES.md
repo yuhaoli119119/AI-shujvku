@@ -1,6 +1,17 @@
 # DFT Lifecycle Integration Release Notes
 
-## Overview
+> Historical snapshot: the original sections and historical test counts below are retained for traceability. Their exact capture date is not asserted here, and they are not current acceptance results or the current acceptance contract. See the 2026-08-11 addendum first.
+
+## 2026-08-11 single-AI verification addendum
+
+- Ordinary DFT `PASS` / `REVISE` / `REJECT` opinions imported through `import_analysis` are candidate audit evidence and cannot perform final acceptance.
+- A DFT `new_candidate` with complete evidence may be materialized as an unverified `DFTResult` candidate. Materialization is not `verified`, exportable, or ML-ready.
+- The only automatic authoritative acceptance path is `get_ai_verification_tasks` followed by `submit_ai_verification_batch` under one authenticated `ai_verify_content` identity. Task pages are capped at 50; submission batches are hard-capped at 20.
+- A passing automatic decision writes `ai_verified`, which remains distinct from human `verified`. Only deterministic-gate exceptions are routed to the Owner-session human queue.
+- No second model, vote, consensus, or third-AI adjudication is part of the current path.
+- The historical human-final-review statements below describe the earlier integration snapshot; they do not override this addendum.
+
+## Historical overview
 
 This integration changes DFT review from AI-driven final adjudication to an issue, repair, and explicit human review lifecycle.
 

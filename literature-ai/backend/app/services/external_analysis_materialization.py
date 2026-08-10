@@ -306,23 +306,25 @@ class ExternalAnalysisMaterializationMixin:
            downstream ``apply_import_rules_for_paper`` gate does not reject the
            write.  The lock is released in a ``finally`` block to guarantee it
            never leaks on success or failure.
-        3. Runs the non-DFT auto-apply path (notes/corrections/relationships).
-        4. Runs the DFT candidate materialization path. Final acceptance is
+        3. Runs the compatibility-named non-DFT path, which retains ordinary
+           outputs for authenticated human review under ``no_ai_overwrite``.
+        4. Runs the DFT candidate materialization path. Only ``new_candidate``
+           may become an unverified ``DFTResult`` candidate. Final acceptance is
            performed only by the dedicated single-AI verification service;
-           this pipeline never creates a second verification lane or consensus.
+           this pipeline never performs authoritative acceptance.
         5. Returns the combined ``auto_apply_summary`` mirroring the historical
            MCP response shape.
 
         Parameters
         ----------
         reviewer:
-            Reviewer label recorded on auto-applied outputs.  This is also used
+            Reviewer label recorded on retained/materialized candidate output. This is also used
             as the ``write_lock_owner`` fallback when the caller does not pass
             an explicit owner list.
         write_lock_tokens:
-            Lock tokens supplied by the caller (e.g. previously acquired via
-            ``acquire_module_write_lock``).  When non-empty the auto-acquire
-            step is skipped.
+            Compatibility lock tokens supplied by the caller. For DFT candidate
+            materialization, a non-empty list skips the internal auto-acquire step.
+            These tokens do not authorize ordinary non-DFT overwrite.
         write_lock_owner:
             Owner(s) allowed to validate the supplied tokens.  MCP passes a
             list ``[internal, reviewer]``; HTTP passes a single ``reviewer``.
@@ -381,7 +383,7 @@ class ExternalAnalysisMaterializationMixin:
                     )
                 except Exception as release_exc:
                     # Best-effort release; surface nothing that would mask the
-                    # original apply error.  But log an audit entry so that a
+                    # original candidate-materialization error. Log an audit entry so that a
                     # leaked lock is observable rather than silently lost.
                     # Stale locks are also reaped by TTL as a backstop.
                     logger.exception(

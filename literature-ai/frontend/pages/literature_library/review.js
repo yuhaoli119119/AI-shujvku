@@ -44,7 +44,7 @@ function renderCandidatePayload(payload) {
 
 function renderInternalParseSummary(data) {
     return '<div class="section-card"><h3>网页端解析已停用</h3>' +
-        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据。普通非 DFT 字段通过 import_analysis 回写；表格对象修改/新建/合并/删除必须直接调用 update_table、create_table、merge_table、delete_table。如果当前会话没暴露 MCP 工具，可使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 受控调用同一套公开 MCP 工具。禁止直接操作 service、session、model 或数据库。</div>' +
+        '<div class="subtle">请在 IDE 中优先使用 MCP 读取材料、核验证据。普通候选/审核意见通过 import_analysis 导入。非受信任的 propose_correction 直接写入中，服务端只对顶层 abstract 及 sections、mechanism_claims、writing_cards 强制模块锁；title/year/journal/authors 等其他允许字段不属于必然强制锁范围。表格对象修改/新建/合并/删除必须直接调用 update_table、create_table、merge_table、delete_table，图像遵守专用工具 capability/evidence 契约。如果当前会话没暴露 MCP 工具，可使用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 受控调用同一套公开 MCP 工具。禁止直接操作 service、session、model 或数据库。</div>' +
     '</div>';
 }
 
@@ -193,7 +193,7 @@ async function loadExternalRuns() {
             return;
         }
         if (!state.externalRuns.length) {
-            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 IDE AI 回写记录。请在 IDE 中优先读取 MCP 材料；普通非 DFT 字段通过 import_analysis 回写，表格对象整理直接调用 update_table/create_table/merge_table/delete_table。如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。确认前不会写入正式数据。</div>';
+            if (extRuns) extRuns.innerHTML = '<div class="workspace-empty">当前文献还没有 IDE AI 回写记录。请在 IDE 中优先读取 MCP 材料；普通候选/审核意见通过 import_analysis 导入。非受信任的 propose_correction 直接写入中，服务端只对 abstract、sections、mechanism_claims、writing_cards 强制模块锁，其他允许元数据字段不属于必然强制锁范围；表格对象整理直接调用 update_table/create_table/merge_table/delete_table，图像遵守专用工具契约。如果当前会话没暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。权威验收前不会成为可信内容。</div>';
             return;
         }
         if (extRuns) {
@@ -212,7 +212,7 @@ async function loadExternalRuns() {
                     '<div class="run-card">' +
                         '<h4>' + esc(run.source_label || uiLabel("source", run.source) || "未命名候选源") + "</h4>" +
                         '<div class="subtle">创建时间：' + esc(formatDate(run.created_at)) + " | 映射状态：" + esc(uiLabel("mapping_status", run.mapping_status || "-")) + "</div>" +
-                        '<div class="subtle" style="margin-top:8px;">用途：这里显示 IDE AI 通过 import_analysis 回写的结果。阅读笔记用于快速理解论文；修正/关联建议用于补全或纠错。DFT 数据仍按审核中心的多 AI 冲突流程处理。</div>' +
+                        '<div class="subtle" style="margin-top:8px;">用途：这里显示 IDE AI 通过 import_analysis 导入的候选和审核意见。它们不会直接覆盖非 DFT 正式对象；DFT 普通意见也不能替代专用 ai_verify_content 权威验收，exception 才进入 Owner-session 人工处理。</div>' +
                         (run.mapping_error ? '<div class="subtle" style="margin-top:8px;color:var(--color-danger);">错误：' + esc(run.mapping_error) + "</div>" : "") +
                         '<div class="candidate-toolbar" style="margin-top:12px;">' +
                             primaryAction +
@@ -334,7 +334,7 @@ async function applyReviewRulesForRun(runId) {
     var totalCount = actions.reviewRules.length + actions.materializable.length;
     var ok = confirm(
         "这是整 run 操作，将按审核规则处理该 run 的 " + totalCount + " 个可处理项。\n\n" +
-        "DFT 项只会生成或更新审核候选、issue 和共识状态，不会自动变成 verified，也不会绕过导出安全门。\n\n" +
+        "DFT 项只会生成或更新审核候选与 issue，不会自动变成 ai_verified/verified，也不会绕过专用 ai_verify_content 验收和导出安全门。\n\n" +
         "是否继续？"
     );
     if (!ok) return;

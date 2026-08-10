@@ -126,16 +126,17 @@ def _mcp_review_identity(
     MCP external-analysis entry points (``import_analysis`` and
     ``apply_analysis_review_rules``).
 
-    The semantics are intentionally identical across both entry points so that
-    a pre-acquired lock validated under one tool can be reused by the other:
+    The semantics are intentionally identical across both entry points so the
+    candidate audit trail and DFT materialization lock ownership stay consistent:
 
     - ``effective_reviewer``: the externally visible reviewer label. Defaults
       to ``auth.source_prefix`` when the caller does not pass one.
-    - ``effective_internal_reviewer``: the identity recorded on auto-applied
-      outputs and used as the ``auto_lock_owner`` when the service needs to
-      auto-acquire a DFT write lock. Prefers ``auth.source_prefix``.
+    - ``effective_internal_reviewer``: the identity recorded on retained or
+      materialized candidate output and used as the ``auto_lock_owner`` when
+      the service needs to auto-acquire a DFT candidate-materialization lock.
+      Prefers ``auth.source_prefix``.
     - ``effective_lock_owners``: de-duplicated ``[internal, reviewer]`` list
-      used to validate caller-supplied ``write_lock_token``\\ s. When both
+      used only to validate caller-supplied DFT candidate-materialization locks. When both
       identities coincide the list collapses to a single entry.
     """
     if not auth.identity_verified or not str(auth.source_identity or "").strip():
@@ -835,7 +836,8 @@ def get_dft_review_queue(
         "Get the current read-only DFT review task for one paper. "
         "Pass catalyst_sample_id or dft_result_ids to explicitly re-review those UUID-bound rows, including terminal rows; "
         "omit both selectors to keep the ordinary pending-only task. "
-        "Use this as the local IDE AI entry point before reading item/page evidence and writing through import_analysis."
+        "Use this as the local IDE AI entry point before reading item/page evidence, importing candidate opinions, "
+        "and handing authoritative acceptance to the ai_verify_content workflow."
     ),
 )
 def get_dft_review_task(
@@ -1911,10 +1913,13 @@ async def review_paper(
 @mcp_server.tool(
     name="import_analysis",
     description=(
-        "Import IDE AI analysis results into the library. "
+        "Import IDE/external AI analysis as candidates, audit opinions, or pending review objects. "
         "Supports free-text or structured JSON, including object-level review audits with target_type, target_id, "
-        "field_name, decision, evidence_location, and corrected_value. Non-DFT AI writes are applied directly "
-        "with last-writer-wins semantics and do not require a module write lock."
+        "field_name, decision, evidence_location, and corrected_value. Ordinary non-DFT output is retained for "
+        "authenticated human review under no_ai_overwrite. DFT decision=new_candidate may materialize an "
+        "unverified DFTResult candidate; ordinary PASS/REVISE/REJECT opinions are not authoritative acceptance. "
+        "Use propose_correction or dedicated table/figure tools for controlled edits, and use the dedicated "
+        "ai_verify_content workflow for authoritative AI acceptance."
     ),
 )
 def import_analysis(

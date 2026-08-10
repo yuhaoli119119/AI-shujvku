@@ -18,7 +18,8 @@ role_boundary:
   review_gate:
     - Deduplicate candidates.
     - Run completeness audit.
-    - Require human or second-AI confirmation before promotion to exportable database.
+    - Import ordinary AI results only as candidates or audit opinions.
+    - Require the dedicated authenticated ai_verify_content path for automatic authoritative acceptance; only deterministic-gate exceptions go to the Owner-session human queue.
 
 intake_boundary:
   current_rule: Literature discovery is a controlled candidate workflow, not direct ingestion.
@@ -78,7 +79,7 @@ workflow_stages:
       - candidate_rows
       - row_check
   row_check:
-    goal: Validate syntax and evidence before any AI or human audit.
+    goal: Validate syntax and evidence before candidate import or authoritative verification.
     required_output:
       - numeric_value
       - unit
@@ -96,8 +97,8 @@ workflow_stages:
       - duplicate_group_id
       - primary_candidate_id
       - merged_evidence_sources
-  second_ai_or_human_audit:
-    goal: A second AI or a human reviews the evidence packet and candidate rows before promotion.
+  candidate_audit_import:
+    goal: An assigned AI checks the evidence packet and imports candidate rows or audit opinions without finalizing them.
     required_output:
       - reviewer_role
       - reviewer_model
@@ -106,26 +107,26 @@ workflow_stages:
       - confirmation_required
       - internal_data_read_status
       - prior_external_audit_summary
-  third_ai_adjudication:
-    goal: When the first two AI opinions disagree on a high-risk target, a third AI may adjudicate after reading the original PDF and both prior opinions.
+  authoritative_ai_verification:
+    goal: The one authenticated ai_verify_content identity rechecks deterministic gates and submits the authoritative AI decision.
     required_output:
-      - adjudication_role
-      - adjudication_scope
-      - selected_source_ids
-      - adopt_reject_partial_decision
-      - object_level_evidence_anchors
-      - adjudication_notes
+      - target_fingerprint
+      - decision
+      - confidence
+      - evidence_checks
+      - locator_checks
+      - exception_reason_when_unresolved
 
 MCP_tooling_context:
   purpose: MCP tools expose evidence packets, page reads, figure crops, chart audits, share tokens, and repair actions to AI workers.
-  rule: MCP tool output is supporting evidence, not final truth.
+  rule: Ordinary MCP identities create candidates or controlled edits; only the dedicated ai_verify_content identity may write ai_verified after deterministic gates, and it can never write human verified.
   traceability: Every MCP-assisted AI action must be recorded in AuditLog, task center, field review, external analysis run, or PaperNote.
   internal_verification_read_path:
     - The worker must inspect the original PDF page or page-derived artifact before trusting parsed structure for high-risk review.
     - Before auditing, external AI workers should read paper readiness through get_paper or get_codex_context and inspect artifact_status when present.
     - artifact_ready_for_external_audit must be true, or the worker must report blocking_errors and warnings instead of pretending the paper was fully readable.
     - get_review_coverage(paper_id) now exposes latest_external_audits, external_audit_count, and external_audit_source_distribution so other AI workers can see prior internal verification opinions.
-    - external_audit_opinion candidates are visible review evidence, not final truth; they remain subject to conflict checks and human/final gates.
+    - external_audit_opinion candidates are visible review evidence, not final truth; they remain subject to conflict checks and the dedicated ai_verify_content gate.
     - If MCP cannot read sections, tables, figures, locators, artifacts, or previous audit opinions, the correct output is needs_fix or blocked_by_unreadable_internal_data, not accept.
   local_fallback_when_mcp_ui_is_missing:
     - If the current IDE session does not expose MCP tools, do not stop at "tool missing" by default.
@@ -221,17 +222,16 @@ deduplication_policy:
   rule: Do not delete duplicates silently. Merge into a primary candidate and keep all evidence sources.
 
 ai_worker_protocol:
-  multi_ai_collaboration:
-    - AI roles are assignable per task. Any IDE AI or external model may act as extractor, reviewer, image auditor, DFT auditor, or judge when assigned by the user.
-    - Role names must be recorded explicitly, for example assigned_image_auditor, assigned_dft_auditor, assigned_extractor, or second_ai_judge.
-    - A model that extracted a record should not be the only reviewer of that same record.
-    - AI outputs are recommendations and candidate records only; they do not write final truth.
-    - "Persisted AI payloads must include writes_final_truth: false and confirmation_required: true unless a separate final gate has explicitly promoted the row."
+  candidate_and_verification_roles:
+    - Any assigned IDE AI or external model may extract candidates, audit images, or import DFT opinions, but product names and model labels are audit metadata rather than voting roles.
+    - Ordinary AI outputs are recommendations and candidate records only; they do not write final truth.
+    - "Persisted ordinary-AI payloads must include writes_final_truth: false and confirmation_required: true."
     - Every AI operation must leave a trace in task center, audit logs, field reviews, shared notes, correction proposals, or external analysis runs.
     - Review suggestions are inspected from the paper workbench/review center, external analysis workbench, DFT candidate review payloads, PaperNote records, and AuditLog entries.
     - External AI workers must first confirm they can read the active library paper, artifact status, parsed content, review coverage, and prior external_audit_opinion records through MCP or API.
-    - For DFT rows, chart values, and other high-risk targets, the worker must compare parsed content with the original PDF before returning PASS, REVISE, or adjudication.
-    - "A second AI review that did not read the internal verification data must declare internal_data_read_status: unreadable or incomplete and cannot return can_promote_to_exportable_database: true."
+    - For DFT rows, chart values, and other high-risk targets, the worker must compare parsed content with the original PDF before returning PASS, REVISE, REJECT, or new_candidate.
+    - A dedicated authenticated verifier must use get_ai_verification_tasks followed by submit_ai_verification_batch; submission batches are hard-capped at 20 and task pages at 50.
+    - No additional model, vote, consensus, or adjudicator is used. Only deterministic-gate exceptions enter Owner-session human handling.
   image_audit:
     - The assigned VLM-capable model may audit figure crops, captions, full-page screenshots, and chart interpretations.
     - Figure audit must record figure_id, page, crop status, question, answer, and whether the crop is verified, incomplete, or incorrect.
@@ -239,30 +239,20 @@ ai_worker_protocol:
   dft_data_audit:
     - The assigned text/science model may audit DFT rows if it receives the evidence packet and this protocol.
     - The reviewer must check exact numeric value, unit, catalyst/material, adsorbate, property type, method/condition, locator, duplicates, and suspected missing rows.
-    - PASS/accept from an AI does not unlock export unless the configured human/final gate also passes.
+    - PASS/accept imported through import_analysis does not unlock export; authoritative AI acceptance must pass submit_ai_verification_batch and all export safety gates.
     - Use only PASS, PROPOSED, REJECT, NEEDS_HUMAN, or new_candidate for object_review_audits.
     - When a missing DFT row is found, submit it as decision=new_candidate with a complete structured corrected_value and use import_analysis(auto_apply_review_rules=true) so the row is materialized into the unverified DFT candidate queue instead of remaining only an external audit note.
-    - PASS confirms only fields that were checked; full-row auto-adoption requires normalized material, property, value, unit, method/condition, and PDF evidence.
+    - An imported PASS confirms only the fields described by the opinion. Full-row ai_verified acceptance is decided only by submit_ai_verification_batch after normalized material, property, value, unit, method/condition, and PDF evidence checks.
     - Normalize energy to eV: meV values must be divided by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
     - Normalize permeance to GPU: values reported as 10^3 GPU must be multiplied by 1000. Preserve the raw expression in raw_value/raw_unit or quoted_text.
-  ai_a_initial_extract:
+  candidate_extractor:
     - First compare parsed materials with the original PDF and record parse defects or locator defects when found.
     - Read abstract, methods, results/discussion, all tables, all captions, DFT-related text, and supporting evidence package.
     - Output structured candidate records only when evidence is located.
-  ai_b_independent_review:
-    - Re-check the original PDF instead of trusting the first AI's parse assumptions.
-    - Independently rescan the same evidence package.
-    - Report missing records, conflicts, weak evidence, and duplicate candidates.
-  ai_c_third_adjudicator:
-    - Read the original PDF, the parsed evidence package, and both prior AI opinions.
-    - Decide whether to adopt all, reject all, or partially adopt the disputed object-level results.
-    - If evidence page or quote is missing, actively locate it in the original PDF; return NEEDS_HUMAN only after the PDF cannot support a reliable decision.
-    - Resolve unit scaling explicitly using the unit policy before returning PASS or PROPOSED.
-    - Output object_review_audit entries with adjudication_role=third_ai, adjudication_scope=conflict_resolution, and selected_source_ids.
-  judge:
-    - Compare AI-A, AI-B, and system_candidate hints.
-    - Produce one merged candidate set plus conflict report.
-    - Do not promote anything to final database.
+  authoritative_verifier:
+    - Re-read the original PDF instead of trusting parser assumptions or ordinary imported opinions.
+    - Check the exact locator, current target fingerprint/version, value, unit, material binding, and unresolved conflicts.
+    - Submit accept, correct, reject, or exception through submit_ai_verification_batch; never impersonate a human verified decision.
 
 paper_statuses:
   - Unparsed
@@ -273,13 +263,13 @@ paper_statuses:
   - DB_Ready
 
 promotion_rule:
-  chain: PDF original evidence -> AI protocol extraction -> deduplicate/merge -> completeness audit -> authorized human or AI review -> exportable database
+  chain: PDF original evidence -> candidate extraction/import -> deduplicate/merge -> completeness audit -> dedicated ai_verify_content verification -> export safety gate
   final_database_filter: Only reviewed/exportable records are visible by default in the DFT database, exports, ML dataset, and trusted matrix.
   blocked_when:
     - candidate came only from Literature Intake and has not been ingested into papers.
     - artifact_ready_for_external_audit is false.
     - MCP/API output does not expose the parsed evidence packet or prior internal verification/audit opinions.
-    - external AI audit conflicts with previous AI or human reviews.
+    - unresolved conflicts remain in the deterministic verification gate.
 
 output_schema:
   record:
@@ -323,14 +313,11 @@ output_schema:
     parser_readability_status: readable | partially_reliable | unreliable
     parse_defects: list
     pdf_checked_pages: list
-    adjudication_role: string
-    adjudication_scope: string
-    selected_source_ids: list
   report:
     detected_dft_signal_count: integer
     parsed_candidate_count: integer
     suspected_missing_count: integer
     conflicts: list
     duplicate_groups: list
-    promotion_recommendation: needs_human_review
+    promotion_recommendation: needs_authoritative_ai_verification_or_exception_handling
     unreadable_internal_data: list

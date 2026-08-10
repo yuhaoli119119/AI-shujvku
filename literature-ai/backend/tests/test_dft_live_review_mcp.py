@@ -91,13 +91,28 @@ def test_dft_live_review_tool_list_and_prompt_describe_local_ai_workflow(setup_t
 
     guide = TestClient(app).get("/api/system/agent-guide").json()
     assert "get_dft_review_task" in guide["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "get_ai_verification_tasks" in guide["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
+    assert "submit_ai_verification_batch" in guide["recommended_entrypoint"]["json_schema_hint"]["curation_tools"]
+    assert "verify_dft_results_batch" in guide["recommended_entrypoint"]["json_schema_hint"]["compatibility_tools"]
     endpoint = next(item for item in guide["http_endpoints"] if item["name"] == "get_dft_review_task")
     assert endpoint["method"] == "GET"
     assert endpoint["path"] == "/api/papers/{paper_id}/dft-review-task"
     assert "JSON only" in endpoint["purpose"]
     assert "get_dft_review_task -> get_codex_item/read_paper_page" in guide["legacy_suggested_client_prompt"]
     assert "offline DFT review ZIP is only for web AI, third-party, or offline review" in guide["legacy_suggested_client_prompt"]
+    legacy_prompt = guide["legacy_suggested_client_prompt"]
+    assert "get_ai_verification_tasks -> dedicated ai_verify_content identity -> submit_ai_verification_batch" in legacy_prompt
+    assert "accept/correct/reject or exception" in legacy_prompt
+    assert "Only exception enters Owner-session human handling" in legacy_prompt
+    assert "There is no second model, vote, consensus, or third-AI adjudication" in legacy_prompt
+    assert "compatibility endpoints only" in legacy_prompt
+    assert "A dft_results lock plus import_analysis is not an authoritative verification path" in legacy_prompt
+    assert "acquire dft_results lock -> import_analysis" not in legacy_prompt
+    assert "one evidence-backed AI opinion may" not in legacy_prompt
+    assert "later AI writes may overwrite earlier AI writes" not in legacy_prompt
+    assert "one-call DFT repair/finalization" not in legacy_prompt
+    assert "can enter the fast processing path" not in legacy_prompt
 
     prompt = build_ide_review_prompt("dft")
     assert "get_dft_review_task -> get_codex_item/read_paper_page" in prompt
-    assert "离线 DFT 审阅 ZIP 仅用于 web AI、第三方或离线审阅" in prompt
+    assert "离线 DFT 审阅 ZIP 只产生 proposal/candidate" in prompt

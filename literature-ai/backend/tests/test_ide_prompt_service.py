@@ -113,7 +113,7 @@ def test_text_modules_have_non_overlapping_scopes():
         assert "repair_dft" not in prompt
 
 
-def test_dft_review_prompt_is_dft_only_and_directly_applies_one_ai_opinion():
+def test_dft_review_prompt_is_dft_only_and_uses_dedicated_single_ai_verification():
     prompt = build_ide_review_prompt("dft")
 
     assert "任务：审核并处理当前论文的 DFT 数据" in prompt
@@ -122,11 +122,13 @@ def test_dft_review_prompt_is_dft_only_and_directly_applies_one_ai_opinion():
     assert "主文及已关联 SI" in prompt
     assert "PASS、REVISE、REJECT 或 NEEDS_HUMAN" in prompt
     assert 'decision="new_candidate"' in prompt
-    assert "import_analysis(auto_apply_review_rules=true)" in prompt
-    assert "一份证据合格的 AI 意见" in prompt
-    assert "不需要第二个 AI" in prompt
-    assert "PASS 会确认当前值" in prompt
-    assert "NEEDS_HUMAN 保持待人工" in prompt
+    assert "普通 PASS、REVISE、REJECT 意见不能通过 import_analysis 完成最终验收" in prompt
+    assert "new_candidate 只物化未验证 DFTResult candidate" in prompt
+    assert "专用 ai_verify_content 身份" in prompt
+    assert "get_ai_verification_tasks" in prompt
+    assert "submit_ai_verification_batch" in prompt
+    assert "exception 才进入 Owner-session 人工处理" in prompt
+    assert "不使用第二模型、投票、共识或第三 AI 仲裁" in prompt
     assert "update_table" not in prompt
     assert "review_figure" not in prompt
 
