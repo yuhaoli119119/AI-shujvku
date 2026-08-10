@@ -95,14 +95,9 @@ The parsed package is a candidate aid, not a substitute for checking the origina
 
 `import_analysis` can also accept object-level review payloads through `raw_payload.object_review_audits`. For high-risk targets:
 
-- Two ordinary AI reviews with evidence anchors may auto-materialize when they agree.
-- For DFT rows that do not yet exist, `decision="new_candidate"` plus a structured `corrected_value` and `auto_apply_review_rules=true` will materialize an unverified `DFTResult` candidate and locator first; later review gates still apply.
-- If the first two AI disagree, a third AI may adjudicate by submitting an object-level payload with:
-  - `adjudication_role="third_ai"`
-  - `adjudication_scope="conflict_resolution"`
-  - `selected_source_ids=[...]`
-
-That third-AI payload is still traceable candidate/audit data. It does not bypass evidence or audit logging.
+- Ordinary object-review imports remain candidate evidence and cannot grant final acceptance.
+- For DFT rows that do not yet exist, `decision="new_candidate"` plus a structured `corrected_value` and `auto_apply_review_rules=true` will materialize an unverified `DFTResult` candidate and locator first; the single-AI verification gate still applies.
+- Legacy multi-AI disagreement is not an acceptance path. Preserve conflicting opinions as evidence and route the target to the human exception queue; do not assign a third AI.
 
 The `source` and `source_label` fields record the role for that run, for example `glm_figure_audit`, `gemini_data_audit`, `codex_parse_review`, or `manual_second_pass`. The system does not hard-code a fixed job for Gemini, GLM, Codex, or any other AI.
 

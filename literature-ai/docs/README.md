@@ -17,6 +17,9 @@
 ## 当前稳定边界
 
 - PostgreSQL + pgvector 是唯一业务数据源。
+- 内容验收采用 single-AI-first：只有服务端认证且具备 `ai_verify_content` 的单一 AI 能在确定性证据门禁通过后写 `ai_verified`；不使用第二 AI、模型共识或投票。
+- `ai_verified` 与人工 `verified` 分离，人工 Owner-session 仅处理异常队列；Owner 网关不向普通请求注入 Owner 身份。
+- 自动写作与引用仍只读取通过权威内容门禁的对象，投影状态不能自行授权。
 - DFT 抽取结果默认是候选，必须经过证据、审核、材料绑定和导出安全门。
 - Literature Library 的 DFT 页按催化剂样本分组，但保留每条 DFT 记录的审核、证据和操作入口。
 - Catalyst sample 的身份可由 DFT 行提供，基础信息可由 catalyst extractor 或前端补全合流。

@@ -1,13 +1,14 @@
-# 局域网多 AI 并发核验执行方案
+# 局域网多客户端单 AI 验收执行方案
 
-本文档描述多台电脑上的外部 AI 如何通过本机 MCP/API 共同核验同一套文献数据库。
+本文档描述多台电脑上的客户端如何通过本机 MCP/API 处理不同任务；每个内容候选的最终自动验收只由一个专用 AI 验收身份完成。
 
 核心原则：
 
 - 本机是主机，运行后端、PostgreSQL、Redis、worker、文件存储。
 - 其它电脑只通过局域网访问本机 MCP/API。
 - 其它电脑不直接修改本机共享文件夹、数据库文件、JSON 或图片文件。
-- DFT 数据走“双 AI 候选审核 + 共识/仲裁”。
+- DFT 与非 DFT 内容统一走“单一 AI 自动验收，人工只处理异常”。
+- 禁止对同一候选安排第二 AI、模型投票、AI 共识或第三 AI 仲裁。
 - 非 DFT 模块允许 AI 直接修正，但必须先获取模块写入锁。
 - 所有操作应优先通过 MCP/API，并在数据库中留下审计日志；如果当前 IDE 会话没有暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 后备路径，再将结果通过 MCP/API 风格的候选/审计写回。
 
@@ -25,7 +26,7 @@
 
 ## 2. 外部 AI 权限建议
 
-普通外部 AI 使用安全能力集：
+普通候选生产/修复 AI 使用安全能力集：
 
 ```text
 read_papers,append_notes,propose_corrections,request_parse
@@ -38,7 +39,7 @@ read_papers,append_notes,propose_corrections,request_parse
 dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
 ```
 
-审核 AI 可使用 `read_papers,propose_corrections` 创建候选、issue 或审核意见；主修复 AI 才能调用 `repair_dft_audit_issue`，且修复结果仍不是已确认或 ML_Ready。
+普通 AI 可使用 `read_papers,propose_corrections` 创建候选、issue 或审核意见；主修复 AI 才能调用 `repair_dft_audit_issue`，且修复结果仍不是已确认或 ML_Ready。专用验收身份使用 `read_papers,ai_verify_content`，不得与普通候选身份混用。
 修改 `LITAI_MCP_API_KEYS` 后，检查 `/api/system/agent-guide` 的 `mcp.capability_warnings` 或 `/api/settings/ide-prompts` 的 `mcp_capability_warnings`。如果出现 `repair_dft_issues_non_primary_repair_key`，说明 repair capability 被配到了非主修复 key；warning 只包含 source/display/capability，不包含 raw key。
 
 建议给不同电脑或不同 AI 使用不同 `source_prefix`，例如：
@@ -47,20 +48,21 @@ dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
 ai_pc_1|AI PC 1|<key>|read_papers,append_notes,propose_corrections,request_parse
 ai_pc_2|AI PC 2|<key>|read_papers,append_notes,propose_corrections,request_parse
 dft_primary_repair|DFT Primary Repair AI|<key>|read_papers,repair_dft_issues
+single_verifier|Single AI Verifier|<key>|read_papers,ai_verify_content
 ```
 
 这样 `audit_logs`、`external_analysis_runs`、`workflow_jobs` 可以区分是谁做的。
 
 ## 3. 推荐分工
 
-同一篇文献可以并行，但不要让多个 AI 同时直接写同一个模块。
+可以并行处理互不重叠的文章或目标，但禁止多个 AI 同时验收同一个候选。
 
 推荐分配：
 
 ```text
-AI-1：DFT 数据核验 + 图片/截图核验
-AI-2：章节核验 + 写作模块核验
-AI-3：另一篇文献的章节/写作模块，或 DFT 第二意见
+验收 AI：负责分配范围内全部候选的唯一验收决定
+修复 AI：只修复候选，不能授予 ai_verified
+其它客户端：处理另一篇文献或互不重叠的模块
 ```
 
 更细的模块名：
@@ -76,7 +78,7 @@ all_non_dft     所有非 DFT 直接写入模块
 
 ## 4. DFT 数据规则
 
-DFT 是高风险数据，不需要模块写入锁来提交候选意见，因为两个 AI 可以同时审核同一条 DFT 数据。
+DFT 是高风险数据。候选生产可以不使用模块写入锁，但同一条 DFT 候选只能由一个专用验收 AI 提交最终自动验收结果。
 
 DFT 推荐流程：
 
@@ -85,21 +87,20 @@ DFT 推荐流程：
 3. `get_dft_review_queue` 找到待审核 DFT 候选。
 4. `get_codex_item(item_type="dft_result")` 读取单条 DFT 候选。
 5. `read_paper_page` 核对 PDF 原文页。
-6. `import_analysis(raw_payload.object_review_audits)` 提交 AI 审核意见。
+6. 普通 AI 可用 `import_analysis(raw_payload.object_review_audits)` 提交候选意见；专用验收 AI 使用 `submit_ai_verification_batch` 完成验收。
 
 补充：
 
 - 对任何文献，如果 AI 发现 parser 漏提的 DFT 行，并且希望它稳定进入系统候选队列，必须提交 `decision="new_candidate"` 的结构化对象，并在 `import_analysis` 时使用 `auto_apply_review_rules=true`。
-- 这一步会把漏项 materialize 成未验证 `DFTResult` candidate，供后续双 AI 复核、冲突裁决和导出门控继续处理。
+- 这一步会把漏项 materialize 成未验证 `DFTResult` candidate，供后续单一 AI 验收和导出门控继续处理。
 - 这不是最终入库通过，也不会直接解锁导出。
 
 规则：
 
-- AI_A 和 AI_B 可以审核同一篇、同一条 DFT 数据。
-- 两个 AI 意见一致时，系统可自动应用安全规则。
-- 意见不一致时，进入冲突队列。
-- 第三 AI 可以用 `adjudication_role="third_ai"` 提交仲裁候选。
-- 普通 AI 不直接调用最终验证/入库工具。
+- 同一候选只允许一个具有 `ai_verify_content` 的已认证验收身份处理。
+- 验收 AI 必须重新读取真实 PDF、核对精确页码/定位、目标版本和 DFT 值/单位/材料绑定。
+- 可安全修正的项目自动修正后通过；证据不符自动拒绝；条件不足或冲突未解进入 `exception`。
+- 普通 AI 不直接调用最终验收工具，人工只处理 `exception` 队列。
 
 ## 5. 非 DFT 直接写入规则
 
@@ -226,13 +227,14 @@ POST /api/module-locks/release
 完成后释放写入锁。
 ```
 
-DFT 第二意见：
+DFT 单一 AI 验收：
 
 ```text
 通过 MCP 和 API 核验 A0005 文章的 DFT 数据。
 优先走 MCP 和 API；如果当前 IDE 会话没有暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。
 必须核对 PDF 原文证据。
-只提交 object_review_audits 候选意见，不直接最终入库。
+使用专用 `ai_verify_content` 身份调用验收工具；不得增加第二 AI 或投票流程。
+证据充分则自动通过或安全修正后通过；异常才进入人工队列。
 所有工作必须留痕。
 ```
 

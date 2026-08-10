@@ -57,11 +57,17 @@ git branch -vv
 
 不要把“未执行”说成“已验证”。
 
-## 3. verified 权限边界
+## 3. 单 AI 优先的验收权限边界
 
-- AI 不能直接把人工审核结论表述为 `verified`
-- AI 可以提交建议、审计、风险判断、修复、测试结果
-- 涉及 review / verification / approval 的最终结论必须明确区分“系统状态”与“人工确认”
+- 系统默认由一个 AI 完成提取、核验、纠错和验收；人工只处理自动修复或确定性证据门禁无法解决的异常，不采用逐条人工点击作为默认流程。
+- AI 不能把自己的判断表述为人工 `verified`，也不能使用 Owner 身份或客户端请求体伪造人工身份。
+- 通过服务端认证且具有专用 `ai_verify_content` capability 的单一 AI，可以通过统一验收服务写入 `reviewer_status=ai_verified`。
+- `ai_verified` 与人工 `verified` 明确分离；它必须携带结构化 `ai_verification` payload，并重新通过 PDF、原文、精确页、定位、对象快照、版本、数值/单位和冲突等确定性门禁后才能进入写作或引用。
+- 匿名请求、普通读取 MCP key、普通提案身份以及无 `ai_verify_content` capability 的 AI 均不能写入 `ai_verified`。
+- 禁止第二 AI、第二模型、多模型投票、AI 共识、第三 AI 仲裁或 subagent 参与内容验收。
+- 自动验收失败时，应由同一 AI 自动重新定位或修正后重跑全部门禁；明确错误自动拒绝，仍无法消除的歧义才进入异常队列。
+- 人工 `verified` 路径保留，仅用于异常处理；AI 不能覆盖已有人工终审状态。
+- 所有 AI 结论必须可审计、可撤销，并追溯到服务端认证身份、政策版本、PDF 原文、页码、定位和目标快照。
 
 ## 4. 文档同步原则
 

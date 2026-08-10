@@ -25,6 +25,10 @@
 
 ## Notes
 
+- Current acceptance is single-AI-first: one server-authenticated AI with `ai_verify_content` may write `ai_verified` only after deterministic PDF, locator, snapshot, numeric/unit and conflict gates pass.
+- `ai_verified` is distinct from human `verified`; the Owner-session path is retained for the exception queue, and the Owner gateway does not inject identity into ordinary requests.
+- Automatic writing and citation still consume only objects that pass the authoritative content gate.
+
 - This file is no longer a second full README.
 - Use the root README for the current baseline, startup path, directory policy, and repository-level guidance.
 - Use `AGENTS.md` and `docs/README.md` when you need operating rules or deeper documentation links.

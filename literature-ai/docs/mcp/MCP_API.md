@@ -1,5 +1,16 @@
 # Literature AI MCP API
 
+## Single-AI content verification
+
+The default acceptance workflow is single-AI-first. A server-authenticated MCP identity with the dedicated `ai_verify_content` capability may use:
+
+- `get_ai_verification_tasks`: read a bounded task list and current target fingerprints; this tool is read-only.
+- `submit_ai_verification_batch`: submit a configured bounded batch (default 20, hard maximum 50). `dry_run=true` is zero-write; formal mode reruns deterministic PDF-page, evidence-text, exact-locator, target-snapshot, version, numeric/unit and unresolved-conflict checks before writing `ai_verified`, `rejected`, or `needs_human`.
+
+`ai_verified` is not human `verified`. The audit payload records `actor_type=ai`, the authenticated source identity and label, model/agent identifier, capability, policy version, confidence, evidence and locator checks, target fingerprint, decision and time. Ordinary MCP keys, anonymous clients and request-body identity fields cannot create this status. The workflow never calls a second model and never uses AI consensus. Human Owner-session verification remains available only for the exception queue.
+
+The Owner gateway does not inject `X-LitAI-Owner-Token`; browsers obtain the HttpOnly Owner session cookie through the explicit Owner-session login endpoint. MCP forwards the caller's own `Authorization` header without converting it to Owner identity.
+
 ## Service URL
 
 ```text
@@ -43,7 +54,9 @@ If this root is wrong, MCP may still list papers from PostgreSQL, but artifact c
 LITAI_MCP_ENABLED=true
 LITAI_MCP_ALLOW_UNAUTHENTICATED=false
 LITAI_MCP_SERVER_NAME=Literature AI MCP
-LITAI_MCP_API_KEYS=ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse;assigned_dft_audit|Assigned DFT Audit AI|litmcp_assigned_dft_audit|read_papers,propose_corrections;dft_primary_repair|DFT Primary Repair AI|litmcp_dft_primary_repair|read_papers,repair_dft_issues;human_reviewer|Human Reviewer|litmcp_human_reviewer|read_papers,review_corrections,review_dft
+LITAI_MCP_API_KEYS=ide_ai|IDE AI|<ide-key>|read_papers,append_notes,propose_corrections,request_parse;single_verifier|Single AI Verifier|<verifier-key>|read_papers,ai_verify_content;human_exception_reviewer|Human Exception Reviewer|<human-key>|read_papers,review_corrections,review_dft
+LITAI_AI_VERIFICATION_MIN_CONFIDENCE=0.9
+LITAI_AI_VERIFICATION_BATCH_LIMIT=20
 ```
 
 Single key format:
@@ -60,14 +73,15 @@ ide_ai|IDE AI|<strong-random-key>|read_papers,append_notes,propose_corrections,r
 
 This lets any AI you run from the IDE read parsed paper context, request parsing, append notes, propose corrections, and import audit opinions as unverified candidates. It does not let that AI approve corrections or mark final verified data.
 
-If you want audit logs to distinguish tools or agents, create multiple keys with the same safe capability set, for example `gemini|Gemini|...`, `glm|GLM|...`, or `codex|Codex|...`. This is optional; task assignment is controlled by your workflow, not by a fixed key name.
+Keep `ai_verify_content` on one designated verifier identity. Do not create a second verification lane, second-model review, voting, or consensus workflow.
 
 Recommended DFT audit and repair split:
 
 ```text
 assigned_dft_audit|Assigned DFT Audit AI|<strong-random-key>|read_papers,propose_corrections
 dft_primary_repair|DFT Primary Repair AI|<strong-random-key>|read_papers,repair_dft_issues
-human_reviewer|Human Reviewer|<strong-random-key>|read_papers,review_corrections,review_dft
+single_verifier|Single AI Verifier|<strong-random-key>|read_papers,ai_verify_content
+human_exception_reviewer|Human Exception Reviewer|<strong-random-key>|read_papers,review_corrections,review_dft
 ```
 
 The DFT audit key may create issue/candidate evidence but must not receive `repair_dft_issues`. The primary repair key is intentionally narrow: it can read the DFT audit issue queue and call `repair_dft_audit_issue`, but it does not need proposal or final-review capabilities. Primary repair can mark `needs_user_decision`, but false-positive closure is reserved for an explicit human/admin action. Human/admin review keys can keep explicit verify/reject capabilities without implicitly becoming DFT issue repair keys.
@@ -93,6 +107,7 @@ The DFT audit center UI is read-only: it is an issue queue, copy surface, and na
 - `review_corrections`: approve or reject pending correction proposals; reserve this for an admin or human reviewer.
 - `review_dft`: optional narrower DFT review capability accepted by DFT verification tools.
 - `repair_dft_issues`: permits `repair_dft_audit_issue` for the primary DFT repair AI only. It does not permit false-positive closure. Do not grant it to ordinary IDE, audit, or propose-only keys.
+- `ai_verify_content`: permits the dedicated authenticated single verifier to list verification tasks and submit bounded verification batches. It is distinct from candidate creation and human exception review.
 - `export_data`: permits Word/dataset exports only when `LITAI_EXPORTS_ENABLED=true`; `read_papers` no longer implies export.
 - `create_share_links`: permits `create_share_token`; this is independent from read, export, and review capabilities.
 
@@ -102,7 +117,7 @@ Natural-language tasks such as "parse this paper", "audit DFT data", "check imag
 
 For LAN multi-computer workflows, see [LAN_MULTI_AI_WORKFLOW.md](./LAN_MULTI_AI_WORKFLOW.md). The short version is:
 
-- DFT review opinions may be submitted concurrently by two or more AI clients.
+- One dedicated verifier handles each candidate. Parallel clients must use non-overlapping paper/target sets; no second-AI vote, AI consensus, or third-AI adjudication is used.
 - Non-DFT direct writes must first acquire a module write lock.
 - Ordinary candidate-only imports can set `auto_apply_review_rules=false` and do not require a write lock.
 - DFT `new_candidate` is the important exception: if you want missing DFT rows to enter the system's unverified DFT candidate queue automatically, send `decision=new_candidate` with a structured `corrected_value` and use `auto_apply_review_rules=true`. This materializes an unverified `DFTResult` candidate and still does not mark it exportable or final.
@@ -119,9 +134,9 @@ Use this flow when any IDE AI needs to review already parsed literature:
 
 For DFT rows, chart values, and figure/table-based claims, the expected behavior is:
 
-1. One AI first compares the system-parsed materials with the original PDF and records parse/locator defects if found.
-2. Two AI perform ordinary object-level review.
-3. If the two AI disagree on a high-risk target, a third AI may adjudicate by reading the PDF and both prior opinions.
+1. The dedicated single verifier re-reads the original PDF and checks the exact locator, current target version/fingerprint, value, unit, entity/material binding, and unresolved conflicts.
+2. It submits one of `accept`, `correct`, `reject`, or `exception` through `submit_ai_verification_batch`.
+3. Accepted and safely corrected items become `ai_verified`; rejected items remain blocked; only `exception` items require a human.
 
 Paper-level audit payload example:
 
@@ -264,58 +279,7 @@ Use `import_analysis` through the same external candidate and verification flow.
 }
 ```
 
-For automated settlement, two AI lanes must instead submit matching `object_review_audits` with `target_type="catalyst_samples"`, `target_id="new"`, `field_name="create"`, and the same identity object in `corrected_value`. Missing PDF anchors remain `requires_resolution`. Before insertion, the backend compares normalized name, metal centers, coordination, support, and structure name within the same paper. One clear match is reused; multiple plausible matches remain unresolved and are never auto-merged.
-
-Third-AI adjudication payload example:
-
-```json
-{
-  "paper_id": "PAPER_UUID",
-  "source": "assigned_third_ai_judge",
-  "source_label": "Assigned AI conflict adjudication",
-  "raw_payload": {
-    "object_review_audits": [
-      {
-        "paper_id": "PAPER_UUID",
-        "target_type": "dft_results",
-        "target_id": "DFT_RESULT_UUID",
-        "field_name": "value",
-        "decision": "REVISE",
-        "corrected_value": -1.26,
-        "confidence": 0.92,
-        "source": "assigned_third_ai_judge",
-        "source_label": "Assigned AI conflict adjudication",
-        "agent_role": "third_ai_judge",
-        "model_name": "assigned-model",
-        "reason": "After comparing the original PDF table and both prior AI opinions, -1.26 eV is the supported value.",
-        "adjudication_role": "third_ai",
-        "adjudication_scope": "conflict_resolution",
-        "selected_source_ids": ["FIRST_AI_SOURCE_ID", "SECOND_AI_SOURCE_ID"],
-        "normalized_energy_type": "adsorption_energy",
-        "normalized_material": "Co-N-C host",
-        "structure_name": "CoN4 single-atom site",
-        "adsorbate": "Li2S6",
-        "reaction_step": "adsorption",
-        "evidence_checked": true,
-        "evidence_location": {
-          "page": 8,
-          "section": "Results",
-          "table": "Table 3",
-          "quoted_text": "-1.26 eV"
-        },
-        "writes_final_truth": false,
-        "confirmation_required": true
-      }
-    ]
-  }
-}
-```
-
-Semantics:
-
-- If `adjudication_role` is omitted, the payload is treated as an ordinary review opinion.
-- If `adjudication_role="third_ai"` and evidence anchors are present, the backend treats the payload as a third-AI adjudication candidate.
-- The third AI must not guess; it must read the original PDF and preserve `selected_source_ids` so the adjudication remains traceable.
+Automated settlement uses the one designated `ai_verify_content` identity and `submit_ai_verification_batch`. Missing PDF anchors, ambiguous identities, or multiple plausible sample matches remain exceptions and are never auto-merged. No second or third AI lane exists.
 
 ## Artifact Preconditions
 
@@ -357,6 +321,35 @@ Reader and AI review tools:
 - `append_note`
 - `propose_correction`
 
+`get_review_coverage` reports authoritative `content_object_gate` totals for
+`sections`, `mechanism_claims`, and `writing_cards`: `total`,
+`ai_verified`, `human_verified`, `exception`, `decision_recorded`/`reviewed`,
+`unreviewed`, `authoritative_reviewed`, `can_use_for_writing`,
+`can_use_for_citation`, `blocked`, and grouped `blocked_reasons`.
+`decision_recorded` means that an active `ExtractionFieldReview` contains an
+explicit AI/human/exception/rejection decision; therefore an `exception` is
+reviewed but is not authoritative and remains blocked. `unreviewed` means no
+such decision exists. The legacy section correction counter remains available
+as `with_corrections` plus `correction_unreviewed`; it no longer overwrites the
+decision-based `unreviewed` field. Section coverage also includes
+`by_section_type`, so figure captions and body text cannot be conflated.
+
+These totals are computed from canonical source rows, active field reviews, and
+`content_object_gate`; `ContentEvidenceItem` is a non-authoritative search
+projection. The Content Knowledge review-summary API and page display the same
+coverage payload. Figure and table entries expose the
+same eligibility keys but remain blocked with an explicit
+`no_unified_content_object_gate` reason; their review/correction counters are
+audit state only and must not be interpreted as writing or citation approval.
+
+Cross-page body sections are not authorized by a local sentence match. Exact
+single-page body evidence may be represented as `section_page_fragment`
+`EvidenceClaim` objects bound to the unchanged parent Section. Each fragment
+must have one 1-based physical PDF page, exact page text, its own locator and
+field review, and its own `content_object_gate` result. Only verified fragments
+may enter retrieval or writing plans; the parent and uncovered text remain
+blocked.
+
 Parsing tools:
 
 - `scan_local_pdfs`
@@ -375,13 +368,35 @@ Reviewer and admin tools:
 - `propose_dft_result_correction`
 - `get_dft_review_queue`
 
+`verify_dft_result`, `verify_dft_results_batch`, and the compatibility
+`auto_finalize` option never create final verified state for an MCP identity.
+They report the request as requiring `ai_verify_content`; the designated single
+AI must use `submit_ai_verification_batch`. Owner-session review is reserved for
+the exception queue.
+
 ## Collaboration Rules
 
-- External AI outputs are candidates, not verified facts.
+- Ordinary external AI outputs are candidates. Only the authenticated single-AI verification service can promote a passing item to `ai_verified`.
 - Ordinary parsed markdown, table splits, figure crops, and locators are not automatically trusted. High-risk review must compare them with the original PDF.
-- External audit imports must remain unverified until a human/final review step confirms them.
+- External audit imports remain candidates until the unified single-AI service reruns all deterministic evidence gates.
 - Do not grant `review_corrections` to external AI clients unless that client is intentionally acting as a trusted admin.
 - Do not grant `repair_dft_issues` to external audit/propose-only clients. Use a separate `dft_primary_repair` key with `read_papers,repair_dft_issues`.
 - Check `mcp.capability_warnings` / `mcp_capability_warnings` after deployment changes; fix any `repair_dft_issues_non_primary_repair_key` warning before running DFT issue repair.
 - DFT export remains gated by safe verified evidence and exact locators.
-- DFT final verify/reject must be a deliberate human/user-authorized action on the DFT detail path or equivalent review tool, not a legacy AI adjudication or auto-advance result.
+- DFT final AI verify/reject must use `ai_verify_content`; human Owner-session decisions are only for unresolved exceptions. Neither path may impersonate the other.
+
+### `materialize_ai_section_page_fragments`
+
+Materializes deterministic Section page-fragment candidates as pending `EvidenceClaim` rows. The
+tool requires the server-authenticated `ai_verify_content` MCP identity and accepts only
+`paper_id`, `parent_section_id`, plus at most 20 `{fragment_id, fragment_fingerprint}` references.
+It does not accept client-supplied page text or page numbers. The server reruns
+`EvidencePageRecoveryService.recover_section_page_fragments()` against the stored PDF and rejects
+stale, approximate, forged, cross-paper, or cross-section references before staging any write.
+
+`dry_run` defaults to `true`; PostgreSQL is placed in a read-only transaction and the response has
+`database_writes=false`. Formal materialization is atomic and idempotent, and creates only
+`source_type=section_page_fragment`, `validation_status=unverified` candidates. It never creates an
+AI/human verified review and never unlocks the parent Section. Materialized candidates can then be
+read through `get_ai_verification_tasks(target_type="section_page_fragments")` and evaluated through
+`submit_ai_verification_batch(dry_run=true)`.

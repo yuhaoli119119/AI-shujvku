@@ -4,7 +4,7 @@ This document defines how natural-language user commands should be routed to MCP
 
 The system does not bind task ownership to a model name. Codex, Gemini, GLM, Claude, or another IDE AI may perform any task below when the user assigns it. Historical names such as `get_codex_context`, `GeminiAuditService`, `gemini_audit_protocol`, `Codex_Candidate`, and `Gemini_Verified` are compatibility names only.
 
-All AI output remains candidate or audit evidence until a later trusted review gate promotes it. Do not treat AI output as final verified data.
+Ordinary AI output remains candidate or audit evidence. Only the dedicated, authenticated single-AI verification gate may promote a candidate to `ai_verified` after re-reading the original PDF, checking the exact locator, and passing the target-specific policy. Do not treat other AI output as final verified data.
 
 ## Common Routing Rules
 
@@ -18,7 +18,7 @@ All AI output remains candidate or audit evidence until a later trusted review g
 - Use `propose_correction` or `propose_dft_result_correction` for suggested data changes.
 - Use `acquire_module_write_lock` before directly applying non-DFT AI edits through `import_analysis(auto_apply_review_rules=true)`.
 - Use `release_module_write_lock` after the assigned non-DFT write task is complete.
-- Reserve `approve_correction`, `reject_correction`, `verify_dft_result`, and `reject_dft_result` for trusted admin or human-review keys.
+- Route normal acceptance through `get_ai_verification_tasks` and `submit_ai_verification_batch` with a dedicated `ai_verify_content` key. Reserve legacy approve/reject tools for explicit exception handling.
 
 Recommended capability set for ordinary IDE AI keys:
 
@@ -29,16 +29,16 @@ read_papers,append_notes,propose_corrections,request_parse
 Do not grant `review_corrections` to an ordinary IDE AI key unless that client is intentionally acting as a trusted admin.
 Do not grant `repair_dft_issues` to ordinary IDE, DFT audit, or propose-only keys. Use a separate primary repair key with only `read_papers,repair_dft_issues` when the user explicitly assigns a DFT audit issue repair task.
 
-## Multi-AI Concurrency Rules
+## Single-AI Verification and Concurrency Rules
 
 The safe LAN workflow is documented in [LAN_MULTI_AI_WORKFLOW.md](./LAN_MULTI_AI_WORKFLOW.md).
 
-DFT data:
+Content verification:
 
-- Two or more AI clients may review the same paper and the same DFT row concurrently.
-- They should submit `object_review_audits` or DFT correction proposals as candidate evidence.
-- Final DFT acceptance still requires the DFT consensus/adjudication/review gates.
-- Do not use module write locks to serialize ordinary DFT review opinions.
+- Exactly one authenticated verifier handles a candidate through the `ai_verify_content` tools.
+- Do not assign a second model, collect votes, compute AI consensus, or request third-AI adjudication for the same candidate.
+- Multiple workers may run concurrently only when their paper/target sets do not overlap.
+- Items that cannot pass automatically become `exception` and enter the human exception queue; ordinary accepted items do not wait for human review.
 
 Non-DFT direct writes:
 
@@ -61,12 +61,12 @@ relationships
 all_non_dft
 ```
 
-Recommended same-paper split:
+Recommended non-overlapping split:
 
 ```text
-AI-1: DFT review opinions + figures lock when applying image/figure fixes
-AI-2: content lock for sections and writing cards
-AI-3: second DFT review lane or another paper's content lock
+Verifier: all acceptance decisions for the assigned paper/target set
+Repair worker: candidate repair only; it cannot grant ai_verified
+Other worker: a different paper or non-overlapping module
 ```
 
 ## Command: "通过 MCP 解析文章"
@@ -138,7 +138,7 @@ Stable missing-row workflow:
 
 - For any paper, if the assigned AI finds a missing DFT row that should enter the system queue, submit it as `decision="new_candidate"` with `target_type="dft_results"`, `target_id="new"`, `field_name="dft_results"`, and a complete structured `corrected_value`.
 - In that case, do not leave the import as candidate-only. Call `import_analysis` with `auto_apply_review_rules=true` so the backend materializes an unverified `DFTResult` candidate plus locator.
-- This materialization is still not final verification, not export approval, and not a bypass of the later consensus/adjudication gate.
+- This materialization is still not final verification or export approval. It must pass the dedicated single-AI verification gate.
 
 DFT audit issue repair is a separate follow-up role:
 
@@ -148,13 +148,13 @@ DFT audit issue repair is a separate follow-up role:
 - The audit AI, ordinary IDE AI, and propose-only keys must not call `repair_dft_audit_issue`.
 - A repair result remains AI-applied candidate data, not human verification, safe verification, or ML/CSV export approval.
 
-Expected review order for high-risk DFT data:
+Expected verification order for high-risk DFT data:
 
-1. One AI first compares system parsing against the original PDF and records parse defects, locator defects, or table/figure split defects.
-2. Two AI then perform ordinary DFT review.
-3. If those two AI disagree, a third AI may adjudicate after reading the original PDF and both prior AI outputs.
+1. The single verifier reads the original PDF and checks the exact locator, value, unit, entity/material binding, and unresolved conflicts.
+2. It accepts, safely corrects and accepts, rejects, or marks the item `exception` in one bounded submission.
+3. Only `exception` items are routed to a human; there is no second-AI vote or third-AI adjudication.
 
-If a DFT row refers to a material or structure that has no `catalyst_sample`, first use `import_analysis` to propose or dual-review `catalyst_samples:new:create` with an original-PDF anchor. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit the normal dual-AI `catalyst_sample_id` review for the DFT row.
+If a DFT row refers to a material or structure that has no `catalyst_sample`, first use `import_analysis` to propose `catalyst_samples:new:create` with an original-PDF anchor. Do not bind the DFT row to the paper's first sample. After the sample is created or unambiguously reused, submit its `catalyst_sample_id` field to the single-AI verification gate.
 
 DFT page-locator boundary:
 
@@ -341,13 +341,7 @@ Standard output or writeback:
 
 `import_analysis` should create candidate records. Paper-level audit payloads should create `external_audit_opinion` candidates with `verification_status=unverified`. Object-level payloads should create `object_review_audit` candidates with the same unverified safety boundary.
 
-When the task is third-AI adjudication instead of ordinary review, the object-level payload must include:
-
-- `adjudication_role: "third_ai"`
-- `adjudication_scope: "conflict_resolution"`
-- `selected_source_ids: ["FIRST_AI_SOURCE_ID", "SECOND_AI_SOURCE_ID"]`
-
-In that mode the AI is not doing a generic third extraction pass. It is explicitly deciding between prior opinions after checking the original PDF.
+Legacy multi-AI adjudication payloads are not an acceptance path. If prior opinions conflict, preserve them as evidence and route the target to `exception`; only a human exception decision or a later clean single-verifier run after the conflict is resolved may progress it.
 
 Object-level payload example:
 
@@ -380,5 +374,4 @@ Object-level payload example:
 
 Forbidden:
 
-Do not import external AI output as final verified data. Do not bypass the artifact gate for paper-level audit. Do not overwrite prior audit opinions; preserve conflicts for later review.
-Do not submit third-AI adjudication without checking the original PDF and preserving `selected_source_ids`.
+Do not import external AI output as final verified data. Do not bypass the artifact gate for paper-level audit. Do not overwrite prior audit opinions; preserve conflicts for the exception queue.
