@@ -92,3 +92,9 @@ fix.py
 .workbuddy/
 111/
 backend.log
+
+# Local audit, benchmark, and browser artifacts
+/outputs/
+literature-ai/backend/outputs/exports/
+literature-ai/frontend/debug.log
+literature-ai/frontend/baseline*.json
