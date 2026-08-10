@@ -22,12 +22,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from app.config import DATABASE_V1_EMBEDDING_DIMENSION, DATABASE_V1_EMBEDDING_MODEL, get_settings
 from app.mcp.auth import parse_mcp_api_keys, validate_mcp_capability_assignments
-from app.security.owner import require_owner_request
+from app.security.owner import (
+    OWNER_SESSION_COOKIE,
+    OWNER_SESSION_TTL_SECONDS,
+    authenticated_owner_session,
+    create_owner_session,
+)
 from app.services.ide_prompt_service import (
     CANONICAL_MCP_PATH,
     PROMPT_SCHEMA_VERSION,
@@ -126,6 +131,53 @@ class SettingItem(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     settings: list[SettingItem]
+
+
+class OwnerSessionRequest(BaseModel):
+    token: str
+
+
+@router.get("/owner-session")
+def owner_session_status(request: Request) -> dict[str, Any]:
+    identity = authenticated_owner_session(request)
+    return {
+        "authenticated": identity is not None,
+        "actor": identity.actor if identity else None,
+    }
+
+
+@router.post("/owner-session")
+def open_owner_session(
+    payload: OwnerSessionRequest,
+    request: Request,
+    response: Response,
+) -> dict[str, Any]:
+    session_value, identity = create_owner_session(payload.token)
+    response.set_cookie(
+        key=OWNER_SESSION_COOKIE,
+        value=session_value,
+        max_age=OWNER_SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=request.url.scheme == "https",
+        samesite="strict",
+        path="/",
+    )
+    return {
+        "authenticated": True,
+        "actor": identity.actor,
+        "expires_in": OWNER_SESSION_TTL_SECONDS,
+    }
+
+
+@router.delete("/owner-session")
+def close_owner_session(response: Response) -> dict[str, Any]:
+    response.delete_cookie(
+        key=OWNER_SESSION_COOKIE,
+        httponly=True,
+        samesite="strict",
+        path="/",
+    )
+    return {"authenticated": False}
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +495,12 @@ def _advertised_base_url(
 
 
 def _enforce_settings_write_access(request: Request) -> None:
-    require_owner_request(request)
+    """Keep settings writes available to the owner-facing web application.
+
+    External MCP access is authenticated independently at the ``/mcp``
+    boundary.  The regular web application must not require an Owner token.
+    """
+    return None
 
 
 @router.get("")

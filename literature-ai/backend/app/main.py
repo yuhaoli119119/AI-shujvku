@@ -38,7 +38,6 @@ from app.db.session import session_scope
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
 from app.security.exports import enforce_export_boundary
-from app.security.owner import enforce_owner_boundary
 from app.security.share import enforce_share_protection
 from app.services.workflow_jobs import expire_stale_activity
 from app.utils.active_database import activate_active_library_database
@@ -83,7 +82,6 @@ app = FastAPI(
 )
 
 app.middleware("http")(enforce_mcp_auth)
-app.middleware("http")(enforce_owner_boundary)
 app.middleware("http")(enforce_export_boundary)
 app.middleware("http")(enforce_share_protection)
 

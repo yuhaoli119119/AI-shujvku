@@ -1,25 +1,11 @@
-import logging
-
 from celery import Celery
 
 from app.config import get_settings
 from app.services.workflow_jobs import WORKFLOW_QUEUE_DEFAULT
-from app.utils.active_database import activate_active_library_database
 
-logger = logging.getLogger(__name__)
-
-
-def bootstrap_worker_database() -> None:
-    try:
-        activate_active_library_database()
-    except Exception as exc:
-        # When multiple workers start together, one may race the startup-time DB
-        # bootstrap. The live backend already initializes the schema, so workers
-        # can continue and rely on runtime sessions afterward.
-        logger.warning("Worker bootstrap DB activation skipped after startup race: %s", exc)
-
-
-bootstrap_worker_database()
+# Database schema bootstrap is owned by the backend lifespan. Compose waits for
+# that service to become healthy before starting workers, so importing the
+# Celery app must never execute DDL against a live database.
 settings = get_settings()
 
 celery_app = Celery(

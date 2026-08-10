@@ -457,11 +457,16 @@
             </div>
 
             <div class="panel">
-                <div class="panel-title">管理员 Token</div>
-                <div class="panel-desc">如果当前环境要求管理员 Token，保存设置时会自动把它带到请求头 `X-Settings-Token` 中，并仅保存在当前浏览器会话。</div>
+                <div class="panel-title">最终人工确认身份（不影响日常使用）</div>
+                <div class="panel-desc">文献库、设置和普通操作无需解锁。仅在把候选结果确认为最终人工结论时，Token 才用于换取 30 分钟的 HttpOnly 会话 Cookie；页面脚本不会保存、读取或附带原始 Token。</div>
                 <div class="field">
                     <label for="settings_token">管理员 Token</label>
-                    <input type="password" id="settings_token" placeholder="输入管理员 Token">
+                    <input type="password" id="settings_token" autocomplete="current-password" placeholder="仅本次解锁使用">
+                </div>
+                <div class="actions">
+                    <button class="btn btn-primary" onclick="openOwnerSession()">解锁管理员会话</button>
+                    <button class="btn btn-ghost" onclick="closeOwnerSession()">退出管理员会话</button>
+                    <span id="owner-session-status" class="badge badge-warn">未检查</span>
                 </div>
             </div>
 
@@ -813,13 +818,16 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         async function fetchSettingsJSON(url, options) {
             const requestOptions = options || {};
             requestOptions.headers = requestOptions.headers || {};
-            const token = sessionStorage.getItem("litai-settings-token");
-            if (token) requestOptions.headers["X-Settings-Token"] = token;
+            requestOptions.credentials = "same-origin";
 
             const resp = await fetch(url, requestOptions);
+            if (resp.status === 401) {
+                showToast("管理员会话未解锁或已过期。", "error");
+                throw new Error("401 Unauthorized: Owner Session Required");
+            }
             if (resp.status === 403) {
-                showToast("无权访问该接口，请先确认是否需要管理员 Token。", "error");
-                throw new Error("403 Forbidden: Admin Token Required");
+                showToast("管理员凭据无效或没有权限。", "error");
+                throw new Error("403 Forbidden: Invalid Owner Credential");
             }
 
             const text = await resp.text();
@@ -844,7 +852,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
 
         async function loadSettings() {
             try {
-                document.getElementById("settings_token").value = sessionStorage.getItem("litai-settings-token") || "";
                 const data = await fetchSettingsJSON(`${API_BASE}/api/settings`);
 
                 document.getElementById("embedding_provider").value = data.embedding_provider || "deterministic";
@@ -877,9 +884,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         }
 
         async function saveSettings() {
-            const tokenVal = document.getElementById("settings_token").value.trim();
-            sessionStorage.setItem("litai-settings-token", tokenVal);
-
             const settings = [
                 { key: "embedding_provider", value: document.getElementById("embedding_provider").value },
                 { key: "embedding_api_base", value: document.getElementById("embedding_api_base").value || null },
@@ -901,6 +905,45 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             } catch (e) {
                 showToast("保存失败: " + e.message, "error");
             }
+        }
+
+        async function loadOwnerSessionStatus() {
+            const badge = document.getElementById("owner-session-status");
+            try {
+                const data = await fetchSettingsJSON(`${API_BASE}/api/settings/owner-session`);
+                badge.className = `badge ${data.authenticated ? "badge-ok" : "badge-warn"}`;
+                badge.textContent = data.authenticated ? "管理员会话已解锁" : "管理员会话未解锁";
+            } catch (_) {
+                badge.className = "badge badge-err";
+                badge.textContent = "会话状态不可用";
+            }
+        }
+
+        async function openOwnerSession() {
+            const input = document.getElementById("settings_token");
+            let tokenVal = input.value.trim();
+            input.value = "";
+            if (!tokenVal) {
+                showToast("请输入管理员 Token。", "error");
+                return;
+            }
+            try {
+                await fetchSettingsJSON(`${API_BASE}/api/settings/owner-session`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ token: tokenVal })
+                });
+                showToast("管理员会话已解锁。", "success");
+                await loadOwnerSessionStatus();
+            } finally {
+                tokenVal = "";
+            }
+        }
+
+        async function closeOwnerSession() {
+            await fetchSettingsJSON(`${API_BASE}/api/settings/owner-session`, { method: "DELETE" });
+            showToast("管理员会话已退出。", "success");
+            await loadOwnerSessionStatus();
         }
 
         async function loadIdePrompts() {
@@ -971,6 +1014,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         document.addEventListener("DOMContentLoaded", () => {
             TopNav.init({ currentPage: "settings", mountId: "topnav-mount" });
             initThemeControls();
+            loadOwnerSessionStatus();
             loadSettings();
             loadStatus();
             loadIdePrompts();

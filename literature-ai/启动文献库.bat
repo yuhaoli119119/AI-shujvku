@@ -3,8 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 cd /d "%~dp0"
 
-set "APP_URL=http://localhost:8000/pages/literature_library/index.html"
-set "HEALTH_URL=http://localhost:8000/api/health"
+set "APP_URL=http://127.0.0.1:8000/pages/literature_library/index.html"
+set "HEALTH_URL=http://127.0.0.1:8000/api/health"
 
 echo [1/5] Checking Docker Desktop...
 docker info >nul 2>nul

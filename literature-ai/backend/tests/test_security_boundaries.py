@@ -161,19 +161,14 @@ def test_local_pdf_validation_enforces_root_regular_file_extension_and_magic(tmp
         validate_local_ingest_pdf(wrong_extension, settings)
 
 
-def test_remote_owner_boundary_ignores_spoofable_headers_and_allows_token(monkeypatch):
+def test_regular_web_api_is_available_without_owner_token(monkeypatch):
     monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "owner-secret")
     get_settings.cache_clear()
     remote = TestClient(app, client=("192.168.1.20", 50000))
 
-    forged = remote.post(
-        "/api/papers/ingest/path",
-        headers={"Host": "localhost:8000", "Origin": "http://localhost:8000", "Referer": "http://localhost/"},
-        json={"pdf_path": "C:/secret.pdf"},
-    )
-    assert forged.status_code == 403
-    assert remote.get("/openapi.json").status_code == 403
-    assert remote.get("/pages/ingestion/index.html").status_code == 403
+    assert remote.get("/api/system/db-info").status_code == 200
+    assert remote.get("/openapi.json").status_code == 200
+    assert remote.get("/pages/ingestion/index.html").status_code == 200
     assert remote.get("/pages/share/index.html").status_code == 200
     assert remote.get("/openapi.json", headers={"X-LitAI-Owner-Token": "owner-secret"}).status_code == 200
 
@@ -272,7 +267,7 @@ def test_share_api_is_remote_read_only_and_page_size_is_hard_capped(share_client
     assert client.get(f"/api/share/read-only-token/papers/{other_id}").status_code == 403
     assert client.get("/api/share/invalid-scope-token/papers").status_code == 403
     assert client.post("/api/share/read-only-token/papers").status_code == 405
-    assert client.get("/api/papers/").status_code == 401
+    assert client.get("/api/papers/").status_code == 200
 
 
 def test_ssrf_guard_blocks_local_dns_and_revalidates_redirects(monkeypatch):

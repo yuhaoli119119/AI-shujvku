@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -36,27 +35,9 @@ def test_is_local_request_host(host: str, expected: bool):
     assert _is_local_request_host(host) is expected
 
 
-def test_settings_write_rejects_private_docker_bridge_when_no_token(monkeypatch):
-    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", " ")
-    monkeypatch.delenv("LITAI_SETTINGS_ADMIN_TOKEN", raising=False)
-    get_settings.cache_clear()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _enforce_settings_write_access(_make_request("172.17.0.1"))
-
-    assert exc_info.value.status_code == 401
-    assert "Owner authentication" in str(exc_info.value.detail)
-
-
-def test_settings_write_rejects_spoofed_localhost_target_when_no_token(monkeypatch):
-    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", " ")
-    monkeypatch.delenv("LITAI_SETTINGS_ADMIN_TOKEN", raising=False)
-    get_settings.cache_clear()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _enforce_settings_write_access(_make_request("172.17.0.1", {"host": "localhost:8000"}))
-
-    assert exc_info.value.status_code == 401
+@pytest.mark.parametrize("host", ["172.17.0.1", "192.168.1.10", "8.8.8.8"])
+def test_settings_write_does_not_require_owner_token(host):
+    assert _enforce_settings_write_access(_make_request(host)) is None
 
 
 def test_ide_prompt_base_url_prefers_request_host_over_docker_ip():
@@ -83,38 +64,6 @@ def test_mcp_runner_uses_npx_cmd_for_windows_clients():
     )
 
     assert _mcp_runner_command(request) == "npx.cmd"
-
-
-def test_settings_write_rejects_public_host_when_no_token(monkeypatch):
-    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", " ")
-    monkeypatch.delenv("LITAI_SETTINGS_ADMIN_TOKEN", raising=False)
-    get_settings.cache_clear()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _enforce_settings_write_access(_make_request("8.8.8.8"))
-
-    assert exc_info.value.status_code == 401
-    assert "Owner authentication" in str(exc_info.value.detail)
-
-
-def test_settings_write_requires_matching_token_when_configured(monkeypatch):
-    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "secret-token")
-    monkeypatch.delenv("LITAI_SETTINGS_ADMIN_TOKEN", raising=False)
-    get_settings.cache_clear()
-
-    with pytest.raises(HTTPException) as exc_info:
-        _enforce_settings_write_access(_make_request("172.17.0.1", {"X-Settings-Token": "wrong-token"}))
-
-    assert exc_info.value.status_code == 403
-    assert exc_info.value.detail == "Invalid Owner token"
-
-    with pytest.raises(HTTPException) as local_exc_info:
-        _enforce_settings_write_access(_make_request("172.17.0.1", {"host": "localhost:8000"}))
-
-    assert local_exc_info.value.status_code == 403
-    assert local_exc_info.value.detail == "Invalid Owner token"
-
-    _enforce_settings_write_access(_make_request("8.8.8.8", {"X-Settings-Token": "secret-token"}))
 
 
 def test_ide_prompts_never_return_real_mcp_key(monkeypatch):
