@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -20,6 +21,7 @@ from app.db.models import (
     ExtractionFieldReview,
     Paper,
 )
+from app.config import get_settings
 from app.main import app
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.dft_review_service import DFTResultReviewService
@@ -108,6 +110,10 @@ def _seed_dft(
 
 
 def _verify_dft_ready(session: Session, row: DFTResult) -> None:
+    paper = session.get(Paper, row.paper_id)
+    pdf_file = Path(get_settings().storage_root) / str(paper.pdf_path)
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
+    pdf_file.write_bytes(b"%PDF-1.4\nProject library fixture\n%%EOF\n")
     verification = DFTResultReviewService(session).verify_result(
         paper_id=row.paper_id,
         result_id=row.id,
@@ -116,8 +122,9 @@ def _verify_dft_ready(session: Session, row: DFTResult) -> None:
         reviewer_note="Verified against the tabular test evidence.",
         expected_write_versions={"value": 1},
         evidence_payload={"page": 5, "quoted_text": row.evidence_text},
-        verification_actor_type="ai",
-        source_label="project_library_quality_test",
+        verification_actor_type="human",
+        actor_name="owner",
+        source_label="owner_api_token",
         commit=False,
     )
     assert verification["export_safety"]["eligible"] is True

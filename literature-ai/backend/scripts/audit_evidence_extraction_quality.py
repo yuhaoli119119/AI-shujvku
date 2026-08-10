@@ -308,7 +308,7 @@ def _writing_gate_stats(session: Session, paper_id: str | None) -> dict[str, int
     stats = Counter()
     stats["writing_cards_total"] = len(rows)
     for row in rows:
-        gate = writing_card_gate(row)
+        gate = writing_card_gate(session, row)
         if gate.can_use_for_writing:
             stats["writing_cards_safe_usable"] += 1
             continue

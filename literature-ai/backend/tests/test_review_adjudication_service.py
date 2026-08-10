@@ -187,7 +187,7 @@ def test_review_conflict_active_view_ignores_materialized_external_audits():
     assert service._active_opinions([active, materialized, verified]) == [active, verified]
 
 
-def test_review_conflict_active_third_ai_adjudication_supersedes_prior_dft_opinions():
+def test_review_conflict_never_treats_a_third_ai_payload_as_authoritative():
     service = ReviewConflictAggregationService.__new__(ReviewConflictAggregationService)
     prior = {
         "target_type": "dft_results",
@@ -202,7 +202,8 @@ def test_review_conflict_active_third_ai_adjudication_supersedes_prior_dft_opini
         "raw_payload": {"adjudication_role": "third_ai"},
     }
 
-    assert service._collapse_active_dft_adjudication([prior, adjudication]) == [adjudication]
+    active = service._active_opinions([prior, adjudication])
+    assert active == [prior, adjudication]
 
 
 def test_review_conflict_whole_row_dft_ignores_missing_fields_and_locator_differences():

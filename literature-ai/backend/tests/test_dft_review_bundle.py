@@ -1694,7 +1694,7 @@ def test_gap_discovery_exports_terminal_context_and_rejects_duplicate_or_unrevie
     assert "new_candidate_requires_reviewed_evidence" in error_codes
 
 
-def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup_test_db):
+def test_dft_import_rejects_ai_auto_verification_without_authenticated_human(setup_test_db):
     paper_id, row_id = _seed_review_materials(setup_test_db)
     _mark_figure_table_review_completed(setup_test_db, paper_id)
     client = TestClient(app)
@@ -1734,8 +1734,8 @@ def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup
     request = validation.json()["import_analysis_request"]
 
     blocked = client.post("/api/external-analysis/import", json=request)
-    assert blocked.status_code == 409, blocked.text
-    assert "local_ai_pdf_verification_required" in blocked.json()["detail"]
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["detail"]["code"] == "authenticated_identity_required_for_auto_apply_review_rules"
 
     audit = request["raw_payload"]["object_review_audits"][0]
     audit["source"] = "local_ai"
@@ -1753,33 +1753,23 @@ def test_dft_import_requires_local_ai_verification_and_records_ai_identity(setup
         ],
         "verification_note": "Checked the stored page layout and the bundled source PDF evidence.",
     }
-    applied = client.post("/api/external-analysis/import", json=request)
+    still_blocked = client.post("/api/external-analysis/import", json=request)
+    assert still_blocked.status_code == 403
+    assert still_blocked.json()["detail"]["code"] == "authenticated_identity_required_for_auto_apply_review_rules"
 
-    assert applied.status_code == 200
-    summary = applied.json()["auto_apply_summary"]
-    assert summary["object_reviews"]["applied_count"] == 1
-    readback = summary["dft_readback"]
-    assert str(row_id) in readback["object_versions"]
-    assert str(row_id) in readback["candidate_status"]
-    assert str(row_id) in readback["export_safety"]
-    assert "conflicts" in readback
-    assert "unfinished_items" in readback
     with Session(setup_test_db) as session:
-        review = session.query(ExtractionFieldReview).filter(
+        row = session.get(DFTResult, row_id)
+        reviews = session.query(ExtractionFieldReview).filter(
             ExtractionFieldReview.paper_id == paper_id,
             ExtractionFieldReview.target_id == str(row_id),
-            ExtractionFieldReview.field_name == "value",
-        ).one()
-    assert "ai_verification" in review.review_payload
-    assert "human_verification" not in review.review_payload
-    assert review.review_payload["ai_verification"]["verification_actor_type"] == "ai"
-    assert review.reviewer_status == "verified"
-    with Session(setup_test_db) as session:
-        audit = session.query(AuditLog).filter(
+        ).all()
+        audits = session.query(AuditLog).filter(
             AuditLog.action == "verify_dft_result",
             AuditLog.target_id == str(row_id),
-        ).order_by(AuditLog.created_at.desc()).first()
-    assert audit.payload["actor_type"] == "ai"
+        ).all()
+    assert row.candidate_status != "ML_Ready"
+    assert reviews == []
+    assert audits == []
 
 
 def test_dft_import_without_review_metadata_cannot_bypass_gates(setup_test_db):
@@ -1813,8 +1803,8 @@ def test_dft_import_without_review_metadata_cannot_bypass_gates(setup_test_db):
 
     response = TestClient(app).post("/api/external-analysis/import", json=payload)
 
-    assert response.status_code in {400, 409}
-    assert "dft_json_validation_failed" in response.json()["detail"] or "figure_table_review_not_completed" in response.json()["detail"]
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "authenticated_identity_required_for_auto_apply_review_rules"
     with Session(setup_test_db) as session:
         row = session.get(DFTResult, row_id)
     assert row.candidate_status != "ML_Ready"

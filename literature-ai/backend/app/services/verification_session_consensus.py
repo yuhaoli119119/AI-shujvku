@@ -9,7 +9,7 @@ from sqlalchemy import select
 from app.db.models import DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun
 
 
-class VerificationSessionDFTConsensusMixin:
+class VerificationSessionDFTSelectionMixin:
     """Apply the latest evidence-backed DFT opinion without AI identity voting."""
 
     DFT_ACTIVE_AUDIT_STATUSES = {"candidate", "pending", "requires_resolution", "materialized", "ai_reviewed", "ai_applied"}

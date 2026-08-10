@@ -357,11 +357,11 @@ class DFTAuditIssueService:
         source_identity: str | None = None,
         source_candidate_id: str | None = None,
         negative: bool = False,
-        adjudicated_by_third_ai: bool = False,
+        requires_human_exception: bool = False,
     ) -> DFTAuditIssue:
         mapped_field = str(field_name or "value").strip() or "value"
         issue_type = "negative_consensus" if negative else self._issue_type_for_field(mapped_field, opinion)
-        status = "needs_user_decision" if negative or adjudicated_by_third_ai else "needs_primary_ai"
+        status = "needs_user_decision" if negative or requires_human_exception else "needs_primary_ai"
         suggested = opinion.get("corrected_value", opinion.get("value"))
         evidence = opinion.get("evidence_payload") or opinion.get("evidence_location")
         fingerprint = self.fingerprint_existing_result_issue(

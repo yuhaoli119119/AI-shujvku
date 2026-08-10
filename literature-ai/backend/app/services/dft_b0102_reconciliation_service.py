@@ -33,7 +33,6 @@ from app.services.dft_identity_dry_run_service import (
     canonical_sha256,
     file_sha256,
 )
-from app.services.dft_review_service import DFTResultReviewService
 from app.services.verification_session_service import VerificationSessionService
 from app.utils.evidence_anchors import has_evidence_anchor
 from app.utils.review_safety import bulk_export_gate_results
@@ -205,17 +204,36 @@ class DFTB0102ReconciliationService:
         already = self.readback(require_final=False)
         if already["is_exact_final_state"]:
             return {
-                "status": "already_reconciled",
+                "status": "legacy_final_state_detected",
                 "database_writes": 0,
+                "writes_final_truth": False,
+                "needs_ai_reverification": True,
+                "blocked_reason": "legacy_ai_verified_state_requires_single_ai_reverification",
                 "database_fingerprint_before": before_fingerprint,
                 "database_fingerprint_after": before_fingerprint,
-                "final_readback": self.readback(require_final=True),
+                "readback": already,
                 "write_events": [],
             }
         if before_fingerprint["sha256"] != expected_database_fingerprint:
             raise B0102ReconciliationError(
                 f"pre_apply_database_fingerprint_mismatch:{before_fingerprint['sha256']}"
             )
+
+        # The historical reconciliation applied AI opinions as final verified
+        # truth. Keep its strict preflight/readback capability, but never enter
+        # the mutation pipeline. Candidates must pass the dedicated single-AI
+        # verification capability and the current deterministic evidence gates.
+        return {
+            "status": "pending_ai_verification",
+            "database_writes": 0,
+            "writes_final_truth": False,
+            "needs_ai_reverification": True,
+            "blocked_reason": "requires_ai_verify_content",
+            "database_fingerprint_before": before_fingerprint,
+            "database_fingerprint_after": before_fingerprint,
+            "readback": already,
+            "write_events": [],
+        }
 
         expected_reconciliation = manifest["canonical_payload"]["paper_reconciliation"]
         live_reconciliation = self._live_authoritative_reconciliation()
@@ -451,23 +469,21 @@ class DFTB0102ReconciliationService:
         evidence = self._candidate_evidence(li2)
         if not has_evidence_anchor(evidence):
             raise B0102ReconciliationError(f"li2_pdf_evidence_anchor_missing:{li2.id}")
-        verification = DFTResultReviewService(self.session).verify_result(
-            paper_id=parent.paper_id,
-            result_id=new_result.id,
-            confirm_reviewed_against_pdf=True,
-            reviewer=B0102_ACTOR,
-            reviewer_note="B0102 identity-split Li2-S result verified by AI against existing PDF evidence.",
-            evidence_payload=evidence,
-            verification_actor_type="ai",
-            source_label="b0102_reconciliation_existing_pdf_evidence",
-            commit=False,
-            compact_result=True,
-        )
-        if verification.get("actor_type") != "ai" or not verification["export_safety"]["is_exportable"]:
-            raise B0102ReconciliationError("li2_ai_verification_export_gate_failed")
-        self.session.refresh(li2_child)
-        if li2_child.status != "closed" or li2_child.result_id != new_result.id:
-            raise B0102ReconciliationError("li2_child_not_closed_by_standard_review")
+        li2_child.status = "pending_ai_verification"
+        li2_child.result_id = new_result.id
+        li2_child.target_id = str(new_result.id)
+        li2_child.resolution_code = None
+        li2_child.resolution_note = "b0102_materialized_candidate_requires_single_ai_verification"
+        self.session.add(li2_child)
+        verification = {
+            "status": "pending_ai_verification",
+            "writes_final_truth": False,
+            "export_safety": {
+                "is_exportable": False,
+                "blocked_reasons": ["ai_verify_content_required"],
+            },
+        }
+        self.session.flush()
 
         mapping = {
             "parent_issue_id": str(parent.id),
@@ -484,9 +500,10 @@ class DFTB0102ReconciliationService:
                 "result_id": str(new_result.id),
                 "observation_key": new_identity.observation_key,
                 "resolution_code": li2_child.resolution_code,
-                "actor": "ai",
+                "actor": "ai_candidate",
                 "evidence_anchor": evidence,
                 "export_gate": verification["export_safety"],
+                "writes_final_truth": False,
             },
         }
         self._add_audit(

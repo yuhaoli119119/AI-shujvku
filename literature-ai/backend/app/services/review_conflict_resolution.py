@@ -206,22 +206,6 @@ class ReviewConflictResolutionMixin:
                 latest_by_source[source_identity] = item
         return list(latest_by_source.values())
 
-    def _collapse_active_dft_adjudication(self, opinions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        if not opinions:
-            return opinions
-        target_type = self._safe_canonical_target_type(str(opinions[0].get("target_type") or ""))
-        if target_type != "dft_results":
-            return opinions
-        adjudications = [
-            item
-            for item in opinions
-            if str((item.get("raw_payload") or {}).get("adjudication_role") or item.get("adjudication_role") or "").strip().lower()
-            == "third_ai"
-        ]
-        if not adjudications:
-            return opinions
-        return [max(adjudications, key=self._opinion_recency_key)]
-
     @staticmethod
     def _opinion_recency_key(opinion: dict[str, Any]) -> tuple[str, float, str]:
         return (

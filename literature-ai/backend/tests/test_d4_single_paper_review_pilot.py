@@ -3,12 +3,14 @@ from __future__ import annotations
 import os
 
 import asyncio
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.extraction import prepare_extraction_field_reviews
+from app.config import get_settings
 from app.db.models import Base, CatalystSample, DFTResult, EvidenceLocator, EvidenceSpan, ExtractionFieldReview, Paper, WritingCard
 from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionReviewMarkVerifiedRequest
 from app.services.extraction_review_service import ExtractionReviewService
@@ -44,6 +46,9 @@ def _paper(session: Session) -> Paper:
         markdown_path="pilot.md",
         authors=["Reviewer"],
     )
+    pdf_path = Path(get_settings().storage_root) / paper.pdf_path
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\nD4 pilot fixture\n%%EOF\n")
     session.add(paper)
     session.flush()
     return paper
@@ -278,6 +283,9 @@ def test_d4_mark_verified_is_the_only_verified_path(tmp_path):
                     expected_write_versions={"value": corrected[0].write_version},
                     reviewer="human_reviewer",
                 ),
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
             )
 
             assert marked[0].reviewer_status == "verified"
@@ -296,15 +304,19 @@ def test_d4_fast_dft_ignores_missing_locator_but_writing_gate_stays_independent(
             _review_like_writing_card(session, paper, locator_status="missing_page", page=None)
             service = ExtractionReviewService(session)
 
-            service.mark_verified(
-                paper.id,
-                ExtractionReviewMarkVerifiedRequest(
-                    target_type="dft_results",
-                    target_id=str(row.id),
-                    field_names=["value"],
-                    reviewer="human_reviewer",
-                ),
-            )
+            with pytest.raises(ValueError, match="locator_not_exact_page:missing_page"):
+                service.mark_verified(
+                    paper.id,
+                    ExtractionReviewMarkVerifiedRequest(
+                        target_type="dft_results",
+                        target_id=str(row.id),
+                        field_names=["value"],
+                        reviewer="human_reviewer",
+                    ),
+                    verification_actor_type="human",
+                    actor_name="owner",
+                    source_label="owner_api_token",
+                )
 
             export_gate = is_export_eligible_extraction(session, row, target_type="dft_results")
             card = PaperQueryService(session).get_paper_detail(paper.id).writing_cards_items[0]
@@ -350,6 +362,9 @@ def test_d4_exact_locator_and_human_verified_are_required_for_export_and_writing
                     expected_write_versions={"value": pending.write_version},
                     reviewer="human_reviewer",
                 ),
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
             )
 
             export_gate = is_export_eligible_extraction(session, row, target_type="dft_results")

@@ -272,7 +272,7 @@ def test_create_missing_dft_creates_sample_and_ai_candidate_without_human_verifi
         assert "test" not in str(audit.payload)
 
 
-def test_batch_fast_path_repairs_and_finalizes_all_missing_issues(setup_test_db):
+def test_batch_fast_path_repairs_all_missing_issues_without_ai_finalization(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Batch fast DFT")
         first = _missing_issue(session, paper, suffix="-1")
@@ -292,7 +292,7 @@ def test_batch_fast_path_repairs_and_finalizes_all_missing_issues(setup_test_db)
 
     assert result["requested_count"] == 2
     assert result["processed_count"] == 2
-    assert result["finalized_count"] == 2
+    assert result["finalized_count"] == 0
     assert result["failed_count"] == 0
     assert result["capability_used"] == "propose_corrections"
 
@@ -305,21 +305,18 @@ def test_batch_fast_path_repairs_and_finalizes_all_missing_issues(setup_test_db)
         ).all()
 
         assert len(rows) == 2
-        assert all(issue is not None and issue.status == "closed" for issue in issues)
+        assert all(issue is not None and issue.status == "fixed_by_primary_ai" for issue in issues)
         assert untouched_other_issue is not None
         assert untouched_other_issue.status == "needs_primary_ai"
-        assert all(row.candidate_status == "ai_verified_ml_ready" for row in rows)
-        assert reviews
-        assert all(review.reviewer_status == "verified" for review in reviews)
-        assert all(review.review_payload["ai_verification"]["verification_actor_type"] == "ai" for review in reviews)
+        assert all(row.candidate_status == "ai_primary_applied" for row in rows)
+        assert reviews == []
         verify_logs = session.scalars(
             select(AuditLog).where(
                 AuditLog.paper_id == paper_id,
                 AuditLog.action == "verify_dft_result",
             )
         ).all()
-        assert verify_logs
-        assert all(log.payload["actor_type"] == "ai" for log in verify_logs)
+        assert verify_logs == []
 
 
 def test_batch_fast_path_blocks_legacy_issue_with_multiple_scientific_subjects(setup_test_db):

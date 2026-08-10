@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+from pathlib import Path
 from uuid import UUID
 
 from fastapi.testclient import TestClient
@@ -10,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.papers.aggregation import export_dft_results_csv
+from app.config import get_settings
 from app.db.models import AuditLog, CatalystSample, DFTAuditIssue, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
 from app.main import app
 from app.mcp.context import mcp_auth_context
@@ -34,7 +36,11 @@ def _audit_only_auth() -> str:
 
 
 def _paper(session: Session, title: str) -> Paper:
-    paper = Paper(title=title, pdf_path=f"{title}.pdf", authors=["DFT E2E"])
+    pdf_path = f"{title}.pdf"
+    pdf_file = Path(get_settings().storage_root) / pdf_path
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
+    pdf_file.write_bytes(b"%PDF-1.4\nDFT lifecycle fixture\n%%EOF\n")
+    paper = Paper(title=title, pdf_path=pdf_path, authors=["DFT E2E"])
     session.add(paper)
     session.flush()
     return paper
@@ -174,7 +180,7 @@ def _export_rows(session: Session):
     return response, list(csv.DictReader(io.StringIO(text)))
 
 
-def test_missing_issue_fast_processing_closes_issue_and_exports_after_ai_confirmation(setup_test_db):
+def test_missing_issue_fast_processing_stays_pending_after_ai_repair(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "DFT lifecycle missing to verify")
         issue = _missing_issue(session, paper)
@@ -197,7 +203,7 @@ def test_missing_issue_fast_processing_closes_issue_and_exports_after_ai_confirm
 
     assert fast_result["requested_count"] == 1
     assert fast_result["processed_count"] == 1
-    assert fast_result["finalized_count"] == 1
+    assert fast_result["finalized_count"] == 0
     assert fast_result["failed_count"] == 0
     assert fast_result["capability_used"] == "review_dft"
     row_id = UUID(fast_result["items"][0]["dft_result_id"])
@@ -208,8 +214,9 @@ def test_missing_issue_fast_processing_closes_issue_and_exports_after_ai_confirm
             confirm_reviewed_against_pdf=True,
             reviewer_note="Repeated fast verification automatically uses current write versions.",
         )
-    assert repeated_verify["verified"] == 1
-    assert repeated_verify["skipped"] == 0
+    assert repeated_verify["verified"] == 0
+    assert repeated_verify["skipped"] == 1
+    assert repeated_verify["skipped_items"][0]["reason"] == "dedicated_ai_verification_capability_required"
 
     with Session(setup_test_db) as session:
         row = session.get(DFTResult, row_id)
@@ -221,22 +228,19 @@ def test_missing_issue_fast_processing_closes_issue_and_exports_after_ai_confirm
         dataset = build_dft_ml_dataset(session)
 
         assert row is not None
-        assert row.candidate_status == "ML_Ready"
-        assert issue.status == "closed"
+        assert row.candidate_status == "ai_primary_applied"
+        assert issue.status == "fixed_by_primary_ai"
         assert issue.target_id == str(row.id)
-        assert issue.resolved_by == "assigned_dft_audit"
-        assert issue.resolved_at is not None
-        assert reviews
-        assert all(review.reviewer_status == "verified" for review in reviews)
-        assert all(review.reviewer == "assigned_dft_audit" for review in reviews)
+        assert issue.resolved_at is None
+        assert not reviews
         assert all(log.payload["writes_final_truth"] is False for log in repair_logs)
         assert repair_logs[0].payload["capability_used"] == "review_dft"
-        assert any(log.payload["closed_audit_issue_ids"] == [issue_id] for log in verify_logs)
-        assert response.headers["x-d1-exported-count"] == "1"
-        assert rows and rows[0]["paper_id"] == str(paper_id)
-        assert dataset["metadata"]["eligible_count"] == 1
-        assert dataset["records"]
-        assert is_rag_eligible(session, row, "dft_result") is True
+        assert not verify_logs
+        assert response.headers["x-d1-exported-count"] == "0"
+        assert not rows
+        assert dataset["metadata"]["eligible_count"] == 0
+        assert not dataset["records"]
+        assert is_rag_eligible(session, row, "dft_result") is False
 
 
 def test_human_reject_closes_issue_and_blocks_export_even_with_historical_safe_review(setup_test_db):
@@ -265,6 +269,9 @@ def test_human_reject_closes_issue_and_blocks_export_even_with_historical_safe_r
             result_id=row_id,
             confirm_reject_candidate=True,
             reviewer="human_reviewer",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             reviewer_note="Human rejected the DFT row after checking the source table.",
             field_names=["value"],
         )
@@ -279,6 +286,9 @@ def test_human_reject_closes_issue_and_blocks_export_even_with_historical_safe_r
             result_id=row_id,
             confirm_reject_candidate=True,
             reviewer="human_reviewer",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             reviewer_note="Repeated reject should not create new issue closures.",
             field_names=["value"],
             expected_write_version=current_review.write_version,
@@ -300,7 +310,7 @@ def test_human_reject_closes_issue_and_blocks_export_even_with_historical_safe_r
         assert historical_row.candidate_status == "Rejected"
         assert all(issue.status == "closed" for issue in issues)
         assert {issue.resolution_note for issue in issues} == {"target_rejected"}
-        assert {issue.resolved_by for issue in issues} == {"human_reviewer"}
+        assert {issue.resolved_by for issue in issues} == {"owner"}
         assert reject_log.payload["closed_audit_issue_ids"]
         assert rows == []
         assert response.headers["x-d1-exported-count"] == "0"
@@ -369,6 +379,9 @@ def test_stale_issue_blocks_primary_repair_and_verify_does_not_close_uncertain_o
             reviewer_note="Human verified current value but non-eligible issues stay open.",
             field_names=["value"],
             evidence_payload={"page": 5, "quoted_text": "Current table value is -0.95 eV."},
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
         )
 
     assert set(verify_result["closed_audit_issue_ids"]) == {wrong_value_id}

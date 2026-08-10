@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
+from app.config import get_settings
 from app.db.models import (
     CatalystSample,
     DFTResult,
@@ -174,7 +176,9 @@ def test_verified_dft_field_reviews_suppress_old_whole_row_ai_conflict(setup_tes
     assert by_target == {}
 
 
-def test_accept_ai_for_dft_conflict_writes_review_and_closes_active_conflict(setup_test_db):
+def test_authenticated_human_accepts_ai_recommendation_and_closes_active_conflict(setup_test_db, monkeypatch):
+    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "conflict-owner-secret")
+    get_settings.cache_clear()
     Session = _session_factory(setup_test_db)
     with Session() as session:
         paper = Paper(title="Accept AI closes DFT conflict", pdf_path="accept-ai.pdf")
@@ -215,8 +219,11 @@ def test_accept_ai_for_dft_conflict_writes_review_and_closes_active_conflict(set
         session.commit()
         paper_id = str(paper.id)
         row_id = str(row.id)
+        pdf_path = Path(get_settings().storage_root) / paper.pdf_path
+        pdf_path.parent.mkdir(parents=True, exist_ok=True)
+        pdf_path.write_bytes(b"%PDF-1.4\nAuthenticated conflict review fixture\n%%EOF\n")
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "conflict-owner-secret"})
     before = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}&target_type=dft_results&target_id={row_id}&field_name=value")
     assert before.status_code == 200
     assert before.json()["conflict_count"] == 1
@@ -246,6 +253,7 @@ def test_accept_ai_for_dft_conflict_writes_review_and_closes_active_conflict(set
             field_name="value",
         ).one()
         assert review.reviewer_status == "verified"
+        assert review.reviewer == "owner"
 
 
 def test_mixed_verified_and_rejected_dft_rows_do_not_make_paper_level_conflict(setup_test_db):

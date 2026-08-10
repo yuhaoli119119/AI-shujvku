@@ -350,8 +350,9 @@ class MechanismExtractor:
             cap = getattr(fig, "caption", "") or ""
             if not cap:
                 continue
+            figure_reference = getattr(fig, "figure_label", None) or cap
             for mtype, defs in MECHANISM_DEFINITIONS.items():
-                claims = self._scan_single_text(cap, mtype, defs, source_fig=cap[:120])
+                claims = self._scan_single_text(cap, mtype, defs, source_fig=figure_reference)
                 for c in claims:
                     c.source_location.page = getattr(fig, "page", None)
                     c.confidence = min(c.confidence, 0.75)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -48,6 +49,7 @@ LOCATOR_WARNING_CODES = {
     "approximate": "evidence_locator_approximate",
     "unresolved": "evidence_locator_unresolved",
 }
+LEGACY_FIGURE_CAPTION_PREFIX_MIN_LENGTH = 24
 
 
 class EvidenceLocatorService:
@@ -644,14 +646,50 @@ class EvidenceLocatorService:
     def _resolve_figure_id(self, paper_id: UUID, caption: str | None) -> UUID | None:
         if not caption:
             return None
-        row = self.session.scalar(select(PaperFigure).where(PaperFigure.paper_id == paper_id, PaperFigure.caption == caption))
-        return row.id if row is not None else None
+        reference = self._normalized_figure_reference(caption)
+        rows = self.session.scalars(
+            select(PaperFigure).where(PaperFigure.paper_id == paper_id).order_by(PaperFigure.id)
+        ).all()
+        for row in rows:
+            if reference in {
+                self._normalized_figure_reference(row.figure_label),
+                self._normalized_figure_reference(row.caption),
+            }:
+                return row.id
+        # Legacy mechanism rows stored the first 120 caption characters.  Keep
+        # that deterministic prefix recoverable without performing semantic
+        # matching or linking a merely similar figure.
+        compact = " ".join(str(caption).split()).casefold()
+        if len(compact) >= LEGACY_FIGURE_CAPTION_PREFIX_MIN_LENGTH:
+            prefix_matches = []
+            for row in rows:
+                row_caption = " ".join(str(row.caption or "").split()).casefold()
+                if len(row_caption) < LEGACY_FIGURE_CAPTION_PREFIX_MIN_LENGTH:
+                    continue
+                if row_caption.startswith(compact) or compact.startswith(row_caption):
+                    prefix_matches.append(row.id)
+            if len(prefix_matches) == 1:
+                return prefix_matches[0]
+        return None
+
+    def resolve_figure_id(self, paper_id: UUID, reference: str | None) -> UUID | None:
+        """Resolve an explicit figure label/caption without fuzzy semantic binding."""
+
+        return self._resolve_figure_id(paper_id, reference)
 
     def _resolve_table_id(self, paper_id: UUID, caption: str | None) -> UUID | None:
         if not caption:
             return None
         row = self.session.scalar(select(PaperTable).where(PaperTable.paper_id == paper_id, PaperTable.caption == caption))
         return row.id if row is not None else None
+
+    @staticmethod
+    def _normalized_figure_reference(value: str | None) -> str:
+        text = " ".join(str(value or "").split()).casefold()
+        match = re.search(r"\bfig(?:ure)?\.?\s*(s?\d+)\b", text, re.IGNORECASE)
+        if match:
+            return f"figure{match.group(1).casefold()}"
+        return re.sub(r"[^a-z0-9]+", "", text)
 
     def _section_title(self, section_id: UUID | None) -> str | None:
         if section_id is None:

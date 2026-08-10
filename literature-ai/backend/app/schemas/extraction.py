@@ -12,6 +12,7 @@ from app.schemas.evidence import PageSpan
 ReviewStatus = Literal[
     "pending",
     "verified",
+    "ai_verified",
     "rejected",
     "corrected",
     "needs_check",
@@ -28,6 +29,7 @@ ReviewStatus = Literal[
     "review_conflict",
     "blocked_by_schema",
     "unknown",
+    "exception",
 ]
 ReviewResolutionStatus = Literal["active", "remapped", "stale", "ambiguous", "unresolved", "unknown"]
 

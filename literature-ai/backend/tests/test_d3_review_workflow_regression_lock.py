@@ -5,13 +5,14 @@ import os
 import asyncio
 import csv
 import io
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.papers.aggregation import export_dft_results_csv
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db.models import (
     Base,
     CatalystSample,
@@ -41,6 +42,9 @@ def _session():
 
 def _paper(session: Session, title: str = "D3 Review Lock Paper") -> Paper:
     paper = Paper(title=title, pdf_path=f"{title}.pdf", authors=[])
+    pdf_path = Path(get_settings().storage_root) / paper.pdf_path
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_bytes(b"%PDF-1.4\nD3 review fixture\n%%EOF\n")
     session.add(paper)
     session.flush()
     return paper
@@ -189,12 +193,12 @@ def test_external_ai_materialize_never_creates_verified_review_even_with_verifie
 
             assert result.created_notes == 1
             assert result.created_corrections == 1
-            assert result.auto_applied_corrections == 1
+            assert result.auto_applied_corrections == 0
             assert result.created_relationships == 1
             assert session.query(ExtractionFieldReview).filter_by(reviewer_status="verified").count() == 0
             assert session.query(PaperNote).count() == 1
             correction = session.query(PaperCorrection).one()
-            assert correction.status == "approved"
+            assert correction.status == "pending"
             assert session.query(PaperRelationship).count() == 1
     finally:
         engine.dispose()
@@ -217,6 +221,9 @@ def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verif
                     reviewer="manual_reviewer",
                     reviewer_note="Human verified against evidence.",
                 ),
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
             )
 
             with pytest.raises(ValueError, match="Verified reviews cannot be downgraded through save"):
@@ -239,7 +246,7 @@ def test_save_reviews_rejects_verified_status_and_does_not_mutate_existing_verif
             stored = session.query(ExtractionFieldReview).filter_by(target_id=str(row.id), field_name="value").one()
             assert stored.reviewer_status == "verified"
             assert stored.reviewed_value == -1.23
-            assert stored.reviewer == "manual_reviewer"
+            assert stored.reviewer == "owner"
             assert stored.reviewer_note == "Human verified against evidence."
     finally:
         engine.dispose()

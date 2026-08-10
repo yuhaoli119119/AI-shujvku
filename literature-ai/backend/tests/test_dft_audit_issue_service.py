@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timedelta
 import json
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -21,7 +22,11 @@ from app.services.verification_session_service import VerificationSessionService
 
 
 def _paper(session: Session, title: str = "DFT audit issue paper") -> Paper:
-    paper = Paper(title=title, pdf_path=f"{title}.pdf")
+    pdf_path = f"{title}.pdf"
+    resolved_pdf = Path(get_settings().storage_root) / pdf_path
+    resolved_pdf.parent.mkdir(parents=True, exist_ok=True)
+    resolved_pdf.write_bytes(b"%PDF-1.4\nDFT audit test\n%%EOF\n")
+    paper = Paper(title=title, pdf_path=pdf_path)
     session.add(paper)
     session.flush()
     return paper
@@ -572,6 +577,9 @@ def test_human_verify_closes_eligible_issue_but_not_duplicate_suspected(setup_te
             result_id=row_id,
             confirm_reviewed_against_pdf=True,
             reviewer="human_reviewer",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             field_names=["value"],
         )
 
@@ -582,7 +590,7 @@ def test_human_verify_closes_eligible_issue_but_not_duplicate_suspected(setup_te
         duplicate = session.get(DFTAuditIssue, duplicate_id)
         assert wrong_value.status == "closed"
         assert wrong_value.resolution_note == "human_verified"
-        assert wrong_value.resolved_by == "human_reviewer"
+        assert wrong_value.resolved_by == "owner"
         assert duplicate.status == "needs_primary_ai"
         assert duplicate.resolved_at is None
 
@@ -619,6 +627,9 @@ def test_human_reject_closes_target_issues_as_rejected(setup_test_db):
             result_id=row_id,
             confirm_reject_candidate=True,
             reviewer="human_reviewer",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             field_names=["value"],
         )
 
@@ -630,7 +641,7 @@ def test_human_reject_closes_target_issues_as_rejected(setup_test_db):
             issue = session.get(DFTAuditIssue, issue_id)
             assert issue.status == "closed"
             assert issue.resolution_note == "target_rejected"
-            assert issue.resolved_by == "human_reviewer"
+            assert issue.resolved_by == "owner"
 
 
 def test_audit_issue_list_returns_live_stale_snapshot(setup_test_db):
@@ -690,6 +701,9 @@ def test_dft_review_transaction_rolls_back_review_status_audit_and_issue(monkeyp
                 result_id=row_id,
                 confirm_reviewed_against_pdf=True,
                 reviewer="human_reviewer",
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
                 field_names=["value"],
             )
         except RuntimeError:

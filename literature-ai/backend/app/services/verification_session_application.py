@@ -27,8 +27,7 @@ class VerificationSessionReviewApplicationMixin:
         self,
         *,
         paper_ids: list[UUID],
-        primary_label: str,
-        secondary_label: str,
+        single_label: str,
         scope: str,
         reviewer: str,
     ) -> dict[str, Any]:
@@ -38,7 +37,7 @@ class VerificationSessionReviewApplicationMixin:
             .join(ExternalAnalysisRun, ExternalAnalysisRun.id == ExternalAnalysisCandidate.run_id)
             .where(
                 ExternalAnalysisRun.paper_id.in_(paper_ids),
-                ExternalAnalysisRun.source_label.in_([primary_label, secondary_label]),
+                ExternalAnalysisRun.source_label == single_label,
                 ExternalAnalysisCandidate.candidate_type == "object_review_audit",
             )
         ).all()
@@ -77,23 +76,13 @@ class VerificationSessionReviewApplicationMixin:
         pending_conflicts: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for (paper_id_text, target_type, target_id, field_name), opinions in grouped.items():
-            if target_type == "dft_results":
-                anchored = [opinion for opinion in opinions if self._opinion_has_pdf_anchor(opinion)]
-                decision = (
-                    {"status": "consensus", "reason": "single_ai_dft_review", "opinion": anchored[-1]}
-                    if anchored
-                    else {"status": "rejected", "reason": "missing_pdf_evidence_anchor"}
-                )
-            else:
-                decision = self._consensus_opinion(
-                    opinions,
-                    primary_label=primary_label,
-                    secondary_label=secondary_label,
-                    target_type=target_type,
-                    target_id=target_id,
-                    field_name=field_name,
-                )
-            if decision["status"] != "consensus":
+            anchored = [opinion for opinion in opinions if self._opinion_has_pdf_anchor(opinion)]
+            decision = (
+                {"status": "single_ai_selected", "reason": "single_ai_evidence_backed_review", "opinion": anchored[-1]}
+                if anchored
+                else {"status": "rejected", "reason": "missing_pdf_evidence_anchor"}
+            )
+            if decision["status"] != "single_ai_selected":
                 if decision["status"] == "rejected" and target_type == "dft_results":
                     for opinion in opinions:
                         candidate = opinion.get("candidate")
@@ -131,8 +120,29 @@ class VerificationSessionReviewApplicationMixin:
                 field_name=field_name,
                 reviewer=reviewer,
                 opinion=decision["opinion"],
-                dual_ai_consensus=True,
             )
+            if adopted.get("writes_final_truth") is False or adopted.get("candidate_status") == "needs_human":
+                for opinion in opinions:
+                    candidate = opinion.get("candidate")
+                    if candidate is None:
+                        continue
+                    candidate.status = "requires_resolution"
+                    candidate.materialized_target_type = None
+                    candidate.materialized_target_id = None
+                    candidate.mapping_reason = "authenticated_human_review_required"
+                    self.session.add(candidate)
+                pending_conflicts.append(
+                    {
+                        "paper_id": paper_id_text,
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": "authenticated_human_review_required",
+                        "opinion_count": len(opinions),
+                        "result": adopted,
+                    }
+                )
+                continue
             if target_type == "tables" and adopted.get("action") == "requires_direct_table_tool":
                 for opinion in opinions:
                     candidate = opinion.get("candidate")
@@ -166,9 +176,9 @@ class VerificationSessionReviewApplicationMixin:
                 self.session.add(candidate)
             auto_applied.append(adopted)
         self.session.flush()
-        missing_dual = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
-        if missing_dual:
-            skipped.append({"reason": "insufficient_dual_ai_pairs", "count": missing_dual})
+        unprocessed = max(0, len(grouped) - len(auto_applied) - len(pending_conflicts))
+        if unprocessed:
+            skipped.append({"reason": "single_ai_verification_required", "count": unprocessed})
         return {
             "candidate_group_count": len(grouped),
             "auto_applied_count": len(auto_applied),
@@ -201,30 +211,6 @@ class VerificationSessionReviewApplicationMixin:
         candidate.mapping_reason = reason
         self.session.add(candidate)
 
-    def _consensus_opinion(
-        self,
-        opinions: list[dict[str, Any]],
-        *,
-        primary_label: str,
-        secondary_label: str,
-        target_type: str,
-        target_id: str,
-        field_name: str,
-    ) -> dict[str, Any]:
-        by_label = {item.get("source_label"): item for item in opinions if item.get("source_label") in {primary_label, secondary_label}}
-        if primary_label not in by_label or secondary_label not in by_label:
-            return {"status": "pending", "reason": "awaiting_both_ai_reviews"}
-        primary = by_label[primary_label]
-        secondary = by_label[secondary_label]
-        if not self._opinion_has_anchor(primary) or not self._opinion_has_anchor(secondary):
-            return {"status": "manual", "reason": "missing_evidence_anchor"}
-        if str(primary.get("decision") or "") != str(secondary.get("decision") or ""):
-            return {"status": "manual", "reason": "decision_conflict"}
-        if self._value_key(primary.get("corrected_value")) != self._value_key(secondary.get("corrected_value")):
-            return {"status": "manual", "reason": "value_conflict"}
-        adopted = primary if (primary.get("confidence") or 0) >= (secondary.get("confidence") or 0) else secondary
-        return {"status": "consensus", "reason": "dual_ai_match", "opinion": adopted}
-
     def _apply_selected_opinion(
         self,
         *,
@@ -234,8 +220,6 @@ class VerificationSessionReviewApplicationMixin:
         field_name: str,
         reviewer: str,
         opinion: dict[str, Any],
-        dual_ai_consensus: bool = False,
-        adjudicated_by_third_ai: bool = False,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         decision = str(opinion.get("decision") or "").upper()
@@ -274,8 +258,6 @@ class VerificationSessionReviewApplicationMixin:
             reviewer=reviewer,
             proposed_value=proposed_value,
             evidence_payload=evidence_payload,
-            dual_ai_consensus=dual_ai_consensus,
-            adjudicated_by_third_ai=adjudicated_by_third_ai,
             write_lock_tokens=write_lock_tokens,
         )
 
@@ -313,12 +295,12 @@ class VerificationSessionReviewApplicationMixin:
             compact_result=compact_result,
         )
         return {
-            "action": "apply_imported_dft_opinion",
+            "action": "record_imported_dft_opinion_candidate",
             "target_type": "dft_results",
             "target_id": target_id,
-            "auto_applied": True,
-            "writes_final_truth": True,
-            "candidate_status": "ai_applied",
+            "auto_applied": False,
+            "writes_final_truth": False,
+            "candidate_status": "pending_ai_verification",
             "result": result,
         }
 
@@ -352,8 +334,6 @@ class VerificationSessionReviewApplicationMixin:
         reviewer: str,
         proposed_value: Any,
         evidence_payload: Any,
-        dual_ai_consensus: bool,
-        adjudicated_by_third_ai: bool,
         write_lock_tokens: list[str] | None = None,
     ) -> dict[str, Any]:
         target_collection = self._correction_collection_name(target_type)
@@ -365,10 +345,7 @@ class VerificationSessionReviewApplicationMixin:
                 target_path=field_name,
                 operation="replace",
                 proposed_value=proposed_value,
-                reason=self._materialization_note(
-                    dual_ai_consensus=dual_ai_consensus,
-                    adjudicated_by_third_ai=adjudicated_by_third_ai,
-                ),
+                reason=self._materialization_note(),
                 evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
                 status="pending",
             )
@@ -401,10 +378,7 @@ class VerificationSessionReviewApplicationMixin:
             target_path="catalyst_samples:new:create" if is_sample_create else f"{target_collection}:{target_id}:{field_name}",
             operation="create" if is_sample_create else "replace",
             proposed_value=proposed_value,
-            reason=self._materialization_note(
-                dual_ai_consensus=dual_ai_consensus,
-                adjudicated_by_third_ai=adjudicated_by_third_ai,
-            ),
+            reason=self._materialization_note(),
             evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
             status="pending",
         )
@@ -632,12 +606,8 @@ class VerificationSessionReviewApplicationMixin:
         return len(identity) > 1 and bool(identity[1])
 
     @staticmethod
-    def _materialization_note(*, dual_ai_consensus: bool, adjudicated_by_third_ai: bool) -> str:
-        if adjudicated_by_third_ai:
-            return "Third-AI adjudication adopted this opinion through the existing verify/correction safety gate."
-        if dual_ai_consensus:
-            return "Dual-AI consensus auto-adopted through the existing verify/correction safety gate."
-        return "Manual adjudication adopted this AI opinion through the existing verify/correction safety gate."
+    def _materialization_note() -> str:
+        return "Manual exception handling adopted this AI candidate through the existing correction safety gate."
 
     @staticmethod
     def _materialize_evidence_payload(opinion: dict[str, Any]) -> Any:

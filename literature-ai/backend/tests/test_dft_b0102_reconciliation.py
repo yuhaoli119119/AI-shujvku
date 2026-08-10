@@ -104,7 +104,7 @@ def _child(
     return child
 
 
-def test_terminal_parent_materializes_and_ai_verifies_only_li2_child(setup_test_db):
+def test_terminal_parent_materializes_li2_child_but_ai_cannot_finalize(setup_test_db):
     with Session(setup_test_db) as session:
         paper = Paper(title="split lineage", paper_code="B9002", pdf_path="paper.pdf", authors=["A"])
         session.add(paper)
@@ -208,30 +208,29 @@ def test_terminal_parent_materializes_and_ai_verifies_only_li2_child(setup_test_
             paper_id=paper.id,
             target_id=new_result_id,
         )] == [li2_child.id]
-        verified = DFTResultReviewService(session).verify_result(
-            paper_id=paper.id,
-            result_id=new_result_id,
-            confirm_reviewed_against_pdf=True,
-            reviewer="pytest-ai",
-            verification_actor_type="ai",
-            source_label="existing-pdf-evidence",
-            evidence_payload=_payload("Li2-S")["evidence_location"],
-            commit=False,
-            compact_result=True,
-        )
+        with pytest.raises(ValueError, match="authenticated_human_actor_required"):
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper.id,
+                result_id=new_result_id,
+                confirm_reviewed_against_pdf=True,
+                reviewer="pytest-ai",
+                verification_actor_type="ai",
+                source_label="existing-pdf-evidence",
+                evidence_payload=_payload("Li2-S")["evidence_location"],
+                commit=False,
+                compact_result=True,
+            )
         session.flush()
 
-        assert verified["actor_type"] == "ai"
-        assert verified["export_safety"]["is_exportable"] is True
-        assert session.get(DFTResult, new_result_id).candidate_status == "ai_verified_ml_ready"
+        assert session.get(DFTResult, new_result_id).candidate_status != "ai_verified_ml_ready"
         assert session.get(DFTAuditIssue, parent.id).resolution_code == "identity_split"
         assert session.get(DFTAuditIssue, parent.id).status == "closed"
         assert session.get(DFTAuditIssue, li1_child.id).resolution_code == "exact_duplicate"
         assert session.get(DFTAuditIssue, li1_child.id).status == "closed"
         li2_child = session.get(DFTAuditIssue, li2_child.id)
-        assert li2_child.status == "closed"
+        assert li2_child.status != "closed"
         assert li2_child.result_id == new_result_id
-        assert li2_child.resolution_code == "verified"
+        assert li2_child.resolution_code is None
         assert session.scalar(
             select(DFTAuditIssueSource).where(
                 DFTAuditIssueSource.issue_id == li2_child.id,
@@ -667,36 +666,14 @@ def _seed_one_fixed_split(session: Session, *, missing_evidence: bool) -> tuple[
     )
 
 
-@pytest.mark.parametrize(
-    ("failure", "error"),
-    [
-        ("missing_evidence", "li2_standard_materialization_failed"),
-        ("non_ai_actor", "li2_ai_verification_export_gate_failed"),
-        ("export_gate", "li2_ai_verification_export_gate_failed"),
-    ],
-)
-def test_split_failure_rolls_back_children_result_sources_and_audit(
-    setup_test_db,
-    monkeypatch,
-    failure,
-    error,
-):
+def test_split_missing_evidence_rolls_back_children_result_sources_and_audit(setup_test_db):
     with Session(setup_test_db) as session:
         entry, fixed = _seed_one_fixed_split(
             session,
-            missing_evidence=failure == "missing_evidence",
-        )
-    if failure in {"non_ai_actor", "export_gate"}:
-        monkeypatch.setattr(
-            DFTResultReviewService,
-            "verify_result",
-            lambda _self, **_kwargs: {
-                "actor_type": "human" if failure == "non_ai_actor" else "ai",
-                "export_safety": {"is_exportable": failure != "export_gate"},
-            },
+            missing_evidence=True,
         )
     with Session(setup_test_db) as session:
-        with pytest.raises(B0102ReconciliationError, match=error):
+        with pytest.raises(B0102ReconciliationError, match="li2_standard_materialization_failed"):
             DFTB0102ReconciliationService(session)._reconcile_split(entry, fixed)
         session.rollback()
     with Session(setup_test_db) as session:
@@ -712,7 +689,93 @@ def test_split_failure_rolls_back_children_result_sources_and_audit(
         assert session.query(AuditLog).count() == 0
 
 
-def test_full_reconciliation_rolls_back_fault_applies_and_is_idempotent(
+def test_split_never_calls_legacy_finalizer_and_leaves_li2_pending_single_ai(setup_test_db, monkeypatch):
+    with Session(setup_test_db) as session:
+        entry, fixed = _seed_one_fixed_split(session, missing_evidence=False)
+    monkeypatch.setattr(
+        DFTResultReviewService,
+        "verify_result",
+        lambda _self, **_kwargs: (_ for _ in ()).throw(AssertionError("AI finalizer must not be called")),
+    )
+    with Session(setup_test_db) as session:
+        report = DFTB0102ReconciliationService(session)._reconcile_split(entry, fixed)
+        li2 = report["li2"]
+        assert li2["actor"] == "ai_candidate"
+        assert li2["writes_final_truth"] is False
+        assert li2["export_gate"]["is_exportable"] is False
+        child = session.get(DFTAuditIssue, UUID(li2["child_issue_id"]))
+        assert child.status == "pending_ai_verification"
+        assert child.resolution_code is None
+        session.rollback()
+
+
+def test_full_reconciliation_is_retired_as_candidate_only_zero_write_path(
+    setup_test_db,
+    monkeypatch,
+):
+    def gates(_session, rows, target_type):
+        assert target_type == "dft_results"
+        return {
+            str(row.id): SimpleNamespace(
+                eligible=str(row.candidate_status or "").casefold() != "rejected",
+                reasons=() if str(row.candidate_status or "").casefold() != "rejected" else ("rejected",),
+            )
+            for row in rows
+        }
+
+    monkeypatch.setattr(
+        "app.services.dft_b0102_reconciliation_service.bulk_export_gate_results",
+        gates,
+    )
+    monkeypatch.setattr(
+        "app.services.dft_identity_dry_run_service.bulk_export_gate_results",
+        gates,
+    )
+    monkeypatch.setattr(
+        "app.services.dft_b0102_reconciliation_service.canonical_sha256",
+        lambda _value: B0102_MANIFEST_CANONICAL_SHA256,
+    )
+    monkeypatch.setattr(
+        DFTIdentityDryRunService,
+        "database_data_fingerprint",
+        lambda _self: {"sha256": B0102_PRE_APPLY_DATABASE_FINGERPRINT},
+    )
+    with Session(setup_test_db) as session:
+        _seed_b0102_fixture(session)
+    with Session(setup_test_db) as session:
+        reconciliation = DFTB0102ReconciliationService(session)._live_authoritative_reconciliation()
+        manifest = {
+            "canonical_payload": {"paper_reconciliation": reconciliation},
+            "canonical_sha256": B0102_MANIFEST_CANONICAL_SHA256,
+        }
+        before = (
+            session.query(DFTResult).count(),
+            session.query(DFTAuditIssue).count(),
+            session.query(DFTAuditIssueSource).count(),
+            session.query(AuditLog).count(),
+        )
+        result = DFTB0102ReconciliationService(session).reconcile(
+            manifest=manifest,
+            expected_manifest_sha256=B0102_MANIFEST_CANONICAL_SHA256,
+            expected_database_fingerprint=B0102_PRE_APPLY_DATABASE_FINGERPRINT,
+            expected_pdf_fingerprint=B0102_PDF_SNAPSHOT_FINGERPRINT,
+            pdf_preflight_fingerprint=B0102_PDF_SNAPSHOT_FINGERPRINT,
+            fault_after="after_safe_366",
+        )
+        after = (
+            session.query(DFTResult).count(),
+            session.query(DFTAuditIssue).count(),
+            session.query(DFTAuditIssueSource).count(),
+            session.query(AuditLog).count(),
+        )
+        assert result["status"] == "pending_ai_verification"
+        assert result["database_writes"] == 0
+        assert result["writes_final_truth"] is False
+        assert result["blocked_reason"] == "requires_ai_verify_content"
+        assert before == after
+
+
+def _legacy_full_reconciliation_rolls_back_fault_applies_and_is_idempotent(
     setup_test_db,
     monkeypatch,
 ):

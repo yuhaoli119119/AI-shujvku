@@ -29,12 +29,13 @@ from app.schemas.extraction import ExtractionFieldReviewSaveItem, ExtractionRevi
 from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
 from app.services.dft_identity_service import DFTIdentityV2
+from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.dft_review_fields import DFT_CORRECTION_FIELD_ALIASES, DFT_REVIEW_FIELD_ALIASES
 from app.services.dft_review_imported import DFTImportedOpinionMixin
 from app.services.dft_review_materials import DFTMaterialBindingMixin
 from app.services.review_service import ReviewService
-from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_evidence_anchor
 from app.utils.review_safety import DFT_REJECTED_STATUSES, is_export_eligible_extraction
 
 
@@ -103,15 +104,18 @@ class DFTResultReviewService(
         expected_write_versions: dict[str, int] | None = None,
         expected_write_version: int | None = None,
         evidence_payload: dict[str, Any] | list[Any] | None = None,
-        verification_actor_type: str = "human",
+        verification_actor_type: str | None = None,
+        actor_name: str | None = None,
         source_label: str | None = None,
         commit: bool = True,
         compact_result: bool = False,
     ) -> dict[str, Any]:
         if not confirm_reviewed_against_pdf:
             raise ValueError("Explicit PDF/evidence review confirmation is required.")
-        if verification_actor_type not in {"human", "ai"}:
-            raise ValueError("verification_actor_type must be human or ai")
+        if verification_actor_type != "human" or not str(actor_name or "").strip():
+            raise ValueError("authenticated_human_actor_required_for_final_verification")
+        if not str(source_label or "").strip():
+            raise ValueError("authenticated_human_source_required_for_final_verification")
 
         row = self.session.get(DFTResult, result_id)
         if row is None or row.paper_id != paper_id:
@@ -124,96 +128,31 @@ class DFTResultReviewService(
         if not selected_fields:
             raise ValueError("No non-empty DFT result fields are available for verification.")
 
+        self._persist_authenticated_human_evidence(
+            row=row,
+            field_names=selected_fields,
+            evidence_payload=evidence_payload,
+        )
+
         verification_note = reviewer_note or "Verified through the DFT candidate review workflow."
-        try:
-            reviews = self.review_service.mark_verified(
-                paper_id,
-                ExtractionReviewMarkVerifiedRequest(
-                    target_type="dft_results",
-                    target_id=str(result_id),
-                    field_names=selected_fields,
-                    expected_write_versions=expected_write_versions or {},
-                    expected_write_version=expected_write_version,
-                    reviewer=reviewer or "codex_review",
-                    reviewer_note=verification_note,
-                ),
-                commit=False,
-                verification_actor_type=verification_actor_type,
-                source_label=source_label,
-                imported_evidence_payload=evidence_payload,
-            )
-        except ValueError as exc:
-            if "missing_evidence_reference" not in str(exc) or not self._has_anchor(evidence_payload):
-                raise
-            note = reviewer_note or "Verified through imported IDE-AI evidence anchors."
-            reviews = []
-            for field_name in selected_fields:
-                field_snapshot = snapshot[field_name]
-                existing_review = self.review_service._find_review(
-                    paper_id,
-                    "dft_results",
-                    str(result_id),
-                    field_name,
-                )
-                expected_version = (expected_write_versions or {}).get(field_name)
-                if expected_version is None and len(selected_fields) == 1:
-                    expected_version = expected_write_version
-                if existing_review is not None:
-                    self.review_service._guard_expected_write_version(
-                        existing_review,
-                        expected_version,
-                        created=False,
-                    )
-                review = existing_review or self.review_service._get_or_create_review(
-                    paper_id,
-                    "dft_results",
-                    str(result_id),
-                    field_name,
-                )
-                self.review_service._guard_expected_write_version(
-                    review,
-                    expected_version,
-                    created=existing_review is None and getattr(review, "_created_by_get_or_create", False),
-                )
-                review.original_value = field_snapshot["value"]
-                review.reviewed_value = field_snapshot["value"]
-                review.unit = field_snapshot["unit"]
-                review.evidence_text = field_snapshot["evidence_text"]
-                review.reviewer_status = "verified"
-                review.reviewer = reviewer or "codex_review"
-                review.reviewer_note = note
-                verification_key = "human_verification" if verification_actor_type == "human" else "ai_verification"
-                review.review_payload = {
-                    verification_key: {
-                        "reviewer": reviewer or "codex_review",
-                        "reviewer_note": note,
-                        "decision": "verified",
-                        "writes_final_truth": True,
-                        "verification_actor_type": verification_actor_type,
-                        "source_label": source_label,
-                    },
-                    "imported_evidence_payload": evidence_payload,
-                }
-                review.target_resolution_status = "active"
-                review.remapped_from_target_id = None
-                review.last_resolved_target_id = str(result_id)
-                self.review_service.resolver._refresh_review_identity(review, "dft_results", row)
-                self.session.add(review)
-                self.session.flush()
-                reviews.append(self.review_service._serialize(review))
-        reviewer_name = reviewer or "codex_review"
-        if verification_actor_type == "ai":
-            row.candidate_status = "ai_verified_ml_ready"
-            row.ml_ready_at = utcnow()
-            row.ml_ready_source = source_label or reviewer_name
-            row.local_ai_verification_payload = {
-                "reviewer": reviewer_name,
-                "source_label": source_label,
-                "field_names": selected_fields,
-                "evidence_payload": evidence_payload,
-                "reviewer_note": verification_note,
-                "final_decision": "ready_for_ml_export",
-            }
+        reviews = self.review_service.mark_verified(
+            paper_id,
+            ExtractionReviewMarkVerifiedRequest(
+                target_type="dft_results",
+                target_id=str(result_id),
+                field_names=selected_fields,
+                expected_write_versions=expected_write_versions or {},
+                expected_write_version=expected_write_version,
+                reviewer=str(actor_name),
+                reviewer_note=verification_note,
+            ),
+            commit=False,
+            verification_actor_type="human",
+            actor_name=str(actor_name),
+            source_label=source_label,
+            imported_evidence_payload=evidence_payload,
+        )
+        reviewer_name = str(actor_name)
         self.session.add(row)
         self.session.flush()
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
@@ -231,7 +170,7 @@ class DFTResultReviewService(
             paper_id=paper_id,
             result_id=result_id,
             reviewer=reviewer_name,
-            actor_type=verification_actor_type,
+            actor_type="human",
             export_gate_passed=gate.eligible,
         )
         if closed_issues and not gate.eligible:
@@ -244,31 +183,16 @@ class DFTResultReviewService(
                     reasons=tuple(dict.fromkeys([*gate.reasons, identity_block_reason])),
                 )
         if gate.eligible:
-            row.candidate_status = "ai_verified_ml_ready" if verification_actor_type == "ai" else "ML_Ready"
-            if verification_actor_type == "ai" and row.ml_ready_at is None:
-                row.ml_ready_at = utcnow()
-                row.ml_ready_source = source_label or reviewer_name
+            row.candidate_status = "ML_Ready"
         else:
-            row.candidate_status = (
-                "human_reviewed_needs_evidence"
-                if verification_actor_type == "human"
-                else "ai_repair_failed_not_imported"
-            )
-            if verification_actor_type == "ai":
-                row.ml_ready_at = None
-                row.ml_ready_source = None
-                row.local_ai_verification_payload = {
-                    **(row.local_ai_verification_payload or {}),
-                    "final_decision": "repair_failed_not_exportable",
-                    "blocked_reasons": list(gate.reasons),
-                }
+            row.candidate_status = "human_reviewed_needs_evidence"
         self.session.add(row)
         if gate.eligible:
             additionally_closed = self.issue_lifecycle.apply_verify(
                 paper_id=paper_id,
                 result_id=result_id,
                 reviewer=reviewer_name,
-                actor_type=verification_actor_type,
+                actor_type="human",
                 export_gate_passed=True,
             )
             known_ids = {issue.id for issue in closed_issues}
@@ -276,7 +200,7 @@ class DFTResultReviewService(
         audit = AuditLog(
             paper_id=paper_id,
             action="verify_dft_result",
-            source=reviewer_name,
+            source=str(source_label),
             target_type="dft_results",
             target_id=str(result_id),
             payload={
@@ -285,7 +209,8 @@ class DFTResultReviewService(
                 "is_exportable": gate.eligible,
                 "blocked_reasons": list(gate.reasons),
                 "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
-                "actor_type": verification_actor_type,
+                "actor_type": "human",
+                "actor": reviewer_name,
                 "source_label": source_label,
             },
         )
@@ -298,7 +223,7 @@ class DFTResultReviewService(
                 "field_names": selected_fields,
                 "is_exportable": gate.eligible,
                 "blocked_reasons": list(gate.reasons),
-                "actor_type": verification_actor_type,
+                "actor_type": "human",
             },
         )
         if commit:
@@ -311,7 +236,7 @@ class DFTResultReviewService(
             "field_names": selected_fields,
             "export_safety": self._gate_payload(row, gate),
             "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
-            "actor_type": verification_actor_type,
+            "actor_type": "human",
             "audit_log_id": str(audit.id),
         }
         if compact_result:
@@ -320,43 +245,46 @@ class DFTResultReviewService(
             result["reviews"] = [item.model_dump(mode="json") for item in reviews]
         return result
 
-    def _rewrite_verified_review_payloads(
+    def _persist_authenticated_human_evidence(
         self,
         *,
-        paper_id: UUID,
-        result_id: UUID,
+        row: DFTResult,
         field_names: list[str],
-        reviewer: str,
-        reviewer_note: str,
         evidence_payload: dict[str, Any] | list[Any] | None,
-        verification_actor_type: str,
-        source_label: str | None,
-    ):
-        rows = self.session.scalars(
-            select(ExtractionFieldReview).where(
-                ExtractionFieldReview.paper_id == paper_id,
-                ExtractionFieldReview.target_type == "dft_results",
-                ExtractionFieldReview.target_id == str(result_id),
-                ExtractionFieldReview.field_name.in_(field_names),
+    ) -> None:
+        anchor = first_pdf_evidence_anchor(evidence_payload)
+        if anchor is None:
+            return
+        try:
+            page = int(anchor.get("page"))
+        except (TypeError, ValueError):
+            return
+        if page <= 0:
+            return
+        evidence_text = str(
+            anchor.get("quoted_text")
+            or anchor.get("evidence_text")
+            or row.evidence_text
+            or ""
+        ).strip()
+        if not evidence_text:
+            return
+        locator_service = EvidenceLocatorService(self.session)
+        for field_name in field_names:
+            locator_service.create_locator_for_span(
+                paper_id=row.paper_id,
+                object_type="dft_results",
+                object_id=str(row.id),
+                evidence_text=evidence_text,
+                page=page,
+                section=str(anchor.get("section") or anchor.get("section_title") or "") or None,
+                figure=str(anchor.get("figure") or anchor.get("figure_id") or "") or None,
+                table=str(anchor.get("table") or anchor.get("table_id") or "") or None,
+                confidence=None,
+                bbox=anchor.get("bbox") if isinstance(anchor.get("bbox"), dict) else None,
+                parser_source="authenticated_human_review",
+                field_name=field_name,
             )
-        ).all()
-        for review in rows:
-            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
-            payload.pop("human_verification", None)
-            payload["ai_verification"] = {
-                "reviewer": reviewer,
-                "reviewer_note": reviewer_note,
-                "decision": "verified",
-                "writes_final_truth": True,
-                "verification_actor_type": verification_actor_type,
-                "source_label": source_label,
-            }
-            if evidence_payload is not None:
-                payload["imported_evidence_payload"] = evidence_payload
-            review.review_payload = payload
-            self.session.add(review)
-        self.session.flush()
-        return [self.review_service._serialize(row) for row in rows]
 
     def _attach_imported_evidence_payload(
         self,
@@ -398,15 +326,18 @@ class DFTResultReviewService(
         field_names: list[str] | None = None,
         expected_write_versions: dict[str, int] | None = None,
         expected_write_version: int | None = None,
-        verification_actor_type: str = "human",
+        verification_actor_type: str | None = None,
+        actor_name: str | None = None,
         source_label: str | None = None,
         evidence_payload: dict[str, Any] | list[Any] | None = None,
         commit: bool = True,
     ) -> dict[str, Any]:
         if not confirm_reject_candidate:
             raise ValueError("Explicit DFT candidate rejection confirmation is required.")
-        if verification_actor_type not in {"human", "ai"}:
-            raise ValueError("verification_actor_type must be human or ai")
+        if verification_actor_type != "human" or not str(actor_name or "").strip():
+            raise ValueError("authenticated_human_actor_required_for_final_rejection")
+        if not str(source_label or "").strip():
+            raise ValueError("authenticated_human_source_required_for_final_rejection")
 
         row = self.session.get(DFTResult, result_id)
         if row is None or row.paper_id != paper_id:
@@ -435,7 +366,7 @@ class DFTResultReviewService(
                     unit=snapshot[field_name]["unit"],
                     evidence_text=snapshot[field_name]["evidence_text"],
                     reviewer_status="rejected",
-                    reviewer=reviewer or "codex_review",
+                    reviewer=str(actor_name),
                     reviewer_note=note,
                 )
                 for field_name in selected_fields
@@ -443,25 +374,15 @@ class DFTResultReviewService(
             commit=False,
             allow_verified_reject=True,
         )
-        if verification_actor_type == "ai":
-            reviews = self._rewrite_rejected_review_payloads(
-                paper_id=paper_id,
-                result_id=result_id,
-                field_names=selected_fields,
-                reviewer=reviewer or "codex_review",
-                reviewer_note=note,
-                evidence_payload=evidence_payload,
-                source_label=source_label,
-            )
         row.candidate_status = "Rejected"
         self.session.add(row)
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
-        reviewer_name = reviewer or "codex_review"
+        reviewer_name = str(actor_name)
         closed_issues = self.issue_lifecycle.apply_reject(
             paper_id=paper_id,
             result_id=result_id,
             reviewer=reviewer_name,
-            actor_type=verification_actor_type,
+            actor_type="human",
         )
         audit = AuditLog(
             paper_id=paper_id,
@@ -475,7 +396,8 @@ class DFTResultReviewService(
                 "blocked_reasons": list(gate.reasons),
                 "review_status": gate.review_status,
                 "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
-                "actor_type": verification_actor_type,
+                "actor_type": "human",
+                "actor": reviewer_name,
                 "source_label": source_label,
             },
         )
@@ -487,7 +409,7 @@ class DFTResultReviewService(
                 "dft_result_id": str(result_id),
                 "field_names": selected_fields,
                 "blocked_reasons": list(gate.reasons),
-                "actor_type": verification_actor_type,
+                "actor_type": "human",
             },
         )
         if commit:
@@ -502,46 +424,9 @@ class DFTResultReviewService(
             "reviews": [item.model_dump(mode="json") for item in reviews],
             "export_safety": self._gate_payload(row, gate),
             "closed_audit_issue_ids": [str(issue.id) for issue in closed_issues],
-            "actor_type": verification_actor_type,
+            "actor_type": "human",
             "audit_log_id": str(audit.id),
         }
-
-    def _rewrite_rejected_review_payloads(
-        self,
-        *,
-        paper_id: UUID,
-        result_id: UUID,
-        field_names: list[str],
-        reviewer: str,
-        reviewer_note: str,
-        evidence_payload: dict[str, Any] | list[Any] | None,
-        source_label: str | None,
-    ):
-        rows = self.session.scalars(
-            select(ExtractionFieldReview).where(
-                ExtractionFieldReview.paper_id == paper_id,
-                ExtractionFieldReview.target_type == "dft_results",
-                ExtractionFieldReview.target_id == str(result_id),
-                ExtractionFieldReview.field_name.in_(field_names),
-            )
-        ).all()
-        for review in rows:
-            payload = review.review_payload if isinstance(review.review_payload, dict) else {}
-            payload.pop("human_verification", None)
-            payload["ai_verification"] = {
-                "reviewer": reviewer,
-                "reviewer_note": reviewer_note,
-                "decision": "rejected",
-                "writes_final_truth": True,
-                "verification_actor_type": "ai",
-                "source_label": source_label,
-            }
-            if evidence_payload is not None:
-                payload["imported_evidence_payload"] = evidence_payload
-            review.review_payload = payload
-            self.session.add(review)
-        self.session.flush()
-        return [self.review_service._serialize(row) for row in rows]
 
     def revoke_result(
         self,
@@ -638,6 +523,9 @@ class DFTResultReviewService(
         reviewer: str | None = None,
         reviewer_note: str | None = None,
         field_names: list[str] | None = None,
+        verification_actor_type: str | None = None,
+        actor_name: str | None = None,
+        source_label: str | None = None,
     ) -> dict[str, Any]:
         if not confirm_reviewed_against_pdf:
             raise ValueError("Explicit PDF/evidence review confirmation is required.")
@@ -660,6 +548,9 @@ class DFTResultReviewService(
                     reviewer=reviewer,
                     reviewer_note=reviewer_note,
                     field_names=field_names,
+                    verification_actor_type=verification_actor_type,
+                    actor_name=actor_name,
+                    source_label=source_label,
                     expected_write_versions={
                         review.field_name: review.write_version
                         for review in existing_reviews
@@ -686,6 +577,9 @@ class DFTResultReviewService(
         reviewer: str | None = None,
         reviewer_note: str | None = None,
         field_names: list[str] | None = None,
+        verification_actor_type: str | None = None,
+        actor_name: str | None = None,
+        source_label: str | None = None,
     ) -> dict[str, Any]:
         if not confirm_reject_candidate:
             raise ValueError("Explicit DFT candidate rejection confirmation is required.")
@@ -708,6 +602,9 @@ class DFTResultReviewService(
                     reviewer=reviewer,
                     reviewer_note=reviewer_note,
                     field_names=field_names,
+                    verification_actor_type=verification_actor_type,
+                    actor_name=actor_name,
+                    source_label=source_label,
                     expected_write_versions={
                         review.field_name: review.write_version
                         for review in existing_reviews
@@ -1421,7 +1318,7 @@ class DFTResultReviewService(
         audit = AuditLog(
             paper_id=paper_id,
             action="rebind_dft_result_group",
-            source=reviewer_name,
+            source=str(reviewer or "human_reviewer"),
             target_type="catalyst_samples",
             target_id=str(source_sample_id),
             payload=audit_payload,

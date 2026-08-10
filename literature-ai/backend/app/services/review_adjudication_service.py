@@ -246,6 +246,7 @@ class ReviewAdjudicationService:
         target_id: str,
         field_name: str,
         reviewer: str,
+        source_label: str,
     ) -> dict[str, Any]:
         payload = self.list_with_adjudication(
             paper_id=paper_id,
@@ -262,7 +263,13 @@ class ReviewAdjudicationService:
         action = adjudication.get("recommended_action")
         if action not in {"verify", "reject", "propose_correction"}:
             raise ValueError("This target does not expose a safe executable AI recommendation.")
-        result = self._execute_action(row=row, adjudication=adjudication, reviewer=reviewer, auto_mode=False)
+        result = self._execute_action(
+            row=row,
+            adjudication=adjudication,
+            reviewer=reviewer,
+            source_label=source_label,
+            auto_mode=False,
+        )
         self._record_adjudication_action(
             paper_id=paper_id,
             target_type=target_type,
@@ -358,6 +365,7 @@ class ReviewAdjudicationService:
         adjudication: dict[str, Any],
         reviewer: str,
         auto_mode: bool,
+        source_label: str | None = None,
     ) -> dict[str, Any]:
         payload = adjudication.get("recommended_payload") or {}
         action = adjudication.get("recommended_action")
@@ -385,6 +393,9 @@ class ReviewAdjudicationService:
                 reviewer_note=action_note,
                 field_names=payload.get("field_names") or [str(row.get("field_name") or "value")],
                 evidence_payload=payload.get("evidence_payload"),
+                verification_actor_type="human",
+                actor_name=reviewer,
+                source_label=source_label,
             )
         elif action == "reject":
             result = self.dft_reviews.reject_result(
@@ -394,6 +405,9 @@ class ReviewAdjudicationService:
                 reviewer=reviewer,
                 reviewer_note=action_note,
                 field_names=payload.get("field_names") or [str(row.get("field_name") or "value")],
+                verification_actor_type="human",
+                actor_name=reviewer,
+                source_label=source_label,
             )
         elif action == "propose_correction":
             result = self.dft_reviews.propose_correction(

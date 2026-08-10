@@ -11,6 +11,7 @@ from sqlalchemy.orm.exc import StaleDataError
 
 from app.db.models import (
     CatalystSample,
+    AuditLog,
     DFTResult,
     DFTAuditIssue,
     DFTSetting,
@@ -18,6 +19,7 @@ from app.db.models import (
     EvidenceLocator,
     ExtractionFieldReview,
     MechanismClaim,
+    Paper,
 )
 from app.schemas.extraction import (
     ExtractionReviewAuditResponse,
@@ -35,9 +37,9 @@ from app.services.review_target_resolver import (
 from app.utils.review_safety import (
     DFT_RESULT_CONFLICT_CODES,
     DFT_RESULT_CONFLICT_ISSUE_TYPES,
-    can_manual_review_mark_verified,
     has_required_evidence_reference,
     is_safe_verified_review,
+    verification_promotion_gate,
 )
 
 RESULT_KEY_BY_TARGET_TYPE = {
@@ -313,6 +315,11 @@ class ExtractionReviewService:
     ) -> list[ExtractionFieldReviewResponse]:
         prepared: list[tuple[ExtractionFieldReviewSaveItem, str, Any, dict[str, Any], ExtractionFieldReview | None]] = []
         for item in items:
+            if item.reviewer_status == "ai_verified":
+                raise ValueError(
+                    "Cannot set reviewer_status=ai_verified through save. "
+                    "Use the capability-gated single-AI verification service."
+                )
             canonical_type = self.canonical_target_type(item.target_type)
             target = self.get_target_or_raise(paper_id, canonical_type, item.target_id)
             snapshot = self.get_target_field_snapshot(canonical_type, target)
@@ -385,46 +392,53 @@ class ExtractionReviewService:
         payload: ExtractionReviewMarkVerifiedRequest,
         *,
         commit: bool = True,
-        verification_actor_type: str = "human",
+        verification_actor_type: str | None = None,
+        actor_name: str | None = None,
         source_label: str | None = None,
         imported_evidence_payload: dict[str, Any] | list[Any] | None = None,
     ) -> list[ExtractionFieldReviewResponse]:
+        if verification_actor_type != "human" or not str(actor_name or "").strip():
+            raise ValueError("authenticated_human_actor_required_for_final_verification")
+        if not str(source_label or "").strip():
+            raise ValueError("authenticated_human_source_required_for_final_verification")
         canonical_type = self.canonical_target_type(payload.target_type)
         target = self.get_target_or_raise(paper_id, canonical_type, payload.target_id)
+        paper = self.session.get(Paper, paper_id)
         snapshot = self.get_target_field_snapshot(canonical_type, target)
         field_names = payload.field_names or list(snapshot.keys())
         if len(field_names) > 1 and payload.expected_write_version is not None:
             raise ValueError("write_conflict:extraction_review_per_field_versions_required")
-
-        # D1 Phase 3: check target exists (already done by get_target_or_raise above)
-        # and check evidence reference and evidence text before marking verified
-        has_evidence_ref = has_required_evidence_reference(
-            self.session,
-            paper_id=paper_id,
-            target_type=canonical_type,
-            target_id=target.id,
-        )
 
         prepared: list[tuple[str, dict[str, Any], ExtractionFieldReview | None]] = []
         for field_name in field_names:
             if field_name not in snapshot:
                 raise ValueError(f"Unsupported field for {canonical_type}: {field_name}")
             field_snapshot = snapshot[field_name]
-            # D1 Phase 3: evidence text guard
-            evidence_text_value = field_snapshot["evidence_text"]
-            has_evidence_text = bool(evidence_text_value and str(evidence_text_value).strip())
-            allowed, reason = can_manual_review_mark_verified(
-                target_exists=True,
-                evidence_reference_exists=has_evidence_ref,
-                evidence_text_exists=has_evidence_text,
-                target_resolution_status="active",
-            )
-            if not allowed:
+            if self._is_blank(field_snapshot["value"]):
                 raise ValueError(
-                    f"Cannot mark {canonical_type}.{field_name} as verified: {reason}. "
-                    f"Ensure target exists, evidence reference and evidence text are present."
+                    f"Cannot mark {canonical_type}.{field_name} as verified: blank_review_value"
                 )
+            evidence_text_value = field_snapshot["evidence_text"]
             review = self._find_review(paper_id, canonical_type, payload.target_id, field_name)
+            gate_review = review or ExtractionFieldReview(
+                paper_id=paper_id,
+                target_type=canonical_type,
+                target_id=payload.target_id,
+                field_name=field_name,
+                target_resolution_status="active",
+                evidence_text=evidence_text_value,
+            )
+            promotion_gate = verification_promotion_gate(
+                self.session,
+                paper=paper,
+                review=gate_review,
+                evidence_text=evidence_text_value,
+            )
+            if not promotion_gate.eligible:
+                raise ValueError(
+                    f"Cannot mark {canonical_type}.{field_name} as verified: "
+                    f"{','.join(promotion_gate.reasons)}"
+                )
             expected_version = self._expected_mark_verified_version(payload, field_name, len(field_names))
             if review is not None:
                 self._guard_expected_write_version(review, expected_version, created=False)
@@ -453,17 +467,17 @@ class ExtractionReviewService:
             review.unit = field_snapshot["unit"]
             review.evidence_text = field_snapshot["evidence_text"]
             review.reviewer_status = "verified"
-            review.reviewer = payload.reviewer
+            review.reviewer = str(actor_name)
             review.reviewer_note = payload.reviewer_note
-            verification_key = "human_verification" if verification_actor_type == "human" else "ai_verification"
             review.review_payload = {
-                verification_key: {
-                    "reviewer": payload.reviewer,
+                "human_verification": {
+                    "reviewer": str(actor_name),
                     "reviewer_note": payload.reviewer_note,
                     "decision": "verified",
                     "writes_final_truth": True,
-                    "verification_actor_type": verification_actor_type,
+                    "verification_actor_type": "human",
                     "source_label": source_label,
+                    "identity_verified": True,
                 }
             }
             if imported_evidence_payload is not None:
@@ -481,6 +495,22 @@ class ExtractionReviewService:
         if defer_batch_flush:
             self._flush_review_write()
             saved.extend(self._serialize(review) for review in deferred_reviews)
+        self.session.add(
+            AuditLog(
+                paper_id=paper_id,
+                action="mark_extraction_fields_verified",
+                source=str(source_label),
+                target_type=canonical_type,
+                target_id=str(payload.target_id),
+                payload={
+                    "actor": str(actor_name),
+                    "actor_type": "human",
+                    "identity_verified": True,
+                    "field_names": list(field_names),
+                    "review_ids": [str(review.id) for _field, _snapshot, review in writable],
+                },
+            )
+        )
         if commit:
             self.session.commit()
         else:
@@ -641,9 +671,9 @@ class ExtractionReviewService:
         incoming_reviewed_value: Any,
         incoming_status: str,
     ) -> None:
-        if review.id is None or review.reviewer_status != "verified":
+        if review.id is None or review.reviewer_status not in {"verified", "ai_verified"}:
             return
-        if incoming_status != "verified":
+        if incoming_status != review.reviewer_status:
             raise ValueError("Verified reviews cannot be downgraded through save")
         if incoming_reviewed_value != review.reviewed_value:
             raise ValueError("Verified reviews cannot overwrite reviewed_value")

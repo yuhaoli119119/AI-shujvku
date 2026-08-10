@@ -80,8 +80,6 @@ class ReviewConflictAggregationService(
         rows = []
         for key, items in sorted(groups.items(), key=lambda item: item[0]):
             collapsed_items = self._collapse_adopted_opinions(items)
-            if active_only:
-                collapsed_items = self._collapse_active_dft_adjudication(collapsed_items)
             enriched_items = [self._enrich_opinion(item) for item in collapsed_items]
             conflict_types = self._conflict_types(enriched_items)
             if not conflict_types and not include_non_conflicts:

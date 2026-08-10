@@ -41,33 +41,33 @@ class DFTImportedOpinionMixin:
         decision = str(opinion.get("decision") or opinion.get("status") or "").strip().upper()
         if not decision:
             raise ValueError("Imported opinion is missing a decision.")
-        if decision in {"NEEDS_HUMAN", "NEEDS_MANUAL", "MANUAL"}:
-            raise ValueError("NEEDS_HUMAN opinions cannot be auto-applied to DFT results.")
-
         evidence_payload = self._imported_evidence_payload(opinion)
-        reason = str(opinion.get("reason") or "").strip() or "Applied imported AI opinion from the DFT review queue."
+        reason = str(opinion.get("reason") or "").strip() or "Imported AI opinion from the DFT review queue."
         source_label = str(opinion.get("source_label") or opinion.get("source") or "imported_ai").strip()
 
         if decision in self.IMPORTED_NEGATIVE_DECISIONS:
-            rejected = self.reject_result(
+            audit = self._record_imported_opinion_candidate(
                 paper_id=paper_id,
                 result_id=result_id,
-                confirm_reject_candidate=True,
                 reviewer=reviewer_name,
-                reviewer_note=f"Applied imported AI rejection from {source_label}. {reason}".strip(),
-                verification_actor_type="ai",
                 source_label=source_label,
+                decision=decision,
+                reason=reason,
                 evidence_payload=evidence_payload,
-                expected_write_versions=expected_write_versions or {},
-                commit=commit,
+                expected_row_state=expected_row_state,
+                local_ai_verification=opinion.get("local_ai_verification"),
             )
+            self._finish_imported_opinion(commit=commit)
             return {
                 "paper_id": str(paper_id),
                 "dft_result_id": str(result_id),
-                "action": "reject",
+                "action": "candidate",
+                "status": "pending_ai_verification",
                 "source_label": source_label,
                 "applied_corrections": [],
-                "review_result": rejected,
+                "recommended_action": "reject",
+                "writes_final_truth": False,
+                "audit_log_id": str(audit.id),
             }
 
         applied_corrections: list[dict[str, Any]] = []
@@ -80,16 +80,19 @@ class DFTImportedOpinionMixin:
             opinion.get("normalized_material_or_catalyst"),
         )
 
-        if material_identity or row.catalyst_sample_id:
-            binding = self._apply_material_binding(
-                row=row,
-                material_identity=material_identity,
-                reviewer=reviewer_name,
-                reason=reason,
-                evidence_payload=evidence_payload,
+        if material_identity and not self._existing_material_binding_matches(
+            row=row,
+            material_identity=material_identity,
+        ):
+            applied_corrections.append(
+                self._propose_material_identity(
+                    paper_id=paper_id,
+                    material_identity=material_identity,
+                    reviewer=reviewer_name,
+                    reason=reason,
+                    evidence_payload=evidence_payload,
+                )
             )
-            if binding:
-                applied_corrections.append(binding)
 
         for field_name, proposed_value in self._imported_field_updates(row=row, opinion=opinion).items():
             applied_corrections.append(
@@ -110,47 +113,29 @@ class DFTImportedOpinionMixin:
             opinion=opinion,
             applied_corrections=applied_corrections,
         )
-        verified = self.verify_result(
+        audit = self._record_imported_opinion_candidate(
             paper_id=paper_id,
             result_id=result_id,
-            confirm_reviewed_against_pdf=True,
             reviewer=reviewer_name,
-            reviewer_note=f"Applied imported AI opinion from {source_label}. {reason}".strip(),
-            field_names=verify_field_names or None,
-            expected_write_versions=expected_write_versions or {},
-            evidence_payload=evidence_payload,
-            verification_actor_type="ai",
             source_label=source_label,
-            commit=False,
-            compact_result=compact_result,
+            decision=decision,
+            reason=reason,
+            evidence_payload=evidence_payload,
+            expected_row_state=expected_row_state,
+            local_ai_verification=opinion.get("local_ai_verification"),
+            proposed_correction_fields=[item.get("field_name") for item in applied_corrections],
+            recommended_verify_fields=verify_field_names,
         )
-        audit = AuditLog(
-            paper_id=paper_id,
-            action="apply_imported_dft_opinion",
-            source=reviewer_name,
-            target_type="dft_results",
-            target_id=str(result_id),
-            payload={
-                "source_label": source_label,
-                "decision": decision,
-                "applied_correction_fields": [item.get("field_name") for item in applied_corrections],
-                "verified_field_names": verify_field_names,
-                "expected_row_state": expected_row_state or {},
-                "verification_actor_type": "ai",
-                "local_ai_verification": opinion.get("local_ai_verification"),
-            },
-        )
-        self.session.add(audit)
-        if commit:
-            self.session.commit()
-        else:
-            self.session.flush()
+        self._finish_imported_opinion(commit=commit)
         result = {
             "paper_id": str(paper_id),
             "dft_result_id": str(result_id),
-            "action": "verify",
+            "action": "candidate",
+            "status": "pending_ai_verification",
             "source_label": source_label,
-            "review_result": verified,
+            "recommended_action": "verify",
+            "recommended_verify_field_names": verify_field_names,
+            "writes_final_truth": False,
             "audit_log_id": str(audit.id),
         }
         if compact_result:
@@ -187,18 +172,96 @@ class DFTImportedOpinionMixin:
         )
         self.session.add(correction)
         self.session.flush()
-        approved = ReviewService(self.session).approve_correction(
-            correction.id,
-            reviewer=reviewer,
-            write_lock_tokens=write_lock_tokens,
-        )
         self.session.flush()
         return {
-            "correction_id": str(approved.id),
+            "correction_id": str(correction.id),
             "field_name": canonical_field,
             "proposed_value": proposed_value,
-            "status": approved.status,
+            "status": correction.status,
         }
+
+    def _propose_material_identity(
+        self,
+        *,
+        paper_id: UUID,
+        material_identity: str,
+        reviewer: str,
+        reason: str,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+    ) -> dict[str, Any]:
+        first_anchor = self._first_anchor(evidence_payload)
+        correction = PaperCorrection(
+            paper_id=paper_id,
+            source=reviewer,
+            field_name="catalyst_samples",
+            target_path="catalyst_samples:new:create",
+            operation="create",
+            proposed_value={
+                "name": material_identity,
+                "structure_name": material_identity,
+                "evidence_strength": self._first_text(
+                    first_anchor.get("quoted_text") if first_anchor else None,
+                    reason,
+                ),
+            },
+            reason=reason,
+            evidence_payload=evidence_payload if isinstance(evidence_payload, (dict, list)) else None,
+            status="pending",
+        )
+        self.session.add(correction)
+        self.session.flush()
+        return {
+            "correction_id": str(correction.id),
+            "field_name": "catalyst_samples",
+            "proposed_value": correction.proposed_value,
+            "status": correction.status,
+        }
+
+    def _record_imported_opinion_candidate(
+        self,
+        *,
+        paper_id: UUID,
+        result_id: UUID,
+        reviewer: str,
+        source_label: str,
+        decision: str,
+        reason: str,
+        evidence_payload: dict[str, Any] | list[Any] | None,
+        expected_row_state: dict[str, Any] | None,
+        local_ai_verification: Any,
+        proposed_correction_fields: list[Any] | None = None,
+        recommended_verify_fields: list[str] | None = None,
+    ) -> AuditLog:
+        audit = AuditLog(
+            paper_id=paper_id,
+            action="import_dft_opinion_candidate",
+            source=reviewer,
+            target_type="dft_results",
+            target_id=str(result_id),
+            payload={
+                "source_label": source_label,
+                "decision": decision,
+                "reason": reason,
+                "evidence_payload": evidence_payload,
+                "proposed_correction_fields": proposed_correction_fields or [],
+                "recommended_verify_field_names": recommended_verify_fields or [],
+                "expected_row_state": expected_row_state or {},
+                "actor_type": "ai",
+                "status": "pending_ai_verification",
+                "next_action": "submit_ai_verification_batch",
+                "writes_final_truth": False,
+                "local_ai_verification": local_ai_verification,
+            },
+        )
+        self.session.add(audit)
+        self.session.flush()
+        return audit
+
+    def _finish_imported_opinion(self, *, commit: bool) -> None:
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
 
     def _imported_field_updates(self, *, row: DFTResult, opinion: dict[str, Any]) -> dict[str, Any]:
         corrected_value = opinion.get("corrected_value")

@@ -681,12 +681,15 @@ def test_bond_candidate_materialization_keeps_atom_subjects_and_reports_value_co
         assert li1_conflict.mapping_reason == "conflicting_dft_observation_for_subject"
 
 
-def test_materialized_missing_issue_stays_open_until_ai_verification_and_closed_issue_is_not_reopened(verification_env):
+def test_materialized_missing_issue_stays_open_until_human_verification_and_closed_issue_is_not_reopened(verification_env):
     Session = verification_env
     with Session() as session:
         paper = Paper(title="Materialized issue lifecycle", pdf_path="materialized-issue.pdf", authors=["A"])
         session.add(paper)
         session.flush()
+        pdf_file = Path(get_settings().storage_root) / paper.pdf_path
+        pdf_file.parent.mkdir(parents=True, exist_ok=True)
+        pdf_file.write_bytes(b"%PDF-1.4\nMaterialized issue fixture\n%%EOF\n")
         run = ExternalAnalysisRun(paper_id=paper.id, source="local_ai", source_label="issue-lifecycle")
         session.add(run)
         session.flush()
@@ -729,15 +732,16 @@ def test_materialized_missing_issue_stays_open_until_ai_verification_and_closed_
             paper_id=paper.id,
             result_id=row.id,
             confirm_reviewed_against_pdf=True,
-            reviewer="pytest-ai",
+            reviewer="client_label_ignored",
             evidence_payload=payload["evidence_location"],
-            verification_actor_type="ai",
-            source_label="pytest-local-ai",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             commit=False,
         )
         assert verified["closed_audit_issue_ids"] == [str(issue.id)]
         assert issue.status == "closed"
-        assert row.candidate_status == "ai_verified_ml_ready"
+        assert row.candidate_status == "ML_Ready"
 
         second_payload = {**payload, "evidence_location": {"page": 12, "quoted_text": payload["evidence_location"]["quoted_text"]}}
         second_candidate = ExternalAnalysisCandidate(
@@ -762,7 +766,7 @@ def test_materialized_missing_issue_stays_open_until_ai_verification_and_closed_
         assert second_candidate.materialized_target_type is None
         assert second_candidate.materialized_target_id is None
         assert issue.status == "closed"
-        assert issue.resolution_note == "ai_verified"
+        assert issue.resolution_note == "human_verified"
 
 
 def test_new_dft_materialization_does_not_revive_rejected_exact_match(verification_env):
@@ -1284,6 +1288,9 @@ def test_dft_verify_can_defer_commit_to_outer_settlement(verification_env):
         paper = Paper(title="Outer transaction paper", pdf_path="outer-transaction.pdf", workflow_status="Initial_Parsed")
         session.add(paper)
         session.flush()
+        pdf_file = Path(get_settings().storage_root) / paper.pdf_path
+        pdf_file.parent.mkdir(parents=True, exist_ok=True)
+        pdf_file.write_bytes(b"%PDF-1.4\nOuter transaction fixture\n%%EOF\n")
         row = DFTResult(
             paper_id=paper.id,
             property_type="adsorption_energy",
@@ -1322,6 +1329,9 @@ def test_dft_verify_can_defer_commit_to_outer_settlement(verification_env):
                 result_id=row_id,
                 confirm_reviewed_against_pdf=True,
                 reviewer="missing_version",
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
                 field_names=["value"],
                 evidence_payload={"page": 5, "quoted_text": "0.04 eV"},
                 commit=False,
@@ -1334,6 +1344,9 @@ def test_dft_verify_can_defer_commit_to_outer_settlement(verification_env):
             result_id=row_id,
             confirm_reviewed_against_pdf=True,
             reviewer="outer_settlement",
+            verification_actor_type="human",
+            actor_name="owner",
+            source_label="owner_api_token",
             field_names=["value"],
             expected_write_versions={"value": 1},
             evidence_payload={"page": 5, "quoted_text": "0.04 eV"},
@@ -1359,8 +1372,13 @@ def test_dft_verify_can_defer_commit_to_outer_settlement(verification_env):
         assert persisted_review.reviewer_status == "pending"
 
 
-def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
+def test_single_ai_high_risk_exception_requires_authenticated_human_to_create_missing_catalyst_sample(
+    verification_env,
+    monkeypatch,
+):
     Session = verification_env
+    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "verification-owner-secret")
+    get_settings.cache_clear()
     with Session() as session:
         paper = Paper(title="Multi-material paper", pdf_path="multi.pdf", workflow_status="Initial_Parsed")
         session.add(paper)
@@ -1375,6 +1393,7 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
     assert created.status_code == 200
     session_payload = created.json()
     labels = session_payload["lane_labels"]
+    assert set(labels) == {"single"}
     proposed = {
         "name": "Pt",
         "catalyst_type": "comparator",
@@ -1387,7 +1406,7 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
     }
 
     with Session() as session:
-        for source, label in (("ai_a", labels["primary"]), ("ai_b", labels["secondary"])):
+        for source, label in (("ai_a", labels["single"]),):
             run = ExternalAnalysisRun(
                 paper_id=UUID(paper_id), source=source, source_label=label,
                 source_identity=f"mcp:{source}",
@@ -1419,9 +1438,20 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
             )
         session.commit()
 
-    settled = client.post(
+    rejected = client.post(
         f"/api/workbench/verification-sessions/{session_payload['session_id']}/settle",
         json={"reviewer": "dual_ai_test"},
+    )
+    assert rejected.status_code == 401
+    with Session() as session:
+        assert session.scalar(
+            select(func.count(CatalystSample.id)).where(CatalystSample.paper_id == UUID(paper_id))
+        ) == 0
+
+    settled = client.post(
+        f"/api/workbench/verification-sessions/{session_payload['session_id']}/settle",
+        json={"reviewer": "client_supplied_name_must_be_ignored"},
+        headers={"X-LitAI-Owner-Token": "verification-owner-secret"},
     )
     assert settled.status_code == 200
     assert settled.json()["settlement"]["high_risk"]["auto_applied_count"] == 1
@@ -1435,6 +1465,13 @@ def test_dual_ai_consensus_creates_missing_catalyst_sample(verification_env):
         ).all()
         assert {item.materialized_target_type for item in candidates} == {"catalyst_sample"}
         assert {item.materialized_target_id for item in candidates} == {str(samples[0].id)}
+        audit = session.scalars(
+            select(AuditLog)
+            .where(AuditLog.action == "settle_verification_session")
+            .order_by(AuditLog.created_at.desc())
+        ).first()
+        assert audit is not None
+        assert audit.source == "owner"
 
 
 def test_paper_detail_dedupes_materialized_new_candidate_audits(verification_env):

@@ -531,8 +531,8 @@ def test_apply_review_rules_table_noop_still_requires_direct_tool(table_tool_env
         second = service.apply_review_rules_for_run(run_id, reviewer="ide_ai")
         session.commit()
         stored_candidate = session.get(ExternalAnalysisCandidate, candidate_id)
-        assert first["non_dft_object_reviews"]["pending_items"][0]["reason"] == "table_audit_corrected_value_not_applied"
-        assert second["non_dft_object_reviews"]["applied_count"] == 0
+        assert first["non_dft_object_reviews"]["needs_human_items"][0]["reason"] == "authenticated_human_review_required"
+        assert second["non_dft_object_reviews"]["auto_applied_count"] == 0
         assert stored_candidate.status == "requires_resolution"
         assert session.query(PaperCorrection).count() == 0
 
@@ -741,7 +741,7 @@ def test_table_audit_corrected_value_is_review_only_but_pass_remains_supported(t
 
         assert session.get(PaperTable, table_id).caption == "Original"
         assert session.get(ExternalAnalysisCandidate, revise_id).status == "requires_resolution"
-        assert session.get(ExternalAnalysisCandidate, passed_id).status == "ai_reviewed"
+        assert session.get(ExternalAnalysisCandidate, passed_id).status == "requires_resolution"
         assert session.query(PaperCorrection).count() == 0
-        assert summary["non_dft_object_reviews"]["pending_count"] == 1
-        assert summary["non_dft_object_reviews"]["applied_count"] == 1
+        assert summary["non_dft_object_reviews"]["needs_human_count"] == 2
+        assert summary["non_dft_object_reviews"]["auto_applied_count"] == 0

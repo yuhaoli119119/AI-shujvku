@@ -728,7 +728,7 @@ def test_import_analysis_auto_applies_non_dft_corrections():
             )
             assert imported.status_code == 200, imported.text
             statuses = {item["status"] for item in imported.json()["candidates"]}
-            assert statuses == {"ai_reviewed", "ai_applied"}
+            assert statuses == {"requires_resolution"}
 
             with Session(engine) as session:
                 stored_paper = session.get(Paper, paper_id)
@@ -736,13 +736,10 @@ def test_import_analysis_auto_applies_non_dft_corrections():
                 corrections = session.scalars(select(PaperCorrection)).all()
                 note = session.scalar(select(PaperNote))
 
-                assert stored_paper.abstract == "AI corrected abstract."
-                assert stored_figure.caption == "Fig. 1. AI corrected caption."
-                assert note is not None
-                assert note.content.startswith("[AI_REVIEWED]")
-                assert len(corrections) == 2
-                assert {row.status for row in corrections} == {"approved"}
-                assert {row.reviewed_by for row in corrections} == {"codex"}
+                assert stored_paper.abstract == "Original abstract."
+                assert stored_figure.caption == "Wrong caption"
+                assert note is None
+                assert corrections == []
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -835,21 +832,17 @@ def test_import_analysis_auto_creates_non_table_structured_objects():
 
             assert imported.status_code == 200, imported.text
             statuses = {item["status"] for item in imported.json()["candidates"]}
-            assert statuses == {"ai_applied"}
+            assert statuses == {"requires_resolution"}
 
             with Session(engine) as session:
-                figure = session.scalars(select(PaperFigure)).one()
-                section = session.scalars(select(PaperSection)).one()
+                figures = session.scalars(select(PaperFigure)).all()
+                sections = session.scalars(select(PaperSection)).all()
                 corrections = session.scalars(select(PaperCorrection)).all()
 
-                assert figure.caption == "Fig. 2. Missing band structure."
-                assert figure.figure_label == "fig_2"
-                assert figure.crop_status == "needs_recrop"
-                assert section.section_title == "Methods"
-                assert section.text == "Methods section recovered from PDF text."
+                assert figures == []
+                assert sections == []
                 assert session.scalars(select(PaperTable)).all() == []
-                assert len(corrections) == 2
-                assert {row.status for row in corrections} == {"approved"}
+                assert corrections == []
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -921,7 +914,7 @@ def test_import_analysis_auto_applies_figure_delete_correction():
 
             assert imported.status_code == 200, imported.text
             statuses = {item["status"] for item in imported.json()["candidates"]}
-            assert statuses == {"ai_applied"}
+            assert statuses == {"requires_resolution"}
 
             with Session(engine) as session:
                 stored_figure = session.get(PaperFigure, figure_id)
@@ -930,13 +923,9 @@ def test_import_analysis_auto_applies_figure_delete_correction():
                     select(AuditLog).where(AuditLog.action == "delete_structured_object")
                 ).all()
 
-                assert stored_figure is None
-                assert len(corrections) == 1
-                assert corrections[0].operation == "delete"
-                assert corrections[0].status == "approved"
-                assert len(delete_logs) == 1
-                assert delete_logs[0].target_type == "figures"
-                assert delete_logs[0].target_id == str(figure_id)
+                assert stored_figure is not None
+                assert corrections == []
+                assert delete_logs == []
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -1694,7 +1683,7 @@ def test_external_analysis_object_level_writing_card_audit_payload_is_candidate_
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchored_content():
+def test_external_analysis_auto_apply_review_rules_defers_single_ai_anchored_content():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -1760,23 +1749,27 @@ def test_external_analysis_auto_apply_review_rules_materializes_single_ai_anchor
             assert imported.status_code == 200
             with Session(engine) as session:
                 stored_paper = session.get(Paper, paper_id)
-                notes = session.query(PaperNote).all()
-                corrections = session.query(PaperCorrection).all()
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                notes = session.query(PaperNote).where(PaperNote.paper_id == paper_id).all()
+                corrections = session.query(PaperCorrection).where(PaperCorrection.paper_id == paper_id).all()
+                candidates = session.scalars(
+                    select(ExternalAnalysisCandidate)
+                    .where(ExternalAnalysisCandidate.paper_id == paper_id)
+                    .order_by(ExternalAnalysisCandidate.created_at.asc())
+                ).all()
 
             assert stored_paper is not None
-            assert stored_paper.abstract == "Updated abstract from IDE AI."
-            assert len(notes) == 1
-            assert notes[0].quoted_text == "Original abstract."
-            assert len(corrections) == 1
-            assert corrections[0].status == "approved"
-            assert {candidate.status for candidate in candidates} == {"ai_reviewed", "ai_applied"}
+            assert stored_paper.abstract == "Original abstract."
+            assert notes == []
+            assert corrections == []
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert all(candidate.mapping_reason == "authenticated_human_review_required" for candidate in candidates)
+            assert all(candidate.materialized_target_id is None for candidate in candidates)
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_modules():
+def test_external_analysis_auto_apply_review_rules_defers_non_dft_structured_modules():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -1872,8 +1865,14 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
                 stored_sample = session.get(CatalystSample, sample_id)
                 stored_claim = session.get(MechanismClaim, claim_id)
                 stored_performance = session.get(ElectrochemicalPerformance, performance_id)
-                corrections = session.query(PaperCorrection).order_by(PaperCorrection.created_at.asc()).all()
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                corrections = session.scalars(
+                    select(PaperCorrection).where(PaperCorrection.paper_id == paper_id)
+                ).all()
+                candidates = session.scalars(
+                    select(ExternalAnalysisCandidate)
+                    .where(ExternalAnalysisCandidate.paper_id == paper_id)
+                    .order_by(ExternalAnalysisCandidate.created_at.asc())
+                ).all()
                 claim_reviews = session.scalars(
                     select(ExtractionFieldReview).where(
                         ExtractionFieldReview.paper_id == paper_id,
@@ -1900,31 +1899,18 @@ def test_external_analysis_auto_apply_review_rules_applies_non_dft_structured_mo
                 )["mechanism_claims"]
 
             assert stored_sample is not None
-            assert stored_sample.catalyst_type == "single_atom_catalyst"
+            assert stored_sample.catalyst_type == "old"
             assert stored_claim is not None
-            assert stored_claim.claim_text == "Fe-N-C promotes polysulfide conversion under the reported conditions."
-            assert len(claim_reviews) == 1
-            assert claim_reviews[0].target_id == str(claim_id)
-            assert claim_reviews[0].field_name == "claim_text"
-            assert claim_reviews[0].reviewer_status == "verified"
-            assert claim_reviews[0].target_resolution_status == "active"
-            assert len(claim_locators) == 1
-            assert claim_locators[0].page == 4
-            assert claim_locators[0].locator_status == "exact_page"
-            assert claim_gate.eligible is True
-            assert claim_gate.review_status == "verified"
-            assert len(retrieved_claims) == 1
-            assert retrieved_claims[0]["object_id"] == claim_id
-            assert retrieved_claims[0]["paper_code"] == "NDFT001"
-            assert retrieved_claims[0]["page"] == 4
-            assert retrieved_claims[0]["evidence_text"] == "Fe-N-C promotes conversion."
-            assert retrieved_claims[0]["review_status"] == "verified"
-            assert retrieved_claims[0]["evidence_locator"]["locator_status"] == "exact_page"
+            assert stored_claim.claim_text == "Old mechanism claim."
+            assert claim_reviews == []
+            assert claim_locators == []
+            assert claim_gate.eligible is False
+            assert retrieved_claims == []
             assert stored_performance is not None
-            assert stored_performance.capacity_value == 720.0
-            assert len(corrections) == 3
-            assert {correction.status for correction in corrections} == {"approved"}
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
+            assert stored_performance.capacity_value == 600.0
+            assert corrections == []
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert all(candidate.mapping_reason == "authenticated_human_review_required" for candidate in candidates)
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2027,7 +2013,7 @@ def test_ide_ai_mechanism_correction_without_exact_pdf_evidence_stays_blocked(ev
             )[str(claim_id)]
             retrieved = Retriever(session).retrieve("unsafe mechanism claim", [paper_id], 5)
 
-        assert stored_claim.claim_text == "Updated but still unsafe mechanism claim."
+        assert stored_claim.claim_text == "Original mechanism claim."
         assert reviews == []
         assert locators == []
         assert gate.eligible is False
@@ -2105,53 +2091,20 @@ def test_ide_ai_mechanism_create_binds_review_and_locator_to_real_uuid_idempoten
             claims = session.scalars(
                 select(MechanismClaim).where(MechanismClaim.paper_id == paper_id)
             ).all()
-            assert len(claims) == 1
-            claim = claims[0]
+            assert claims == []
             corrections = session.scalars(
                 select(PaperCorrection).where(
                     PaperCorrection.paper_id == paper_id,
                     PaperCorrection.field_name == "mechanism_claims",
                 )
             ).all()
-            reviews = session.scalars(
-                select(ExtractionFieldReview).where(
-                    ExtractionFieldReview.paper_id == paper_id,
-                    ExtractionFieldReview.target_type == "mechanism_claims",
-                    ExtractionFieldReview.target_id == str(claim.id),
-                )
+            candidates = session.scalars(
+                select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
             ).all()
-            locators = session.scalars(
-                select(EvidenceLocator).where(
-                    EvidenceLocator.paper_id == paper_id,
-                    EvidenceLocator.target_type == "mechanism_claims",
-                    EvidenceLocator.target_id == str(claim.id),
-                    EvidenceLocator.parser_source == "ide_ai_review",
-                )
-            ).all()
-            gate = bulk_export_gate_results(
-                session,
-                [claim],
-                target_type="mechanism_claims",
-            )[str(claim.id)]
+            assert corrections == []
+            assert candidates
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
 
-        assert corrections
-        assert all(correction.status == "approved" for correction in corrections)
-        assert all(
-            correction.evidence_payload["structured_create"]["target_id"] == str(claim.id)
-            for correction in corrections
-        )
-        assert all(
-            correction.evidence_payload["structured_create"]["target_id"] != "new"
-            for correction in corrections
-        )
-        assert len(reviews) == 2
-        assert {review.field_name for review in reviews} == {"claim_type", "claim_text"}
-        assert all(review.reviewer_status == "verified" for review in reviews)
-        assert all(review.target_resolution_status == "active" for review in reviews)
-        assert len(locators) == 2
-        assert all(locator.page == 7 for locator in locators)
-        assert all(locator.locator_status == "exact_page" for locator in locators)
-        assert gate.eligible is True
     finally:
         app.dependency_overrides.clear()
         engine.dispose()
@@ -2302,11 +2255,11 @@ def test_ide_ai_section_and_writing_card_review_close_formal_rag_without_note_un
                 )
             ).all()
 
-        assert sections[str(reviewed_section_id)]["retrieval_tier"] == "formal_evidence"
-        assert sections[str(reviewed_section_id)]["can_use_for_writing"] is True
+        assert sections[str(reviewed_section_id)]["retrieval_tier"] == "discovery_candidate"
+        assert sections[str(reviewed_section_id)]["can_use_for_writing"] is False
         assert sections[str(note_only_section_id)]["retrieval_tier"] == "discovery_candidate"
         assert sections[str(note_only_section_id)]["can_use_for_writing"] is False
-        assert str(reviewed_card_id) in writing_ids
+        assert str(reviewed_card_id) not in writing_ids
         assert str(unreviewed_card_id) not in writing_ids
         assert note_only_reviews == []
     finally:
@@ -2497,7 +2450,7 @@ def test_new_dft_candidates_do_not_create_target_new_conflicts():
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
+def test_external_analysis_auto_apply_review_rules_single_ai_defers_figures():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2562,14 +2515,15 @@ def test_external_analysis_auto_apply_review_rules_single_ai_applies_figures():
 
             with Session(engine) as session:
                 stored_figure = session.get(PaperFigure, figure_id)
-                corrections = session.query(PaperCorrection).all()
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                corrections = session.query(PaperCorrection).where(PaperCorrection.paper_id == paper_id).all()
+                candidates = session.scalars(
+                    select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
+                ).all()
 
             assert stored_figure is not None
-            assert stored_figure.content_summary == "Updated figure summary from a single AI review."
-            assert len(corrections) == 1
-            assert corrections[0].status == "approved"
-            assert {candidate.status for candidate in candidates} == {"ai_applied"}
+            assert stored_figure.content_summary == "Old summary"
+            assert corrections == []
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
         finally:
             app.dependency_overrides.clear()
             get_settings.cache_clear()
@@ -2661,8 +2615,7 @@ def test_dft_scoped_import_rejects_non_dft_auto_apply_targets():
             assert {candidate.candidate_type for candidate in candidates} == {"correction", "object_review_audit"}
             assert {candidate.status for candidate in candidates} == {"requires_resolution"}
             assert {candidate.mapping_reason for candidate in candidates} == {
-                "dft_scoped_run_rejects_non_dft_candidate",
-                "dft_scoped_run_rejects_non_dft_target",
+                "authenticated_human_review_required",
             }
         finally:
             app.dependency_overrides.clear()
@@ -2744,10 +2697,7 @@ def test_external_analysis_auto_apply_figure_summary_strips_caption_echo_prefix(
                 stored_figure = session.get(PaperFigure, figure_id)
 
             assert stored_figure is not None
-            assert stored_figure.content_summary == (
-                "(a) HAADF-STEM image with EDS elemental maps for Pt, Ni, Co, Mg, Bi, and Sn. "
-                "(b-f) XANES/EXAFS comparisons and Pt-Pt coordination number chart."
-            )
+            assert stored_figure.content_summary == "Old summary"
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
@@ -2826,16 +2776,13 @@ def test_external_analysis_auto_apply_figure_key_elements_normalizes_stringified
                 stored_figure = session.get(PaperFigure, figure_id)
 
             assert stored_figure is not None
-            assert stored_figure.key_elements == [
-                "Panel (a): HAADF-STEM image with atomically dispersed Pt",
-                "Panel (b): EXAFS fitting and coordination-number comparison",
-            ]
+            assert stored_figure.key_elements == ["old"]
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_single_ai_accepts_tables():
+def test_external_analysis_auto_apply_review_rules_single_ai_defers_table_acceptance():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2898,21 +2845,23 @@ def test_external_analysis_auto_apply_review_rules_single_ai_accepts_tables():
             assert imported.status_code == 200
 
             with Session(engine) as session:
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                candidates = session.scalars(
+                    select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
+                ).all()
 
             detail = client.get(f"/api/papers/{paper_id}")
             assert detail.status_code == 200
             table_payload = detail.json()["tables"][0]
 
-            assert {candidate.status for candidate in candidates} == {"ai_reviewed"}
-            assert table_payload["table_review_status"] == "verified"
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert table_payload["table_review_status"] != "verified"
             assert table_payload["object_review_audit_count"] == 1
         finally:
             app.dependency_overrides.clear()
             engine.dispose()
 
 
-def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
+def test_external_analysis_auto_apply_review_rules_single_ai_defers_table_rejection():
     with TemporaryDirectory() as tmpdir:
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
         Base.metadata.create_all(engine)
@@ -2975,14 +2924,16 @@ def test_external_analysis_auto_apply_review_rules_single_ai_rejects_tables():
             assert imported.status_code == 200
 
             with Session(engine) as session:
-                candidates = session.query(ExternalAnalysisCandidate).order_by(ExternalAnalysisCandidate.created_at.asc()).all()
+                candidates = session.scalars(
+                    select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
+                ).all()
 
             detail = client.get(f"/api/papers/{paper_id}")
             assert detail.status_code == 200
             table_payload = detail.json()["tables"][0]
 
-            assert {candidate.status for candidate in candidates} == {"ai_reviewed"}
-            assert table_payload["table_review_status"] == "rejected"
+            assert {candidate.status for candidate in candidates} == {"requires_resolution"}
+            assert table_payload["table_review_status"] != "rejected"
             assert table_payload["object_review_audit_count"] == 1
         finally:
             app.dependency_overrides.clear()

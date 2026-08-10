@@ -39,7 +39,7 @@ from app.services.verification_session_candidates import (
     VerificationSessionDFTCandidateMixin,
 )
 from app.services.verification_session_consensus import (
-    VerificationSessionDFTConsensusMixin,
+    VerificationSessionDFTSelectionMixin,
 )
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, normalize_library_name
 
@@ -57,7 +57,7 @@ class VerificationSessionConflict(ValueError):
 
 class VerificationSessionService(
     VerificationSessionDFTCandidateMixin,
-    VerificationSessionDFTConsensusMixin,
+    VerificationSessionDFTSelectionMixin,
     VerificationSessionReviewApplicationMixin,
 ):
     HIGH_RISK_IDE_TARGET_TYPES = {"catalyst_samples"}
@@ -128,8 +128,6 @@ class VerificationSessionService(
             raise ValueError("No papers matched the requested selection.")
         session_id = str(uuid4())
         lane_labels = {
-            "primary": f"verify:{session_id}:primary",
-            "secondary": f"verify:{session_id}:secondary",
             "single": f"verify:{session_id}:single",
         }
         payload = {
@@ -306,12 +304,9 @@ class VerificationSessionService(
             lock_tokens=write_lock_tokens,
             locked_by=write_lock_owner or reviewer,
         )
-        low_risk_summary = self._auto_materialize_single_ai_candidates(
+        deferred_non_dft = self._defer_non_dft_import_candidates(
             paper_id=paper_id,
-            reviewer=reviewer,
             candidate_run_id=candidate_run_id,
-            write_lock_tokens=write_lock_tokens,
-            write_lock_owner=write_lock_owner,
         )
         dft_settlement_summary = self.settle_ai_dft_reviews_for_paper(
             paper_id=paper_id,
@@ -320,13 +315,20 @@ class VerificationSessionService(
             write_lock_tokens=write_lock_tokens,
         )
         new_dft_summary = dft_settlement_summary["new_dft_candidates"]
-        object_review_summary = self._auto_apply_object_review_candidates(
-            paper_id=paper_id,
-            reviewer=reviewer,
-            candidate_run_id=candidate_run_id,
-            write_lock_tokens=write_lock_tokens,
-            exclude_target_types={"dft_results"},
-        )
+        low_risk_summary = {
+            "materialized_count": 0,
+            "materialized_items": [],
+            "skipped_count": len(deferred_non_dft),
+            "skipped_items": deferred_non_dft,
+        }
+        object_review_summary = {
+            "auto_applied_count": 0,
+            "auto_applied_items": [],
+            "needs_human_count": len(deferred_non_dft),
+            "needs_human_items": deferred_non_dft,
+            "skipped_count": 0,
+            "skipped_items": [],
+        }
         summary = {
             "paper_id": str(paper_id),
             "new_dft_candidates": new_dft_summary,
@@ -364,7 +366,7 @@ class VerificationSessionService(
         self.session.add(
             AuditLog(
                 paper_id=paper_id,
-                action="apply_ide_review_rules",
+                action="defer_ide_review_rules_for_human_confirmation",
                 source=reviewer,
                 target_type="paper",
                 target_id=str(paper_id),
@@ -379,12 +381,52 @@ class VerificationSessionService(
                     "dft_exportable_count": dft_settlement_summary["exportable_count"],
                     "dft_blocked_reason_counts": dft_settlement_summary["blocked_reason_counts"],
                     "non_dft_applied_count": object_review_summary.get("auto_applied_count", 0),
+                    "non_dft_needs_human_count": len(deferred_non_dft),
+                    "writes_final_truth": False,
+                    "requires_confirmation": True,
                     "write_lock": summary["write_lock"],
                 },
             )
         )
         self.session.flush()
         return summary
+
+    def _defer_non_dft_import_candidates(
+        self,
+        *,
+        paper_id: UUID,
+        candidate_run_id: UUID | None = None,
+    ) -> list[dict[str, Any]]:
+        stmt = select(ExternalAnalysisCandidate).where(
+            ExternalAnalysisCandidate.paper_id == paper_id,
+            ExternalAnalysisCandidate.candidate_type.in_(("note", "correction", "relationship", "object_review_audit")),
+        )
+        if candidate_run_id is not None:
+            stmt = stmt.where(ExternalAnalysisCandidate.run_id == candidate_run_id)
+        deferred: list[dict[str, Any]] = []
+        for candidate in self.session.scalars(stmt.order_by(ExternalAnalysisCandidate.created_at.asc())).all():
+            payload = candidate.normalized_payload if isinstance(candidate.normalized_payload, dict) else {}
+            target_type = None
+            if candidate.candidate_type == "object_review_audit":
+                target_type = self._normalize_object_review_target_type(payload.get("target_type"))
+            if target_type == "dft_results":
+                continue
+            candidate.status = "requires_resolution"
+            candidate.materialized_target_type = None
+            candidate.materialized_target_id = None
+            candidate.mapping_reason = "authenticated_human_review_required"
+            self.session.add(candidate)
+            deferred.append(
+                {
+                    "candidate_id": str(candidate.id),
+                    "candidate_type": candidate.candidate_type,
+                    "target_type": target_type or None,
+                    "reason": "authenticated_human_review_required",
+                    "writes_final_truth": False,
+                }
+            )
+        self.session.flush()
+        return deferred
 
     def settle_ai_dft_reviews_for_paper(
         self,
@@ -554,8 +596,7 @@ class VerificationSessionService(
         )
         high_risk_summary = self._settle_high_risk_targets(
             paper_ids=paper_ids,
-            primary_label=str(lane_labels.get("primary") or ""),
-            secondary_label=str(lane_labels.get("secondary") or ""),
+            single_label=str(lane_labels.get("single") or ""),
             scope=scope,
             reviewer=reviewer,
         )
@@ -571,7 +612,7 @@ class VerificationSessionService(
         job.status = "settled"
         job.progress = {
             "completed": True,
-            "consistent_auto_adopted": high_risk_summary["auto_applied_count"],
+            "single_ai_structured_adopted": high_risk_summary["auto_applied_count"],
             "single_ai_auto_adopted": note_summary["auto_materialized_count"],
             "manual_conflicts": high_risk_summary["manual_conflict_count"],
         }
@@ -753,15 +794,15 @@ class VerificationSessionService(
                 {
                     "lane": "structured_ai_review",
                     "review_mode": "single_ai",
-                    "source_labels": [lane_labels.get("primary"), lane_labels.get("secondary")],
+                    "source_labels": [lane_labels.get("single")],
                     "import_mode": "object_review_audits",
                     "required_fields": ["target_type", "target_id", "field_name", "decision", "corrected_value", "evidence_location"],
                     "instruction": (
                         "First compare the parsed materials with the original PDF page via read_paper_page, then use "
                         "MCP /api/papers/{paper_id}/codex-context and /codex-item to inspect evidence. "
                         "Record parse defects if the system split tables/figures/locators incorrectly, then import "
-                        "object_review_audits through import_analysis. Each evidence-backed DFT opinion is applied "
-                        "independently through the controlled verification and write path."
+                        "object_review_audits through import_analysis. A single authenticated AI must then submit "
+                        "the structured judgment through the ai_verify_content verification path; no second AI or voting is used."
                     ),
                 }
             )
@@ -1037,76 +1078,32 @@ class VerificationSessionService(
                 current = deduped.get(key)
                 if current is None or (opinion.get("confidence") or 0) >= (current.get("confidence") or 0):
                     deduped[key] = opinion
-            eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
-            third_ai = [item for item in eligible if str(item.get("adjudication_role") or "").strip().lower() == "third_ai"]
-            if target_type in self.HIGH_RISK_IDE_TARGET_TYPES:
-                if third_ai:
-                    adopted = max(third_ai, key=lambda item: item.get("confidence") or 0)
-                elif len(eligible) < 2:
-                    pending.append(
-                        {
-                            "target_type": target_type,
-                            "target_id": target_id,
-                            "field_name": field_name,
-                            "reason": "awaiting_two_ai_reviews",
-                            "eligible_opinion_count": len(eligible),
-                        }
-                    )
-                    continue
-                else:
-                    signature_groups = {
-                        self._review_consensus_key(item, target_type=target_type, target_id=target_id, field_name=field_name): item
-                        for item in eligible
+            if len(deduped) > 1:
+                pending.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": "multiple_ai_sources_not_allowed",
+                        "eligible_opinion_count": 0,
                     }
-                    if len(signature_groups) != 1:
-                        pending.append(
-                            {
-                                "target_type": target_type,
-                                "target_id": target_id,
-                                "field_name": field_name,
-                                "reason": self._consensus_disagreement_reason(
-                                    eligible,
-                                    target_type=target_type,
-                                    target_id=target_id,
-                                    field_name=field_name,
-                                ),
-                                "eligible_opinion_count": len(eligible),
-                            }
-                        )
-                        continue
-                    adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
-            else:
-                if not eligible:
-                    skipped.append(
-                        {
-                            "target_type": target_type,
-                            "target_id": target_id,
-                            "field_name": field_name,
-                            "reason": "missing_evidence_anchor",
-                        }
-                    )
-                    continue
-                signature_groups = {
-                    self._review_consensus_key(item, target_type=target_type, target_id=target_id, field_name=field_name): item
-                    for item in eligible
-                }
-                if not third_ai and len(signature_groups) != 1:
-                    pending.append(
-                        {
-                            "target_type": target_type,
-                            "target_id": target_id,
-                            "field_name": field_name,
-                            "reason": self._consensus_disagreement_reason(
-                                eligible,
-                                target_type=target_type,
-                                target_id=target_id,
-                                field_name=field_name,
-                            ),
-                            "eligible_opinion_count": len(eligible),
-                        }
-                    )
-                    continue
-                adopted = max(third_ai, key=lambda item: item.get("confidence") or 0) if third_ai else max(eligible, key=lambda item: item.get("confidence") or 0)
+                )
+                continue
+            eligible = [item for item in deduped.values() if self._opinion_has_anchor(item)]
+            if not eligible:
+                skipped.append(
+                    {
+                        "target_type": target_type,
+                        "target_id": target_id,
+                        "field_name": field_name,
+                        "reason": "missing_evidence_anchor",
+                    }
+                )
+                continue
+            # One authenticated source identity owns the decision. If duplicate
+            # payloads exist for that same identity, use its latest/highest-confidence
+            # item; never wait for or compare a second AI.
+            adopted = max(eligible, key=lambda item: item.get("confidence") or 0)
             try:
                 result = self._apply_selected_opinion(
                     paper_id=paper_id,
@@ -1115,8 +1112,6 @@ class VerificationSessionService(
                     field_name=field_name,
                     reviewer=reviewer,
                     opinion=adopted,
-                    dual_ai_consensus=target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
-                    adjudicated_by_third_ai=bool(third_ai and adopted in third_ai),
                     write_lock_tokens=write_lock_tokens,
                 )
             except Exception as exc:
@@ -1162,8 +1157,8 @@ class VerificationSessionService(
                     "action": result.get("action"),
                     "materialized_target_type": materialized_target_type,
                     "materialized_target_id": materialized_target_id,
-                    "dual_ai_required": target_type in self.HIGH_RISK_IDE_TARGET_TYPES,
-                    "adjudication_role": adopted.get("adjudication_role"),
+                    "single_ai": True,
+                    "second_ai_used": False,
                 }
             )
         self.session.flush()

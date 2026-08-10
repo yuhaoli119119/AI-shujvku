@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -20,6 +20,7 @@ from app.schemas.extraction import (
     ExtractionValidationResponse,
 )
 from app.schemas.evidence import EvidenceLocatorResponse
+from app.security.owner import AuthenticatedOwnerIdentity, require_authenticated_owner_request
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.extraction_schema_service import ExtractionSchemaService
 from app.services.evidence_locator_service import EvidenceLocatorService
@@ -36,6 +37,10 @@ from app.services.workflow_jobs import (
 )
 
 router = APIRouter()
+
+
+def _require_authenticated_extraction_reviewer(request: Request) -> AuthenticatedOwnerIdentity:
+    return require_authenticated_owner_request(request)
 
 
 @router.get("/schemas")
@@ -192,12 +197,19 @@ async def save_extraction_field_reviews(
 async def mark_extraction_fields_verified(
     paper_id: UUID,
     payload: ExtractionReviewMarkVerifiedRequest,
+    identity: AuthenticatedOwnerIdentity = Depends(_require_authenticated_extraction_reviewer),
     session: Session = Depends(get_db_session),
 ) -> list[ExtractionFieldReviewResponse]:
     if not session.get(Paper, paper_id):
         raise HTTPException(status_code=404, detail="Paper not found")
     try:
-        return ExtractionReviewService(session).mark_verified(paper_id, payload)
+        return ExtractionReviewService(session).mark_verified(
+            paper_id,
+            payload,
+            verification_actor_type="human",
+            actor_name=identity.actor,
+            source_label=identity.source,
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:

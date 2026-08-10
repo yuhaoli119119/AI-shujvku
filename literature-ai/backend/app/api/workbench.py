@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.models import DFTResult, Paper
 from app.db.session import get_db_session
+from app.security.owner import require_authenticated_owner_request
 from app.schemas.workbench import (
     ConflictAdjudicationActionRequest,
     ConflictAutoAdvanceBatchRequest,
@@ -78,15 +79,18 @@ def get_review_conflicts(
 @router.post("/review-conflicts/accept-ai")
 def accept_ai_adjudication(
     payload: ConflictAdjudicationActionRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
+    identity = require_authenticated_owner_request(request)
     try:
         return ReviewAdjudicationService(session).accept_recommendation(
             paper_id=payload.paper_id,
             target_type=payload.target_type,
             target_id=payload.target_id,
             field_name=payload.field_name,
-            reviewer=payload.reviewer,
+            reviewer=identity.actor,
+            source_label=identity.source,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -142,11 +146,13 @@ def get_verification_session(
 def settle_verification_session(
     session_id: str,
     payload: VerificationSessionSettleRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    identity = require_authenticated_owner_request(request)
     try:
-        return VerificationSessionService(session, settings).settle_session(session_id, reviewer=payload.reviewer)
+        return VerificationSessionService(session, settings).settle_session(session_id, reviewer=identity.actor)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -154,9 +160,11 @@ def settle_verification_session(
 @router.post("/review-conflicts/manual-decision")
 def manually_resolve_review_conflict(
     payload: VerificationConflictDecisionRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
+    identity = require_authenticated_owner_request(request)
     try:
         return VerificationSessionService(session, settings).resolve_conflict(
             paper_id=payload.paper_id,
@@ -164,7 +172,7 @@ def manually_resolve_review_conflict(
             target_id=payload.target_id,
             field_name=payload.field_name,
             resolution=payload.resolution,
-            reviewer=payload.reviewer,
+            reviewer=identity.actor,
             opinion_source_id=payload.opinion_source_id,
         )
     except LookupError as exc:
@@ -259,13 +267,15 @@ def submit_gemini_audit(
 def human_confirm_workbench_status(
     paper_id: UUID,
     payload: HumanConfirmRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
+    identity = require_authenticated_owner_request(request)
     try:
         return GeminiAuditService(session).human_confirm(
             paper_id=paper_id,
             target_status=payload.target_status,
-            reviewer=payload.reviewer,
+            reviewer=identity.actor,
             note=payload.note,
             confirm_human_review=payload.confirm_human_review,
         )

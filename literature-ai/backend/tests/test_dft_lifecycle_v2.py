@@ -205,7 +205,7 @@ def test_materialization_double_writes_v1_v2_issue_and_source(setup_test_db):
         assert {source.candidate_id for source in sources} == {first.id, second.id}
 
 
-def test_materialize_then_ai_verify_closes_only_after_export_gate(setup_test_db):
+def test_materialize_then_ai_cannot_finalize_or_close_issue(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "AI verify lifecycle")
         _candidate(
@@ -227,23 +227,23 @@ def test_materialize_then_ai_verify_closes_only_after_export_gate(setup_test_db)
         row_id = materialized["materialized_items"][0]["dft_result_id"]
         issue_id = materialized["materialized_items"][0]["issue_id"]
 
-        verified = DFTResultReviewService(session).verify_result(
-            paper_id=paper.id,
-            result_id=UUID(row_id),
-            confirm_reviewed_against_pdf=True,
-            reviewer="pytest-ai",
-            field_names=["value"],
-            verification_actor_type="ai",
-            source_label="local_ai",
-            evidence_payload={"page": 4, "quoted_text": "DFT evidence on page 4"},
-            commit=False,
-        )
+        with pytest.raises(ValueError, match="authenticated_human_actor_required"):
+            DFTResultReviewService(session).verify_result(
+                paper_id=paper.id,
+                result_id=UUID(row_id),
+                confirm_reviewed_against_pdf=True,
+                reviewer="pytest-ai",
+                field_names=["value"],
+                verification_actor_type="ai",
+                actor_name="pytest-ai",
+                source_label="local_ai",
+                evidence_payload={"page": 4, "quoted_text": "DFT evidence on page 4"},
+                commit=False,
+            )
         issue = session.get(DFTAuditIssue, UUID(issue_id))
-        assert verified["actor_type"] == "ai"
-        assert verified["export_safety"]["eligible"] is True
-        assert issue.status == "closed"
-        assert issue.resolution_code == "verified"
-        assert issue.retry_count == 0 and issue.next_retry_at is None
+        assert issue.status == "fixed_by_primary_ai"
+        assert issue.lifecycle_stage == "pending_verification"
+        assert issue.resolution_code is None
 
 
 def test_export_gate_failure_keeps_issue_open_then_success_clears_retry(setup_test_db):
@@ -739,6 +739,9 @@ def test_rejected_result_cannot_be_revived_by_verify(setup_test_db):
                 result_id=row.id,
                 confirm_reviewed_against_pdf=True,
                 reviewer="pytest",
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
             )
 
 

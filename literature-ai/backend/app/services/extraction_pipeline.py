@@ -43,6 +43,7 @@ from app.services.embedding import EmbeddingUnavailableError, get_embedding_serv
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
 from app.services.paper_workbench_service import PaperWorkbenchService
+from app.utils.writing_card_content import normalized_evidence_chain
 from app.utils.workbench_status import EXTRACTION_PROTOCOL_VERSION
 
 logger = logging.getLogger(__name__)
@@ -1299,6 +1300,9 @@ class ExtractionPipelineService:
 
         # Keep figure_logic JSON-encoded because the current column is text.
         figure_logic = payload.get("figure_logic")
+        evidence_chain_text = "\n".join(
+            item["text"] for item in normalized_evidence_chain(payload.get("evidence_chain"), limit=20)
+        )
         embedding_text = "\n".join(
             filter(
                 None,
@@ -1307,9 +1311,7 @@ class ExtractionPipelineService:
                     payload.get("research_gap"),
                     payload.get("proposed_solution"),
                     payload.get("core_hypothesis"),
-                    payload.get("abstract_logic"),
-                    payload.get("introduction_logic"),
-                    payload.get("discussion_logic"),
+                    evidence_chain_text,
                 ],
             )
         )
@@ -1335,18 +1337,44 @@ class ExtractionPipelineService:
         self.session.add(record)
         self.session.flush()
 
-        for evidence in payload.get("evidence_chain") or []:
+        for index, evidence in enumerate(payload.get("evidence_chain") or []):
+            evidence_text = evidence.get("text") or ""
+            source = evidence.get("source") or None
+            page = evidence.get("page")
             self.session.add(
                 EvidenceSpan(
                     paper_id=paper_id,
                     object_type="writing_card",
                     object_id=str(record.id),
-                    text=evidence.get("text") or "",
-                    page=evidence.get("page"),
-                    section=evidence.get("source"),
+                    text=evidence_text,
+                    page=page,
+                    section=source,
                     confidence=0.75,
                 )
             )
+            if not evidence_text:
+                continue
+            figure_reference = evidence_text if str(source or "").casefold().startswith("figure") else None
+            locator_kwargs = {
+                "paper_id": paper_id,
+                "claim_id": None,
+                "chunk_id": f"{record.id}:evidence:{index}",
+                "source_type": "figure" if figure_reference else "text",
+                "page": page,
+                "bbox": None,
+                "section": source,
+                "figure_id": self.locators.resolve_figure_id(paper_id, figure_reference),
+                "target_type": "writing_card",
+                "target_id": str(record.id),
+                "evidence_text": evidence_text,
+                "parser_source": "writing_card_extractor",
+                "locator_confidence": 0.75,
+            }
+            for field_name in evidence.get("supports_fields") or []:
+                if field_name not in {"research_gap", "proposed_solution", "core_hypothesis"}:
+                    continue
+                self.locators.upsert_locator(field_name=field_name, **locator_kwargs)
+            self.locators.upsert_locator(field_name=None, **locator_kwargs)
         return 1
 
     def _embed_text(self, text: str) -> list[float]:

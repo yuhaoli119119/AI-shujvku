@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from sqlalchemy.orm import Session
 
 from app.db.models import ExtractionFieldReview, AuditLog, Paper
-from app.utils.review_safety import has_required_evidence_reference, has_required_evidence_text
+from app.utils.review_safety import verification_promotion_gate
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.review_target_resolver import canonical_target_type
 
@@ -21,10 +21,13 @@ class VerificationService:
         review_id: UUID,
         target_status: str,
         reviewed_value: Any,
-        reviewer: str | None = None,
+        actor_name: str,
+        actor_source: str,
     ) -> tuple[ExtractionFieldReview, str]:
         if target_status not in {"verified", "safe_verified"}:
             raise ValueError("target_status must be 'verified' or 'safe_verified'")
+        if not str(actor_name or "").strip() or not str(actor_source or "").strip():
+            raise ValueError("authenticated_human_actor_required_for_final_verification")
 
         review = self.session.get(ExtractionFieldReview, review_id)
         if not review:
@@ -47,22 +50,15 @@ class VerificationService:
         except LookupError as exc:
             raise LookupError(f"Target not found: {exc}") from exc
 
-        # Basic constraints for any verification
-        if target_status in {"verified", "safe_verified"}:
-            has_ref = has_required_evidence_reference(
-                self.session,
-                paper_id=review.paper_id,
-                target_type=review.target_type,
-                target_id=review.target_id,
+        promotion_gate = verification_promotion_gate(
+            self.session,
+            paper=paper,
+            review=review,
+        )
+        if not promotion_gate.eligible:
+            raise ValueError(
+                "Cannot promote review: " + ",".join(promotion_gate.reasons)
             )
-            has_text = has_required_evidence_text(review)
-            
-            # Strict checks apply to ALL verification promotions to prevent bypassing the export gate
-            if not has_ref or not has_text:
-                raise ValueError("Cannot promote review: missing explicit evidence text or exact locator.")
-            
-            if review.target_resolution_status not in {"active", "remapped"}:
-                raise ValueError("Cannot promote review: target is stale or ambiguous.")
 
         before_state = {
             "reviewer_status": review.reviewer_status,
@@ -72,7 +68,17 @@ class VerificationService:
 
         review.reviewer_status = "verified"
         review.reviewed_value = reviewed_value
-        review.reviewer = reviewer
+        review.reviewer = actor_name
+        review.review_payload = {
+            "human_verification": {
+                "reviewer": actor_name,
+                "decision": "verified",
+                "writes_final_truth": True,
+                "verification_actor_type": "human",
+                "source_label": actor_source,
+                "identity_verified": True,
+            }
+        }
 
         after_state = {
             "reviewer_status": review.reviewer_status,
@@ -85,12 +91,15 @@ class VerificationService:
             id=UUID(audit_id),
             paper_id=review.paper_id,
             action="promote_to_verified",
-            source=reviewer or "system",
+            source=actor_source,
             target_type="ExtractionFieldReview",
             target_id=str(review.id),
             payload={
                 "before_state": before_state,
                 "after_state": after_state,
+                "actor": actor_name,
+                "actor_type": "human",
+                "identity_verified": True,
             },
             created_at=datetime.now(UTC).replace(tzinfo=None),
         )

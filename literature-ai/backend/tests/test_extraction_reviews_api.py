@@ -10,10 +10,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings, get_settings
-from app.db.models import Base, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
+from app.db.models import AuditLog, Base, DFTResult, EvidenceSpan, ExtractionFieldReview, Paper
 from app.db.session import get_db_session
 from app.main import app
 from app.services.extraction_pipeline import ExtractionPipelineService
+
+OWNER_HEADERS = {"X-LitAI-Owner-Token": "owner-secret"}
 
 
 @pytest.fixture
@@ -22,6 +24,16 @@ def setup_test_db(monkeypatch):
         db_url = os.environ["LITAI_TEST_DATABASE_URL"]
 
         monkeypatch.setenv("LITAI_DATABASE_URL", db_url)
+        monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "owner-secret")
+        monkeypatch.setenv("LITAI_MCP_API_KEYS", "reader|Reader|mcp-secret|read_papers")
+        monkeypatch.setenv("LITAI_STORAGE_ROOT", tmpdir)
+        for name in (
+            "ambiguous.pdf", "atomic-verify.pdf", "first-review.pdf", "locator-warning.pdf",
+            "missing.pdf", "missing-verify.pdf", "missing-version-save.pdf", "multi-ai.pdf",
+            "per-field.pdf", "remap.pdf", "reviewable.pdf", "stale.pdf", "stale-save.pdf",
+            "stale-verify.pdf", "validate.pdf", "verify.pdf",
+        ):
+            Path(tmpdir, name).write_bytes(b"%PDF-1.4\nreview fixture\n%%EOF\n")
         get_settings.cache_clear()
 
         engine = create_engine(db_url, future=True)
@@ -52,6 +64,108 @@ def setup_test_db(monkeypatch):
         _engines.clear()
         _session_factories.clear()
         get_settings.cache_clear()
+
+
+def _mark_verified_request_payload(**overrides):
+    payload = {
+        "target_type": "dft_results",
+        "target_id": str(uuid4()),
+        "field_names": ["value"],
+        "reviewer": "forged-human",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_mark_verified_rejects_anonymous_missing_paper_without_database_writes(setup_test_db):
+    Session = sessionmaker(bind=setup_test_db)
+    with Session() as session:
+        before = {
+            "papers": session.query(Paper).count(),
+            "reviews": session.query(ExtractionFieldReview).count(),
+            "audits": session.query(AuditLog).count(),
+        }
+
+    response = TestClient(app).post(
+        f"/api/extraction/results/{uuid4()}/reviews/mark-verified",
+        json=_mark_verified_request_payload(),
+    )
+
+    assert response.status_code == 401
+    assert response.status_code != 404
+    with Session() as session:
+        assert session.query(Paper).count() == before["papers"]
+        assert session.query(ExtractionFieldReview).count() == before["reviews"]
+        assert session.query(AuditLog).count() == before["audits"]
+
+
+def test_mark_verified_authentication_precedes_database_dependency(setup_test_db):
+    original_override = app.dependency_overrides[get_db_session]
+    database_dependency_calls = 0
+
+    def forbidden_database_dependency():
+        nonlocal database_dependency_calls
+        database_dependency_calls += 1
+        raise AssertionError("database dependency ran before final-verification authentication")
+
+    app.dependency_overrides[get_db_session] = forbidden_database_dependency
+    try:
+        response = TestClient(app).post(
+            f"/api/extraction/results/{uuid4()}/reviews/mark-verified",
+            json=_mark_verified_request_payload(),
+        )
+    finally:
+        app.dependency_overrides[get_db_session] = original_override
+
+    assert response.status_code == 401
+    assert database_dependency_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("headers", "forged_fields", "expected_status"),
+    [
+        ({"Authorization": "Bearer mcp-secret"}, {}, 403),
+        ({}, {"reviewer": "human"}, 401),
+        ({}, {"verification_actor_type": "human"}, 401),
+        ({}, {"actor_type": "human", "confirm_human_review": True}, 401),
+    ],
+)
+def test_mark_verified_rejects_mcp_and_forged_client_identity(
+    setup_test_db,
+    headers,
+    forged_fields,
+    expected_status,
+):
+    Session = sessionmaker(bind=setup_test_db)
+    with Session() as session:
+        audit_count = session.query(AuditLog).count()
+
+    response = TestClient(app).post(
+        f"/api/extraction/results/{uuid4()}/reviews/mark-verified",
+        headers=headers,
+        json=_mark_verified_request_payload(**forged_fields),
+    )
+
+    assert response.status_code == expected_status
+    assert response.status_code != 404
+    with Session() as session:
+        assert session.query(AuditLog).count() == audit_count
+
+
+def test_mark_verified_owner_session_missing_paper_returns_404_after_authentication(setup_test_db):
+    browser = TestClient(app)
+    opened = browser.post("/api/settings/owner-session", json={"token": "owner-secret"})
+    assert opened.status_code == 200
+
+    response = browser.post(
+        f"/api/extraction/results/{uuid4()}/reviews/mark-verified",
+        json=_mark_verified_request_payload(),
+    )
+
+    assert response.status_code == 404
+    Session = sessionmaker(bind=setup_test_db)
+    with Session() as session:
+        assert session.query(AuditLog).count() == 0
 
 
 def test_save_extraction_field_review(setup_test_db):
@@ -297,12 +411,13 @@ def test_mark_verified_persists_verified_review(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text or "The adsorption energy of Li2S6 is -0.91 eV.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         target_id = str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/mark-verified",
         json={
@@ -345,13 +460,14 @@ def test_mark_verified_rejects_stale_expected_write_version(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text or "The adsorption energy of Li2S6 is -0.91 eV.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
         target_id = str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     first = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
         json={
@@ -415,11 +531,12 @@ def test_mark_verified_rejects_missing_version_without_mutation(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text,
+            page=1,
         ))
         session.commit()
         paper_id, paper_uuid, target_id = str(paper.id), paper.id, str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     first = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
         json={"reviews": [{
@@ -476,11 +593,12 @@ def test_mark_verified_accepts_distinct_per_field_versions(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text,
+            page=1,
         ))
         session.commit()
         paper_id, target_id = str(paper.id), str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     created = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
         json={"reviews": [
@@ -542,11 +660,12 @@ def test_mark_verified_stale_field_rolls_back_entire_batch(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text,
+            page=1,
         ))
         session.commit()
         paper_id, paper_uuid, target_id = str(paper.id), paper.id, str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     created = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
         json={"reviews": [
@@ -601,12 +720,13 @@ def test_validate_returns_review_state(setup_test_db):
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text or "The adsorption energy is -1.11 eV.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         target_id = str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     # Use mark-verified API instead of save with verified status (D1 Phase 3 boundary)
     save_response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/mark-verified",
@@ -626,7 +746,7 @@ def test_validate_returns_review_state(setup_test_db):
     assert payload["results"]["DFTResult"][0]["value"]["verified"] is True
     assert payload["results"]["DFTResult"][0]["value"]["review"]["reviewer_status"] == "verified"
     assert payload["results"]["DFTResult"][0]["value"]["review"]["target_resolution_status"] == "active"
-    assert payload["results"]["DFTResult"][0]["value"]["evidence_locator"]["locator_status"] in {"missing_page", "text_only"}
+    assert payload["results"]["DFTResult"][0]["value"]["evidence_locator"]["locator_status"] == "exact_page"
     assert payload["field_reviews"][0]["target_id"] == target_id
 
 
@@ -689,13 +809,14 @@ def test_replace_stage2_remaps_review_when_semantics_are_unchanged(setup_test_db
             object_type="dft_results",
             object_id=str(original.id),
             text=original.evidence_text or "The adsorption energy of Li2S4 is -1.23 eV on Fe-N4.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
         old_target_id = str(original.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     # First save as corrected, then mark verified (D1 Phase 3 boundary)
     save_response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/save",
@@ -795,13 +916,14 @@ def test_replace_stage2_marks_stale_review_and_does_not_apply_it(setup_test_db):
             object_type="dft_results",
             object_id=str(original.id),
             text=original.evidence_text or "The adsorption energy of Li2S4 is -1.23 eV.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
         old_target_id = str(original.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/mark-verified",
         json={
@@ -969,13 +1091,14 @@ def test_validate_reports_locator_warning_without_overriding_stale_review_state(
             object_type="dft_results",
             object_id=str(result.id),
             text=result.evidence_text or "The adsorption energy of Li2S4 is -1.05 eV.",
+            page=1,
         ))
         session.commit()
         paper_id = str(paper.id)
         paper_uuid = paper.id
         old_target_id = str(result.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers=OWNER_HEADERS)
     response = client.post(
         f"/api/extraction/results/{paper_id}/reviews/mark-verified",
         json={

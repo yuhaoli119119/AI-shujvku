@@ -327,7 +327,7 @@ def _call_import_analysis(request: dict[str, Any], *, lock_token: str) -> dict[s
         )
 
 
-def test_live_task_import_auto_applies_pass_and_revise_then_rejects_stale_task_without_dft_writes(
+def test_live_task_import_records_pass_and_revise_as_candidates_without_dft_finalization(
     setup_test_db,
 ):
     paper_id, pass_row_id, revise_row_id = _seed_live_dft_review(setup_test_db)
@@ -352,57 +352,37 @@ def test_live_task_import_auto_applies_pass_and_revise_then_rejects_stale_task_w
 
     readback = imported["auto_apply_summary"]["dft_readback"]
     for target_id in (str(pass_row_id), str(revise_row_id)):
-        assert readback["candidate_status"][target_id] == "ai_verified_ml_ready"
-        assert readback["object_versions"][target_id]
-        assert readback["export_safety"][target_id]["eligible"] is True
+        assert readback["candidate_status"][target_id] == "system_candidate"
+        assert readback["export_safety"][target_id]["eligible"] is False
     assert readback["conflicts"] == []
-    assert readback["unfinished_items"] == []
 
     with Session(setup_test_db) as session:
         pass_row = session.get(DFTResult, pass_row_id)
         revise_row = session.get(DFTResult, revise_row_id)
         assert pass_row is not None and pass_row.value == pytest.approx(-1.20)
-        assert revise_row is not None and revise_row.value == pytest.approx(0.42)
-        assert pass_row.candidate_status == "ai_verified_ml_ready"
-        assert revise_row.candidate_status == "ai_verified_ml_ready"
+        assert revise_row is not None and revise_row.value == pytest.approx(0.55)
+        assert pass_row.candidate_status == "system_candidate"
+        assert revise_row.candidate_status == "system_candidate"
         reviews = session.scalars(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == paper_id,
                 ExtractionFieldReview.target_type == "dft_results",
             )
         ).all()
-        assert {review.target_id for review in reviews} == {
-            str(pass_row_id),
-            str(revise_row_id),
-        }
-        assert all(review.reviewer_status == "verified" for review in reviews)
+        assert reviews == []
         candidates = session.scalars(
             select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
         ).all()
         assert len(candidates) == 2
-        assert all(candidate.status == "ai_applied" for candidate in candidates)
+        assert {candidate.status for candidate in candidates} <= {
+            "candidate",
+            "pending",
+            "requires_resolution",
+            "pending_ai_verification",
+        }
+        assert all(candidate.materialized_target_id is None for candidate in candidates)
         task_after = DFTReviewBundleService(session, get_settings()).get_review_task(paper_id)
-        dft_before_stale_retry = {
-            str(row.id): (row.value, row.candidate_status)
-            for row in session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
-        }
-        run_count_before = session.scalar(
-            select(func.count()).select_from(ExternalAnalysisRun).where(ExternalAnalysisRun.paper_id == paper_id)
-        )
-
-    assert task_after["bundle_fingerprint"] != task_before["bundle_fingerprint"]
-    with pytest.raises(ValueError, match="stale_or_mismatched_bundle"):
-        _call_import_analysis(request, lock_token=lock_token)
-
-    with Session(setup_test_db) as session:
-        dft_after_stale_retry = {
-            str(row.id): (row.value, row.candidate_status)
-            for row in session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
-        }
-        assert dft_after_stale_retry == dft_before_stale_retry
-        assert session.scalar(
-            select(func.count()).select_from(ExternalAnalysisRun).where(ExternalAnalysisRun.paper_id == paper_id)
-        ) == run_count_before
+        assert task_after["target_ids"] == task_before["target_ids"]
         lock = session.scalar(select(ModuleWriteLock).where(ModuleWriteLock.lock_token == lock_token))
         assert lock is not None and lock.status == "active"
 
@@ -475,15 +455,15 @@ def test_needs_human_import_stays_pending_and_is_not_exportable(setup_test_db):
     imported = _call_import_analysis(request, lock_token=lock_token)
 
     readback = imported["auto_apply_summary"]["dft_readback"]
-    assert readback["export_safety"][str(pass_row_id)]["eligible"] is True
+    assert readback["export_safety"][str(pass_row_id)]["eligible"] is False
     assert readback["export_safety"][str(revise_row_id)]["eligible"] is False
     assert readback["unfinished_items"]
     with Session(setup_test_db) as session:
         pass_row = session.get(DFTResult, pass_row_id)
         needs_human_row = session.get(DFTResult, revise_row_id)
-        assert pass_row is not None and pass_row.candidate_status == "ai_verified_ml_ready"
+        assert pass_row is not None and pass_row.candidate_status == "system_candidate"
         assert needs_human_row is not None and needs_human_row.value == pytest.approx(0.55)
-        assert needs_human_row.candidate_status != "ai_verified_ml_ready"
+        assert needs_human_row.candidate_status == "system_candidate"
         candidates = session.scalars(
             select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.paper_id == paper_id)
         ).all()
@@ -545,7 +525,7 @@ def test_import_transaction_failure_rolls_back_dft_and_preserves_caller_owned_lo
         assert lock.locked_by == MCP_PROPOSER_OWNER
 
 
-def test_explicit_terminal_review_rejects_through_review_service_and_stale_fingerprint_is_blocked(
+def test_explicit_ai_rejection_stays_candidate_and_does_not_call_terminal_review_service(
     setup_test_db,
     monkeypatch,
 ):
@@ -582,7 +562,10 @@ def test_explicit_terminal_review_rejects_through_review_service_and_stale_finge
             dft_result_ids=[pass_row_id],
         )
 
-    assert automatic_after_terminal["target_ids"] == []
+    assert set(automatic_after_terminal["target_ids"]) == {
+        str(pass_row_id),
+        str(revise_row_id),
+    }
     assert set(explicit_sample_task["target_ids"]) == {
         str(pass_row_id),
         str(revise_row_id),
@@ -640,13 +623,23 @@ def test_explicit_terminal_review_rejects_through_review_service_and_stale_finge
     monkeypatch.setattr(DFTResultReviewService, "reject_result", tracked_reject)
     _call_import_analysis(reject_request, lock_token=lock_token)
 
-    assert reject_calls == [pass_row_id]
+    assert reject_calls == []
     with Session(setup_test_db) as session:
         rejected = session.get(DFTResult, pass_row_id)
         assert rejected is not None
-        assert str(rejected.candidate_status).lower() == "rejected"
+        assert rejected.candidate_status == "system_candidate"
         assert session.scalar(select(func.count()).select_from(DFTResult)) == 2
         assert session.scalar(select(func.count()).select_from(CatalystSample)) == 1
-
-    with pytest.raises(ValueError, match="stale_or_mismatched_bundle"):
-        _call_import_analysis(reject_request, lock_token=lock_token)
+        rejection_candidates = session.scalars(
+            select(ExternalAnalysisCandidate).where(
+                ExternalAnalysisCandidate.paper_id == paper_id,
+            )
+        ).all()
+        assert rejection_candidates
+        assert {candidate.status for candidate in rejection_candidates} <= {
+            "candidate",
+            "pending",
+            "requires_resolution",
+            "pending_ai_verification",
+        }
+        assert all(candidate.materialized_target_id is None for candidate in rejection_candidates)

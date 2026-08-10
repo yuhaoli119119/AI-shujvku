@@ -80,6 +80,15 @@ def locator_degradation(
             warning_reason=warning_reason or "locator could not be resolved",
         )
 
+    if status == TEXT_ONLY:
+        return LocatorDegradation(
+            locator_status=TEXT_ONLY,
+            provenance_level=TEXT_EVIDENCE_ONLY,
+            can_jump_to_pdf_page=False,
+            can_highlight_in_pdf=False,
+            warning_reason=warning_reason or "page missing or locator explicitly text-only; exact PDF page required",
+        )
+
     if has_page:
         return LocatorDegradation(
             locator_status=EXACT_PAGE,
@@ -87,15 +96,6 @@ def locator_degradation(
             can_jump_to_pdf_page=True,
             can_highlight_in_pdf=False,
             warning_reason=warning_reason,
-        )
-
-    if status == TEXT_ONLY:
-        return LocatorDegradation(
-            locator_status=TEXT_ONLY,
-            provenance_level=TEXT_EVIDENCE_ONLY,
-            can_jump_to_pdf_page=False,
-            can_highlight_in_pdf=False,
-            warning_reason=warning_reason or "page missing; only evidence text is available",
         )
 
     if status == MISSING_PAGE or (has_text and status != MISSING_LOCATOR):

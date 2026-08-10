@@ -66,7 +66,6 @@ class ExternalAnalysisMaterializationMixin:
         candidates = self.session.scalars(stmt.order_by(ExternalAnalysisCandidate.created_at.asc())).all()
 
         result = MaterializationResult()
-        review_service = ReviewService(self.session)
         for candidate in candidates:
             payload = candidate.normalized_payload or {}
             if (
@@ -141,15 +140,13 @@ class ExternalAnalysisMaterializationMixin:
                     run,
                     payload.get("evidence_payload"),
                 )
-                auto_apply_non_dft = self._is_auto_applicable_non_dft_correction(payload)
-                if auto_apply_non_dft:
-                    evidence_payload.update(
-                        {
-                            "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
-                            "writes_final_truth": True,
-                            "requires_confirmation": False,
-                        }
-                    )
+                evidence_payload.update(
+                    {
+                        "protocol": protocol_snapshot("external_analysis_candidate_only"),
+                        "writes_final_truth": False,
+                        "requires_confirmation": True,
+                    }
+                )
                 correction = PaperCorrection(
                     paper_id=candidate.paper_id,
                     source=run.source,
@@ -163,12 +160,7 @@ class ExternalAnalysisMaterializationMixin:
                 )
                 self.session.add(correction)
                 self.session.flush()
-                if auto_apply_non_dft:
-                    review_service.approve_correction(correction.id, created_by)
-                    candidate.status = "ai_applied"
-                    result.auto_applied_corrections += 1
-                else:
-                    candidate.status = "materialized"
+                candidate.status = "materialized"
                 candidate.materialized_target_type = "paper_correction"
                 candidate.materialized_target_id = str(correction.id)
                 result.created_corrections += 1
@@ -213,8 +205,8 @@ class ExternalAnalysisMaterializationMixin:
                     "deferred_review_candidates": result.deferred_review_candidates,
                     "source_run_id": str(run.id),
                     "protocol": protocol_snapshot("gemini_audit_protocol"),
-                    "writes_final_truth": result.auto_applied_corrections > 0,
-                    "requires_confirmation": result.created_corrections > result.auto_applied_corrections,
+                    "writes_final_truth": False,
+                    "requires_confirmation": result.created_corrections > 0,
                 },
             )
         )
@@ -229,13 +221,7 @@ class ExternalAnalysisMaterializationMixin:
         write_lock_tokens: list[str] | None = None,
         write_lock_owner: str | list[str] | set[str] | tuple[str, ...] | None = None,
     ) -> MaterializationResult:
-        """Materialize IDE AI outputs that are safe outside the DFT review lane.
-
-        Non-DFT notes and corrections are operational outputs: notes mark a module as
-        IDE-reviewed, and eligible corrections are immediately approved/applied so
-        RAG can use the cleaned records. DFT results/settings stay out of this path
-        and must go through the dedicated review/export workflow.
-        """
+        """Retain imported AI outputs for unified single-AI verification or exception handling."""
 
         run = self.get_run(run_id)
         candidates = self.session.scalars(
@@ -244,8 +230,6 @@ class ExternalAnalysisMaterializationMixin:
             .order_by(ExternalAnalysisCandidate.created_at.asc())
         ).all()
         result = MaterializationResult()
-        review_service = ReviewService(self.session)
-
         for candidate in candidates:
             if candidate.status not in {"pending", "requires_resolution"}:
                 result.skipped_candidates += 1
@@ -263,107 +247,17 @@ class ExternalAnalysisMaterializationMixin:
                 result.skipped_candidates += 1
                 continue
 
-            if candidate.candidate_type == "note":
-                note = PaperNote(
-                    paper_id=candidate.paper_id,
-                    source=run.source,
-                    content=payload.get("content", ""),
-                    field_name=payload.get("field_name"),
-                    page=payload.get("page"),
-                    section_title=payload.get("section_title"),
-                    quoted_text=payload.get("quoted_text"),
-                )
-                self.session.add(note)
-                self.session.flush()
-                candidate.status = "ai_reviewed"
-                candidate.materialized_target_type = "paper_note"
-                candidate.materialized_target_id = str(note.id)
-                result.created_notes += 1
-                self.session.add(candidate)
-                continue
-
-            if candidate.candidate_type == "correction":
-                if self._is_table_correction_payload(payload):
-                    candidate.status = "requires_resolution"
-                    candidate.mapping_reason = "direct_mcp_tool_required:table_object_mutation"
-                    self.session.add(candidate)
-                    result.skipped_candidates += 1
-                    continue
-                if not self._is_auto_applicable_non_dft_correction(payload):
-                    candidate.status = "requires_resolution"
-                    self.session.add(candidate)
-                    result.skipped_candidates += 1
-                    continue
-                correction = PaperCorrection(
-                    paper_id=candidate.paper_id,
-                    source=run.source,
-                    field_name=payload.get("field_name", ""),
-                    target_path=payload.get("target_path", ""),
-                    operation=payload.get("operation", "replace"),
-                    proposed_value=payload.get("proposed_value"),
-                    reason=payload.get("reason", ""),
-                    evidence_payload=self._external_candidate_evidence_payload(
-                        run,
-                        payload.get("evidence_payload"),
-                    ),
-                    status="pending",
-                )
-                self.session.add(correction)
-                self.session.flush()
-                try:
-                    review_service.approve_correction(
-                        correction.id,
-                        reviewer,
-                        write_lock_tokens=write_lock_tokens,
-                        write_lock_owner=write_lock_owner,
-                    )
-                except Exception as exc:
-                    correction.status = "requires_resolution"
-                    correction.reviewed_by = reviewer
-                    correction.reviewed_at = None
-                    candidate.status = "requires_resolution"
-                    candidate.mapping_reason = str(exc)
-                    self.session.add(correction)
-                    self.session.add(candidate)
-                    result.skipped_candidates += 1
-                    continue
-                candidate.status = "ai_applied"
-                candidate.materialized_target_type = "paper_correction"
-                candidate.materialized_target_id = str(correction.id)
-                result.created_corrections += 1
-                result.auto_applied_corrections += 1
-                self.session.add(candidate)
-                continue
-
-            if candidate.candidate_type == "relationship":
-                target_paper_id = payload.get("target_paper_id")
-                if not target_paper_id:
-                    candidate.status = "requires_resolution"
-                    result.skipped_candidates += 1
-                    self.session.add(candidate)
-                    continue
-                relationship = PaperRelationship(
-                    source_paper_id=candidate.paper_id,
-                    target_paper_id=UUID(str(target_paper_id)),
-                    relationship_type=payload.get("relationship_type", "supports"),
-                    note=payload.get("note"),
-                    created_by=reviewer,
-                )
-                self.session.add(relationship)
-                self.session.flush()
-                candidate.status = "ai_applied"
-                candidate.materialized_target_type = "paper_relationship"
-                candidate.materialized_target_id = str(relationship.id)
-                result.created_relationships += 1
-                self.session.add(candidate)
-                continue
-
+            candidate.status = "requires_resolution"
+            candidate.materialized_target_type = None
+            candidate.materialized_target_id = None
+            candidate.mapping_reason = "authenticated_human_review_required"
+            self.session.add(candidate)
             result.skipped_candidates += 1
 
         self.session.add(
             AuditLog(
                 paper_id=run.paper_id,
-                action="auto_apply_non_dft_external_analysis",
+                action="defer_external_analysis_candidates_for_human_review",
                 source=reviewer,
                 target_type="external_analysis_run",
                 target_id=str(run.id),
@@ -375,15 +269,15 @@ class ExternalAnalysisMaterializationMixin:
                     "idempotent_noops": result.idempotent_noops,
                     "skipped_candidates": result.skipped_candidates,
                     "source_run_id": str(run.id),
-                    "protocol": protocol_snapshot("ide_ai_non_dft_auto_apply"),
-                    "writes_final_truth": True,
-                    "requires_confirmation": False,
+                    "protocol": protocol_snapshot("external_analysis_candidate_only"),
+                    "writes_final_truth": False,
+                    "requires_confirmation": True,
                     "dft_outputs_excluded": True,
                     "write_lock": {
                         "required_modules": [],
                         "covered_modules": [],
                         "lock_ids": [],
-                        "policy": "not_required_for_non_dft_ai_overwrite",
+                        "policy": "no_ai_overwrite",
                     },
                 },
             )
@@ -413,8 +307,9 @@ class ExternalAnalysisMaterializationMixin:
            write.  The lock is released in a ``finally`` block to guarantee it
            never leaks on success or failure.
         3. Runs the non-DFT auto-apply path (notes/corrections/relationships).
-        4. Runs the DFT settlement path (materialize new candidates + dual-AI
-           consensus state machine) via ``VerificationSessionService``.
+        4. Runs the DFT candidate materialization path. Final acceptance is
+           performed only by the dedicated single-AI verification service;
+           this pipeline never creates a second verification lane or consensus.
         5. Returns the combined ``auto_apply_summary`` mirroring the historical
            MCP response shape.
 
