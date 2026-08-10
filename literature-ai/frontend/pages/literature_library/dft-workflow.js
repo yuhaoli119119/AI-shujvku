@@ -141,9 +141,9 @@ function buildCompactBlockedDftBatchPrompt(rows) {
     ) || "<source_pdf>";
     const header = [
         "任务：在一次处理中完成已有 DFT 候选核验和全文证据查漏；不要把清单内候选重新当成新数据提交。",
-        "要求：先核对 PDF 证据，再逐条给出完整意见。系统按独立 candidate_id 审核提交计票，不按 AI、模型或 source_label 去重；同一模型可以再次提交下一轮审核。",
+        "要求：先核对 PDF 证据，再逐条给出完整意见。每个 candidate_id 只能进入单一 AI 验收流程；禁止第二 AI、模型投票或共识裁决。",
         "强制规则：清单内每条候选都必须使用该行给出的 target_id；禁止对清单内候选输出 target_id='new' 或 decision='new_candidate'。",
-        "有效 AI 意见必须在 evidence_location 同时填写 page 和 quoted_text；缺任一项都不会计入第二意见或裁决依据。",
+        "有效 AI 意见必须在 evidence_location 同时填写 page 和 quoted_text；缺任一项都只能作为候选证据，不能通过验收。",
         "不要输出长解释；只输出一个可直接用于 import_analysis 的 JSON，顶层只保留 object_review_audits。",
         "如果当前 IDE 没有暴露 MCP 工具，不要直接停下；请通过仓库内 `app.mcp.context.mcp_auth_context` 建立明确身份，再受控调用 `app.mcp.server` 已公开的 MCP 工具。禁止直接调用 service/session/model 或数据库。",
         "",

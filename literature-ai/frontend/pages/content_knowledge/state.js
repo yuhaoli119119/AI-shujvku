@@ -1,4 +1,15 @@
-export const state = { items: [], total: 0, offset: 0, startOffset: 0, limit: 25, hasMore: false, selectedId: null, filters: {} };
+export const state = {
+  items: [],
+  total: 0,
+  distinctPaperCount: 0,
+  resultView: 'content',
+  offset: 0,
+  startOffset: 0,
+  limit: 25,
+  hasMore: false,
+  selectedId: null,
+  filters: {},
+};
 
 export function readUrlState() {
   const params = new URLSearchParams(window.location.search);

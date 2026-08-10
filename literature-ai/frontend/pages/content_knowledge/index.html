@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>内容知识审核台 - Literature AI</title>
+  <title>论文内容审核 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -17,42 +17,46 @@
   <main class="workspace">
     <header class="page-head">
       <div>
-        <p class="eyebrow">内容审核工作台</p>
-        <h1>内容知识</h1>
-        <p class="page-intro">逐条核对论文内容、证据与来源风险；人工决定后才会改变内容的引用或写作使用状态。</p>
+        <p class="eyebrow">论文内容审核</p>
+        <h1 id="pageTitle">论文内容</h1>
+        <p class="page-intro">集中核对研究空白、解决方案、关键结果与机理证据，并显示可用的已审核图片；审核后才会改变写作或引用资格。</p>
       </div>
       <span class="status-pill" id="schemaStatus">内容索引</span>
     </header>
 
     <form id="knowledgeFilters" class="filters" novalidate>
       <label class="search-field" for="queryInput"><span>全局搜索</span><input id="queryInput" name="query" autocomplete="off" placeholder="论文号、标题、内容或证据关键词"></label>
+      <label class="field" for="resultViewSelect"><span>结果视图</span><select id="resultViewSelect" name="result_view"><option value="content">论文内容</option><option value="audit">DFT / 外部候选审计</option></select></label>
       <label class="field" for="categorySelect"><span>类别</span><select id="categorySelect" name="category"></select></label>
-      <label class="field" for="reviewSelect"><span>审核状态</span><select id="reviewSelect" name="review_status"><option value="">全部</option><option value="needs_review">待审核</option><option value="needs_human">需人工</option><option value="validated">已审核</option><option value="rejected">已拒绝</option></select></label>
+      <label class="field" for="reviewSelect"><span>验收状态</span><select id="reviewSelect" name="review_status"><option value="">全部</option><option value="needs_review">待 AI 验收</option><option value="ai_verified">AI 已验收</option><option value="auto_repaired">AI 自动修正</option><option value="rejected" data-ai-outcome="auto_rejected">AI 自动拒绝</option><option value="needs_human">异常 / 需人工</option><option value="validated">人工已确认</option></select></label>
       <button class="primary-btn" type="submit">检索</button>
       <button class="text-btn" id="moreFiltersToggle" type="button" aria-expanded="false" aria-controls="moreFilters">更多筛选</button>
       <section class="more-filters" id="moreFilters" hidden>
         <label class="field" for="paperInput"><span>论文号 / ID</span><input id="paperInput" name="paper_id" autocomplete="off" placeholder="如 B0078"></label>
         <label class="field" for="libraryInput"><span>文献库</span><input id="libraryInput" name="library_name" autocomplete="off"></label>
         <label class="field" for="citationSelect"><span>引用资格</span><select id="citationSelect" name="citation_status"><option value="">全部</option><option value="citable">可引用</option><option value="writing_only">仅写作</option><option value="needs_review">待审核</option><option value="blocked">阻断</option></select></label>
-        <label class="check-field"><input id="candidateToggle" name="include_candidates" type="checkbox" checked>包含候选项</label>
-        <label class="check-field"><input id="blockedToggle" name="include_blocked" type="checkbox">只看阻断风险</label>
+        <label class="check-field"><input id="candidateToggle" name="include_candidates" type="checkbox"><span id="candidateToggleLabel">外部候选已与论文内容分流</span></label>
+        <label class="check-field"><input id="blockedToggle" name="include_blocked" type="checkbox">显示安全门阻断项</label>
       </section>
     </form>
 
     <section class="workbench-status" aria-live="polite">
-      <span id="resultRange">准备加载内容知识…</span>
+      <span id="resultRange">准备加载论文内容…</span>
       <span id="scopeBanner"></span>
+      <span id="reviewCoverageSummary">选择一篇论文后读取权威审核覆盖。</span>
       <span id="actionMessage" class="action-message" hidden></span>
+      <p class="count-semantics" id="countSemantics">列表结果 / 证据项是搜索投影卡数量，不等于论文数；审核对象是审核包内逐条核验的内容对象；唯一证据页是去重后的 PDF 页面数，多个对象可共享同一页。</p>
+      <p class="count-semantics">默认由单一获授权 AI 自动验收；人工页面只处理 exception。状态必须区分 human verified、ai_verified、blocked、exception、可写作与可引用。</p>
     </section>
 
-    <section class="workbench" aria-label="内容知识审核工作台">
+    <section class="workbench" aria-label="论文内容审核工作台">
       <aside class="results-panel panel" aria-label="检索结果">
-        <div class="panel-heading"><h2>结果</h2><span id="resultCount"></span></div>
+        <div class="panel-heading"><h2 id="resultHeading">论文内容证据项</h2><span id="resultCount"></span></div>
         <div id="listRoot" class="knowledge-list"><div class="state-card">加载中…</div></div>
         <button id="loadMoreButton" class="secondary-btn" type="button" hidden>加载更多</button>
       </aside>
       <section class="detail-panel panel" aria-label="内容详情" id="detailRoot"><div class="state-card">从左侧选择一条内容以查看证据与技术详情。</div></section>
-      <aside class="review-panel panel" aria-label="审核和来源风险" id="reviewRoot"><div class="state-card">选择内容后可进行人工审核。</div></aside>
+      <aside class="review-panel panel" aria-label="审核和来源风险" id="reviewRoot"><div class="state-card">选择异常项后可进行人工处理；已通过 AI 门禁的项目无需逐条点击。</div></aside>
     </section>
 
     <details class="advanced-actions">
@@ -61,12 +65,25 @@
       <p id="syncScope" class="muted">同步范围：请先选择论文或文献库。</p>
       <div class="advanced-buttons">
         <button data-advanced="sync" class="secondary-btn" type="button">同步内容索引</button>
-        <label class="field bundle-module" for="bundleModule"><span>审核模块</span><select id="bundleModule"><option value="abstract">摘要</option><option value="sections">章节</option><option value="mechanism_knowledge">机理知识</option><option value="writing_cards">写作卡</option></select></label>
+        <label class="field bundle-module" for="bundleModule"><span>审核范围</span><select id="bundleModule"><option value="paper_content">论文内容</option></select></label>
         <button id="createBundleButton" class="secondary-btn" type="button">生成 v2 审核包</button>
         <button id="copyBundleButton" class="secondary-btn" type="button">复制网页 AI 指令</button>
       </div>
+      <section id="bundleStorageOverview" class="bundle-storage-overview" aria-live="polite">
+        <h3>当前论文审核包概况</h3>
+        <div class="bundle-storage-stats">
+          <span>审核包总数 <strong id="bundleTotalCount">—</strong></span>
+          <span>可复用数 <strong id="bundleReusableCount">—</strong></span>
+          <span>受保护审计数 <strong id="bundleProtectedCount">—</strong></span>
+          <span>可清理数 <strong id="bundleCleanupCount">—</strong></span>
+          <span>JSON 内容估算 <strong id="bundleJsonEstimate">—</strong></span>
+        </div>
+        <p id="bundleStorageStatus" class="muted">选择论文后读取概况。</p>
+        <p class="bundle-storage-note">ZIP 在下载时临时生成，不在服务器重复永久保存。已收到网页 AI 建议或进入本地核验的审核包不会自动删除。相同快照反复点击生成会复用原审核包。</p>
+      </section>
       <section id="bundleControls" hidden>
         <p id="bundleStatus"></p>
+        <p class="muted">审核对象按内容对象逐条计数；唯一证据页按 PDF 页码去重，因此多个对象可能共用同一页。</p>
         <button id="bundleDownloadButton" class="secondary-btn" type="button" disabled>下载审核包 ZIP</button>
         <label class="field" for="bundleInstructionOutput"><span>网页 AI 指令（只读降级显示）</span><textarea id="bundleInstructionOutput" rows="4" readonly hidden></textarea></label>
         <div id="bundleDropZone" class="bundle-drop-zone" tabindex="0">拖入网页 AI JSON，或<label for="bundleFile">选择文件</label><input id="bundleFile" type="file" accept="application/json,.json"></div>

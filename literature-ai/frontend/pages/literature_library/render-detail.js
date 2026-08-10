@@ -8,7 +8,7 @@ function renderDetail(detail, audit) {
             '<div class="stat-card"><h3>图片</h3><div class="value">' + (counts.figures || 0) + "</div></div>" +
             '<div class="stat-card"><h3>DFT 候选</h3><div class="value">' + (counts.dft_results || 0) + "</div></div>" +
             '<div class="stat-card"><h3>机理</h3><div class="value">' + (counts.mechanism_claims || 0) + "</div></div>" +
-            '<div class="stat-card"><h3>写作卡</h3><div class="value">' + (counts.writing_cards || 0) + "</div></div>" +
+            '<div class="stat-card"><h3>论文重点</h3><div class="value">' + (counts.writing_cards || 0) + "</div></div>" +
         "</div>";
 
     const baseInfo =
@@ -24,7 +24,6 @@ function renderDetail(detail, audit) {
         "</details>";
 
     const abstractReviewStatus = contentReviewStatus(detail, "abstract_review_status");
-    const sectionsReviewStatus = contentReviewStatus(detail, "sections_review_status");
     const writingCardsReviewStatus = contentReviewStatus(detail, "writing_cards_review_status");
     const translationReviewStatus = contentReviewStatus(detail, "translation_review_status");
     const abstractCard = isAiVerifiedStatus(abstractReviewStatus)
@@ -35,26 +34,6 @@ function renderDetail(detail, audit) {
     const comprehensiveCard = "";
 
     const activeTab = state.currentTab || "summary";
-    let sectionCards = "";
-    if (activeTab === "sections") {
-        if (isAiVerifiedStatus(sectionsReviewStatus)) {
-            const displaySections = (detail.sections || []).filter(isDisplayBodySection).sort(compareDisplaySections).slice(0, 8);
-            if (displaySections.length) {
-            sectionCards = renderListBlock("章节内容", displaySections, function(item) {
-                const text = cleanPdfExtractedText(item.text || "");
-                return '<div class="prewrap">' + esc(ellipsis(text, 2200) || "暂无文本。") + "</div>";
-            }, function(item) {
-                const title = cleanPdfExtractedText(item.section_title || item.section_type || "未命名章节");
-                return esc(title);
-            });
-            } else {
-                sectionCards = renderPendingReviewCard("\u7ae0\u8282", "\u5f53\u524d\u53ea\u5269\u6574\u9875\u5207\u5206\u6216\u5df2\u5e9f\u5f03\u7ae0\u8282\uff0c\u6682\u65f6\u6ca1\u6709\u53ef\u5c55\u793a\u7684\u7ed3\u6784\u5316\u7ae0\u8282\u3002");
-            }
-        } else {
-            sectionCards = renderPendingReviewCard("章节", "章节待 AI 核验。");
-        }
-    }
-
     let figureCards = "";
     if (activeTab === "figures" && detail.figures && detail.figures.length) {
         function extractFigureNumber(caption) {
@@ -265,22 +244,9 @@ function renderDetail(detail, audit) {
             '<div id="evidenceLocatorsPanel"><div class="muted">正在加载证据定位...</div></div>' +
         '</details>';
 
-    let referenceCards = "";
-    if (activeTab === "sections") {
-        referenceCards = renderListBlock("参考文献", detail.references ? detail.references.slice(0, 20) : [], function(item) {
-            return (
-                '<div class="prewrap">' + esc(item.title || "未命名参考文献") + "</div>" +
-                '<div class="subtle" style="margin-top:8px;">作者：' + esc(item.authors || "-") + " | DOI：" + esc(item.doi || "-") + "</div>" +
-                (item.citation_context ? '<div class="mono" style="margin-top:8px;">' + esc(item.citation_context) + "</div>" : "")
-            );
-        });
-    }
-
     const summaryEl = $("summaryContent");
-    const sectionsEl = $("sectionsContent");
     const figuresEl = $("figuresContent");
     const dftEl = $("dftContent");
-    const mechanismEl = $("mechanismContent");
     const writingEl = $("writingContent");
     const translationEl = $("translationContent");
     const aggregateEl = $("aggregateResult");
@@ -359,26 +325,6 @@ function renderDetail(detail, audit) {
             renderEvidenceLocators(state.selectedPaperEvidenceLocators);
         }
     }
-    if (sectionsEl && activeTab === "sections") {
-        sectionsEl.innerHTML =
-            renderContentKnowledgeLinkCard(detail, "正文审核入口", "正文、章节和摘要的证据核对入口；此处的人工浏览标记不等于审核通过。") +
-            renderManualReviewCompletionCard(detail, "content", "内容解析进度", "当摘要、章节和详情页展示内容都核对完毕后，再手动标记完成。若之后重新补解析，可随时取消。") +
-            sectionCards +
-            referenceCards +
-            '<div style="margin-bottom:16px;">' +
-            '<button class="btn primary small" onclick="promptAddRelationship(\'' + detail.id + '\')">绑定支撑文献</button>' +
-            '</div>' +
-            renderJSONCards("出向关系", detail.outgoing_relationships || []) +
-            renderJSONCards("入向关系", detail.incoming_relationships || []);
-    }
-    if (mechanismEl && activeTab === "mechanism") {
-        const mechanismItems = detail.mechanism_claims_items || [];
-        mechanismEl.innerHTML =
-            renderContentKnowledgeLinkCard(detail, "机理知识审核", "机理声明仍需结合正文、图表和 PDF 证据审核；详情页不把原始候选对象改写成审核状态。", "mechanism_evidence") +
-            (mechanismItems.length
-                ? renderJSONCards("机理知识", mechanismItems)
-                : renderPendingReviewCard("机理知识", "当前没有可展示的机理知识候选。可先到知识审核入口查看或补充。"));
-    }
     if (figuresEl && activeTab === "figures") {
         figuresEl.innerHTML =
             renderManualReviewCompletionCard(detail, "figures", "图表进度", "当图表对象、裁图和关键信息都核对完毕后，再手动标记完成。若后续重新补图或重裁，可取消。") +
@@ -409,15 +355,20 @@ function renderDetail(detail, audit) {
         decorateDftReadinessPanel(detail);
     }
     if (writingEl && activeTab === "writing") {
+        const mechanismItems = detail.mechanism_claims_items || [];
         const writingItems = detail.writing_cards_items || [];
-        if (writingItems.length) {
-            const reviewNotice = isAiVerifiedStatus(writingCardsReviewStatus)
-                ? ""
-                : '<div class="section-card figure-audit-note"><h3>\u5199\u4f5c\u5361\u72b6\u6001</h3><div class="subtle">\u8fd9\u6279\u5199\u4f5c\u5361\u8fd8\u6ca1\u8fdb\u5165 safe_verified\uff0c\u4f46\u73b0\u5728\u53ef\u4ee5\u76f4\u63a5\u67e5\u770b\u7814\u7a76\u7a7a\u767d\u3001\u62df\u89e3\u51b3\u65b9\u6848\u3001\u6838\u5fc3\u5047\u8bbe\u3001\u8bc1\u636e\u94fe\u548c\u5f53\u524d\u963b\u585e\u9879\u3002</div></div>';
-            writingEl.innerHTML = renderContentKnowledgeLinkCard(detail, "写作卡知识审核", "写作卡需要基于正文和 PDF 证据审核后再作为写作依据。", "writing_material") + reviewNotice + renderJSONCards("写作卡片", writingItems);
-        } else {
-            writingEl.innerHTML = renderContentKnowledgeLinkCard(detail, "写作卡知识审核", "当前没有写作卡，也可以先到知识审核入口查看写作材料。", "writing_material") + renderPendingReviewCard("写作卡片", "当前还没有写作卡内容。");
-        }
+        const reviewNotice = isAiVerifiedStatus(writingCardsReviewStatus)
+            ? ""
+            : '<div class="section-card figure-audit-note"><h3>论文内容状态</h3><div class="subtle">当前提取结果尚未全部进入 safe_verified。研究空白、方案、核心假设、重点结果和机理内容都必须在统一审核页核对原文证据；只有已审核图表会与文字内容关联。</div></div>';
+        const writingContent = writingItems.length
+            ? renderJSONCards("论文重点", writingItems)
+            : renderPendingReviewCard("论文重点", "当前还没有提取出可展示的论文重点内容。");
+        const mechanismContent = mechanismItems.length
+            ? renderJSONCards("机理内容", mechanismItems)
+            : renderPendingReviewCard("机理内容", "当前没有可展示的结构化机理内容。");
+        writingEl.innerHTML =
+            renderContentKnowledgeLinkCard(detail, "论文内容审核", "统一审核研究空白、解决方案、核心假设、重点结果与机理内容，并查看它们关联的已审核图表。") +
+            reviewNotice + writingContent + mechanismContent;
     }
     if (translationEl && activeTab === "translation") {
         translationEl.innerHTML = (isAiVerifiedStatus(translationReviewStatus) || translationReviewStatus === "final_trusted")

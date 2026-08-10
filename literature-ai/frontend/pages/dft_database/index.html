@@ -790,7 +790,6 @@
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
     async function fetchJSON(url, options) {
       options = options || {}; options.headers = options.headers || {};
-      const token = sessionStorage.getItem("litai-settings-token"); if (token) options.headers["X-Settings-Token"] = token;
       const resp = await fetch(url, options); const text = await resp.text();
       let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
       if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
@@ -1610,8 +1609,6 @@
       applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
-      const token = sessionStorage.getItem("litai-settings-token");
-      if (token) headers["X-Settings-Token"] = token;
       setExportSafetyStatus("正在读取导出安全结果...");
       try {
         const resp = await fetch(url, { headers });
@@ -1685,8 +1682,6 @@
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
-      const token = sessionStorage.getItem("litai-settings-token");
-      if (token) headers["X-Settings-Token"] = token;
       setExportSafetyStatus("正在生成 ML 数据集导出...");
       try {
         const resp = await fetch(url, { headers });

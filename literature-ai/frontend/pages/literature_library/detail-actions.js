@@ -54,7 +54,7 @@ function taskLogModuleLabelFromRun(run) {
     if (text.indexOf("dft") >= 0) return "DFT数据审核";
     if (/(figure|table|chart)/i.test(text)) return "图表证据整理";
     if (/(writing|card|draft)/i.test(text)) return "写作RAG生成";
-    return "内容知识审核";
+    return "论文内容审核";
 }
 
 function collectTaskLogEntries(detail, audit) {
@@ -129,7 +129,7 @@ function renderTaskLogPanel(detail, audit) {
                 entries.map(function(entry) {
                     return '<div class="candidate-card">' +
                         '<div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;flex-wrap:wrap;">' +
-                            '<strong>' + esc(entry.actor || "system") + '：' + esc(entry.target || "内容知识审核") + '</strong>' +
+                            '<strong>' + esc(entry.actor || "system") + '：' + esc(entry.target || "论文内容审核") + '</strong>' +
                             '<span class="status-chip ' + escAttr(entry.tone || "meta") + '">' + esc(entry.time ? formatDate(entry.time) : "time unknown") + '</span>' +
                         '</div>' +
                         '<div style="margin-top:6px;">' + esc(entry.action || "action") + '</div>' +

@@ -20,6 +20,11 @@ export async function listItems(filters, offset, limit) {
   return {
     items,
     total: body.total ?? items.length,
+    resultItemCount: body.result_item_count ?? items.length,
+    distinctPaperCount: body.distinct_paper_count ?? new Set(items.map((item) => item.paper_id).filter(Boolean)).size,
+    resultView: body.result_view || filters.result_view || 'content',
+    countSemantics: body.count_semantics || {},
+    categoryCounts: body.category_counts || {},
     offset: body.offset ?? offset,
     limit: body.limit ?? limit,
     hasMore: body.has_more ?? false,
@@ -66,6 +71,19 @@ export function createReviewBundleV2(body) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+export function getReviewSummary(paperId) {
+  return request(`/api/content-knowledge/papers/${encodeURIComponent(paperId)}/review-summary`);
+}
+
+export function getReviewBundleHistory(paperId, module, limit = 20) {
+  const params = new URLSearchParams({
+    paper_id: paperId,
+    module,
+    limit: String(limit),
+  });
+  return request(`/api/content-knowledge/review-bundles/v2/history?${params}`);
 }
 
 export function validateReviewBundleProposal(bundleId, result) {

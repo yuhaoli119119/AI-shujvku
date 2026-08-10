@@ -256,7 +256,7 @@ function renderPaperList() {
                         '<span title="线索/章节数量">章节: <strong>' + (paper.counts && paper.counts.sections ? paper.counts.sections : 0) + '</strong></span>' +
                         '<span title="解析图表数量">图表: <strong>' + (paper.counts && paper.counts.figures ? paper.counts.figures : 0) + '</strong></span>' +
                         '<span title="DFT提取数据">DFT: <strong>' + (paper.counts && paper.counts.dft_results ? paper.counts.dft_results : 0) + '</strong></span>' +
-                        '<span title="关联写作卡片">写作卡: <strong>' + (paper.counts && paper.counts.writing_cards ? paper.counts.writing_cards : 0) + '</strong></span>' +
+                        '<span title="论文重点记录数">论文重点: <strong>' + (paper.counts && paper.counts.writing_cards ? paper.counts.writing_cards : 0) + '</strong></span>' +
                     '</div>' +
                 '</td>' +
             '</tr>'

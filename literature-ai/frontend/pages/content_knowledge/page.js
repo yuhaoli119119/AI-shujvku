@@ -3,9 +3,11 @@ import { initFilters } from './filters.js';
 import {
   listItems,
   getItem,
+  getReviewSummary,
   reviewItem,
   syncIndex,
   createReviewBundleV2,
+  getReviewBundleHistory,
   validateReviewBundleProposal,
   getLocalVerificationPlan,
   getLocalVerificationStatus,
@@ -23,6 +25,7 @@ let currentBundle = null;
 let currentPlan = null;
 let currentVerificationStatus = null;
 let uploadedProposalKey = null;
+let currentReviewSummary = null;
 const MAX_PROPOSAL_BYTES = 5 * 1024 * 1024;
 
 function showMessage(text, isError = false) {
@@ -101,10 +104,44 @@ function renderSelectedItem() {
 
 function renderMetadata() {
   const shown = state.items.length ? `${state.startOffset + 1}–${state.startOffset + state.items.length}` : '0';
-  document.querySelector('#resultRange').textContent = `显示 ${shown}，共 ${state.total} 条`;
-  document.querySelector('#resultCount').textContent = `${state.total} 条`;
+  const auditView = state.resultView === 'audit';
+  const itemLabel = auditView ? '外部候选 / 审计记录' : '论文内容证据项';
+  document.querySelector('#pageTitle').textContent = auditView ? 'DFT / 外部候选审计' : '论文内容';
+  document.querySelector('#resultHeading').textContent = itemLabel;
+  document.querySelector('#resultRange').textContent = `显示 ${shown}，共 ${state.total} 条；涉及论文 ${state.distinctPaperCount} 篇`;
+  document.querySelector('#resultCount').textContent = `${state.total} 条 / ${state.distinctPaperCount} 篇论文`;
   document.querySelector('#loadMoreButton').hidden = !state.hasMore;
   renderScopeBanner();
+}
+
+function renderReviewCoverage(summary) {
+  currentReviewSummary = summary;
+  const root = document.querySelector('#reviewCoverageSummary');
+  const coverage = summary?.review_coverage;
+  if (!coverage) {
+    root.textContent = '选择一篇论文后读取权威审核覆盖。';
+    return;
+  }
+  const sections = coverage.sections || {};
+  const cards = coverage.writing_cards || {};
+  const types = sections.by_section_type || {};
+  const captions = types.figure_caption || {};
+  const body = types.body || {};
+  root.textContent = `权威覆盖：Section ${sections.authoritative_reviewed || 0}/${sections.total || 0}（Figure caption 已验收 ${captions.verified || 0}；body 已验收 ${body.verified || 0}、exception ${body.exception || 0}）；WritingCard 已验收 ${cards.authoritative_reviewed || 0}/${cards.total || 0}、exception ${cards.exception || 0}；未决策 ${Number(sections.unreviewed || 0) + Number(cards.unreviewed || 0)}。`;
+}
+
+async function loadReviewCoverage() {
+  const paperId = selectedPaperId() || state.filters.paper_id;
+  if (!paperId) {
+    renderReviewCoverage(null);
+    return;
+  }
+  try {
+    renderReviewCoverage(await getReviewSummary(paperId));
+  } catch (error) {
+    currentReviewSummary = null;
+    document.querySelector('#reviewCoverageSummary').textContent = `权威审核覆盖读取失败：${error.message}`;
+  }
 }
 
 async function loadItems({ append = false } = {}) {
@@ -114,16 +151,19 @@ async function loadItems({ append = false } = {}) {
     if (!append) state.startOffset = payload.offset;
     state.items = append ? [...state.items, ...payload.items] : payload.items;
     state.total = payload.total;
+    state.distinctPaperCount = payload.distinctPaperCount;
+    state.resultView = payload.resultView;
     state.limit = payload.limit;
     state.hasMore = payload.hasMore;
     document.querySelector('#schemaStatus').textContent = payload.schemaVersion || '内容索引';
     renderList(listRoot, state.items, state.selectedId, selectItem);
     renderMetadata();
+    await loadReviewCoverage();
     if (state.selectedId) await hydrateSelectedItem();
     renderSelectedItem();
   } catch (error) {
     renderListError(listRoot, error.message);
-    showMessage('无法加载内容知识。', true);
+    showMessage('无法加载当前内容 / 审计视图。', true);
   }
 }
 
@@ -132,6 +172,7 @@ async function selectItem(itemId) {
   renderList(listRoot, state.items, itemId, selectItem);
   await hydrateSelectedItem();
   renderSelectedItem();
+  await loadReviewCoverage();
 }
 
 async function hydrateSelectedItem() {
@@ -211,12 +252,45 @@ function bundleSummary(bundle) {
   const objectCount = firstDefined(bundle, 'object_count', 'target_count', 'item_count') ?? firstDefined(manifest, 'object_count', 'target_count', 'item_count') ?? (targets.length || 0);
   const pageCount = firstDefined(bundle, 'unique_evidence_page_count', 'unique_page_count') ?? firstDefined(manifest, 'unique_evidence_page_count', 'unique_page_count') ?? (allowedPages.length || 0);
   const status = bundle.status || manifest.status || 'created';
-  return `审核包已生成：${bundle.bundle_id}；对象 ${objectCount}；唯一证据页 ${pageCount}；状态 ${status}。`;
+  const outcome = bundle.reused
+    ? `已复用现有审核包：${bundle.bundle_id}（未新增存储记录）`
+    : `新建审核包：${bundle.bundle_id}`;
+  return `${outcome}；审核对象 ${objectCount} 个（逐条核验）；唯一证据页 ${pageCount} 页（按 PDF 页码去重，可被多个对象共享）；状态 ${status}。`;
 }
 
 function renderBundleStatus(text) {
   document.querySelector('#bundleControls').hidden = false;
   document.querySelector('#bundleStatus').textContent = text;
+}
+
+function formatJsonBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderBundleHistory(history) {
+  document.querySelector('#bundleTotalCount').textContent = displayValue(history?.total_count, '0');
+  document.querySelector('#bundleReusableCount').textContent = displayValue(history?.reusable_count, '0');
+  document.querySelector('#bundleProtectedCount').textContent = displayValue(history?.protected_count, '0');
+  document.querySelector('#bundleCleanupCount').textContent = displayValue(history?.cleanup_eligible_count, '0');
+  const manifestBytes = Number(history?.estimated_manifest_bytes) || 0;
+  const proposalBytes = Number(history?.estimated_proposal_bytes) || 0;
+  document.querySelector('#bundleJsonEstimate').textContent = formatJsonBytes(manifestBytes + proposalBytes);
+  document.querySelector('#bundleStorageStatus').textContent = `manifest ${formatJsonBytes(manifestBytes)}；proposal ${formatJsonBytes(proposalBytes)}。这是 JSON 内容估算，不是 PostgreSQL 精确磁盘占用。`;
+}
+
+async function loadBundleHistory(paperId = selectedPaperId()) {
+  if (!paperId) {
+    document.querySelector('#bundleStorageStatus').textContent = '选择论文后读取概况。';
+    return;
+  }
+  try {
+    renderBundleHistory(await getReviewBundleHistory(paperId, selectedModule(), 20));
+  } catch (error) {
+    document.querySelector('#bundleStorageStatus').textContent = `审核包概况读取失败：${error.message}`;
+  }
 }
 
 const VERIFICATION_STATUS_LABELS = {
@@ -343,6 +417,7 @@ async function generateBundle() {
     renderBundleStatus(bundleSummary(currentBundle));
     document.querySelector('#bundleDownloadButton').disabled = false;
     document.querySelector('#bundleFile').value = '';
+    await loadBundleHistory(paperId);
   } catch (error) {
     showMessage(`生成审核包失败：${error.message}`, true);
   }
@@ -389,6 +464,7 @@ async function validateBundle() {
       });
       return;
     }
+    await loadBundleHistory();
     await loadLocalPlan();
     await loadVerificationStatus();
   } catch (error) {
@@ -408,7 +484,7 @@ function renderPlan(plan) {
   const logicalReads = firstDefined(metrics, 'logical_page_read_count');
   const unresolved = firstDefined(metrics, 'unresolved_page_target_count');
   const metricText = `${logicalReads != null ? `；逻辑页读取 ${logicalReads}` : ''}${unresolved != null ? `；未解决页目标 ${unresolved}` : ''}`;
-  stats.textContent = `本地核验计划：网页已核验 ${countOf(summary, 'web_reviewed_target_count')}；本地需核验 ${countOf(summary, 'local_required_target_count')}；本地跳过 ${countOf(summary, 'local_skipped_target_count')}；唯一页 ${countOf(summary, 'unique_page_count')}${metricText}`;
+  stats.textContent = `本地核验计划：网页已核验对象 ${countOf(summary, 'web_reviewed_target_count')}；本地需核验对象 ${countOf(summary, 'local_required_target_count')}；本地跳过对象 ${countOf(summary, 'local_skipped_target_count')}；唯一证据页 ${countOf(summary, 'unique_page_count')}（去重页数）${metricText}`;
   root.append(stats);
   const batches = plan.page_batches || plan.batches || [];
   if (batches.length) {
@@ -555,6 +631,9 @@ document.addEventListener('DOMContentLoaded', () => {
   ['dragleave', 'drop'].forEach((eventName) => dropZone.addEventListener(eventName, (event) => { event.preventDefault(); dropZone.classList.remove('is-dragging'); }));
   dropZone.addEventListener('drop', (event) => readProposalFile(event.dataTransfer.files[0]));
   document.querySelector('#writingPlanButton').addEventListener('click', generateWritingPlan);
+  document.querySelector('.advanced-actions').addEventListener('toggle', (event) => {
+    if (event.currentTarget.open) loadBundleHistory();
+  });
   updateSyncScope();
   loadItems();
 });

@@ -3,7 +3,7 @@ const BASE_URL = process.env.TEST_BASE_URL || 'http://127.0.0.1:4173';
 const PAPER_ID = '11111111-1111-4111-8111-111111111111';
 
 const firstItem = {
-  item_id: 'claim:1', reviewable: true, paper_id: PAPER_ID, paper_code: 'B0078', paper_title: 'Evidence <b>claim</b>', category: 'mechanism_evidence', category_label: '机理证据卡', content: '<img src=x onerror="window.xssHit=1">Catalyst improves conversion', evidence_text: 'Page evidence', page_start: 4, section_title: 'Results', review_status: 'needs_review', citation_policy: 'needs_review', risk_flags: ['missing_locator'], source_identity_verified: false, match_reason: '关键词命中', updated_at: '2026-07-16T00:00:00Z', metadata: { internal: '<script>bad()</script>' },
+  item_id: 'claim:1', reviewable: true, paper_id: PAPER_ID, paper_code: 'B0078', paper_title: 'Evidence <b>claim</b>', category: 'mechanism_evidence', category_label: '机理内容', content: '<img src=x onerror="window.xssHit=1">Catalyst improves conversion', evidence_text: 'Page evidence', page_start: 4, section_title: 'Results', review_status: 'needs_review', citation_policy: 'needs_review', risk_flags: ['missing_locator'], source_identity_verified: false, match_reason: '关键词命中', updated_at: '2026-07-16T00:00:00Z', metadata: { internal: '<script>bad()</script>', linked_figures: [{ figure_id: 'figure-2', figure_label: 'Figure 2', page: 4, content_summary: 'Reviewed sulfur conversion pathway', asset_url: '/api/papers/assets/figures/figure-2.png' }] },
 };
 const secondItem = { ...firstItem, item_id: 'card:2', paper_code: 'B0079', paper_title: 'Second paper', content: 'Second content', risk_flags: [] };
 const thirdItem = { ...firstItem, item_id: 'card:3', paper_code: 'B0080', paper_title: 'Third paper', content: 'Third content' };
@@ -46,12 +46,131 @@ test('content knowledge workbench searches, restores URL state, paginates, and k
   await expect(page.getByText('显示 1–3，共 3 条')).toBeVisible();
 });
 
+test('content knowledge workbench renders the shared authoritative review coverage', async ({ page }) => {
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith('/review-summary')) {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          review_coverage: {
+            sections: {
+              total: 6,
+              authoritative_reviewed: 4,
+              exception: 2,
+              unreviewed: 0,
+              by_section_type: {
+                figure_caption: { verified: 4, exception: 0 },
+                body: { verified: 0, exception: 2 },
+              },
+            },
+            writing_cards: {
+              total: 1,
+              authoritative_reviewed: 0,
+              exception: 1,
+              unreviewed: 0,
+            },
+          },
+        }),
+      });
+    }
+    if (url.pathname.endsWith('/claim%3A1') || url.pathname.endsWith('/claim:1')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify(firstItem) });
+    }
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }),
+    });
+  });
+
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await expect(page.locator('#reviewCoverageSummary')).toHaveText(
+    '权威覆盖：Section 4/6（Figure caption 已验收 4；body 已验收 0、exception 2）；WritingCard 已验收 0/1、exception 1；未决策 0。',
+  );
+});
+
+test('content and audit views keep candidates, counts, URL state, and lifecycle labels separate', async ({ page }) => {
+  const requests = [];
+  const terminalAudit = {
+    ...firstItem,
+    item_id: 'audit:terminal',
+    item_kind: 'audit',
+    source_type: 'external_analysis_candidate',
+    paper_code: 'B0101',
+    audit_state: 'terminal_history',
+    audit_state_label: '终态 / 历史审计记录',
+    candidate_status: 'rejected_by_local_ai',
+    can_use_for_writing: false,
+    can_use_for_citation: false,
+    reviewable: false,
+  };
+  const appliedAudit = {
+    ...terminalAudit,
+    item_id: 'audit:applied',
+    audit_state: 'applied_to_formal_dft',
+    audit_state_label: '已应用到正式 DFT / 已归档审计',
+    candidate_status: 'materialized',
+    linked_target_type: 'dft_results',
+    linked_target_id: 'dft-1',
+  };
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname !== '/api/content-knowledge') return route.continue();
+    requests.push(url);
+    const audit = url.searchParams.get('result_view') === 'audit';
+    const items = audit ? [terminalAudit, appliedAudit] : [firstItem];
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        schema_version: 'content_knowledge.v1',
+        result_view: audit ? 'audit' : 'content',
+        items,
+        total: items.length,
+        result_item_count: items.length,
+        distinct_paper_count: 1,
+        offset: 0,
+        limit: 25,
+        has_more: false,
+      }),
+    });
+  });
+
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html?result_view=all&include_candidates=true`);
+  await expect(page.locator('#resultHeading')).toHaveText('论文内容证据项');
+  expect(requests.at(-1).searchParams.get('result_view')).toBe('content');
+  expect(requests.at(-1).searchParams.get('include_candidates')).toBe('false');
+  await expect(page.locator('#resultCount')).toHaveText('1 条 / 1 篇论文');
+  await expect(page.locator('#countSemantics')).toContainText('列表结果 / 证据项');
+  await expect(page.locator('#countSemantics')).toContainText('审核对象');
+  await expect(page.locator('#countSemantics')).toContainText('唯一证据页');
+
+  await page.locator('#resultViewSelect').selectOption('audit');
+  await expect(page).toHaveURL(/result_view=audit/);
+  await expect(page.locator('#resultHeading')).toHaveText('外部候选 / 审计记录');
+  expect(requests.at(-1).searchParams.get('include_candidates')).toBe('true');
+  const cards = page.locator('.knowledge-item.audit-only');
+  await expect(cards).toHaveCount(2);
+  await expect(cards.nth(0)).toContainText('终态 / 历史审计记录');
+  await expect(cards.nth(1)).toContainText('已应用到正式 DFT / 已归档审计');
+  await expect(cards.nth(0)).toContainText('仅审计，不可写作 / 引用');
+  await expect(cards.nth(0)).not.toContainText('待核验');
+  await expect(cards.nth(1)).not.toContainText('待核验');
+  await cards.nth(0).click();
+  await expect(page.locator('#detailRoot')).toContainText('仅审计，不可写作 / 引用');
+  await expect(page.locator('#detailRoot')).toContainText('终态 / 历史审计记录');
+  await expect(page.locator('#detailRoot')).toContainText('rejected_by_local_ai');
+  await expect(page.locator('#detailRoot')).not.toContainText('审核状态');
+});
+
 test('content detail has collapsed technical JSON and all four evidence decisions use the fixed contract', async ({ page }) => {
   const posted = [];
   await mockKnowledge(page, { posts: posted });
   await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
   await page.getByRole('button', { name: /Evidence.*claim/ }).click();
   await expect(page.locator('blockquote')).toHaveText('Page evidence');
+  await expect(page.locator('.linked-figure img')).toHaveAttribute('src', '/api/papers/assets/figures/figure-2.png');
+  await expect(page.getByText('关联的已审核图片')).toBeVisible();
   await expect(page.locator('.technical-details')).not.toHaveAttribute('open', '');
   await expect(page.getByRole('link', { name: '去审核中心修正源内容' })).toHaveAttribute('href', new RegExp(`paper_id=${PAPER_ID}`));
   for (const decision of ['approve_citable', 'writing_only', 'needs_human', 'reject']) {
@@ -163,12 +282,26 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
     if (url.pathname === '/api/content-knowledge/sync') {
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ synced: true }) });
     }
+    if (url.pathname === '/api/content-knowledge/review-bundles/v2/history') {
+      return route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          total_count: 1,
+          reusable_count: 1,
+          protected_count: 0,
+          cleanup_eligible_count: 0,
+          estimated_manifest_bytes: 1536,
+          estimated_proposal_bytes: 0,
+          items: [],
+        }),
+      });
+    }
     if (url.pathname === '/api/content-knowledge/review-bundles/v2') {
       return route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({
           bundle_id: 'bundle-1',
-          status: 'created', bundle_fingerprint: 'fp-1', download_url: '/api/content-knowledge/review-bundles/bundle-1/download', proposal_only: true, writes_final_truth: false, source_identity_verified: true,
+          status: 'generated', created: true, reused: false, bundle_fingerprint: 'fp-1', download_url: '/api/content-knowledge/review-bundles/bundle-1/download', proposal_only: true, writes_final_truth: false, source_identity_verified: true,
           manifest: { targets: [{ id: 'a' }, { id: 'b' }], allowed_pages: [4, 7], instructions: 'Review B0078 safely' },
           return_template: { schema_version: 'content_evidence_review_result_v1' },
         }),
@@ -217,12 +350,20 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   expect(syncCall.search).toContain(`paper_id=${PAPER_ID}`);
   expect(syncCall.body).toBeNull();
 
-  await page.locator('#bundleModule').selectOption('writing_cards');
+  await page.locator('#bundleModule').selectOption('paper_content');
   await page.getByRole('button', { name: '生成 v2 审核包' }).click();
-  await expect(page.getByText(/审核包已生成：bundle-1/)).toBeVisible();
-  await expect(page.getByText(/对象 2；唯一证据页 2/)).toBeVisible();
+  await expect(page.getByText(/新建审核包：bundle-1/)).toBeVisible();
+  await expect(page.getByText(/审核对象 2 个.*唯一证据页 2 页/)).toBeVisible();
+  await expect(page.locator('#bundleTotalCount')).toHaveText('1');
+  await expect(page.locator('#bundleReusableCount')).toHaveText('1');
+  await expect(page.locator('#bundleProtectedCount')).toHaveText('0');
+  await expect(page.locator('#bundleCleanupCount')).toHaveText('0');
+  await expect(page.locator('#bundleJsonEstimate')).toHaveText('1.5 KB');
+  await expect(page.getByText(/ZIP 在下载时临时生成，不在服务器重复永久保存/)).toBeVisible();
+  await expect(page.getByText(/已收到网页 AI 建议或进入本地核验的审核包不会自动删除/)).toBeVisible();
+  await expect(page.getByText(/相同快照反复点击生成会复用原审核包/)).toBeVisible();
   const bundleCall = calls.find((call) => call.path.endsWith('/review-bundles/v2'));
-  expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, module: 'writing_cards' });
+  expect(bundleCall.body).toEqual({ paper_id: PAPER_ID, module: 'paper_content' });
 
   const proposalFile = { name: 'proposal.json', mimeType: 'application/json', buffer: Buffer.from('{"targets":[]}') };
   await page.locator('#bundleFile').setInputFiles(proposalFile);
@@ -233,7 +374,7 @@ test('v2 bundle flow selects a module, validates proposal, and shows readonly lo
   await page.locator('#bundleResultInput').fill('{}');
   await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
   await expect(page.getByText(/网页 AI 回传校验完成：通过/)).toBeVisible();
-  await expect(page.getByText(/本地核验计划：网页已核验 1/)).toBeVisible();
+  await expect(page.getByText(/本地核验计划：网页已核验对象 1/)).toBeVisible();
   await expect(page.getByText('总状态：已完成（finalized）')).toBeVisible();
   await expect(page.getByText(/对象计数：必需 2；已应用 2；待处理 0/)).toBeVisible();
   await expect(page.getByText(/可写作 1 → 2（1）；可引用 0 → 1（1）；RAG 1 → 2（1）/)).toBeVisible();
@@ -360,7 +501,7 @@ test('a paper-code deep link resolves the UUID before creating a v2 review bundl
     bundleBody = JSON.parse(route.request().postData() || '{}');
     await route.fulfill({
       contentType: 'application/json',
-      body: JSON.stringify({ bundle_id: 'bundle-paper-code', object_count: 1, unique_evidence_page_count: 1 }),
+      body: JSON.stringify({ bundle_id: 'bundle-paper-code', created: true, reused: false, object_count: 1, unique_evidence_page_count: 1 }),
     });
   });
 
@@ -368,8 +509,44 @@ test('a paper-code deep link resolves the UUID before creating a v2 review bundl
   await page.getByText('批量与高级操作').click();
   await page.getByRole('button', { name: '生成 v2 审核包' }).click();
 
-  await expect(page.getByText(/审核包已生成：bundle-paper-code/)).toBeVisible();
-  expect(bundleBody).toEqual({ paper_id: PAPER_ID, module: 'abstract' });
+  await expect(page.getByText(/新建审核包：bundle-paper-code/)).toBeVisible();
+  expect(bundleBody).toEqual({ paper_id: PAPER_ID, module: 'paper_content' });
+});
+
+test('repeated v2 generation reports reuse and history count does not grow', async ({ page }) => {
+  let generationCount = 0;
+  await page.route('**/api/content-knowledge**', async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === '/api/content-knowledge') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ items: [firstItem], total: 1, offset: 0, limit: 25, has_more: false }) });
+    }
+    if (url.pathname.includes('/items/')) {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({ item: firstItem }) });
+    }
+    if (url.pathname === '/api/content-knowledge/review-bundles/v2/history') {
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        total_count: 1, reusable_count: 1, protected_count: 0, cleanup_eligible_count: 0,
+        estimated_manifest_bytes: 512, estimated_proposal_bytes: 0, items: [],
+      }) });
+    }
+    if (url.pathname === '/api/content-knowledge/review-bundles/v2') {
+      generationCount += 1;
+      return route.fulfill({ contentType: 'application/json', body: JSON.stringify({
+        bundle_id: 'bundle-reused', status: 'generated',
+        created: generationCount === 1, reused: generationCount > 1,
+        object_count: 1, unique_evidence_page_count: 1,
+      }) });
+    }
+    return route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+  });
+  await page.goto(`${BASE_URL}/pages/content_knowledge/index.html`);
+  await page.getByRole('button', { name: /Evidence.*claim/ }).click();
+  await page.getByText('批量与高级操作').click();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await expect(page.getByText(/新建审核包：bundle-reused/)).toBeVisible();
+  await page.getByRole('button', { name: '生成 v2 审核包' }).click();
+  await expect(page.getByText(/已复用现有审核包：bundle-reused（未新增存储记录）/)).toBeVisible();
+  await expect(page.locator('#bundleTotalCount')).toHaveText('1');
 });
 
 test('v2 validation errors are rendered as safe text and do not request a local plan', async ({ page }) => {
@@ -392,7 +569,8 @@ test('v2 validation errors are rendered as safe text and do not request a local 
   await page.getByRole('button', { name: '校验网页 AI 建议' }).click();
   await expect(page.getByText('<img src=x onerror=window.xssHit=1>')).toBeVisible();
   await expect(page.getByText('<script>alert(1)</script>')).toBeVisible();
-  await expect(page.locator('img')).toHaveCount(0);
+  await expect(page.locator('img[src="x"]')).toHaveCount(0);
+  await expect(page.locator('.linked-figure img')).toHaveCount(1);
   expect(await page.evaluate(() => window.xssHit)).toBeUndefined();
   expect(planRequested).toBeFalsy();
 });

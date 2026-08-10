@@ -308,13 +308,13 @@ async function resetDftAiReviewsForPaper() {
 
 function writingCardReviewMeta(item) {
     if (item && item.can_use_for_writing) {
-        return { label: "可直接参考", className: "high", tip: "这张写作卡已满足当前写作使用条件。" };
+        return { label: "可直接参考", className: "high", tip: "这组论文重点已满足当前写作使用条件。" };
     }
     const reasons = Array.isArray(item && item.blocked_reasons) ? item.blocked_reasons : [];
     if (reasons.length) {
         return { label: "需先核对", className: "medium", tip: "当前仍有待处理项：" + reasons.join("、") };
     }
-    return { label: "草稿候选", className: "unknown", tip: "这是自动生成的写作草稿，使用前建议先核对证据。" };
+    return { label: "提取候选", className: "unknown", tip: "这是自动提取的论文重点，使用前必须核对证据。" };
 }
 
 function writingCardLogicBlock(label, value) {
@@ -416,9 +416,9 @@ function isPendingNavigationItem(itemType, item) {
 
 function renderWritingCardsCompact(items) {
     if (!items || !items.length) {
-        return '<div class="section-card"><h3>写作卡片</h3><div class="muted">暂无内容。</div></div>';
+        return '<div class="section-card"><h3>论文重点</h3><div class="muted">暂无内容。</div></div>';
     }
-    const intro = '<div class="section-card figure-audit-note"><h3>写作卡片说明</h3><div class="subtle">这里优先显示适合写作时直接阅读的短摘要。详细逻辑、证据链和阻塞原因默认折叠，避免一上来铺成整页长文本。</div></div>';
+    const intro = '<div class="section-card figure-audit-note"><h3>论文重点说明</h3><div class="subtle">这里显示从全文提取的研究空白、方案和核心假设。证据状态与阻塞原因默认折叠，正式写作前必须到统一内容审核页核对。</div></div>';
     return intro + items.map(function(item, index) {
         const review = writingCardReviewMeta(item);
         const action = codexItemActionHtml("writing_card", item);
@@ -433,9 +433,7 @@ function renderWritingCardsCompact(items) {
             return '<div class="writing-card-summary-block"><div class="writing-card-summary-title">' + esc(block.label) + '</div><div class="writing-card-summary-text">' + esc(clipText(block.value, 160)) + '</div></div>';
         }).join("");
         const details = [
-            writingCardLogicBlock("摘要写法", item && item.abstract_logic),
-            writingCardLogicBlock("引言写法", item && item.introduction_logic),
-            writingCardLogicBlock("讨论写法", item && item.discussion_logic)
+            writingCardLogicBlock("证据链状态", item && item.evidence_chain_status)
         ].filter(Boolean).join("");
         const auditSummary = writingCardAuditSummaryHtml(item || {});
         const blocked = Array.isArray(item && item.blocked_reasons) && item.blocked_reasons.length
@@ -447,7 +445,7 @@ function renderWritingCardsCompact(items) {
             '<summary style="display:flex; justify-content:space-between; align-items:flex-start; flex:1; width:100%;">' +
                 '<div style="flex:1;">' +
                     '<div class="knowledge-card-head">' +
-                        '<div><h3 style="margin:0;">写作卡片 ' + (items.length > 1 ? (index + 1) : "") + '</h3><div class="knowledge-card-use">适合用来组织引言、摘要和讨论的写作骨架</div></div>' +
+                        '<div><h3 style="margin:0;">论文重点 ' + (items.length > 1 ? (index + 1) : "") + '</h3><div class="knowledge-card-use">研究空白、方案与核心假设的结构化提取</div></div>' +
                         '<div class="knowledge-card-actions">' + action + '</div>' +
                     '</div>' +
                     '<div class="knowledge-tag-row">' +
@@ -458,9 +456,9 @@ function renderWritingCardsCompact(items) {
                 '</div>' +
             '</summary>' +
             auditSummary +
-            '<div class="writing-card-summary-grid">' + (summaryBlocks || '<div class="muted">这张写作卡还没有生成可直接阅读的短摘要。</div>') + '</div>' +
+            '<div class="writing-card-summary-grid">' + (summaryBlocks || '<div class="muted">当前还没有提取出可直接阅读的论文重点。</div>') + '</div>' +
             '<details class="knowledge-details">' +
-                '<summary>展开写作逻辑与限制</summary>' +
+                '<summary>展开证据状态与限制</summary>' +
                 details +
                 blocked +
             '</details>' +
@@ -705,11 +703,11 @@ function renderReadableCards(title, items, options) {
             return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">当前没有结构化电化学性能数据。该模块来自实验/电化学信号的 Stage 2 抽取，或由 IDE AI 通过 import_analysis 回写；纯计算论文通常为空。</div></div>';
         }
         if (title === "机理声明") {
-            return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">当前没有结构化机理声明。该模块来自 Stage 2 机理规则抽取，或由 IDE AI 通过 import_analysis 回写；写作卡只引用这些证据，不承载原始结构化数据。</div></div>';
+            return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">当前没有结构化机理声明。该模块来自 Stage 2 机理规则抽取，或由 IDE AI 通过 import_analysis 回写；论文重点只引用这些证据，不承载原始结构化数据。</div></div>';
         }
         return '<div class="section-card"><h3>' + esc(title) + '</h3><div class="muted">暂无内容。</div></div>';
     }
-    if (title === "写作卡片") {
+    if (title === "写作卡片" || title === "论文重点") {
         return renderWritingCardsCompact(items);
     }
     const keySets = {
@@ -721,7 +719,9 @@ function renderReadableCards(title, items, options) {
         "电化学性能": ["sulfur_loading", "sulfur_content", "electrolyte_sulfur_ratio", "capacity", "cycle_number", "rate", "decay_per_cycle", "evidence_text", "confidence"],
         "机理声明": ["claim_type", "claim_text", "key_species", "mechanism_direction", "evidence_text", "confidence"],
         "机理知识": ["candidate_status", "review_status", "can_use_for_writing", "can_use_for_citation", "claim_type", "claim_text", "evidence_text", "confidence"],
+        "机理内容": ["candidate_status", "review_status", "can_use_for_writing", "can_use_for_citation", "claim_type", "claim_text", "evidence_text", "confidence"],
         "写作卡片": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
+        "论文重点": ["paper_type", "research_gap", "proposed_solution", "core_hypothesis", "evidence_text"],
         "表格": ["source_document_type", "related_paper_code", "caption", "page", "markdown_content"],
         "出站关联": ["relationship_type", "target_title", "target_doi", "reason"],
         "入站关联": ["relationship_type", "source_title", "source_doi", "reason"]

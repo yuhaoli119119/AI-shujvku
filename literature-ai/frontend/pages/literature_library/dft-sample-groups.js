@@ -775,6 +775,8 @@ const CODEX_ITEM_TYPE_BY_CARD_TITLE = {
     "电化学性能": "electrochemical_performance",
     "机理声明": "mechanism_claim",
     "机理知识": "mechanism_claim",
+    "机理内容": "mechanism_claim",
     "写作卡片": "writing_card",
+    "论文重点": "writing_card",
     "表格": "table"
 };

@@ -147,7 +147,7 @@ function renderPaperList() {
                 '<div class="paper-item-stats">' +
                     '<span class="paper-side-stat" title="DFT结果数">D:' + esc(dftCount) + '</span>' +
                     '<span class="paper-side-stat" title="图表数">F:' + esc(figureCount) + '</span>' +
-                    '<span class="paper-side-stat" title="写作卡数">W:' + esc(writingCount) + '</span>' +
+                    '<span class="paper-side-stat" title="论文重点数">重点:' + esc(writingCount) + '</span>' +
                 '</div>' +
             '</div>' +
         '</div>';

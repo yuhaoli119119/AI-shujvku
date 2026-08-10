@@ -19,29 +19,22 @@
       <div>
         <p class="eyebrow">DFT 数据概览</p>
         <h1>数据可视化</h1>
-        <p class="intro">以同一催化剂样本内的已记录数值做可解释的性质关系分析。</p>
+        <p id="overviewStatus" class="status" aria-live="polite">正在读取概览…</p>
       </div>
-      <p id="overviewStatus" class="status" aria-live="polite">正在读取概览…</p>
+      <div class="header-actions">
+        <button id="exportCatalystCsv" class="btn btn-secondary" type="button">导出催化剂宽表 CSV</button>
+        <button id="downloadCatalystJson" class="btn btn-secondary" type="button">下载审计 JSON</button>
+        <p class="status export-note">CSV：给 pandas、随机森林、XGBoost 使用；缺失或冲突值为空。JSON：用于来源追溯和 AI 核验，不是直接训练表。</p>
+        <p id="exportStatus" class="status" aria-live="polite"></p>
+      </div>
     </header>
 
     <section id="metrics" class="metrics" aria-label="DFT 数据统计">
-      <article class="metric"><strong id="metricDftTotal">-</strong><span>DFT 总记录</span></article>
-      <article class="metric"><strong id="metricExportEligible">-</strong><span>通过导出门的记录</span></article>
-      <article class="metric"><strong id="metricV2Numeric">-</strong><span>V2 行级数值可用记录</span></article>
-      <article class="metric"><strong id="metricCatalysts">-</strong><span>通过导出门的催化剂</span></article>
-      <article class="metric"><strong id="metricPapers">-</strong><span>V2 贡献论文</span></article>
-    </section>
-
-    <section class="panel export-panel" aria-labelledby="export-title">
-      <div>
-        <h2 id="export-title">催化剂级数据导出</h2>
-        <p>CSV：给 pandas、随机森林、XGBoost 使用；缺失或冲突值为空。JSON：用于来源追溯和 AI 核验，不是直接训练表。</p>
-      </div>
-      <div class="export-actions">
-        <button id="exportCatalystCsv" class="btn btn-primary" type="button">导出催化剂宽表 CSV</button>
-        <button id="downloadCatalystJson" class="btn btn-secondary" type="button">下载审计 JSON</button>
-      </div>
-      <p id="exportStatus" class="status" aria-live="polite"></p>
+      <span class="metric"><strong id="metricDftTotal">-</strong>DFT 总记录</span>
+      <span class="metric"><strong id="metricExportEligible">-</strong>通过导出门的记录</span>
+      <span class="metric"><strong id="metricV2Numeric">-</strong>V2 行级数值可用记录</span>
+      <span class="metric"><strong id="metricCatalysts">-</strong>通过导出门的催化剂</span>
+      <span class="metric"><strong id="metricPapers">-</strong>V2 贡献论文</span>
     </section>
 
     <section class="panel relation-panel" aria-labelledby="relation-title">
@@ -50,7 +43,7 @@
           <h2 id="relation-title">催化剂性质关系</h2>
           <p>每个点只来自同一个 <code>catalyst_sample_id</code>；页面不会跨催化剂配对或自行合并记录。</p>
         </div>
-        <button id="quickChargeBond" class="btn btn-secondary" type="button">快捷关系：Li2S Bader 电荷转移 vs Li-S 最大键长</button>
+        <button id="quickChargeBond" class="btn btn-secondary quick-btn" type="button">快捷关系：Li2S Bader 电荷转移 vs Li-S 最大键长</button>
       </div>
 
       <div class="controls">
@@ -58,7 +51,7 @@
         <label> Y 字段 <select id="yField" aria-label="Y 字段"><option value="">加载中…</option></select></label>
         <label> 最少样本数 <input id="minN" aria-label="最少样本数" type="number" min="3" step="1" value="3"></label>
       </div>
-      <p id="relationStatus" class="status" aria-live="polite">正在读取可分析字段…</p>
+      <p class="status status-row" aria-live="polite"><span id="relationStatus">正在读取可分析字段…</span><button id="retryCorrelation" class="btn btn-secondary btn-small" type="button" hidden>重试</button></p>
 
       <div class="analysis-grid">
         <div class="plot-wrap">
@@ -66,42 +59,70 @@
             <text id="plotEmpty" x="320" y="195" text-anchor="middle">等待相关性数据</text>
             <g id="plotLayer"></g>
           </svg>
+          <div id="plotTooltip" class="plot-tooltip" hidden></div>
+          <ol id="plotLegend" class="plot-legend" aria-label="图中催化剂编号" hidden></ol>
           <p id="fitNotice" class="fit-notice"></p>
         </div>
-        <dl class="statistics" aria-label="相关性统计">
-          <div><dt>Pearson r</dt><dd id="statPearson">-</dd></div>
-          <div><dt>Spearman rho</dt><dd id="statSpearman">-</dd></div>
-          <div><dt>R²</dt><dd id="statR2">-</dd></div>
-          <div><dt>斜率</dt><dd id="statSlope">-</dd></div>
-          <div><dt>截距</dt><dd id="statIntercept">-</dd></div>
-          <div><dt>催化剂数</dt><dd id="statCatalysts">-</dd></div>
-          <div><dt>论文数</dt><dd id="statPapers">-</dd></div>
-        </dl>
-      </div>
-
-      <section id="diagnostics" class="diagnostics" hidden aria-label="分析提示">
-        <div class="diagnostic-summary">
-          <h3 id="diagnosticTitle">当前分析状态</h3>
-          <p id="diagnosticMessage"></p>
-          <ul id="diagnosticHighlights"></ul>
-          <p class="diagnostic-policy">关系分析要求同一催化剂、审核通过、数值单位可标准化且计算设置明确；Identity V2 优先，但满足这些安全条件的历史记录也可参与。冲突值仍留空。</p>
-        </div>
-        <details id="technicalDiagnostics" class="technical-diagnostics">
-          <summary>查看数据质量技术明细</summary>
-          <p class="diagnostic-note">以下数字是“原因出现次数”，同一记录可能同时命中多个原因，因此不能相加，也不代表数据被删除。</p>
-          <div class="technical-diagnostic-grid">
-            <div id="warningsBox" hidden><h4>分析提示</h4><ul id="warningsList"></ul></div>
-            <div id="excludedBox" hidden><h4>排除原因</h4><ul id="excludedList"></ul></div>
+        <aside class="side-stack">
+          <div class="verdict-card" id="verdictCard" data-state="idle">
+            <p class="verdict-label" id="verdictLabel">暂无结论</p>
+            <p class="verdict-r" id="verdictR">—</p>
+            <p class="verdict-meta" id="verdictMeta"></p>
+            <p class="verdict-equation" id="verdictEquation"></p>
+            <p class="verdict-quality" id="verdictQuality"></p>
           </div>
-        </details>
-      </section>
+          <details class="stats-details">
+            <summary>全部统计</summary>
+            <dl class="statistics" aria-label="相关性统计">
+              <div><dt>Pearson r</dt><dd id="statPearson">-</dd></div>
+              <div><dt>Spearman rho</dt><dd id="statSpearman">-</dd></div>
+              <div><dt>R²</dt><dd id="statR2">-</dd></div>
+              <div><dt>斜率</dt><dd id="statSlope">-</dd></div>
+              <div><dt>截距</dt><dd id="statIntercept">-</dd></div>
+              <div><dt>催化剂数</dt><dd id="statCatalysts">-</dd></div>
+              <div><dt>论文数</dt><dd id="statPapers">-</dd></div>
+            </dl>
+          </details>
+
+          <section id="diagnostics" class="diagnostics" hidden aria-label="分析提示">
+            <div class="diagnostic-summary">
+              <div class="diagnostic-heading">
+                <h3 id="diagnosticTitle">当前分析状态</h3>
+                <span id="diagnosticFlag" class="diagnostic-flag">数据说明</span>
+              </div>
+              <p id="diagnosticMessage"></p>
+            </div>
+            <details id="technicalDiagnostics" class="technical-diagnostics">
+              <summary>查看数据来源与质量说明</summary>
+              <div class="diagnostic-body">
+                <ul id="diagnosticHighlights"></ul>
+                <p class="diagnostic-policy">关系分析要求同一催化剂、审核通过、数值单位可标准化且计算设置明确；Identity V2 优先，但满足这些安全条件的历史记录也可参与。冲突值仍留空。</p>
+                <p class="diagnostic-note">以下数字是“原因出现次数”，同一记录可能同时命中多个原因，因此不能相加，也不代表数据被删除。</p>
+                <div class="technical-diagnostic-grid">
+                  <div id="warningsBox" hidden><h4>分析提示</h4><ul id="warningsList"></ul></div>
+                  <div id="excludedBox" hidden><h4>排除原因</h4><ul id="excludedList"></ul></div>
+                </div>
+              </div>
+            </details>
+          </section>
+        </aside>
+      </div>
 
       <section class="details" aria-labelledby="details-title">
         <h3 id="details-title">同一催化剂样本明细</h3>
         <p>来源记录 ID 由相关性接口返回，用于追溯 X 与 Y 值。Li2S 解离能垒展示全部候选路径；只有接口明确标记的最大可比能垒用于汇总和回归。</p>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>催化剂</th><th>论文</th><th>catalyst_sample_id</th><th id="xColumn">X</th><th id="yColumn">Y</th><th>来源记录 ID</th><th>Li2S 解离能垒候选</th></tr></thead>
+            <colgroup>
+              <col class="table-col-catalyst">
+              <col class="table-col-paper">
+              <col class="table-col-sample-id">
+              <col class="table-col-value">
+              <col class="table-col-value">
+              <col class="table-col-sources">
+              <col class="table-col-candidates">
+            </colgroup>
+            <thead><tr><th>催化剂</th><th>论文</th><th class="col-id">catalyst_sample_id</th><th id="xColumn">X</th><th id="yColumn">Y</th><th class="col-id">来源记录 ID</th><th>Li2S 解离能垒候选</th></tr></thead>
             <tbody id="detailsBody"><tr><td colspan="7">等待相关性数据</td></tr></tbody>
           </table>
         </div>

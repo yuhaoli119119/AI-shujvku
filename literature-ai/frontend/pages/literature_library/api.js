@@ -87,12 +87,6 @@ async function fetchJSON(url, options) {
     options = options || {};
     options.headers = options.headers || {};
     
-    // Check if an administrative token exists in sessionStorage and append it
-    const token = sessionStorage.getItem("litai-settings-token");
-    if (token) {
-        options.headers["X-Settings-Token"] = token;
-    }
-
     const resp = await fetch(url, options);
     const text = await resp.text();
     let data = null;
@@ -104,11 +98,11 @@ async function fetchJSON(url, options) {
             detailText.includes("Invalid Owner token");
         showToast(
             looksLikeOwnerAuth
-                ? "无权访问该接口。请先在[设置]中配置管理员 Token 或确认是否为本地请求。"
+                ? "此操作需要最终人工确认身份；文献库日常使用不需要管理员解锁。"
                 : ("请求被拒绝：" + (detailText || "403 Forbidden")),
             "error"
         );
-        throw new Error(looksLikeOwnerAuth ? "403 Forbidden: Admin Token Required" : (detailText || "403 Forbidden"));
+        throw new Error(looksLikeOwnerAuth ? "403 Forbidden: Human Confirmation Required" : (detailText || "403 Forbidden"));
     }
     if (!resp.ok) {
         const detail = (data && data.detail) ? data.detail : (data && (data.status || data.message) ? data : ("HTTP " + resp.status));

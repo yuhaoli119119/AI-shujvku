@@ -39,7 +39,7 @@ function renderWorkspaceHeader(paper) {
             badge(counts.dft_results, "DFT \u6570\u91cf") +
             badge(counts.sections, "\u7ae0\u8282\u6570\u91cf") +
             badge(counts.mechanism_claims, "\u673a\u7406\u58f0\u660e\u6570\u91cf") +
-            badge(counts.writing_cards, "\u5199\u4f5c\u5361\u7247\u6570\u91cf");
+            badge(counts.writing_cards, "\u8bba\u6587\u91cd\u70b9\u8bb0\u5f55\u6570");
     }
     if (topicEl) topicEl.value = paper.title_zh || paper.title || "";
 }
@@ -237,7 +237,7 @@ function knowledgeCategoryMeta(category) {
 function knowledgeSourceMeta(sourceType) {
     const mapping = {
         mechanism_claim: { label: "结构化机理提取", tip: "系统从已解析的机理字段中抽出的候选。" },
-        writing_card: { label: "写作卡片", tip: "系统生成的写作草稿或写作逻辑。" },
+        writing_card: { label: "论文重点", tip: "系统从论文中提取的研究问题、解决思路、核心假设和结果证据。" },
         paper_section: { label: "正文节选", tip: "直接来自正文解析的章节片段。" },
         paper_abstract: { label: "摘要原文", tip: "直接来自论文摘要。" },
         external_analysis_candidate: { label: "IDE AI 回写", tip: "来自 IDE AI 回写，通常优先走 MCP；若当时会话未暴露 MCP 工具，也可能来自仓库内 `app.mcp.*` 后备路径，仍必须再核对。" },

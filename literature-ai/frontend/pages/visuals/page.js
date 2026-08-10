@@ -13,6 +13,7 @@
     requestId: 0,
     libraryName: new URLSearchParams(window.location.search).get("library_name") || "",
     libraryResolutionFailed: false,
+    lastCorrelation: null,
   };
   const WARNING_LABELS = {
     min_n_not_reached: "有效配对未达到最少样本数，暂不计算拟合结果",
@@ -138,6 +139,7 @@
   }
 
   async function loadOverview() {
+    $("metrics").classList.add("is-loading");
     try {
       const data = await getJSON("/api/visuals/overview?" + visualParams(new URLSearchParams()).toString());
       setOverview(data.summary || data.overview || {});
@@ -146,6 +148,8 @@
         : (state.libraryResolutionFailed ? "当前文献库读取失败，已显示全部文献库" : "全部文献库");
     } catch (error) {
       $("overviewStatus").textContent = "概览读取失败：" + error.message;
+    } finally {
+      $("metrics").classList.remove("is-loading");
     }
   }
 
@@ -208,6 +212,8 @@
     const catalystCount = Number(data.n_catalysts ?? data.catalyst_count ?? (data.points || []).length) || 0;
     const paperCount = Number(data.n_papers ?? data.paper_count) || 0;
     const minN = Number(data.min_n ?? data.statistics?.min_n ?? $("minN").value) || 3;
+    $("diagnostics").dataset.state = data.ready === true ? "ready" : "blocked";
+    $("diagnosticFlag").textContent = data.ready === true ? "数据范围说明" : "需要处理";
     $("diagnosticTitle").textContent = data.ready === true ? "当前数据可以进行拟合" : "当前数据不足，暂不进行拟合";
     $("diagnosticMessage").textContent = data.ready === true
       ? "已形成 " + catalystCount + " 个同一催化剂有效配对，来自 " + paperCount + " 篇论文。"
@@ -239,6 +245,36 @@
     Object.entries(stats).forEach(([id, value]) => { $(id).textContent = display(value); });
   }
 
+  function renderVerdict(data) {
+    const card = $("verdictCard");
+    const r = number(statistic(data, "pearson_r"));
+    const r2 = number(statistic(data, "r_squared"));
+    const catalysts = Number(data.n_catalysts ?? data.catalyst_count ?? (data.points || []).length) || 0;
+    const papers = Number(data.n_papers ?? data.paper_count) || 0;
+    if (data.ready !== true || r === null) {
+      card.dataset.state = "idle";
+      $("verdictLabel").textContent = "暂无结论";
+      $("verdictR").textContent = "—";
+      $("verdictMeta").textContent = "有效配对 " + catalysts + " 个，未达到拟合条件";
+      $("verdictEquation").textContent = "";
+      $("verdictQuality").textContent = "";
+      return;
+    }
+    const abs = Math.abs(r);
+    const strength = abs >= 0.8 ? "强" : abs >= 0.5 ? "中等" : abs >= 0.3 ? "弱" : "极弱";
+    const direction = r > 0 ? "正相关" : r < 0 ? "负相关" : "相关";
+    card.dataset.state = abs >= 0.8 ? "strong" : abs >= 0.5 ? "medium" : "weak";
+    $("verdictLabel").textContent = strength + direction;
+    $("verdictR").textContent = "r = " + display(r);
+    $("verdictMeta").textContent = "n=" + catalysts + (r2 !== null ? " · R²=" + display(r2) : "");
+    const slope = number(statistic(data, "slope"));
+    const intercept = number(statistic(data, "intercept"));
+    $("verdictEquation").textContent = slope === null || intercept === null
+      ? ""
+      : "y = " + fmt2(slope) + "x " + (intercept >= 0 ? "+ " : "− ") + fmt2(Math.abs(intercept));
+    $("verdictQuality").textContent = papers < 2 ? "数据来自单一论文，仅供核验" : "跨 " + papers + " 篇论文";
+  }
+
   function axisValue(point, axis) {
     return point?.[axis]?.value ?? point?.[axis + "_value"] ?? null;
   }
@@ -247,38 +283,184 @@
     return point.catalyst_name || point.catalyst?.name || point.catalyst || "催化剂";
   }
 
+  let activePointIdx = null;
+
+  function hideTooltip() {
+    activePointIdx = null;
+    $("plotTooltip").hidden = true;
+    $("plotLayer").querySelectorAll(".plot-point.is-selected").forEach((c) => c.classList.remove("is-selected"));
+    $("plotLegend").querySelectorAll(".plot-legend-item.is-selected").forEach((item) => item.classList.remove("is-selected"));
+    $("detailsBody").querySelectorAll("tr.is-selected-row").forEach((r) => r.classList.remove("is-selected-row"));
+  }
+
+  function selectPoint(idx, circle) {
+    const data = state.lastCorrelation;
+    if (!data) return;
+    const points = (data.points || []).filter((point) => number(axisValue(point, "x")) !== null && number(axisValue(point, "y")) !== null);
+    const point = points[idx];
+    if (!point) return;
+    hideTooltip();
+    activePointIdx = idx;
+    const targetCircle = circle || $("plotLayer").querySelector('.plot-point[data-idx="' + idx + '"]');
+    if (!targetCircle) return;
+    targetCircle.classList.add("is-selected");
+    const legendItem = $("plotLegend").querySelector('.plot-legend-item[data-idx="' + idx + '"]');
+    if (legendItem) legendItem.classList.add("is-selected");
+    const xLabel = data.x_label || fieldLabel(data.x_field || $("xField").value);
+    const yLabel = data.y_label || fieldLabel(data.y_field || $("yField").value);
+    const tooltip = $("plotTooltip");
+    tooltip.innerHTML = '<strong class="tooltip-title">' + esc(pointCatalystName(point)) + "</strong>"
+      + '<span class="muted">' + esc(point.catalyst_sample_id || "") + "</span><br>"
+      + esc(xLabel) + "：<b>" + esc(display(axisValue(point, "x"))) + "</b><br>"
+      + esc(yLabel) + "：<b>" + esc(display(axisValue(point, "y"))) + "</b>";
+    const wrapRect = document.querySelector(".plot-wrap").getBoundingClientRect();
+    tooltip.hidden = false;
+    const circleRect = targetCircle.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth;
+    const tooltipHeight = tooltip.offsetHeight;
+    let left = circleRect.left - wrapRect.left + 14;
+    if (left + tooltipWidth > wrapRect.width - 8) left = circleRect.left - wrapRect.left - tooltipWidth - 14;
+    left = Math.max(8, Math.min(left, wrapRect.width - tooltipWidth - 8));
+    let top = circleRect.top - wrapRect.top - 10;
+    if (top + tooltipHeight > wrapRect.height - 8) top = wrapRect.height - tooltipHeight - 8;
+    tooltip.style.left = left + "px";
+    tooltip.style.top = Math.max(top, 8) + "px";
+    const row = $("detailsBody").querySelector('tr[data-idx="' + idx + '"]');
+    if (row) {
+      row.classList.add("is-selected-row");
+    }
+  }
+
+  function niceStep(range, targetCount) {
+    if (!range || !isFinite(range)) return 1;
+    const raw = range / targetCount;
+    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const norm = raw / mag;
+    let step;
+    if (norm < 1.5) step = 1;
+    else if (norm < 3) step = 2;
+    else if (norm < 7) step = 5;
+    else step = 10;
+    return step * mag;
+  }
+
+  function niceScale(min, max, targetCount) {
+    if (min === max) { min -= 0.5; max += 0.5; }
+    const rawSpan = max - min;
+    const paddedMin = min - rawSpan * 0.06;
+    const paddedMax = max + rawSpan * 0.06;
+    const step = niceStep(paddedMax - paddedMin, targetCount);
+    const start = Math.floor(paddedMin / step) * step;
+    const end = Math.ceil(paddedMax / step) * step;
+    const ticks = [];
+    const precision = Math.max(0, -Math.floor(Math.log10(step)) + 2);
+    for (let v = start; v <= end + step * 0.001; v += step) ticks.push(Number(v.toFixed(precision)));
+    return { min: start, max: end, ticks };
+  }
+
+  function formatTick(value) {
+    const n = Number(value);
+    if (!isFinite(n)) return "—";
+    if (Math.abs(n) >= 1000 || (Math.abs(n) < 0.01 && n !== 0)) return n.toExponential(1);
+    return (Math.round(n * 100) / 100).toString();
+  }
+
+  function fmt2(value) {
+    return value === null || value === undefined ? "—" : (Math.round(value * 100) / 100).toString();
+  }
+
   function plot(data) {
     const points = (data.points || []).filter((point) => number(axisValue(point, "x")) !== null && number(axisValue(point, "y")) !== null);
     const layer = $("plotLayer");
     const empty = $("plotEmpty");
     layer.innerHTML = "";
+    hideTooltip();
     if (!points.length) {
+      $("plotLegend").innerHTML = "";
+      $("plotLegend").hidden = true;
       empty.textContent = data.insufficient_reason || data.fit?.reason || "没有可绘制的同一催化剂样本";
-      empty.hidden = false;
+      empty.style.display = "";
       return;
     }
-    empty.hidden = true;
+    empty.style.display = "none";
     const xValues = points.map((point) => number(axisValue(point, "x")));
     const yValues = points.map((point) => number(axisValue(point, "y")));
-    const xMin = Math.min(...xValues), xMax = Math.max(...xValues), yMin = Math.min(...yValues), yMax = Math.max(...yValues);
-    const xSpan = xMax - xMin || 1, ySpan = yMax - yMin || 1;
-    const sx = (x) => 58 + ((x - xMin) / xSpan) * 548;
-    const sy = (y) => 334 - ((y - yMin) / ySpan) * 278;
-    layer.insertAdjacentHTML("beforeend", '<line class="plot-axis" x1="58" y1="334" x2="606" y2="334"/><line class="plot-axis" x1="58" y1="42" x2="58" y2="334"/>');
-    for (let tick = 1; tick < 4; tick += 1) {
-      const x = 58 + tick * (548 / 4), y = 334 - tick * (278 / 4);
-      layer.insertAdjacentHTML("beforeend", '<line class="plot-grid" x1="' + x + '" y1="42" x2="' + x + '" y2="334"/><line class="plot-grid" x1="58" y1="' + y + '" x2="606" y2="' + y + '"/>');
-    }
+    const xScale = niceScale(Math.min(...xValues), Math.max(...xValues), 5);
+    const yScale = niceScale(Math.min(...yValues), Math.max(...yValues), 5);
+    const xTicks = xScale.ticks, yTicks = yScale.ticks;
+    const xLo = xScale.min, xHi = xScale.max;
+    const yLo = yScale.min, yHi = yScale.max;
+    const xSpan = xHi - xLo || 1, ySpan = yHi - yLo || 1;
+    const L = 58, R = 606, T = 42, B = 334;
+    const W = R - L, H = B - T;
+    const sx = (x) => L + ((x - xLo) / xSpan) * W;
+    const sy = (y) => B - ((y - yLo) / ySpan) * H;
+
+    layer.insertAdjacentHTML("beforeend",
+      '<clipPath id="plotClip"><rect x="' + L + '" y="' + T + '" width="' + W + '" height="' + H + '"/></clipPath>');
+
+    let grid = '';
+    yTicks.forEach((t) => {
+      const y = sy(t);
+      grid += '<line class="plot-grid" x1="' + L + '" y1="' + y + '" x2="' + R + '" y2="' + y + '"/>';
+      grid += '<text class="plot-tick" x="' + (L - 6) + '" y="' + (y + 3) + '" text-anchor="end">' + esc(formatTick(t)) + "</text>";
+    });
+    xTicks.forEach((t) => {
+      const x = sx(t);
+      grid += '<line class="plot-grid" x1="' + x + '" y1="' + T + '" x2="' + x + '" y2="' + B + '"/>';
+      grid += '<text class="plot-tick" x="' + x + '" y="' + (B + 16) + '" text-anchor="middle">' + esc(formatTick(t)) + "</text>";
+    });
+    layer.insertAdjacentHTML("beforeend", grid);
+
+    layer.insertAdjacentHTML("beforeend",
+      '<line class="plot-axis" x1="' + L + '" y1="' + T + '" x2="' + L + '" y2="' + B + '"/>'
+      + '<line class="plot-axis" x1="' + L + '" y1="' + B + '" x2="' + R + '" y2="' + B + '"/>');
+
+    const xTitle = data.x_label || fieldLabel(data.x_field || $("xField").value);
+    const yTitle = data.y_label || fieldLabel(data.y_field || $("yField").value);
+    layer.insertAdjacentHTML("beforeend",
+      '<text class="plot-axis-title" x="' + (L + W / 2) + '" y="' + (B + 34) + '" text-anchor="middle">' + esc(xTitle) + "</text>"
+      + '<text class="plot-axis-title" x="14" y="' + (T + H / 2) + '" text-anchor="middle" transform="rotate(-90 14 ' + (T + H / 2) + ')">' + esc(yTitle) + "</text>");
+
     const slope = number(data.statistics?.slope);
     const intercept = number(data.statistics?.intercept);
     const fitReady = data.ready === true && slope !== null && intercept !== null;
     if (fitReady) {
-      layer.insertAdjacentHTML("beforeend", '<line class="fit-line" x1="' + sx(xMin) + '" y1="' + sy(slope * xMin + intercept) + '" x2="' + sx(xMax) + '" y2="' + sy(slope * xMax + intercept) + '"/>');
+      layer.insertAdjacentHTML("beforeend",
+        '<g clip-path="url(#plotClip)"><line class="fit-line" x1="' + sx(xLo) + '" y1="' + sy(slope * xLo + intercept) + '" x2="' + sx(xHi) + '" y2="' + sy(slope * xHi + intercept) + '"/></g>');
     }
-    points.forEach((point) => {
+
+    const showLegend = points.length <= 12;
+    let pts = '';
+    points.forEach((point, idx) => {
       const x = number(axisValue(point, "x")), y = number(axisValue(point, "y"));
-      layer.insertAdjacentHTML("beforeend", '<circle class="plot-point" cx="' + sx(x) + '" cy="' + sy(y) + '" r="6"><title>' + esc(pointCatalystName(point) + " · " + (point.catalyst_sample_id || "")) + '</title></circle>');
+      const aria = pointCatalystName(point) + "，X " + display(x) + "，Y " + display(y);
+      pts += '<circle class="plot-point" role="button" tabindex="0" aria-label="' + esc(aria) + '" data-idx="' + idx + '" cx="' + sx(x) + '" cy="' + sy(y) + '" r="7"><title>' + esc(pointCatalystName(point) + " · " + (point.catalyst_sample_id || "")) + "</title></circle>";
+      if (showLegend) pts += '<text class="plot-point-index" x="' + sx(x) + '" y="' + sy(y) + '">' + (idx + 1) + "</text>";
     });
+    layer.insertAdjacentHTML("beforeend", pts);
+
+    const legend = $("plotLegend");
+    legend.hidden = !showLegend;
+    legend.innerHTML = showLegend ? points.map((point, idx) => '<li><button class="plot-legend-item" type="button" data-idx="' + idx + '"><span class="plot-legend-index">' + (idx + 1) + '</span><span class="plot-legend-name">' + esc(pointCatalystName(point)) + "</span></button></li>").join("") : "";
+
+    layer.querySelectorAll(".plot-point").forEach((circle) => {
+      circle.addEventListener("click", (event) => {
+        event.stopPropagation();
+        selectPoint(Number(circle.getAttribute("data-idx")), circle);
+      });
+      circle.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          event.stopPropagation();
+          selectPoint(Number(circle.getAttribute("data-idx")), circle);
+        }
+      });
+    });
+    legend.querySelectorAll(".plot-legend-item").forEach((item) => item.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectPoint(Number(item.getAttribute("data-idx")));
+    }));
     $("fitNotice").textContent = fitReady ? "拟合线按接口返回的斜率和截距绘制。" : (data.insufficient_reason || data.reason || "样本量不足或数据不可比，未绘制拟合线。");
   }
 
@@ -294,7 +476,7 @@
     return '<div class="candidate-list">' + list.map((candidate) => {
       const selected = candidate.selected_for_summary === true || candidate.selected_for_regression === true;
       const label = [candidate.pathway || candidate.label || "候选路径", display(candidate.value ?? candidate.barrier)].join("：");
-      return '<span class="' + (selected ? "selected-candidate" : "") + '">' + esc(label) + (selected ? "（用于汇总/回归的最大可比能垒）" : "") + "</span>";
+      return '<span class="candidate-item"><span class="' + (selected ? "selected-candidate" : "") + '">' + esc(label) + "</span>" + (selected ? '<span class="candidate-badge">用于汇总/回归</span>' : "") + "</span>";
     }).join("") + "</div>";
   }
 
@@ -303,10 +485,12 @@
     $("xColumn").textContent = "X：" + (data.x_label || fieldLabel(xKey));
     $("yColumn").textContent = "Y：" + (data.y_label || fieldLabel(yKey));
     const points = data.points || [];
+    const plottable = points.filter((point) => number(axisValue(point, "x")) !== null && number(axisValue(point, "y")) !== null);
     $("detailsBody").innerHTML = points.length ? points.map((point) => {
       const xSources = point.x?.source_record_ids ?? point.x_source_record_ids ?? point.source_record_ids?.x;
       const ySources = point.y?.source_record_ids ?? point.y_source_record_ids ?? point.source_record_ids?.y;
-      return "<tr><td>" + esc(pointCatalystName(point)) + "</td><td>" + esc(point.paper?.paper_code ?? point.paper_code ?? "—") + "</td><td><code>" + esc(point.catalyst_sample_id || "—") + "</code></td><td>" + esc(display(axisValue(point, "x"))) + "</td><td>" + esc(display(axisValue(point, "y"))) + "</td><td>X: " + ids(xSources) + "<br>Y: " + ids(ySources) + "</td><td>" + candidates(point, data) + "</td></tr>";
+      const plotIdx = plottable.indexOf(point);
+      return '<tr' + (plotIdx >= 0 ? ' data-idx="' + plotIdx + '"' : "") + "><td>" + esc(pointCatalystName(point)) + "</td><td>" + esc(point.paper?.paper_code ?? point.paper_code ?? "—") + '</td><td class="col-id"><code>' + esc(point.catalyst_sample_id || "—") + "</code></td><td>" + esc(display(axisValue(point, "x"))) + "</td><td>" + esc(display(axisValue(point, "y"))) + '</td><td class="col-id">X: ' + ids(xSources) + "<br>Y: " + ids(ySources) + "</td><td>" + candidates(point, data) + "</td></tr>";
     }).join("") : '<tr><td colspan="7">没有可显示的同一催化剂样本。</td></tr>';
   }
 
@@ -316,20 +500,33 @@
     $("minN").value = String(minN);
     const requestId = ++state.requestId;
     $("relationStatus").textContent = "正在读取同一催化剂样本的关系数据…";
+    $("retryCorrelation").hidden = true;
+    document.querySelector(".plot-wrap").classList.add("is-loading");
+    $("plotEmpty").textContent = "正在加载…";
+    $("plotEmpty").style.display = "";
     try {
       const params = visualParams(new URLSearchParams({ x_field: xField, y_field: yField, min_n: String(minN) }));
       const data = await getJSON("/api/visuals/catalyst-correlation?" + params.toString());
       if (requestId !== state.requestId) return;
+      state.lastCorrelation = data;
       renderStatistics(data);
+      renderVerdict(data);
       renderDiagnostics(data);
       plot(data);
       renderDetails(data);
       $("relationStatus").textContent = "已加载 " + (data.n_catalysts ?? data.catalyst_count ?? (data.points || []).length) + " 个同一催化剂样本。";
     } catch (error) {
       if (requestId !== state.requestId) return;
+      state.lastCorrelation = null;
       $("relationStatus").textContent = "关系数据读取失败：" + error.message;
+      $("retryCorrelation").hidden = false;
+      renderStatistics({});
+      renderVerdict({ ready: false, points: [] });
+      renderDiagnostics({});
       plot({ insufficient_reason: "关系数据读取失败，未绘制拟合线。" });
       renderDetails({ points: [] });
+    } finally {
+      if (requestId === state.requestId) document.querySelector(".plot-wrap").classList.remove("is-loading");
     }
   }
 
@@ -338,6 +535,8 @@
     ["xField", "yField", "minN"].forEach((id) => $(id).addEventListener("change", loadCorrelation));
     $("exportCatalystCsv").addEventListener("click", () => downloadDataset("csv"));
     $("downloadCatalystJson").addEventListener("click", () => downloadDataset("json"));
+    $("retryCorrelation").addEventListener("click", loadCorrelation);
+    document.querySelector(".plot-wrap").addEventListener("click", hideTooltip);
     $("quickChargeBond").addEventListener("click", () => {
       if (state.fields.some((field) => field.key === DEFAULTS.quickX) && state.fields.some((field) => field.key === DEFAULTS.quickY)) {
         $("xField").value = DEFAULTS.quickX;

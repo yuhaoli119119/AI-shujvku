@@ -86,7 +86,7 @@ test('content knowledge page exposes unified safe retrieval surface', () => {
   ].map(readFrontendFile).join('\n');
 
   expect(topnav).toContain('id: "content-knowledge"');
-  expect(topnav).toContain('label: "内容知识"');
+  expect(topnav).toContain('label: "论文内容审核"');
   expect(page).toContain('/api/content-knowledge?');
   expect(page).toContain('/api/content-knowledge/sync?');
   expect(page).toContain('/web-proposal/validate');

@@ -169,7 +169,8 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(second).toContainText("nested-x-sample-co-002");
     await expect(second).toContainText("nested-y-sample-co-002");
     await expect(second).toContainText("path A：0.77");
-    await expect(second).toContainText("path B：1.02（用于汇总/回归的最大可比能垒）");
+    await expect(second).toContainText("path B：1.02");
+    await expect(second.locator(".candidate-badge")).toHaveText("用于汇总/回归");
 
     await page.getByRole("button", { name: "快捷关系：Li2S Bader 电荷转移 vs Li-S 最大键长" }).click();
     await expect.poll(() => correlationRequests.length).toBe(2);
@@ -241,6 +242,102 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(page.locator("#relationStatus")).toContainText("已加载 6 个同一催化剂样本");
   });
 
+  test("keeps every point inside the plot and uses a compact numbered legend", async ({ page }) => {
+    const correlationRequests = [];
+    await installVisualMocks(page, correlationRequests);
+    await page.route("**/api/visuals/catalyst-correlation?*", (route) => {
+      const url = new URL(route.request().url());
+      const points = [
+        point("sample-1", "Co-N3S1", "B0102", -2.68, 2.21),
+        point("sample-2", "Co-N3S1", "B0102", -2.50, 1.73),
+        point("sample-3", "Co-N3Cl1 (Co1N3Cl1)", "B0102", -2.34, 1.59),
+        point("sample-4", "Co-N3Br1 (Co1N3Br1)", "B0102", -2.31, 1.57),
+        point("sample-5", "Co-N3I1 (Co1N3I1)", "B0102", -2.29, 1.56),
+      ];
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          x_field: url.searchParams.get("x_field"),
+          y_field: url.searchParams.get("y_field"),
+          x_label: "Li2S 吸附能",
+          y_label: "Li2S 解离/分解能垒",
+          min_n: 3,
+          n_catalysts: 5,
+          n_papers: 1,
+          legacy_identity_point_count: 5,
+          ready: true,
+          statistics: { pearson_r: -0.9544, spearman_rho: -1, r_squared: 0.911, slope: -1.87, intercept: -2.78 },
+          warnings: [],
+          excluded_reasons: { context_mismatch: 2 },
+          points,
+        }),
+      });
+    });
+
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(BASE_URL + "/pages/visuals/index.html?library_name=Selected%20Library");
+    await expect(page.locator(".plot-point")).toHaveCount(5);
+
+    const positions = await page.locator(".plot-point").evaluateAll((nodes) => nodes.map((node) => ({
+      x: Number(node.getAttribute("cx")),
+      y: Number(node.getAttribute("cy")),
+    })));
+    for (const position of positions) {
+      expect(position.x).toBeGreaterThanOrEqual(65);
+      expect(position.x).toBeLessThanOrEqual(599);
+      expect(position.y).toBeGreaterThanOrEqual(49);
+      expect(position.y).toBeLessThanOrEqual(327);
+    }
+
+    await expect(page.locator(".plot-point-label")).toHaveCount(0);
+    await expect(page.locator(".plot-annotation-group")).toHaveCount(0);
+    await expect(page.locator("#plotLegend .plot-legend-item")).toHaveCount(5);
+    await expect(page.locator("#verdictEquation")).toHaveText("y = -1.87x − 2.78");
+    await expect(page.locator("#technicalDiagnostics")).not.toHaveAttribute("open", "");
+    await expect(page.locator(".diagnostic-policy")).not.toBeVisible();
+    const overflowingHeaders = await page.locator("thead th").evaluateAll((nodes) => nodes.filter((node) => node.scrollWidth > node.clientWidth + 1).map((node) => node.textContent));
+    expect(overflowingHeaders).toEqual([]);
+
+    const targetPoint = page.locator(".plot-point").nth(4);
+    await targetPoint.scrollIntoViewIfNeeded();
+    const beforeClickScroll = await page.evaluate(() => window.scrollY);
+    await targetPoint.click();
+    await expect(page.locator("#plotTooltip")).toBeVisible();
+    await expect(page.locator("#plotLegend .plot-legend-item").nth(4)).toHaveClass(/is-selected/);
+    await expect(page.locator("#detailsBody tr").nth(4)).toHaveClass(/is-selected-row/);
+    expect(await page.evaluate(() => window.scrollY)).toBe(beforeClickScroll);
+  });
+
+  test("clears stale analysis after a failed request and can retry", async ({ page }) => {
+    const correlationRequests = [];
+    let shouldFail = false;
+    await installVisualMocks(page, correlationRequests);
+    await page.route("**/api/visuals/catalyst-correlation?*", (route) => {
+      const url = new URL(route.request().url());
+      correlationRequests.push(url);
+      if (shouldFail) return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ detail: "temporary failure" }) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(correlationPayload(url)) });
+    });
+
+    await page.goto(BASE_URL + "/pages/visuals/index.html");
+    await expect(page.locator(".fit-line")).toHaveCount(1);
+    await expect(page.locator("#statPearson")).toHaveText("-0.91");
+
+    shouldFail = true;
+    await page.locator("#yField").selectOption("d_band_center");
+    await expect(page.locator("#relationStatus")).toContainText("关系数据读取失败");
+    await expect(page.locator("#retryCorrelation")).toBeVisible();
+    await expect(page.locator(".fit-line")).toHaveCount(0);
+    await expect(page.locator("#statPearson")).toHaveText("—");
+    await expect(page.locator("#diagnostics")).toBeHidden();
+
+    shouldFail = false;
+    await page.locator("#retryCorrelation").click();
+    await expect(page.locator("#relationStatus")).toContainText("已加载 3 个同一催化剂样本");
+    await expect(page.locator(".fit-line")).toHaveCount(1);
+    await expect(page.locator("#retryCorrelation")).toBeHidden();
+  });
+
   test("offers fixed catalyst CSV and audit JSON downloads with library scope and clear errors", async ({ page }) => {
     const correlationRequests = [];
     const exportRequests = [];
@@ -266,8 +363,8 @@ test.describe("DFT 数据可视化迁移", () => {
 
     await expect(page.getByRole("button", { name: "导出催化剂宽表 CSV" })).toBeVisible();
     await expect(page.getByRole("button", { name: "下载审计 JSON" })).toBeVisible();
-    await expect(page.locator(".export-panel")).toContainText("pandas、随机森林、XGBoost");
-    await expect(page.locator(".export-panel")).toContainText("不是直接训练表");
+    await expect(page.locator(".export-note")).toContainText("pandas、随机森林、XGBoost");
+    await expect(page.locator(".export-note")).toContainText("不是直接训练表");
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByRole("button", { name: "导出催化剂宽表 CSV" }).click();
