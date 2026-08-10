@@ -159,7 +159,7 @@ def _bundle(session, paper_id: str, module: str):
 
 def _result(check, outcome="CONFIRMED", verified_value=None):
     pages = []
-    if check["requires_page_render"]:
+    if check["requires_page_render"] and check["page"] is not None:
         pages = [{
             "source_paper_id": check["source_paper_id"],
             "source_pdf_sha256": check["source_pdf_sha256"],
@@ -479,20 +479,17 @@ def test_partial_stale_does_not_roll_back_valid_object_and_retry_is_idempotent(s
 def test_same_writing_card_fields_use_latest_object_gate_without_false_stale(setup_test_db, tmp_path):
     seeded = _seed(setup_test_db, tmp_path)
     with _factory(setup_test_db).begin() as session:
-        created, plan = _bundle(session, seeded["paper_id"], "writing_cards")
-        first, second = plan["required_object_checks"]
+        created, plan = _bundle(session, seeded["paper_id"], "paper_content")
         service = ContentWebReviewLocalVerificationService(session)
-        one = service.apply(
-            bundle_id=UUID(created["bundle_id"]), results=[_result(first)], partial=True,
-            source_prefix="ide_ai", identity_verified=True,
-        )
-        assert one["submitted_results"][0]["status"] == "applied"
-        two = service.apply(
-            bundle_id=UUID(created["bundle_id"]), results=[_result(second)], partial=True,
-            source_prefix="ide_ai", identity_verified=True,
-        )
-        assert two["submitted_results"][0]["status"] == "applied"
-        assert two["status"] == "finalized"
+        applied = None
+        for check in plan["required_object_checks"]:
+            applied = service.apply(
+                bundle_id=UUID(created["bundle_id"]), results=[_result(check)], partial=True,
+                source_prefix="ide_ai", identity_verified=True,
+            )
+            assert applied["submitted_results"][0]["status"] == "applied"
+        assert applied is not None
+        assert applied["status"] == "finalized"
 
 
 def test_direct_review_write_without_lock_fails(setup_test_db, tmp_path):

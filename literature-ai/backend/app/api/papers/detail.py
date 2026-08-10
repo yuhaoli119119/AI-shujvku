@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
@@ -25,6 +25,7 @@ from app.db.models import (
     WorkflowJob,
 )
 from app.db.session import get_db_session
+from app.security.owner import require_authenticated_owner_request
 from app.schemas.api import (
     CatalystSampleDuplicateMergeRequest,
     CatalystSampleDuplicateMergeResponse,
@@ -1038,8 +1039,10 @@ async def verify_dft_result(
     paper_id: UUID,
     result_id: UUID,
     payload: DFTResultVerifyRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> DFTResultVerifyResponse:
+    identity = require_authenticated_owner_request(request)
     try:
         result = DFTResultReviewService(session).verify_result(
             paper_id=paper_id,
@@ -1050,6 +1053,9 @@ async def verify_dft_result(
             field_names=payload.field_names,
             expected_write_versions=payload.expected_write_versions,
             expected_write_version=payload.expected_write_version,
+            verification_actor_type="human",
+            actor_name=identity.actor,
+            source_label=identity.source,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1064,8 +1070,10 @@ async def reject_dft_result(
     paper_id: UUID,
     result_id: UUID,
     payload: DFTResultRejectRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> DFTResultRejectResponse:
+    identity = require_authenticated_owner_request(request)
     try:
         result = DFTResultReviewService(session).reject_result(
             paper_id=paper_id,
@@ -1076,6 +1084,9 @@ async def reject_dft_result(
             field_names=payload.field_names,
             expected_write_versions=payload.expected_write_versions,
             expected_write_version=payload.expected_write_version,
+            verification_actor_type="human",
+            actor_name=identity.actor,
+            source_label=identity.source,
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

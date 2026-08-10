@@ -22,6 +22,9 @@ from app.migrations.external_analysis_candidate_retention_v1 import (
 )
 from app.migrations.source_snapshot_reconciliation_v1 import upgrade as upgrade_source_snapshot_reconciliation_v1
 from app.migrations.content_web_review_bundle_v2 import upgrade as upgrade_content_web_review_bundle_v2
+from app.migrations.content_web_review_bundle_v2_active_generation_v1 import (
+    upgrade as upgrade_content_web_review_bundle_v2_active_generation_v1,
+)
 from app.migrations.content_web_review_local_verification_v1 import (
     upgrade as upgrade_content_web_review_local_verification_v1,
 )
@@ -125,6 +128,7 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
             )
         upgrade_source_snapshot_reconciliation_v1(connection)
         upgrade_content_web_review_bundle_v2(connection)
+        upgrade_content_web_review_bundle_v2_active_generation_v1(connection)
         upgrade_content_web_review_local_verification_v1(connection)
     with engine.begin() as connection:
         # A snapshot may be exported to both web AI and IDE AI; bundles are

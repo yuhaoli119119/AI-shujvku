@@ -13,6 +13,7 @@ from app.db.models import (
     WritingCard,
 )
 from app.main import app
+from app.services.content_knowledge_service import candidate_audit_semantics
 
 
 def _seed_content_knowledge(engine) -> str:
@@ -111,7 +112,10 @@ def _items_by_source(payload: dict) -> dict[str, list[dict]]:
 
 def test_content_knowledge_unifies_sources_and_preserves_safety_policies(setup_test_db):
     paper_id = _seed_content_knowledge(setup_test_db)
-    response = TestClient(app).get("/api/content-knowledge", params={"paper_id": paper_id, "limit": 50})
+    response = TestClient(app).get(
+        "/api/content-knowledge",
+        params={"paper_id": paper_id, "result_view": "all", "limit": 50},
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -161,13 +165,24 @@ def test_content_knowledge_filters_category_query_and_candidates(setup_test_db):
 
     query_payload = client.get(
         "/api/content-knowledge",
-        params={"paper_id": paper_id, "query": "mechanism conflict", "limit": 50},
+        params={
+            "paper_id": paper_id,
+            "query": "mechanism conflict",
+            "result_view": "audit",
+            "limit": 50,
+        },
     ).json()
     assert any(item["source_type"] == "external_analysis_candidate" for item in query_payload["items"])
 
     without_candidates = client.get(
         "/api/content-knowledge",
-        params={"paper_id": paper_id, "include_candidates": False, "query": "mechanism conflict", "limit": 50},
+        params={
+            "paper_id": paper_id,
+            "result_view": "audit",
+            "include_candidates": False,
+            "query": "mechanism conflict",
+            "limit": 50,
+        },
     ).json()
     assert all(item["source_type"] != "external_analysis_candidate" for item in without_candidates["items"])
 
@@ -179,13 +194,115 @@ def test_content_knowledge_filters_category_query_and_candidates(setup_test_db):
     assert {item["paper_code"] for item in by_paper_code["items"]} == {"CK001"}
 
 
+def test_result_views_keep_content_and_audit_counts_separate_before_and_after_sync(setup_test_db):
+    paper_id = _seed_content_knowledge(setup_test_db)
+    client = TestClient(app)
+
+    def assert_views() -> None:
+        content = client.get(
+            "/api/content-knowledge",
+            params={"paper_id": paper_id, "result_view": "content", "limit": 2},
+        ).json()
+        assert content["result_view"] == "content"
+        assert content["total"] == 4
+        assert content["result_item_count"] == 2
+        assert content["distinct_paper_count"] == 1
+        assert sum(content["category_counts"].values()) == 4
+        assert all(item["source_type"] != "external_analysis_candidate" for item in content["items"])
+        assert "not a paper count" in content["count_semantics"]["result_items"]
+
+        audit = client.get(
+            "/api/content-knowledge",
+            params={"paper_id": paper_id, "result_view": "audit", "limit": 50},
+        ).json()
+        assert audit["total"] == 1
+        assert audit["distinct_paper_count"] == 1
+        assert sum(audit["category_counts"].values()) == 1
+        assert {item["source_type"] for item in audit["items"]} == {"external_analysis_candidate"}
+        candidate = audit["items"][0]
+        assert candidate["item_kind"] == "audit"
+        assert candidate["audit_state"] == "active_unresolved"
+        assert candidate["audit_requires_action"] is True
+        assert candidate["can_use_for_writing"] is False
+        assert candidate["can_use_for_citation"] is False
+
+        all_items = client.get(
+            "/api/content-knowledge",
+            params={"paper_id": paper_id, "result_view": "all", "limit": 50},
+        ).json()
+        assert all_items["total"] == 5
+        assert {item["item_kind"] for item in all_items["items"]} == {"content", "audit"}
+
+    assert_views()
+    assert client.post("/api/content-knowledge/sync", params={"paper_id": paper_id}).status_code == 200
+    assert_views()
+    assert client.get("/api/content-knowledge", params={"result_view": "invalid"}).status_code == 422
+
+
+def test_candidate_audit_semantics_require_explicit_linkage_and_keep_terminal_history():
+    linked = candidate_audit_semantics(
+        "materialized",
+        target_type="dft_results",
+        target_id="formal-dft-id",
+    )
+    assert linked["state"] == "applied_to_formal_dft"
+    assert linked["linkage_explicit"] is True
+    assert linked["requires_action"] is False
+
+    unlinked = candidate_audit_semantics("materialized")
+    assert unlinked["state"] == "unknown_requires_attention"
+    assert unlinked["warning"] == "materialized_status_missing_explicit_target_link"
+
+    for status in ("rejected_by_local_ai", "failed", "skipped"):
+        terminal = candidate_audit_semantics(status)
+        assert terminal["state"] == "terminal_history"
+        assert terminal["requires_action"] is False
+        assert terminal["label"] != "待处理审计候选"
+
+
+def test_audit_view_does_not_hide_blocked_terminal_candidates_in_legacy_or_persistent_path(
+    setup_test_db,
+):
+    paper_id = _seed_content_knowledge(setup_test_db)
+    Session = sessionmaker(
+        bind=setup_test_db,
+        autoflush=False,
+        autocommit=False,
+        future=True,
+    )
+    with Session.begin() as session:
+        candidate = session.query(ExternalAnalysisCandidate).one()
+        candidate.status = "failed"
+
+    client = TestClient(app)
+
+    def assert_terminal_visible() -> None:
+        payload = client.get(
+            "/api/content-knowledge",
+            params={"paper_id": paper_id, "result_view": "audit"},
+        ).json()
+        assert payload["total"] == 1
+        assert payload["items"][0]["audit_state"] == "terminal_history"
+        assert payload["items"][0]["can_use_for_writing"] is False
+        assert payload["items"][0]["can_use_for_citation"] is False
+
+    assert_terminal_visible()
+    assert client.post("/api/content-knowledge/sync", params={"paper_id": paper_id}).status_code == 200
+    assert_terminal_visible()
+
+
 def test_legacy_fallback_search_pagination_and_reviewability(setup_test_db):
     paper_id = _seed_content_knowledge(setup_test_db)
     client = TestClient(app)
 
     search = client.get(
         "/api/content-knowledge",
-        params={"query": "CK001 catalysts 10.1000/ck001", "limit": 2, "offset": 0},
+        params={
+            "query": "CK001 catalysts 10.1000/ck001",
+            "result_view": "all",
+            "limit": 2,
+            "offset": 0,
+        },
     )
     assert search.status_code == 200
     first = search.json()
@@ -200,7 +317,12 @@ def test_legacy_fallback_search_pagination_and_reviewability(setup_test_db):
     pages = [
         client.get(
             "/api/content-knowledge",
-            params={"query": "CK001 catalysts 10.1000/ck001", "limit": 2, "offset": offset},
+            params={
+                "query": "CK001 catalysts 10.1000/ck001",
+                "result_view": "all",
+                "limit": 2,
+                "offset": offset,
+            },
         ).json()
         for offset in (0, 2, 4)
     ]
@@ -241,10 +363,4 @@ def test_retrieval_search_includes_content_knowledge_with_policy_metadata(setup_
     payload = response.json()
     content_items = [item for item in payload["items"] if item["source"] == "content_knowledge"]
     assert content_items
-    candidate = next(item for item in content_items if item["source_type"] == "external_analysis_candidate")
-    assert candidate["paper_code"] == "CK001"
-    assert candidate["review_status"] == "needs_review"
-    assert candidate["metadata"]["citation_policy"] == "blocked"
-    assert candidate["metadata"]["can_use_for_writing"] is False
-    assert candidate["metadata"]["can_use_for_citation"] is False
-    assert "candidate_requires_resolution" in candidate["metadata"]["risk_flags"]
+    assert all(item["source_type"] != "external_analysis_candidate" for item in content_items)

@@ -49,6 +49,145 @@ class PaperWriterPromptBuilder:
             "target_paper_type": target_paper_type,
         }
 
+    def build_batch_prompt_context(
+        self,
+        plan: dict[str, Any],
+        batch_id: str,
+    ) -> dict[str, Any]:
+        """Build one bounded synthesis context from a multi-paper evidence plan.
+
+        The context contains only the evidence IDs assigned to the requested
+        batch. It never expands paper full text or evidence from another batch.
+        """
+
+        batches = plan.get("batches") if isinstance(plan.get("batches"), list) else []
+        batch = next(
+            (item for item in batches if isinstance(item, dict) and item.get("batch_id") == batch_id),
+            None,
+        )
+        if batch is None:
+            raise ValueError(f"Unknown batch_id: {batch_id}")
+
+        batch_paper_ids = {str(item) for item in (batch.get("paper_ids") or [])}
+        batch_evidence_ids = [str(item) for item in (batch.get("selected_evidence_ids") or [])]
+        evidence_by_id = {
+            str(item.get("evidence_id")): item
+            for item in (plan.get("selected_evidence") or [])
+            if isinstance(item, dict) and item.get("evidence_id")
+        }
+        evidence_cards: list[dict[str, Any]] = []
+        for evidence_id in batch_evidence_ids:
+            evidence = evidence_by_id.get(evidence_id)
+            if evidence is None:
+                raise ValueError(f"Batch references missing evidence_id: {evidence_id}")
+            if str(evidence.get("source_paper_id") or evidence.get("paper_id") or "") not in batch_paper_ids:
+                raise ValueError(f"Batch evidence belongs to another paper scope: {evidence_id}")
+            evidence_cards.append(self._json_safe(evidence))
+
+        matrix: list[dict[str, Any]] = []
+        batch_evidence_id_set = set(batch_evidence_ids)
+        for group in plan.get("claim_evidence_matrix") or []:
+            if not isinstance(group, dict):
+                continue
+            evidence_ids = [
+                str(item)
+                for item in (group.get("evidence_ids") or [])
+                if str(item) in batch_evidence_id_set
+            ]
+            if not evidence_ids:
+                continue
+            source_paper_ids = list(
+                dict.fromkeys(
+                    str(evidence_by_id[evidence_id].get("source_paper_id"))
+                    for evidence_id in evidence_ids
+                )
+            )
+            matrix.append(
+                {
+                    **self._json_safe(group),
+                    "evidence_ids": evidence_ids,
+                    "source_paper_ids": source_paper_ids,
+                    "source_count": len(source_paper_ids),
+                    "comparison_allowed": bool(
+                        group.get("comparison_allowed") and len(source_paper_ids) >= 2
+                    ),
+                    "automatic_conclusion_allowed": False,
+                }
+            )
+
+        coverage = plan.get("coverage") if isinstance(plan.get("coverage"), dict) else {}
+        batch_coverage = [
+            self._json_safe(item)
+            for item in (coverage.get("by_paper") or [])
+            if isinstance(item, dict) and str(item.get("paper_id") or "") in batch_paper_ids
+        ]
+        constraints = [
+            {
+                "code": "batch_evidence_boundary",
+                "instruction": "Use only evidence_cards and claim_evidence_matrix from this batch.",
+            },
+            {
+                "code": "source_attribution_required",
+                "instruction": (
+                    "Keep every number and causal statement bound to source_paper_id, "
+                    "evidence_type, object_id, property, unit, context, and locator."
+                ),
+            },
+            {
+                "code": "citation_eligibility_required",
+                "instruction": (
+                    "Only evidence_cards with can_use_for_citation=true may become formal "
+                    "citations. Cards with can_use_for_writing=true and "
+                    "can_use_for_citation=false may organize prose only and must never "
+                    "enter a citation plan or be presented as direct evidence."
+                ),
+            },
+            {
+                "code": "unsupported_claims_must_be_marked",
+                "instruction": "Mark unsupported points as unsupported; do not fill evidence gaps.",
+            },
+            {
+                "code": "final_synthesis_boundary",
+                "instruction": (
+                    "A later synthesis may merge only completed batch summaries plus their "
+                    "claim-evidence mappings; it must not detach numbers from source identities."
+                ),
+            },
+        ]
+        if not coverage.get("coverage_complete"):
+            constraints.append(
+                {
+                    "code": "no_comprehensive_coverage_claim",
+                    "instruction": (
+                        "Coverage is incomplete; do not claim systematic, comprehensive, "
+                        "or exhaustive coverage."
+                    ),
+                }
+            )
+
+        return {
+            "schema_version": "multi_paper_batch_prompt_context.v1",
+            "plan_id": plan.get("plan_id"),
+            "plan_fingerprint": plan.get("plan_fingerprint"),
+            "query": plan.get("query"),
+            "retrieval_intent": plan.get("retrieval_intent"),
+            "retrieval_mode": plan.get("retrieval_mode"),
+            "batch_id": batch.get("batch_id"),
+            "batch_index": batch.get("batch_index"),
+            "paper_ids": list(batch.get("paper_ids") or []),
+            "paper_codes": list(batch.get("paper_codes") or []),
+            "budget": self._json_safe(batch.get("budget") or {}),
+            "evidence_cards": evidence_cards,
+            "claim_evidence_matrix": matrix,
+            "coverage": {
+                "coverage_complete": bool(coverage.get("coverage_complete")),
+                "by_paper": batch_coverage,
+            },
+            "constraints": constraints,
+            "full_text_included": False,
+            "database_writes": False,
+        }
+
     @staticmethod
     def formal_evidence_only(retrieved: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
         """Remove discovery-only section candidates from writing inputs."""

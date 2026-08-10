@@ -170,7 +170,12 @@ def test_run_scoped_projection_remains_readonly_after_v1_bundle_deprecation(setu
 
     scoped_knowledge = client.get(
         "/api/content-knowledge",
-        params={"paper_id": str(paper_id), "run_id": str(run_a_id), "limit": 50},
+        params={
+            "paper_id": str(paper_id),
+            "run_id": str(run_a_id),
+            "result_view": "audit",
+            "limit": 50,
+        },
     )
     assert scoped_knowledge.status_code == 200
     assert scoped_knowledge.json()["filters"]["run_id"] == str(run_a_id)

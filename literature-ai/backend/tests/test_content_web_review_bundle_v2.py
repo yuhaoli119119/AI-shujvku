@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+from threading import Barrier
 from uuid import UUID
 from zipfile import ZipFile
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import ContentEvidenceItem, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperSection, WritingCard
+from app.db.models import ContentEvidenceItem, ContentWebReviewBundleV2, EvidenceLocator, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperSection, WritingCard
 from app.main import app
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 
@@ -31,7 +34,17 @@ def _seed(engine, tmp_path):
         first = PaperSection(paper_id=paper.id, section_title="Results", text="First page evidence", page_start=4, page_end=4)
         second = PaperSection(paper_id=paper.id, section_title="Discussion", text="Second same page evidence", page_start=4, page_end=4)
         claim = MechanismClaim(paper_id=paper.id, claim_type="mechanism", claim_text="Claim evidence", evidence_text="Claim evidence")
-        card = WritingCard(paper_id=paper.id, research_gap="Writing-card evidence")
+        card = WritingCard(
+            paper_id=paper.id,
+            research_gap="Writing-card evidence",
+            evidence_chain=[{
+                "text": "Figure 2 supports the extracted key result.",
+                "source": "Results",
+                "page": 4,
+                "locator_status": "exact_page",
+                "evidence_type": "result",
+            }],
+        )
         session.add_all([first, second, claim, card]); session.flush()
         # Projection flags alone must never make a REJECT consequential.
         session.add(ContentEvidenceItem(paper_id=paper.id, category="mechanism_evidence", source_type="mechanism_claim", source_id=str(claim.id), content="Claim evidence", review_status="validated", citation_status="citable", risk_flags=[]))
@@ -104,7 +117,7 @@ def test_v2_rejects_incomplete_forged_and_wrong_page_payloads(setup_test_db, tmp
         payload["actions"][0]["evidence_quote"] = "invented quote"
         result = service.validate_web_proposal(UUID(bundle["bundle_id"]), payload)
         assert result["valid"] is False
-        assert result["status"] == "proposal_invalid"
+        assert result["status"] == "generated"
         assert {"forged_source_identity", "incomplete_required_field_coverage"} <= set(result["errors"])
         assert any(error.startswith("wrong_page:") for error in result["errors"])
         assert any(error.startswith("forged_quote:") for error in result["errors"])
@@ -118,6 +131,7 @@ def test_v2_validated_web_proposal_is_idempotent_but_immutable(setup_test_db, tm
         proposal = _proposal(bundle["manifest"])
         first = service.validate_web_proposal(UUID(bundle["bundle_id"]), proposal)
         assert first["valid"] is True and first.get("idempotent") is None
+        assert service._bundle(UUID(bundle["bundle_id"])).active_generation_key is None
         repeated = service.validate_web_proposal(UUID(bundle["bundle_id"]), proposal)
         assert repeated["valid"] is True and repeated["idempotent"] is True
         saved = dict(service._bundle(UUID(bundle["bundle_id"])).proposal_payload)
@@ -186,6 +200,138 @@ def test_v2_modules_reject_empty_invalid_and_persist_selected_scope(setup_test_d
             assert str(exc) == "content_web_review_v2_no_targets_for_selected_modules"
         else:
             raise AssertionError("empty module scope must not create a review package")
+
+
+def test_paper_content_replaces_split_text_modules_for_new_review_packages(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        bundle = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        manifest = bundle["manifest"]
+        assert manifest["selected_modules"] == ["paper_content"]
+        assert {item["target_type"] for item in manifest["targets"]} == {
+            "mechanism_claim",
+            "writing_card",
+        }
+        assert {
+            item["field_name"]
+            for item in manifest["targets"]
+            if item["target_type"] == "writing_card"
+        } == {"research_gap", "evidence_chain"}
+        assert not any(
+            item["target_type"] in {"paper_abstract", "paper_section"}
+            for item in manifest["targets"]
+        )
+        with pytest.raises(
+            ValueError,
+            match="content_web_review_v2_paper_content_cannot_mix_legacy_modules",
+        ):
+            service.generate(
+                paper_id=UUID(paper_id),
+                modules=["paper_content", "sections"],
+            )
+
+
+def test_v2_same_snapshot_reuses_one_row_and_legacy_null_key_is_claimed(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        first = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        second = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        assert first["created"] is True and first["reused"] is False
+        assert second["created"] is False and second["reused"] is True
+        assert second["bundle_id"] == first["bundle_id"]
+        assert session.scalar(select(func.count()).select_from(ContentWebReviewBundleV2)) == 1
+        service._bundle(UUID(first["bundle_id"])).active_generation_key = None
+        session.flush()
+        claimed = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        assert claimed["bundle_id"] == first["bundle_id"]
+        assert claimed["reused"] is True and claimed["created"] is False
+        assert service._bundle(UUID(first["bundle_id"])).active_generation_key
+
+
+def test_v2_new_scope_snapshot_and_used_cycle_create_new_rows(setup_test_db, tmp_path):
+    paper_id, section_id = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        paper_content = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        sections = service.generate(paper_id=UUID(paper_id), module="sections")
+        assert sections["bundle_id"] != paper_content["bundle_id"]
+        proposal = _proposal(paper_content["manifest"])
+        assert service.validate_web_proposal(UUID(paper_content["bundle_id"]), proposal)["valid"] is True
+        next_cycle = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        assert next_cycle["bundle_id"] != paper_content["bundle_id"]
+        session.get(PaperSection, UUID(section_id)).text = "new fingerprint"
+        session.flush()
+        changed = service.generate(paper_id=UUID(paper_id), module="sections")
+        assert changed["bundle_id"] != sections["bundle_id"]
+        assert service._bundle(UUID(sections["bundle_id"])).status == "stale"
+        assert service._bundle(UUID(sections["bundle_id"])).active_generation_key is None
+
+
+def test_v2_invalid_proposal_keeps_active_bundle_but_explicit_stale_does_not(
+    setup_test_db,
+    tmp_path,
+):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        invalid = _proposal(created["manifest"])
+        invalid["actions"] = invalid["actions"][:-1]
+        rejected = service.validate_web_proposal(UUID(created["bundle_id"]), invalid)
+        assert rejected["valid"] is False and rejected["status"] == "generated"
+        assert service._bundle(UUID(created["bundle_id"])).active_generation_key
+        retried = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        assert retried["bundle_id"] == created["bundle_id"]
+        stale_bundle = service._bundle(UUID(created["bundle_id"]))
+        stale_bundle.status = "stale"
+        stale_bundle.active_generation_key = None
+        session.flush()
+        replacement = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        assert replacement["bundle_id"] != created["bundle_id"]
+
+
+def test_v2_concurrent_generation_keeps_one_active_row(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    factory = _factory(setup_test_db)
+    barrier = Barrier(2)
+
+    def generate_once():
+        with factory.begin() as session:
+            barrier.wait(timeout=10)
+            return ContentWebReviewBundleV2Service(session).generate(
+                paper_id=UUID(paper_id),
+                module="paper_content",
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_future = pool.submit(generate_once)
+        second_future = pool.submit(generate_once)
+        first = first_future.result(timeout=30)
+        second = second_future.result(timeout=30)
+    assert first["bundle_id"] == second["bundle_id"]
+    assert sorted([first["created"], second["created"]]) == [False, True]
+    with factory() as session:
+        rows = session.scalars(
+            select(ContentWebReviewBundleV2).where(
+                ContentWebReviewBundleV2.paper_id == UUID(paper_id)
+            )
+        ).all()
+        assert len(rows) == 1
+        assert rows[0].active_generation_key is not None
+
+
+def test_v2_download_is_ephemeral_and_does_not_create_records(setup_test_db, tmp_path):
+    paper_id, _ = _seed(setup_test_db, tmp_path)
+    with _factory(setup_test_db).begin() as session:
+        service = ContentWebReviewBundleV2Service(session)
+        created = service.generate(paper_id=UUID(paper_id), module="paper_content")
+        before = session.scalar(select(func.count()).select_from(ContentWebReviewBundleV2))
+        first = service.download(UUID(created["bundle_id"]))
+        second = service.download(UUID(created["bundle_id"]))
+        assert first["content"].startswith(b"PK") and second["content"].startswith(b"PK")
+        assert session.scalar(select(func.count()).select_from(ContentWebReviewBundleV2)) == before
 
 
 def test_v2_stable_uuid_schema_revise_shape_and_locator_page_batch(setup_test_db, tmp_path):

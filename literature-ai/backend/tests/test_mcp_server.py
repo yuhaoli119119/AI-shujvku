@@ -12,6 +12,7 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+import fitz
 from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
@@ -54,6 +55,8 @@ from app.mcp.server import (
     get_correction_queue,
     get_codex_item,
     get_dft_review_queue,
+    get_ai_verification_tasks,
+    get_review_coverage,
     get_paper_knowledge,
     get_content_web_review_local_verification_plan,
     get_parse_status,
@@ -72,6 +75,7 @@ from app.mcp.server import (
     reject_correction,
     scan_local_pdfs,
     scan_duplicate_dois,
+    submit_ai_verification_batch,
     mcp_server,
     _mcp_review_identity,
 )
@@ -80,6 +84,7 @@ from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
 from app.utils.library_names import DEFAULT_LIBRARY_NAME
+from app.utils.ai_verification import ai_target_fingerprint
 
 
 def _validated_local_ai_dft_request(engine, paper_id: str, audits: list[dict]) -> dict:
@@ -264,7 +269,8 @@ def mcp_test_env(monkeypatch):
             "admin|Admin|litmcp_admin|read_papers,append_notes,propose_corrections,request_parse,review_corrections;"
             "ide_ai|IDE AI|litmcp_ide_ai|read_papers,append_notes,propose_corrections,request_parse;"
             "owner_export|Owner Export|litmcp_owner_export|read_papers,export_data;"
-            "ai_pc_1|AI PC 1|litmcp_ai_pc_1|read_papers,append_notes,propose_corrections,request_parse,review_corrections",
+            "ai_pc_1|AI PC 1|litmcp_ai_pc_1|read_papers,append_notes,propose_corrections,request_parse,review_corrections;"
+            "single_verifier|Single Verifier|litmcp_single_verifier|read_papers,ai_verify_content",
         )
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(Path(tmpdir) / "storage"))
         monkeypatch.setenv("LITAI_LOCAL_INGEST_ROOTS", tmpdir)
@@ -311,6 +317,10 @@ def _dft_primary_repair_auth() -> str:
 
 def _ai_reviewer_auth() -> str:
     return "litmcp_ai_pc_1"
+
+
+def _single_verifier_auth() -> str:
+    return "litmcp_single_verifier"
 
 
 def _validated_content_web_bundle(engine, root: Path) -> tuple[str, dict, UUID]:
@@ -1601,21 +1611,21 @@ def test_mcp_import_analysis_applies_each_evidence_backed_dft_review(mcp_test_en
         audit_logs = session.query(AuditLog).filter(AuditLog.action == "verify_dft_result").all()
 
     assert stored_row is not None
-    assert stored_row.candidate_status == "ai_verified_ml_ready"
+    assert stored_row.candidate_status == "system_candidate"
     assert [run.source_identity for run in runs] == ["mcp:claude"]
     assert all(run.source_identity_verified for run in runs)
-    assert {candidate.status for candidate in candidates} == {"ai_applied"}
-    assert reviews
-    assert {review.reviewer_status for review in reviews} == {"verified"}
-    assert len(audit_logs) == 1
-    assert audit_logs[0].payload["actor_type"] == "ai"
+    assert {candidate.status for candidate in candidates} <= {
+        "candidate", "pending", "pending_ai_verification", "requires_resolution", "needs_human"
+    }
+    assert reviews == []
+    assert audit_logs == []
 
 
 @pytest.mark.parametrize(
     ("decision", "corrected_value", "expected_value", "expected_status", "expected_review_status", "expected_pending"),
     [
-        ("REVISE", -1.45, -1.45, "ai_verified_ml_ready", "verified", 0),
-        ("REJECT", None, -1.2, "Rejected", "rejected", 0),
+        ("REVISE", -1.45, -1.2, "system_candidate", None, 0),
+        ("REJECT", None, -1.2, "system_candidate", None, 0),
         ("NEEDS_HUMAN", None, -1.2, "system_candidate", None, 1),
     ],
 )
@@ -1761,7 +1771,7 @@ def test_mcp_import_analysis_materializes_new_dft_candidate_with_custom_reviewer
     with Session(mcp_test_env["engine"]) as session:
         rows = session.scalars(select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))).all()
         assert len(rows) == 1
-        assert rows[0].candidate_status == "ai_verified_ml_ready"
+        assert rows[0].candidate_status == "new_candidate"
         assert rows[0].property_type == "adsorption_energy"
 
 
@@ -1840,7 +1850,7 @@ def test_mcp_import_analysis_preserves_new_candidate_contract_with_terminal_dft_
     new_dft_id = materialized[0]["dft_result_id"]
     readback = summary["dft_readback"]
     assert new_dft_id in readback["candidate_status"]
-    assert new_dft_id in readback["object_versions"]
+    assert new_dft_id not in readback["object_versions"]
     assert new_dft_id in readback["export_safety"]
     assert readback["conflicts"] == []
     assert readback["unfinished_items"] == []
@@ -2174,12 +2184,10 @@ def test_admin_mcp_reject_dft_result_leaves_active_queue(mcp_test_env):
         active_queue = get_dft_review_queue(paper_id=paper_id)
         rejected_queue = get_dft_review_queue(paper_id=paper_id, status="rejected")
 
-    assert rejected["export_safety"]["review_status"] == "rejected"
-    assert "missing_material_identity" in rejected["export_safety"]["blocked_reasons"]
-    assert "unsafe_review" in rejected["export_safety"]["blocked_reasons"]
-    assert active_queue["rows"] == []
-    assert rejected_queue["rows"][0]["record_id"] == row_id
-    assert rejected_queue["rows"][0]["decision_status"] == "rejected"
+    assert rejected["status"] == "requires_ai_verify_content"
+    assert rejected["writes_final_truth"] is False
+    assert active_queue["rows"]
+    assert rejected_queue["rows"] == []
 
 
 def test_mcp_propose_dft_result_correction_enters_review_queue(mcp_test_env):
@@ -2316,7 +2324,7 @@ def test_import_analysis_defaults_reviewer_to_mcp_source_for_lock_validation(mcp
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
         assert updated is not None
-        assert updated.abstract == "Rewritten abstract"
+        assert updated.abstract == "Old abstract"
 
 
 def test_import_analysis_custom_reviewer_does_not_break_mcp_lock_validation(mcp_test_env):
@@ -2356,7 +2364,7 @@ def test_import_analysis_custom_reviewer_does_not_break_mcp_lock_validation(mcp_
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
         assert updated is not None
-        assert updated.abstract == "Rewritten with custom reviewer label"
+        assert updated.abstract == "Old abstract"
 
 
 def test_import_analysis_custom_lock_owner_matching_reviewer_is_accepted(mcp_test_env):
@@ -2397,7 +2405,7 @@ def test_import_analysis_custom_lock_owner_matching_reviewer_is_accepted(mcp_tes
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
         assert updated is not None
-        assert updated.abstract == "Rewritten with custom lock owner"
+        assert updated.abstract == "Old abstract"
 
 
 def test_import_analysis_object_review_can_apply_paper_type_metadata(mcp_test_env):
@@ -2436,7 +2444,7 @@ def test_import_analysis_object_review_can_apply_paper_type_metadata(mcp_test_en
     with Session(mcp_test_env["engine"]) as session:
         updated = session.get(Paper, UUID(paper_id))
         assert updated is not None
-        assert updated.paper_type == "B"
+        assert updated.paper_type == "A"
 
 
 def test_non_dft_proposals_apply_immediately_and_leave_queue_empty(mcp_test_env):
@@ -2896,7 +2904,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
     assert result["auto_apply_summary"]["new_dft_candidates"]["materialized_count"] == 1
 
     candidate_payload = result["candidates"][0]
-    assert candidate_payload["status"] == "ai_applied"
+    assert candidate_payload["status"] == "pending_ai_verification"
     assert candidate_payload["materialized_target_type"] == "dft_results"
     assert candidate_payload["materialized_target_id"] is not None
 
@@ -2905,7 +2913,7 @@ def test_mcp_apply_analysis_review_rules_materializes_deferred_dft_candidate(mcp
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ai_verified_ml_ready"
+        assert dft_rows[0].candidate_status == "new_candidate"
         assert dft_rows[0].value == pytest.approx(-0.95)
         assert dft_rows[0].adsorbate == "H"
 
@@ -3002,7 +3010,7 @@ def test_mcp_apply_analysis_review_rules_preserves_multi_owner_lock_validation(m
             select(DFTResult).where(DFTResult.paper_id == UUID(paper_id))
         ).all()
         assert len(dft_rows) == 1
-        assert dft_rows[0].candidate_status == "ai_verified_ml_ready"
+        assert dft_rows[0].candidate_status == "new_candidate"
         assert dft_rows[0].adsorbate == "Li2S4"
 
         # No active dft_results lock leaked after explicit release
@@ -3047,3 +3055,178 @@ def test_mcp_review_identity_helper_consistency():
     assert reviewer == "claude"
     assert internal == "claude"
     assert owners == ["claude"]
+
+
+def test_ai_verify_content_capability_is_distinct_and_dry_run_is_zero_write(mcp_test_env):
+    evidence = "Fe-N4 sites accelerate Li2S4 conversion."
+    pdf_path = mcp_test_env["tmpdir"] / "single-ai-mcp.pdf"
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), evidence)
+    document.save(pdf_path)
+    document.close()
+
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP single AI", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper)
+        session.flush()
+        claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="mechanism",
+            claim_text=evidence,
+            evidence_types=["pdf_text"],
+            evidence_text=evidence,
+        )
+        session.add(claim)
+        session.commit()
+        paper_id = str(paper.id)
+        claim_id = str(claim.id)
+        fingerprint = ai_target_fingerprint("mechanism_claims", claim)
+
+    with pytest.raises(PermissionError, match="authentication context"):
+        get_ai_verification_tasks(paper_id=paper_id)
+
+    with mcp_auth_context(_admin_auth()):
+        with pytest.raises(PermissionError, match="ai_verify_content"):
+            get_ai_verification_tasks(paper_id=paper_id)
+
+    with mcp_auth_context(_single_verifier_auth()):
+        tasks = get_ai_verification_tasks(paper_id=paper_id)
+        result = submit_ai_verification_batch(
+            paper_id=paper_id,
+            dry_run=True,
+            submissions=[
+                {
+                    "target_type": "mechanism_claims",
+                    "target_id": claim_id,
+                    "field_name": "claim_text",
+                    "decision": "accept",
+                    "confidence": 0.98,
+                    "evidence_text": evidence,
+                    "page": 1,
+                    "reasoning_summary": "Direct support on the PDF page.",
+                    "expected_target_fingerprint": fingerprint,
+                }
+            ],
+        )
+
+    assert tasks["single_ai"] is True
+    assert tasks["second_ai_used"] is False
+    assert tasks["total"] == 1
+    assert tasks["returned"] == 1
+    assert tasks["offset"] == 0
+    assert tasks["has_more"] is False
+    assert tasks["next_offset"] is None
+    assert tasks["task_count"] == 1
+    assert result["dry_run"] is True
+    assert result["auto_repaired"] == 1
+    assert result["database_writes"] is False
+    with Session(mcp_test_env["engine"]) as session:
+        assert session.scalar(select(func.count(ExtractionFieldReview.id))) == 0
+        assert session.scalar(select(func.count(AuditLog.id))) == 0
+
+    with mcp_auth_context(_single_verifier_auth()):
+        formal = submit_ai_verification_batch(
+            paper_id=paper_id,
+            dry_run=False,
+            submissions=[
+                {
+                    "target_type": "mechanism_claims",
+                    "target_id": claim_id,
+                    "field_name": "claim_text",
+                    "decision": "accept",
+                    "confidence": 0.98,
+                    "evidence_text": evidence,
+                    "page": 1,
+                    "reasoning_summary": "Direct support on the PDF page.",
+                    "expected_target_fingerprint": fingerprint,
+                }
+            ],
+        )
+        coverage = get_review_coverage(paper_id=paper_id)
+
+    assert formal["auto_repaired"] == 1
+    assert coverage["mechanism_claims"]["human_verified"] == 0
+    assert coverage["mechanism_claims"]["ai_verified"] == 1
+    assert coverage["mechanism_claims"]["can_use_for_writing"] == 1
+    assert coverage["mechanism_claims"]["can_use_for_citation"] == 1
+    with Session(mcp_test_env["engine"]) as session:
+        review = session.scalar(select(ExtractionFieldReview))
+        audit = session.scalar(select(AuditLog).where(AuditLog.action == "single_ai_verification_decision"))
+        assert review.reviewer_status == "ai_verified"
+        assert review.reviewer != "human"
+        assert audit.source == "mcp:single_verifier"
+
+
+def test_ai_verification_task_mcp_pagination_contract_has_no_gaps_duplicates_or_writes(mcp_test_env):
+    with Session(mcp_test_env["engine"]) as session:
+        paper = Paper(title="MCP pagination", pdf_path="mcp-pagination.pdf", authors=["Tester"])
+        other_paper = Paper(
+            title="MCP pagination isolation",
+            pdf_path="mcp-pagination-isolation.pdf",
+            authors=["Tester"],
+        )
+        session.add_all([paper, other_paper])
+        session.flush()
+        claims = [
+            MechanismClaim(
+                paper_id=paper.id,
+                claim_type="mechanism",
+                claim_text=f"MCP paged claim {index:02d}",
+                evidence_types=["pdf_text"],
+                evidence_text=f"MCP paged evidence {index:02d}",
+            )
+            for index in range(22)
+        ]
+        isolated_claim = MechanismClaim(
+            paper_id=other_paper.id,
+            claim_type="mechanism",
+            claim_text="Other paper claim",
+            evidence_types=["pdf_text"],
+            evidence_text="Other paper evidence",
+        )
+        session.add_all([*claims, isolated_claim])
+        session.commit()
+        paper_id = str(paper.id)
+        expected_ids = {str(claim.id) for claim in claims}
+        isolated_id = str(isolated_claim.id)
+
+    with mcp_auth_context(_single_verifier_auth()):
+        first = get_ai_verification_tasks(
+            paper_id=paper_id,
+            limit=20,
+            offset=0,
+            recover_evidence=False,
+            target_type="mechanism_claims",
+        )
+        second = get_ai_verification_tasks(
+            paper_id=paper_id,
+            limit=20,
+            offset=first["next_offset"],
+            recover_evidence=False,
+            target_type="mechanism_claims",
+        )
+
+    first_ids = [task["target_id"] for task in first["tasks"]]
+    second_ids = [task["target_id"] for task in second["tasks"]]
+    combined = first_ids + second_ids
+    assert first["total"] == second["total"] == 22
+    assert first["returned"] == 20
+    assert first["has_more"] is True
+    assert first["next_offset"] == 20
+    assert second["offset"] == 20
+    assert second["returned"] == 2
+    assert second["has_more"] is False
+    assert second["next_offset"] is None
+    assert len(combined) == len(set(combined)) == 22
+    assert set(combined) == expected_ids
+    assert isolated_id not in combined
+    assert first["database_writes"] is False
+    assert second["database_writes"] is False
+    assert first["postgres_transaction_read_only"] is True
+    assert second["postgres_transaction_read_only"] is True
+
+    with Session(mcp_test_env["engine"]) as session:
+        assert session.scalar(select(func.count(ExtractionFieldReview.id))) == 0
+        assert session.scalar(select(func.count(AuditLog.id))) == 0
+        assert session.scalar(select(func.count(EvidenceLocator.id))) == 0

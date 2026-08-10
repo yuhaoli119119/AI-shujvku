@@ -4,13 +4,14 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.models import AuditLog, ContentEvidenceItem, Paper, utcnow
 from app.schemas.content_knowledge import ContentReviewDecision
 from app.services.content_knowledge_service import CONTENT_KNOWLEDGE_SCHEMA_VERSION, serialize_content_item
+from app.services.content_review_coverage_service import ContentReviewCoverageService
 from app.utils.artifact_paths import resolve_paper_pdf_path
 from app.utils.review_safety import content_object_gate
 
@@ -44,6 +45,7 @@ class ContentKnowledgeReviewService:
                 item,
                 paper,
                 object_gate=content_object_gate(self.session, item.source_type, item),
+                session=self.session,
             ).payload(),
         }
 
@@ -99,38 +101,64 @@ class ContentKnowledgeReviewService:
                 item,
                 paper,
                 object_gate=content_object_gate(self.session, item.source_type, item),
+                session=self.session,
             ).payload(),
             "audit_log_id": str(audit.id),
         }
 
     def paper_summary(self, paper_id: str) -> dict:
         paper = self._paper(paper_id)
-        rows = self.session.execute(
-            select(
-                ContentEvidenceItem.category,
-                ContentEvidenceItem.review_status,
-                ContentEvidenceItem.citation_status,
-                func.count(),
-            )
-            .where(ContentEvidenceItem.paper_id == paper.id)
-            .group_by(
-                ContentEvidenceItem.category,
-                ContentEvidenceItem.review_status,
-                ContentEvidenceItem.citation_status,
-            )
-        ).all()
+        review_coverage = ContentReviewCoverageService(self.session).paper_coverage(paper.id)
+        items = list(
+            self.session.scalars(
+                select(ContentEvidenceItem)
+                .where(ContentEvidenceItem.paper_id == paper.id)
+                .order_by(ContentEvidenceItem.created_at.asc(), ContentEvidenceItem.id.asc())
+            ).all()
+        )
         by_category: Counter[str] = Counter()
         by_review_status: Counter[str] = Counter()
         by_citation_status: Counter[str] = Counter()
         category_status: dict[str, Counter[str]] = defaultdict(Counter)
-        for category, review_status, citation_status, count in rows:
-            count_value = int(count)
-            by_category[category] += count_value
-            by_review_status[review_status] += count_value
-            by_citation_status[citation_status] += count_value
-            category_status[category][review_status] += count_value
-        total = sum(by_category.values())
-        pending = by_review_status["needs_review"] + by_review_status["needs_human"]
+        blocked_reasons: Counter[str] = Counter()
+        authoritative_reviewed_total = 0
+        can_use_for_writing_total = 0
+        can_use_for_citation_total = 0
+        projection_gate_mismatch_total = 0
+        projection_cache_stale_total = 0
+        completed = 0
+        for item in items:
+            by_category[item.category] += 1
+            by_review_status[item.review_status] += 1
+            by_citation_status[item.citation_status] += 1
+            category_status[item.category][item.review_status] += 1
+
+            gate = content_object_gate(self.session, item.source_type, item)
+            can_write = bool(gate.can_use_for_writing)
+            can_cite = bool(gate.can_use_for_citation)
+            authoritative_reviewed_total += int(gate.review_gate_status == "safe_verified")
+            can_use_for_writing_total += int(can_write)
+            can_use_for_citation_total += int(can_cite)
+            for reason in gate.blocked_reasons:
+                blocked_reasons[reason] += 1
+
+            projection_claims_access = (
+                str(item.review_status or "").strip().lower() in {"validated", "approved", "safe_verified"}
+                or str(item.citation_status or "").strip().lower() in {"citable", "writing_only"}
+            )
+            authoritative_access = can_write or can_cite
+            completed += int(authoritative_access)
+            if projection_claims_access and not authoritative_access:
+                projection_gate_mismatch_total += 1
+            elif authoritative_access and not projection_claims_access:
+                projection_cache_stale_total += 1
+
+        total = len(items)
+        blocked_total = total - completed
+        source_summaries = [
+            review_coverage[key]
+            for key in ("sections", "mechanism_claims", "writing_cards")
+        ]
         return {
             "schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION,
             "paper": {
@@ -140,8 +168,26 @@ class ContentKnowledgeReviewService:
                 "doi": paper.doi,
             },
             "total": total,
-            "pending_total": pending,
-            "completed_total": total - pending,
+            "pending_total": blocked_total,
+            "completed_total": completed,
+            "authoritative_reviewed_total": authoritative_reviewed_total,
+            "can_use_for_writing_total": can_use_for_writing_total,
+            "can_use_for_citation_total": can_use_for_citation_total,
+            "blocked_total": blocked_total,
+            "blocked_reasons": dict(sorted(blocked_reasons.items())),
+            "projection_gate_mismatch_total": projection_gate_mismatch_total,
+            "projection_cache_stale_total": projection_cache_stale_total,
+            "completion_basis": "authoritative_content_object_gate",
+            "review_coverage": review_coverage,
+            "source_object_total": sum(summary["total"] for summary in source_summaries),
+            "source_decision_recorded_total": sum(
+                summary["decision_recorded"] for summary in source_summaries
+            ),
+            "source_unreviewed_total": sum(summary["unreviewed"] for summary in source_summaries),
+            "source_authoritative_reviewed_total": sum(
+                summary["authoritative_reviewed"] for summary in source_summaries
+            ),
+            "source_coverage_basis": review_coverage["coverage_basis"],
             "by_category": dict(sorted(by_category.items())),
             "by_review_status": dict(sorted(by_review_status.items())),
             "by_citation_status": dict(sorted(by_citation_status.items())),

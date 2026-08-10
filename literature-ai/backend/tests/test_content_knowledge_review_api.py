@@ -9,7 +9,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import AuditLog, ContentEvidenceItem, MechanismClaim, Paper
+from app.db.models import (
+    AuditLog,
+    ContentEvidenceItem,
+    EvidenceLocator,
+    ExtractionFieldReview,
+    MechanismClaim,
+    Paper,
+)
 from app.main import app
 
 
@@ -239,6 +246,93 @@ def test_item_detail_404_and_paper_summary(setup_test_db, tmp_path):
         "performance_evidence": 1,
     }
     assert payload["by_review_status"] == {"needs_review": 3}
+
+
+def test_paper_summary_uses_authoritative_gate_and_reports_projection_drift(setup_test_db, tmp_path):
+    factory = _factory(setup_test_db)
+    with factory.begin() as session:
+        paper = Paper(
+            paper_code="B0099",
+            title="Authoritative summary",
+            pdf_path=str(_pdf(tmp_path, "summary.pdf")),
+            authors=[],
+        )
+        session.add(paper)
+        session.flush()
+        unsafe = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="unsafe",
+            claim_text="Projection claims this is citable",
+            evidence_text="Unsafe projection evidence.",
+        )
+        safe = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="safe",
+            claim_text="Canonical gate allows this claim",
+            evidence_text="Safe canonical evidence.",
+        )
+        session.add_all([unsafe, safe])
+        session.flush()
+        unsafe_projection = ContentEvidenceItem(
+            paper_id=paper.id,
+            category="mechanism_evidence",
+            source_type="mechanism_claim",
+            source_id=str(unsafe.id),
+            content=unsafe.claim_text,
+            evidence_text=unsafe.evidence_text,
+            review_status="validated",
+            citation_status="citable",
+        )
+        stale_projection = ContentEvidenceItem(
+            paper_id=paper.id,
+            category="mechanism_evidence",
+            source_type="mechanism_claim",
+            source_id=str(safe.id),
+            content=safe.claim_text,
+            evidence_text=safe.evidence_text,
+            review_status="needs_review",
+            citation_status="needs_review",
+        )
+        session.add_all([
+            unsafe_projection,
+            stale_projection,
+            ExtractionFieldReview(
+                paper_id=paper.id,
+                target_type="mechanism_claims",
+                target_id=str(safe.id),
+                field_name="claim_text",
+                reviewer_status="verified",
+                target_resolution_status="active",
+                evidence_text=safe.evidence_text,
+            ),
+            EvidenceLocator(
+                paper_id=paper.id,
+                source_type="pdf",
+                target_type="mechanism_claims",
+                target_id=str(safe.id),
+                field_name="claim_text",
+                page=2,
+                evidence_text=safe.evidence_text,
+                locator_status="exact_page",
+                locator_confidence=1.0,
+                parser_source="test",
+            ),
+        ])
+        paper_id = paper.id
+
+    payload = TestClient(app).get(
+        f"/api/content-knowledge/papers/{paper_id}/review-summary"
+    ).json()
+
+    assert payload["total"] == 2
+    assert payload["completed_total"] == 1
+    assert payload["pending_total"] == 1
+    assert payload["authoritative_reviewed_total"] == 1
+    assert payload["can_use_for_writing_total"] == 1
+    assert payload["can_use_for_citation_total"] == 1
+    assert payload["blocked_total"] == 1
+    assert payload["projection_gate_mismatch_total"] == 1
+    assert payload["projection_cache_stale_total"] == 1
 
 
 @pytest.mark.parametrize(

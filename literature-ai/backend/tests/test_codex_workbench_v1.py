@@ -56,6 +56,7 @@ def workbench_env(monkeypatch):
         monkeypatch.setenv("LITAI_STORAGE_ROOT", str(storage_root))
         monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
         monkeypatch.setenv("LITAI_DOCLING_DO_OCR", "false")
+        monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "workbench-owner-secret")
         get_settings.cache_clear()
 
         engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
@@ -497,7 +498,7 @@ def test_paper_detail_exposes_mechanism_claim_object_review_summary_read_only(wo
         assert detail is not None
         claim_payload = detail.mechanism_claims_items[0]
         assert claim_payload.evidence_status == "present"
-        assert claim_payload.locator_status == "text_only"
+        assert claim_payload.locator_status == "missing_locator"
         assert claim_payload.confidence_status == "medium"
         assert claim_payload.object_review_audit_count == 2
         assert claim_payload.latest_object_review_audit["source"] == "glm_mechanism_audit"
@@ -2891,7 +2892,7 @@ def test_review_conflicts_api_accepts_ai_adjudication_without_bypassing_audit(wo
         paper_id = str(paper.id)
         row_id = str(row.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "workbench-owner-secret"})
     conflicts = client.get(f"/api/workbench/review-conflicts?paper_id={paper_id}&include_non_conflicts=true")
     assert conflicts.status_code == 200
     adjudication = conflicts.json()["rows"][0]["adjudication"]
@@ -2977,11 +2978,22 @@ def test_apply_imported_whole_row_dft_opinion_applies_explicit_null_adsorbate(wo
             )
         )
 
-    assert result["action"] == "verify"
+    assert result["action"] == "candidate"
+    assert result["status"] == "pending_ai_verification"
+    assert result["writes_final_truth"] is False
     assert stored is not None
-    assert stored.adsorbate is None
-    assert review is not None
-    assert review.reviewer_status == "verified"
+    assert stored.adsorbate == "H2"
+    assert review is None
+    with Session() as session:
+        correction = session.scalar(
+            select(PaperCorrection).where(
+                PaperCorrection.paper_id == paper_id,
+                PaperCorrection.target_path == f"dft_results:{row_id}:adsorbate",
+            )
+        )
+        assert correction is not None
+        assert correction.status == "pending"
+        assert correction.proposed_value is None
 
 
 def test_apply_imported_whole_row_dft_opinion_repairs_verified_field_with_expected_versions(workbench_env):
@@ -3090,12 +3102,24 @@ def test_apply_imported_whole_row_dft_opinion_repairs_verified_field_with_expect
             )
         )
 
-    assert result["action"] == "verify"
+    assert result["action"] == "candidate"
+    assert result["status"] == "pending_ai_verification"
+    assert result["writes_final_truth"] is False
     assert stored is not None
-    assert stored.adsorbate is None
+    assert stored.adsorbate == "H2"
     assert adsorbate_review is not None
-    assert adsorbate_review.reviewed_value is None
-    assert adsorbate_review.write_version == review_versions["adsorbate"] + 1
+    assert adsorbate_review.reviewed_value == "H2"
+    assert adsorbate_review.write_version == review_versions["adsorbate"]
+    with Session() as session:
+        correction = session.scalar(
+            select(PaperCorrection).where(
+                PaperCorrection.paper_id == paper_id,
+                PaperCorrection.target_path == f"dft_results:{row_id}:adsorbate",
+            )
+        )
+        assert correction is not None
+        assert correction.status == "pending"
+        assert correction.proposed_value is None
 
 
 def test_apply_imported_whole_row_dft_opinion_rejects_stale_expected_row_state_via_api(workbench_env):

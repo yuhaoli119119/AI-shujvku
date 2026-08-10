@@ -343,31 +343,33 @@ def test_dft_export_does_not_require_separate_ai_export_recommendation(tmp_path)
         engine.dispose()
 
 
-def test_local_ai_verified_ml_ready_exports_without_separate_approval(tmp_path):
+def test_local_ai_cannot_mark_ml_ready_without_authenticated_human(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
             paper = _paper(session)
             row = _dft(session, paper)
-            DFTResultReviewService(session).verify_result(
-                paper_id=paper.id,
-                result_id=row.id,
-                confirm_reviewed_against_pdf=True,
-                reviewer="local_ai_after_pdf_evidence_check",
-                reviewer_note="Local AI read the cited PDF page and approved this DFT row for ML.",
-                evidence_payload={"page": 1, "quoted_text": row.evidence_text},
-                verification_actor_type="ai",
-                source_label="local_ai_after_pdf_evidence_check",
-            )
+            with pytest.raises(ValueError, match="authenticated_human_actor_required"):
+                DFTResultReviewService(session).verify_result(
+                    paper_id=paper.id,
+                    result_id=row.id,
+                    confirm_reviewed_against_pdf=True,
+                    reviewer="local_ai_after_pdf_evidence_check",
+                    reviewer_note="Local AI read the cited PDF page.",
+                    evidence_payload={"page": 1, "quoted_text": row.evidence_text},
+                    verification_actor_type="ai",
+                    source_label="local_ai_after_pdf_evidence_check",
+                )
             session.commit()
 
             response, rows = _export_rows(session)
             stored = session.get(DFTResult, row.id)
 
-            assert stored.candidate_status == "ai_verified_ml_ready"
-            assert stored.ml_ready_at is not None
-            assert rows and rows[0]["paper_id"] == str(paper.id)
-            assert response.headers["x-d1-blocked-count"] == "0"
+            assert stored.candidate_status == "system_candidate"
+            assert stored.ml_ready_at is None
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert response.headers["x-d1-blocked-count"] == "1"
     finally:
         engine.dispose()
 
@@ -484,6 +486,9 @@ def test_dft_fast_mode_allows_text_evidence_without_fabricating_page_or_bbox(tmp
     try:
         with SessionLocal() as session:
             paper = _paper(session)
+            pdf_file = tmp_path / "imported-page-anchor.pdf"
+            pdf_file.write_bytes(b"%PDF-1.4\nImported page anchor fixture\n%%EOF\n")
+            paper.pdf_path = str(pdf_file)
             row = _dft(session, paper)
             _safe_review(session, paper, row)
             _evidence_ref(session, paper, row, page=None)
@@ -541,6 +546,9 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
     try:
         with SessionLocal() as session:
             paper = _paper(session)
+            pdf_file = tmp_path / "imported-page-anchor.pdf"
+            pdf_file.write_bytes(b"%PDF-1.4\nImported page anchor fixture\n%%EOF\n")
+            paper.pdf_path = str(pdf_file)
             row = _dft(session, paper)
             _evidence_ref(session, paper, row, page=None)
             _object_review_audit(session, paper, row, source="local_ai")
@@ -551,6 +559,9 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
                 result_id=row.id,
                 confirm_reviewed_against_pdf=True,
                 reviewer="dual_ai_settlement",
+                verification_actor_type="human",
+                actor_name="owner",
+                source_label="owner_api_token",
                 reviewer_note="Dual AI checked the PDF page.",
                 field_names=["value"],
                 evidence_payload={

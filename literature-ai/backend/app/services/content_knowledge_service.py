@@ -4,7 +4,7 @@ import json
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -12,45 +12,67 @@ from sqlalchemy.orm import Session
 from app.db.models import (
     AuditLog,
     EvidenceClaim,
+    EvidenceLocator,
     ContentEvidenceItem,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
     MechanismClaim,
     Paper,
     PaperNote,
+    PaperSection,
     WritingCard,
 )
-from app.services.content_knowledge_search import content_item_filters, content_search_score
+from app.services.content_knowledge_search import (
+    AUDIT_RESULT_VIEW,
+    AUDIT_SOURCE_TYPES,
+    CONTENT_RESULT_VIEW,
+    RESULT_VIEWS,
+    content_item_filters,
+    content_search_score,
+)
+from app.services.content_figure_link_service import ContentFigureLinkService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import (
     ContentObjectGateResult,
     bulk_export_gate_results,
     content_object_gate,
+    get_target_reviews,
     writing_card_content_gate,
     writing_card_gate,
 )
 from app.services.embedding import get_embedding_service
 from app.config import get_settings
+from app.utils.writing_card_content import normalized_evidence_chain
 
 
 CONTENT_KNOWLEDGE_SCHEMA_VERSION = "content_knowledge.v1"
 
 CATEGORY_LABELS: dict[str, str] = {
-    "mechanism_evidence": "机理证据卡",
-    "performance_evidence": "性能证据卡",
-    "dft_evidence": "DFT证据卡",
-    "figure_table_evidence": "图表证据卡",
-    "material_evidence": "材料信息卡",
-    "method_evidence": "方法信息卡",
-    "writing_material": "写作素材卡",
-    "review_viewpoint": "综述观点卡",
-    "uncertainty_note": "争议/风险卡",
+    "mechanism_evidence": "机理内容",
+    "performance_evidence": "性能证据",
+    "dft_evidence": "DFT证据",
+    "figure_table_evidence": "图表证据",
+    "material_evidence": "材料信息",
+    "method_evidence": "方法信息",
+    "writing_material": "论文重点内容",
+    "review_viewpoint": "综述观点",
+    "uncertainty_note": "争议/风险",
     "draft_evidence_check": "草稿证据核验",
 }
 
 PROBLEM_CANDIDATE_STATUSES = {"requires_resolution", "unmapped", "failed", "skipped"}
 BLOCKED_CANDIDATE_STATUSES = {"failed", "skipped"}
 CITABLE_EVIDENCE_STATUSES = {"approved", "validated", "safe_verified"}
+ACTIVE_AUDIT_STATUSES = {"candidate", "pending", "requires_resolution", "unmapped", "needs_human"}
+TERMINAL_AUDIT_STATUSES = {
+    "failed",
+    "skipped",
+    "rejected",
+    "ai_rejected",
+    "rejected_by_local_ai",
+    "ignored",
+}
+APPLIED_AUDIT_STATUSES = {"materialized", "ai_applied"}
 
 
 @dataclass(slots=True)
@@ -90,6 +112,12 @@ class ContentKnowledgeItem:
     snapshot_fingerprint: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+    item_kind: str = "content"
+    audit_state: str | None = None
+    audit_state_label: str | None = None
+    audit_requires_action: bool = False
+    linked_target_type: str | None = None
+    linked_target_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def payload(self) -> dict[str, Any]:
@@ -110,6 +138,7 @@ class ContentKnowledgeService:
         library_name: str | None = None,
         category: str | None = None,
         query: str | None = None,
+        result_view: str = CONTENT_RESULT_VIEW,
         include_candidates: bool = True,
         include_blocked: bool = False,
         review_status: str | None = None,
@@ -119,6 +148,7 @@ class ContentKnowledgeService:
         offset: int = 0,
         limit: int = 100,
     ) -> dict[str, Any]:
+        normalized_view = _normalize_result_view(result_view)
         normalized_library = normalize_library_name(library_name) if library_name is not None else None
         offset_value = max(0, int(offset or 0))
         limit_value = max(1, min(int(limit or 100), 500))
@@ -131,11 +161,12 @@ class ContentKnowledgeService:
         # Projection is deliberately explicit: callers that need a durable review
         # package call sync_items() (and commit).  A GET remains read-only and can
         # still render legacy source rows until the first sync is performed.
-        items, total = self._persistent_items(
+        items, total, counts, distinct_paper_count = self._persistent_items(
             paper_ids=paper_ids,
             run_id=run_uuid,
             category=category,
             query=query,
+            result_view=normalized_view,
             include_candidates=include_candidates,
             include_blocked=include_blocked,
             review_status=review_status,
@@ -145,8 +176,16 @@ class ContentKnowledgeService:
             offset=offset_value,
             limit=limit_value,
         )
-        if total == 0 and paper_ids and not run_id and not self._has_persistent_items(paper_ids):
-            legacy = self._legacy_items(paper_ids, paper_by_id, include_candidates=include_candidates)
+        if total == 0 and paper_ids and not run_id and not self._has_persistent_items(
+            paper_ids,
+            result_view=normalized_view,
+            include_candidates=include_candidates,
+        ):
+            legacy = self._legacy_items(
+                paper_ids,
+                paper_by_id,
+                include_candidates=include_candidates and normalized_view != CONTENT_RESULT_VIEW,
+            )
             matched = [
                 item
                 for item in legacy
@@ -154,6 +193,7 @@ class ContentKnowledgeService:
                     item,
                     category=category,
                     query=query,
+                    result_view=normalized_view,
                     include_candidates=include_candidates,
                     include_blocked=include_blocked,
                     review_status=review_status,
@@ -164,11 +204,21 @@ class ContentKnowledgeService:
             ]
             ordered = _sort_legacy_items(matched, query=query)
             total = len(ordered)
+            counts = Counter(item.category for item in ordered)
+            distinct_paper_count = len({item.paper_id for item in ordered if item.paper_id})
             items = ordered[offset_value:offset_value + limit_value]
 
-        counts = Counter(item.category for item in items)
         return {
             "schema_version": CONTENT_KNOWLEDGE_SCHEMA_VERSION,
+            "result_view": normalized_view,
+            "result_item_count": len(items),
+            "distinct_paper_count": distinct_paper_count,
+            "count_semantics": {
+                "result_items": "Evidence projection records matching the current view and filters; this is not a paper count.",
+                "distinct_papers": "Distinct papers represented by the full filtered result, not only the current page.",
+                "review_objects": "Objects included in a generated review bundle and checked individually.",
+                "unique_evidence_pages": "Deduplicated PDF pages across review objects; multiple objects may share one page.",
+            },
             "policy": {
                 "source_of_truth": "postgresql",
                 "verified_boundary": "AI candidates and raw extracted content stay needs_review until a safe review/correction path approves them.",
@@ -181,6 +231,7 @@ class ContentKnowledgeService:
                 "library_name": normalized_library,
                 "category": _clean_text(category),
                 "query": _clean_text(query),
+                "result_view": normalized_view,
                 "include_candidates": include_candidates,
                 "include_blocked": include_blocked,
                 "review_status": review_status,
@@ -204,6 +255,8 @@ class ContentKnowledgeService:
         paper_id: str | uuid.UUID | None = None,
         library_name: str | None = None,
         include_candidates: bool = True,
+        source_types: Iterable[str] | None = None,
+        source_ids: Iterable[str] | None = None,
     ) -> dict[str, Any]:
         """Materialize legacy source rows into the ContentEvidenceItem contract.
 
@@ -217,6 +270,12 @@ class ContentKnowledgeService:
         )
         paper_by_id = {paper.id: paper for paper in papers}
         legacy = self._legacy_items(list(paper_by_id), paper_by_id, include_candidates=include_candidates)
+        allowed_types = {str(value).strip() for value in (source_types or []) if str(value).strip()}
+        allowed_ids = {str(value).strip() for value in (source_ids or []) if str(value).strip()}
+        if allowed_types:
+            legacy = [item for item in legacy if item.source_type in allowed_types]
+        if allowed_ids:
+            legacy = [item for item in legacy if str(item.source_id) in allowed_ids]
         created = updated = 0
         settings = get_settings()
         embedding = get_embedding_service(
@@ -234,6 +293,10 @@ class ContentKnowledgeService:
                 )
             )
             source_metadata = dict(item.metadata or {})
+            # Figure links are request-time authorization data, not durable
+            # projection state. Rebuild them from the canonical source object
+            # and the current figure review gate whenever content is read.
+            source_metadata.pop("linked_figures", None)
             source_run_id = _maybe_uuid(source_metadata.get("external_analysis_run_id"))
             if existing is None:
                 citation_status = item.citation_policy
@@ -334,7 +397,9 @@ class ContentKnowledgeService:
         limit: int = 20,
     ) -> list[tuple[ContentKnowledgeItem, dict[str, float]]]:
         """Hybrid content retrieval with DB scope/filtering before Python rerank."""
-        stmt = select(ContentEvidenceItem)
+        stmt = select(ContentEvidenceItem).where(
+            ContentEvidenceItem.source_type.not_in(AUDIT_SOURCE_TYPES)
+        )
         if paper_ids:
             stmt = stmt.where(ContentEvidenceItem.paper_id.in_(paper_ids))
         terms = _search_terms(query)
@@ -361,6 +426,7 @@ class ContentKnowledgeService:
         except Exception:
             query_vector = None
         scored = []
+        figure_links = ContentFigureLinkService(self.session)
         for row in rows:
             gate = content_object_gate(self.session, row.source_type, row)
             if not include_review_assist and not (
@@ -376,6 +442,7 @@ class ContentKnowledgeService:
                         row,
                         paper_by_id.get(row.paper_id),
                         object_gate=gate,
+                        figure_links=figure_links,
                     ),
                     {"bm25": lexical, "vector": vector, "hybrid": hybrid},
                 ))
@@ -389,7 +456,8 @@ class ContentKnowledgeService:
     ) -> int:
         """Return the DB-scoped count excluded by the formal-citation review gate."""
         stmt = select(func.count()).select_from(ContentEvidenceItem).where(
-            ContentEvidenceItem.review_status.in_(("needs_review", "needs_human"))
+            ContentEvidenceItem.review_status.in_(("needs_review", "needs_human")),
+            ContentEvidenceItem.source_type.not_in(AUDIT_SOURCE_TYPES),
         )
         if paper_ids:
             stmt = stmt.where(ContentEvidenceItem.paper_id.in_(paper_ids))
@@ -405,6 +473,7 @@ class ContentKnowledgeService:
         items: list[ContentKnowledgeItem] = []
         if paper_ids:
             items.extend(self._mechanism_items(paper_ids, paper_by_id))
+            items.extend(self._section_items(paper_ids, paper_by_id))
             items.extend(self._writing_card_items(paper_ids, paper_by_id))
             items.extend(self._paper_note_items(paper_ids, paper_by_id))
             items.extend(self._evidence_claim_items(paper_ids, paper_by_id))
@@ -419,6 +488,7 @@ class ContentKnowledgeService:
         run_id,
         category,
         query,
+        result_view,
         include_candidates,
         include_blocked,
         review_status,
@@ -429,13 +499,14 @@ class ContentKnowledgeService:
         limit,
     ):
         if not paper_ids:
-            return [], 0
+            return [], 0, {}, 0
         terms = _search_terms(query)
         filters = content_item_filters(
             paper_ids=paper_ids,
             run_id=run_id,
             category=category,
             terms=terms,
+            result_view=result_view,
             include_candidates=include_candidates,
             include_blocked=include_blocked,
             review_status=review_status,
@@ -446,6 +517,24 @@ class ContentKnowledgeService:
         total = int(
             self.session.scalar(
                 select(func.count())
+                .select_from(ContentEvidenceItem)
+                .join(Paper, Paper.id == ContentEvidenceItem.paper_id)
+                .where(*filters)
+            )
+            or 0
+        )
+        category_counts = {
+            str(row_category): int(row_count)
+            for row_category, row_count in self.session.execute(
+                select(ContentEvidenceItem.category, func.count())
+                .join(Paper, Paper.id == ContentEvidenceItem.paper_id)
+                .where(*filters)
+                .group_by(ContentEvidenceItem.category)
+            ).all()
+        }
+        distinct_paper_count = int(
+            self.session.scalar(
+                select(func.count(func.distinct(ContentEvidenceItem.paper_id)))
                 .select_from(ContentEvidenceItem)
                 .join(Paper, Paper.id == ContentEvidenceItem.paper_id)
                 .where(*filters)
@@ -470,14 +559,19 @@ class ContentKnowledgeService:
                 ContentEvidenceItem.id.asc(),
             )
         rows = self.session.execute(stmt.offset(offset).limit(limit)).all()
+        audit_candidate_by_id = self._audit_candidates_for_rows([item for item, _paper in rows])
+        figure_links = ContentFigureLinkService(self.session)
         return [
             serialize_content_item(
                 item,
                 paper,
                 object_gate=content_object_gate(self.session, item.source_type, item),
+                session=self.session,
+                figure_links=figure_links,
+                audit_candidate=audit_candidate_by_id.get(item.source_id),
             )
             for item, paper in rows
-        ], total
+        ], total, category_counts, distinct_paper_count
 
     def _persistent_item(
         self,
@@ -485,13 +579,58 @@ class ContentKnowledgeService:
         paper: Paper | None,
         *,
         object_gate: ContentObjectGateResult | None = None,
+        figure_links: ContentFigureLinkService | None = None,
     ) -> ContentKnowledgeItem:
-        return serialize_content_item(row, paper, object_gate=object_gate)
+        return serialize_content_item(
+            row,
+            paper,
+            object_gate=object_gate,
+            session=self.session,
+            figure_links=figure_links,
+        )
 
-    def _has_persistent_items(self, paper_ids: list[uuid.UUID]) -> bool:
+    def _has_persistent_items(
+        self,
+        paper_ids: list[uuid.UUID],
+        *,
+        result_view: str,
+        include_candidates: bool,
+    ) -> bool:
+        filters = content_item_filters(
+            paper_ids=paper_ids,
+            run_id=None,
+            category=None,
+            terms=[],
+            result_view=result_view,
+            include_candidates=include_candidates,
+            include_blocked=True,
+            review_status=None,
+            citation_status=None,
+            source_trust=None,
+            problem_status=None,
+        )
         return self.session.scalar(
-            select(ContentEvidenceItem.id).where(ContentEvidenceItem.paper_id.in_(paper_ids)).limit(1)
+            select(ContentEvidenceItem.id).where(*filters).limit(1)
         ) is not None
+
+    def _audit_candidates_for_rows(
+        self,
+        rows: list[ContentEvidenceItem],
+    ) -> dict[str, ExternalAnalysisCandidate]:
+        candidate_ids = [
+            candidate_id
+            for row in rows
+            if _is_audit_source_type(row.source_type)
+            and (candidate_id := _maybe_uuid(row.source_id)) is not None
+        ]
+        if not candidate_ids:
+            return {}
+        return {
+            str(candidate.id): candidate
+            for candidate in self.session.scalars(
+                select(ExternalAnalysisCandidate).where(ExternalAnalysisCandidate.id.in_(candidate_ids))
+            ).all()
+        }
 
     def _scoped_papers(
         self,
@@ -519,6 +658,7 @@ class ContentKnowledgeService:
             select(MechanismClaim).where(MechanismClaim.paper_id.in_(paper_ids)).limit(500)
         ).all()
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="mechanism_claims")
+        figure_links = ContentFigureLinkService(self.session)
         items: list[ContentKnowledgeItem] = []
         for row in rows:
             paper = paper_by_id.get(row.paper_id)
@@ -548,6 +688,10 @@ class ContentKnowledgeService:
                         "claim_type": row.claim_type,
                         "confidence": row.confidence,
                         "evidence_types": row.evidence_types or [],
+                        "ai_verification": _ai_verification_metadata(
+                            self.session, "mechanism_claims", row
+                        ),
+                        "linked_figures": figure_links.links_for_mechanism_claim(row),
                     },
                 )
             )
@@ -561,6 +705,7 @@ class ContentKnowledgeService:
         rows = self.session.scalars(
             select(WritingCard).where(WritingCard.paper_id.in_(paper_ids)).limit(500)
         ).all()
+        figure_links = ContentFigureLinkService(self.session)
         items: list[ContentKnowledgeItem] = []
         for row in rows:
             paper = paper_by_id.get(row.paper_id)
@@ -593,8 +738,84 @@ class ContentKnowledgeService:
                     metadata={
                         "paper_type": row.paper_type,
                         "evidence_chain_status": content_gate.evidence_chain_status,
-                        "figure_logic": row.figure_logic,
-                        "section_strategy": row.section_strategy,
+                        "evidence_chain": normalized_evidence_chain(row.evidence_chain, limit=8),
+                        "ai_verification": _ai_verification_metadata(
+                            self.session, "writing_cards", row
+                        ),
+                        "linked_figures": figure_links.links_for_writing_card(row),
+                    },
+                )
+            )
+        return items
+
+    def _section_items(
+        self,
+        paper_ids: list[uuid.UUID],
+        paper_by_id: dict[uuid.UUID, Paper],
+    ) -> list[ContentKnowledgeItem]:
+        rows = self.session.scalars(
+            select(PaperSection).where(PaperSection.paper_id.in_(paper_ids)).limit(500)
+        ).all()
+        if not rows:
+            return []
+        gate_by_id = bulk_export_gate_results(self.session, rows, target_type="sections")
+        target_ids = {str(row.id) for row in rows}
+        locators_by_target: dict[str, list[EvidenceLocator]] = {target_id: [] for target_id in target_ids}
+        for locator in self.session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id.in_(paper_ids),
+                EvidenceLocator.target_type.in_(["sections", "section", "paper_section", "PaperSection"]),
+                EvidenceLocator.target_id.in_(target_ids),
+                EvidenceLocator.field_name == "text",
+                EvidenceLocator.locator_status.in_(["exact_page", "exact_bbox"]),
+            )
+        ).all():
+            locators_by_target.setdefault(str(locator.target_id), []).append(locator)
+
+        items: list[ContentKnowledgeItem] = []
+        for row in rows:
+            paper = paper_by_id.get(row.paper_id)
+            content = _clean_text(row.text)
+            gate = gate_by_id[str(row.id)]
+            locators = sorted(
+                locators_by_target.get(str(row.id), []),
+                key=lambda locator: (int(locator.page or 0), str(locator.id)),
+            )
+            locator = locators[0] if locators else None
+            locator_payload = (
+                {
+                    "page": locator.page,
+                    "locator_status": locator.locator_status,
+                    "evidence_text": locator.evidence_text,
+                }
+                if locator is not None
+                else None
+            )
+            items.append(
+                self._item(
+                    paper,
+                    category="writing_material",
+                    source_type="section",
+                    source_id=row.id,
+                    source_table="paper_sections",
+                    content=content,
+                    evidence_text=content,
+                    evidence_locator=locator_payload,
+                    page_start=locator.page if locator is not None else row.page_start,
+                    page_end=locator.page if locator is not None else row.page_end,
+                    section_title=row.section_title,
+                    review_status=gate.review_status,
+                    review_gate_status=gate.review_gate_status,
+                    candidate_status="reviewed_exportable" if gate.eligible else "candidate_unverified",
+                    citation_policy="citable" if gate.eligible else "needs_review",
+                    can_use_for_writing=bool(content and gate.eligible),
+                    can_use_for_citation=gate.eligible,
+                    risk_flags=list(gate.reasons),
+                    recommended_action=None if gate.eligible else "verify_section_text_evidence",
+                    updated_at=getattr(row, "updated_at", getattr(row, "created_at", None)),
+                    metadata={
+                        "section_type": row.section_type,
+                        "ai_verification": _ai_verification_metadata(self.session, "sections", row),
                     },
                 )
             )
@@ -658,6 +879,86 @@ class ContentKnowledgeService:
                 # A writing plan is derived output, never a new evidence source.
                 continue
             paper = paper_by_id.get(row.paper_id)
+            if _normalized(row.source_type) == "section_page_fragment":
+                gate = content_object_gate(self.session, "section_page_fragments", row)
+                locator = self.session.scalar(
+                    select(EvidenceLocator)
+                    .where(
+                        EvidenceLocator.paper_id == row.paper_id,
+                        EvidenceLocator.target_type.in_(
+                            ["section_page_fragments", "section_page_fragment"]
+                        ),
+                        EvidenceLocator.target_id == str(row.id),
+                        EvidenceLocator.field_name == "text",
+                        EvidenceLocator.page == row.page_start,
+                        EvidenceLocator.locator_status.in_(["exact_page", "exact_bbox"]),
+                    )
+                    .order_by(EvidenceLocator.id.asc())
+                )
+                parent = self.session.get(PaperSection, row.section_id) if row.section_id else None
+                items.append(
+                    self._item(
+                        paper,
+                        category="writing_material",
+                        source_type="section_page_fragment",
+                        source_id=row.id,
+                        source_table="evidence_claims",
+                        content=_clean_text(row.claim_text),
+                        evidence_text=row.evidence_text,
+                        evidence_locator=(
+                            {
+                                "page": locator.page,
+                                "page_start": locator.page,
+                                "page_end": locator.page,
+                                "locator_status": locator.locator_status,
+                                "evidence_text": locator.evidence_text,
+                            }
+                            if locator is not None
+                            else {
+                                "page": row.page_start,
+                                "page_start": row.page_start,
+                                "page_end": row.page_end,
+                                "locator_status": "missing",
+                            }
+                        ),
+                        page_start=row.page_start,
+                        page_end=row.page_end,
+                        section_title=getattr(parent, "section_title", None),
+                        review_status=(
+                            "safe_verified" if gate.review_gate_status == "safe_verified" else "needs_review"
+                        ),
+                        review_gate_status=gate.review_gate_status,
+                        candidate_status=(
+                            "reviewed_exportable"
+                            if gate.can_use_for_writing or gate.can_use_for_citation
+                            else "candidate_unverified"
+                        ),
+                        citation_policy=(
+                            "citable" if gate.can_use_for_citation else "needs_review"
+                        ),
+                        can_use_for_writing=gate.can_use_for_writing,
+                        can_use_for_citation=gate.can_use_for_citation,
+                        risk_flags=list(gate.blocked_reasons),
+                        recommended_action=(
+                            None
+                            if gate.can_use_for_writing or gate.can_use_for_citation
+                            else "verify_section_page_fragment"
+                        ),
+                        updated_at=getattr(row, "created_at", None),
+                        metadata={
+                            "parent_section_id": str(row.section_id) if row.section_id else None,
+                            "section_type": getattr(parent, "section_type", None),
+                            "physical_page_numbering": "1_based_pdf",
+                            "fragment_metadata": row.meta or {},
+                            "ai_verification": _ai_verification_metadata(
+                                self.session,
+                                "section_page_fragments",
+                                row,
+                            ),
+                        },
+                    )
+                )
+                continue
             status = _normalized(row.validation_status) or "unverified"
             is_citable = status in CITABLE_EVIDENCE_STATUSES
             category = _category_from_hint(row.target_type or row.source_type)
@@ -716,6 +1017,11 @@ class ContentKnowledgeService:
             category = _external_candidate_category(candidate)
             policy = "blocked" if status in BLOCKED_CANDIDATE_STATUSES else "needs_review"
             content = _candidate_content(candidate)
+            audit = candidate_audit_semantics(
+                status,
+                target_type=candidate.materialized_target_type,
+                target_id=candidate.materialized_target_id,
+            )
             items.append(
                 self._item(
                     paper,
@@ -733,7 +1039,7 @@ class ContentKnowledgeService:
                     can_use_for_writing=False,
                     can_use_for_citation=False,
                     risk_flags=risks,
-                    recommended_action="resolve_external_ai_candidate" if risks else "review_external_ai_candidate",
+                    recommended_action=audit["recommended_action"],
                     source_ai=run.source,
                     source_label=run.source_label,
                     updated_at=getattr(candidate, "updated_at", getattr(candidate, "created_at", None)),
@@ -747,8 +1053,11 @@ class ContentKnowledgeService:
                         "source_identity": run.source_identity,
                         "source_identity_verified": run.source_identity_verified,
                         "external_analysis_run_id": str(run.id),
+                        "external_analysis_candidate_id": str(candidate.id),
+                        "candidate_status": status,
                         "materialized_target_type": candidate.materialized_target_type,
                         "materialized_target_id": candidate.materialized_target_id,
+                        "audit_lifecycle": audit,
                         "normalized_payload": candidate.normalized_payload,
                     },
                 )
@@ -785,6 +1094,7 @@ class ContentKnowledgeService:
         item_category = category if category in CATEGORY_LABELS else "draft_evidence_check"
         paper_id = str(paper.id) if paper is not None else ""
         item_id = f"{source_type}:{source_id}"
+        audit = (metadata or {}).get("audit_lifecycle") if _is_audit_source_type(source_type) else None
         return ContentKnowledgeItem(
             item_id=item_id,
             paper_id=paper_id,
@@ -817,6 +1127,12 @@ class ContentKnowledgeService:
             source_identity=(metadata or {}).get("source_identity"),
             source_identity_verified=bool((metadata or {}).get("source_identity_verified")),
             updated_at=updated_at.isoformat() if updated_at else None,
+            item_kind="audit" if audit else "content",
+            audit_state=(audit or {}).get("state"),
+            audit_state_label=(audit or {}).get("label"),
+            audit_requires_action=bool((audit or {}).get("requires_action")),
+            linked_target_type=(audit or {}).get("target_type"),
+            linked_target_id=(audit or {}).get("target_id"),
             metadata=metadata or {},
         )
 
@@ -826,6 +1142,7 @@ class ContentKnowledgeService:
         *,
         category: str | None,
         query: str | None,
+        result_view: str,
         include_candidates: bool,
         include_blocked: bool,
         review_status: str | None,
@@ -833,11 +1150,19 @@ class ContentKnowledgeService:
         source_trust: str | None,
         problem_status: str | None,
     ) -> bool:
+        if result_view == CONTENT_RESULT_VIEW and item.item_kind == "audit":
+            return False
+        if result_view == AUDIT_RESULT_VIEW and item.item_kind != "audit":
+            return False
         if category and item.category != category:
             return False
         if not include_candidates and item.source_type == "external_analysis_candidate":
             return False
-        if not include_blocked and item.citation_policy == "blocked":
+        if (
+            result_view != AUDIT_RESULT_VIEW
+            and not include_blocked
+            and item.citation_policy == "blocked"
+        ):
             return False
         if review_status and item.review_status != review_status:
             return False
@@ -860,10 +1185,24 @@ def serialize_content_item(
     paper: Paper | None,
     *,
     object_gate: ContentObjectGateResult | None = None,
+    session: Session | None = None,
+    figure_links: ContentFigureLinkService | None = None,
+    audit_candidate: ExternalAnalysisCandidate | None = None,
 ) -> ContentKnowledgeItem:
     citation = _normalized(row.citation_status) or "needs_review"
     reviewed = _normalized(row.review_status) in {"validated", "approved", "safe_verified"}
     metadata = dict(row.source_record or {})
+    # Never expose a cached authorization decision. Even if an old projection
+    # contains linked_figures, current output is rebuilt from the real source
+    # row and the latest figure review state.
+    metadata.pop("linked_figures", None)
+    if session is not None:
+        live_links = figure_links or ContentFigureLinkService(session)
+        metadata["linked_figures"] = live_links.links_for_content_source(
+            paper_id=row.paper_id,
+            source_type=row.source_type,
+            source_id=row.source_id,
+        )
     metadata["projection_state"] = {
         "review_status": row.review_status,
         "citation_status": citation,
@@ -873,7 +1212,39 @@ def serialize_content_item(
     if row.run_id is not None:
         metadata.setdefault("external_analysis_run_id", str(row.run_id))
     risk_flags = list(row.risk_flags or [])
-    if object_gate is None:
+    is_audit = _is_audit_source_type(row.source_type)
+    candidate_status = None
+    audit = None
+    if is_audit:
+        candidate_status = _normalized(
+            getattr(audit_candidate, "status", None) or metadata.get("candidate_status")
+        ) or "unknown"
+        target_type = (
+            getattr(audit_candidate, "materialized_target_type", None)
+            if audit_candidate is not None
+            else metadata.get("materialized_target_type")
+        )
+        target_id = (
+            getattr(audit_candidate, "materialized_target_id", None)
+            if audit_candidate is not None
+            else metadata.get("materialized_target_id")
+        )
+        audit = candidate_audit_semantics(
+            candidate_status,
+            target_type=target_type,
+            target_id=target_id,
+        )
+        metadata["candidate_status"] = candidate_status
+        metadata["materialized_target_type"] = target_type
+        metadata["materialized_target_id"] = target_id
+        metadata["audit_lifecycle"] = audit
+        can_write = False
+        can_cite = False
+        review_gate_status = "audit_only_not_writing_or_citation"
+        effective_citation = "blocked"
+        risk_flags = list(dict.fromkeys([*risk_flags, "audit_only_not_writing_or_citation"]))
+        recommended_action = audit["recommended_action"]
+    elif object_gate is None:
         can_write = False
         can_cite = False
         review_gate_status = "projection_only"
@@ -912,7 +1283,7 @@ def serialize_content_item(
         source_type=row.source_type,
         source_id=row.source_id,
         source_table="content_evidence_items",
-        reviewable=True,
+        reviewable=not is_audit,
         requires_sync=False,
         content=_clean_text(row.content),
         evidence_text=_clean_text(row.evidence_text) or None,
@@ -922,6 +1293,7 @@ def serialize_content_item(
         section_title=row.section_title,
         review_status=row.review_status,
         review_gate_status=review_gate_status,
+        candidate_status=candidate_status,
         citation_policy=effective_citation,
         can_use_for_writing=can_write,
         can_use_for_citation=can_cite,
@@ -936,6 +1308,12 @@ def serialize_content_item(
         snapshot_fingerprint=row.snapshot_fingerprint,
         created_at=row.created_at.isoformat() if row.created_at else None,
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
+        item_kind="audit" if is_audit else "content",
+        audit_state=(audit or {}).get("state"),
+        audit_state_label=(audit or {}).get("label"),
+        audit_requires_action=bool((audit or {}).get("requires_action")),
+        linked_target_type=(audit or {}).get("target_type"),
+        linked_target_id=(audit or {}).get("target_id"),
         metadata=metadata,
     )
 
@@ -990,6 +1368,23 @@ def _content_item_has_locator(item: ContentEvidenceItem) -> bool:
     )
 
 
+def _ai_verification_metadata(session: Session, target_type: str, target: Any) -> dict[str, Any] | None:
+    reviews = get_target_reviews(
+        session,
+        paper_id=target.paper_id,
+        target_type=target_type,
+        target_id=target.id,
+    )
+    for review in reviews:
+        if str(review.reviewer_status or "").casefold() != "ai_verified":
+            continue
+        payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+        verification = payload.get("ai_verification")
+        if isinstance(verification, dict):
+            return verification
+    return None
+
+
 def _has_effective_review(item: ContentEvidenceItem) -> bool:
     return (
         _normalized(item.review_status) in {"validated", "approved", "safe_verified"}
@@ -1034,6 +1429,84 @@ def _legacy_search_score(item: ContentKnowledgeItem, terms: list[str]) -> int:
             score += 35
         score += sum(weight for value, weight in fields if term in _normalized(value))
     return score
+
+
+def _normalize_result_view(value: Any) -> str:
+    normalized = _normalized(value) or CONTENT_RESULT_VIEW
+    if normalized not in RESULT_VIEWS:
+        raise ValueError(f"unsupported result_view: {value}")
+    return normalized
+
+
+def _is_audit_source_type(source_type: Any) -> bool:
+    return _normalized(source_type) in AUDIT_SOURCE_TYPES
+
+
+def candidate_audit_semantics(
+    status: Any,
+    *,
+    target_type: Any = None,
+    target_id: Any = None,
+) -> dict[str, Any]:
+    """Derive display-only audit lifecycle state without mutating or guessing links."""
+    normalized_status = _normalized(status) or "unknown"
+    normalized_target_type = _clean_text(target_type) or None
+    normalized_target_id = _clean_text(target_id) or None
+    has_explicit_link = bool(normalized_target_type and normalized_target_id)
+
+    if normalized_status in APPLIED_AUDIT_STATUSES and has_explicit_link:
+        is_dft = _normalized(normalized_target_type) == "dft_results"
+        return {
+            "state": "applied_to_formal_dft" if is_dft else "applied_to_linked_object",
+            "label": "已应用到正式 DFT / 已归档审计" if is_dft else "已应用到关联对象 / 已归档审计",
+            "requires_action": False,
+            "terminal": True,
+            "status": normalized_status,
+            "target_type": normalized_target_type,
+            "target_id": normalized_target_id,
+            "linkage_explicit": True,
+            "recommended_action": "view_linked_audit_target",
+        }
+    if normalized_status in TERMINAL_AUDIT_STATUSES:
+        return {
+            "state": "terminal_history",
+            "label": "终态 / 历史审计记录",
+            "requires_action": False,
+            "terminal": True,
+            "status": normalized_status,
+            "target_type": normalized_target_type,
+            "target_id": normalized_target_id,
+            "linkage_explicit": has_explicit_link,
+            "recommended_action": "view_audit_history",
+        }
+    if normalized_status in ACTIVE_AUDIT_STATUSES:
+        return {
+            "state": "active_unresolved",
+            "label": "待处理审计候选",
+            "requires_action": True,
+            "terminal": False,
+            "status": normalized_status,
+            "target_type": normalized_target_type,
+            "target_id": normalized_target_id,
+            "linkage_explicit": has_explicit_link,
+            "recommended_action": "resolve_external_ai_candidate",
+        }
+    return {
+        "state": "unknown_requires_attention",
+        "label": "审计状态未知 / 需处理",
+        "requires_action": True,
+        "terminal": False,
+        "status": normalized_status,
+        "target_type": normalized_target_type,
+        "target_id": normalized_target_id,
+        "linkage_explicit": has_explicit_link,
+        "recommended_action": "inspect_external_ai_candidate",
+        "warning": (
+            "materialized_status_missing_explicit_target_link"
+            if normalized_status in APPLIED_AUDIT_STATUSES
+            else "unrecognized_candidate_status"
+        ),
+    }
 
 
 def _maybe_uuid(value: str | uuid.UUID) -> uuid.UUID | None:
@@ -1122,14 +1595,14 @@ def _writing_card_content(card: WritingCard) -> str:
         ("research_gap", "research_gap"),
         ("proposed_solution", "proposed_solution"),
         ("core_hypothesis", "core_hypothesis"),
-        ("abstract_logic", "abstract_logic"),
-        ("introduction_logic", "introduction_logic"),
-        ("discussion_logic", "discussion_logic"),
-        ("figure_logic", "figure_logic"),
     ):
         value = _clean_text(getattr(card, field_name, None))
         if value:
             parts.append(f"{label}: {value}")
+    for item in normalized_evidence_chain(card.evidence_chain, limit=8):
+        if item["supports_fields"]:
+            continue
+        parts.append(f"{item['evidence_type']}: {item['text']}")
     return " | ".join(parts)
 
 

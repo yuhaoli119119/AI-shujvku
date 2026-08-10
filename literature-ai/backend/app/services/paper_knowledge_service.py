@@ -8,9 +8,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import ExternalAnalysisCandidate, PaperNote
+from app.db.models import ExternalAnalysisCandidate, MechanismClaim, PaperNote, WritingCard
 from app.schemas.api import PaperDetailResponse
+from app.services.content_figure_link_service import ContentFigureLinkService
 from app.services.paper_query import PaperQueryService
+from app.utils.writing_card_content import normalized_evidence_chain
 
 
 SECTION_CATEGORY_RULES: list[tuple[str, str, tuple[str, ...]]] = [
@@ -149,9 +151,11 @@ class PaperKnowledgeService:
     ) -> list[dict[str, Any]]:
         items: list[KnowledgeCandidate] = []
         paper_id = str(detail.id)
+        figure_links = ContentFigureLinkService(self.session)
 
         for claim in detail.mechanism_claims_items or []:
             claim_payload = claim.model_dump(mode="json")
+            claim_row = self.session.get(MechanismClaim, claim.id)
             items.append(
                 KnowledgeCandidate(
                     id=f"mechanism_claim:{claim.id}",
@@ -164,19 +168,26 @@ class PaperKnowledgeService:
                     evidence_text=self._clip(claim.evidence_text, max_chars_per_candidate),
                     confidence=claim.confidence,
                     evidence_state="structured_extraction_candidate",
-                    metadata={"evidence_types": claim_payload.get("evidence_types") or []},
+                    metadata={
+                        "evidence_types": claim_payload.get("evidence_types") or [],
+                        "linked_figures": (
+                            figure_links.links_for_mechanism_claim(claim_row)
+                            if claim_row is not None else []
+                        ),
+                    },
                 )
             )
 
         for card in detail.writing_cards_items or []:
             card_payload = card.model_dump(mode="json")
+            card_row = self.session.get(WritingCard, card.id)
+            linked_figures = (
+                figure_links.links_for_writing_card(card_row) if card_row is not None else []
+            )
             for category, field_name, title in (
                 ("research_gap", "research_gap", "Research gap"),
                 ("proposed_solution", "proposed_solution", "Proposed solution"),
                 ("core_hypothesis", "core_hypothesis", "Core hypothesis"),
-                ("writing_logic", "abstract_logic", "Abstract logic"),
-                ("writing_logic", "introduction_logic", "Introduction logic"),
-                ("writing_logic", "discussion_logic", "Discussion logic"),
             ):
                 value = card_payload.get(field_name)
                 if not self._has_text(value):
@@ -197,6 +208,37 @@ class PaperKnowledgeService:
                         metadata={
                             "review_gate_status": card_payload.get("review_gate_status"),
                             "blocked_reasons": card_payload.get("blocked_reasons") or [],
+                            "linked_figures": linked_figures,
+                        },
+                    )
+                )
+            for evidence in normalized_evidence_chain(card_payload.get("evidence_chain"), limit=8):
+                if evidence["supports_fields"]:
+                    continue
+                evidence_links = [
+                    link for link in linked_figures
+                    if not link.get("evidence_ids") or evidence["evidence_id"] in link["evidence_ids"]
+                ]
+                evidence_type = str(evidence.get("evidence_type") or "result")
+                items.append(
+                    KnowledgeCandidate(
+                        id=f"writing_card:{card.id}:{evidence['evidence_id']}",
+                        paper_id=paper_id,
+                        category="mechanism" if "mechanism" in evidence_type.casefold() else "key_result",
+                        title="Key mechanism" if "mechanism" in evidence_type.casefold() else "Key result",
+                        content=self._clip(evidence["text"], max_chars_per_candidate),
+                        source_type="writing_card_evidence",
+                        source_id=str(card.id),
+                        evidence_text=self._clip(evidence["text"], max_chars_per_candidate),
+                        page_start=evidence.get("page"),
+                        section_title=evidence.get("source"),
+                        evidence_state=evidence.get("locator_status") or "text_only_candidate",
+                        candidate_status="candidate_unverified",
+                        recommended_action="Use as writing context only until the source evidence is formally reviewed.",
+                        metadata={
+                            "evidence_type": evidence_type,
+                            "writing_uses": evidence.get("writing_uses") or [],
+                            "linked_figures": evidence_links,
                         },
                     )
                 )

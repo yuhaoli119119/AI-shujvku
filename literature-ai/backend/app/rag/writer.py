@@ -40,8 +40,9 @@ class Writer:
         sections: list[str] | None = None,
         limit_per_type: int = 5,
         target_paper_type: str | None = None,
+        mode: str | None = None,
     ) -> dict[str, Any]:
-        requested = sections or ["outline", "introduction", "dft_results", "discussion", "figure_storyline"]
+        requested = list(sections) if sections else ["outline", "introduction", "discussion", "figure_storyline"]
         query = " ".join(part for part in [topic, user_notes or ""] if part)
         
         paper_type_filter = normalize_paper_type_filter(target_paper_type)
@@ -51,8 +52,13 @@ class Writer:
             paper_ids=paper_ids, 
             limit_per_type=limit_per_type,
             target_paper_type=target_paper_type,
-            paper_type_filter=paper_type_filter
+            paper_type_filter=paper_type_filter,
+            mode=mode,
+            requested_sections=requested,
         )
+        retrieval_intent = self.retriever.last_retrieval_intent
+        if not sections and retrieval_intent and retrieval_intent.dft_included:
+            requested.insert(2, "dft_results")
         formal_retrieved = self.prompt_builder.formal_evidence_only(retrieved)
 
         rule_sections = self._build_rule_sections(topic, formal_retrieved, requested, target_paper_type)
@@ -99,6 +105,7 @@ class Writer:
             "evidence_claims": [claim.model_dump(mode="json") for claim in evidence_claims],
             "citation_audit": citation_audit.model_dump(mode="json"),
             "guard_actions": guard_actions,
+            **(retrieval_intent.as_dict() if retrieval_intent else {}),
         }
 
     def status(self) -> dict[str, Any]:
@@ -138,16 +145,21 @@ class Writer:
         }
 
     def _build_outline(self, topic: str, retrieved: dict[str, list[dict[str, Any]]], target_paper_type: str | None) -> list[str]:
+        has_dft_evidence = bool(retrieved.get("dft_results"))
         if target_paper_type and target_paper_type.startswith("R"):
             return [
                 f"Historical context and significance of {topic}",
                 "Review of fundamental mechanisms and key challenges",
-                "Summary of recent breakthroughs across computational and experimental studies",
+                (
+                    "Summary of recent breakthroughs across computational and experimental studies"
+                    if has_dft_evidence
+                    else "Summary of recent breakthroughs across mechanistic and experimental studies"
+                ),
                 "Discussion on limitations of current methodologies",
                 "Future perspectives and research directions",
             ]
 
-        if target_paper_type and target_paper_type.startswith("A"):
+        if target_paper_type and target_paper_type.startswith("A") and has_dft_evidence:
             return [
                 f"Background and motivation for computational study of {topic}",
                 "Computational methodology \u2014 DFT functional, basis set, model construction",
@@ -170,7 +182,11 @@ class Writer:
         outline = [
             f"Context and challenge in {topic}",
             "Catalyst design rationale and research gap",
-            "Key DFT evidence for adsorption, conversion, or barrier tuning",
+            (
+                "Key DFT evidence for adsorption, conversion, or barrier tuning"
+                if has_dft_evidence
+                else "Key reviewed evidence for adsorption, conversion, or kinetic regulation"
+            ),
             "Mechanistic interpretation linked to sulfur redox behavior",
             "Implications for electrochemical performance and figure sequence",
         ]
@@ -184,6 +200,7 @@ class Writer:
         cards = retrieved.get("writing_cards", [])
         mechanisms = retrieved.get("mechanism_claims", [])
         catalysts = retrieved.get("catalyst_samples", [])
+        has_dft_evidence = bool(retrieved.get("dft_results"))
         gap = cards[0].get("research_gap") if cards else "prior studies still lack a stable way to balance polysulfide adsorption and fast conversion"
         default_solution = "single-atom or dual-atom catalytic centers are introduced to tune sulfur redox chemistry"
         if catalysts:
@@ -193,14 +210,19 @@ class Writer:
         mechanism = mechanisms[0].get("text") if mechanisms else "the catalytic site is expected to strengthen sulfur-species binding while accelerating bidirectional conversion"
         
         if target_paper_type and target_paper_type.startswith("R"):
+            bridge = (
+                "computational insights with experimental benchmarks"
+                if has_dft_evidence
+                else "mechanistic insights with experimental benchmarks"
+            )
             return (
                 f"Lithium-sulfur batteries represent a promising next-generation energy storage system, yet {gap}. "
                 f"This review comprehensively summarizes the recent progress in {topic}, focusing on how {solution}. "
                 f"We particularly highlight the mechanistic consensus that {mechanism}. "
-                "By bridging computational insights with experimental benchmarks, this review aims to provide a clear roadmap for future material design."
+                f"By bridging {bridge}, this review aims to provide a clear roadmap for future material design."
             )
 
-        if target_paper_type and target_paper_type.startswith("A"):
+        if target_paper_type and target_paper_type.startswith("A") and has_dft_evidence:
             return (
                 f"Understanding the electronic structure and reaction energetics of {topic} requires systematic first-principles investigation. "
                 f"Prior computational studies face the challenge that {gap}. "
@@ -216,11 +238,16 @@ class Writer:
                 "This work establishes a clear experimental foundation linking catalyst design to electrochemical performance."
             )
             
+        evidence_bridge = (
+            "electronic-structure evidence"
+            if has_dft_evidence
+            else "reviewed mechanistic evidence"
+        )
         return (
             f"Lithium-sulfur cathodes remain attractive given their high theoretical energy density, yet {gap}. "
             f"For {topic}, a practical design strategy is that {solution}. "
             f"In this evidence set, the working hypothesis is that {mechanism}. "
-            "This framing provides a manuscript structure in which catalyst design, electronic-structure evidence, and sulfur-redox consequences are discussed as one coherent argument."
+            f"This framing provides a manuscript structure in which catalyst design, {evidence_bridge}, and sulfur-redox consequences are discussed as one coherent argument."
         )
 
     def _build_dft_results(self, topic: str, retrieved: dict[str, list[dict[str, Any]]], target_paper_type: str | None) -> str:
@@ -253,9 +280,14 @@ class Writer:
         parts = []
         if mechanisms:
             top_claim = mechanisms[0]
+            evidence_context = (
+                "the corresponding DFT descriptors"
+                if retrieved.get("dft_results")
+                else "the corresponding reviewed evidence"
+            )
             parts.append(
                 f"For {topic}, the mechanistic anchor is {top_claim.get('text')}. "
-                "This claim should be discussed together with the corresponding DFT descriptors rather than as an isolated statement."
+                f"This claim should be discussed together with {evidence_context} rather than as an isolated statement."
             )
         if catalysts:
             catalyst = catalysts[0]

@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceLocator, EvidenceSpan, MechanismClaim, PaperChunk, PaperFigure, PaperSection, WritingCard, Paper, FigureDataPoint
+from app.db.models import CatalystSample, DFTResult, ElectrochemicalPerformance, EvidenceClaim, EvidenceLocator, EvidenceSpan, MechanismClaim, PaperChunk, PaperFigure, PaperSection, WritingCard, Paper, FigureDataPoint
 from app.services.embedding import (
     DeterministicEmbeddingService,
     EmbeddingService,
@@ -18,8 +18,11 @@ from app.services.embedding import (
 )
 from app.rag.eligibility import is_rag_eligible, section_is_retrieval_candidate, writing_card_rag_review_status
 from app.rag.cards import build_dft_card, build_evidence_card, build_figure_card, build_writing_card, paper_code_for
+from app.rag.retrieval_intent import RetrievalIntent, SUPPORTED_EVIDENCE_TYPES, route_retrieval_intent
+from app.services.content_figure_link_service import ContentFigureLinkService
 from app.utils.figure_summary import flatten_figure_key_elements
 from app.utils.review_safety import bulk_export_gate_results, content_object_gate, writing_card_gate
+from app.utils.writing_card_content import evidence_chain_search_text, normalized_evidence_chain
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +44,7 @@ class Retriever:
         self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
         self._semantic_enabled = not isinstance(self.embedding, DeterministicEmbeddingService)
         self._text_embedding_cache: dict[str, list[float]] = {}
+        self.last_retrieval_intent: RetrievalIntent | None = None
 
     def retrieve(
         self,
@@ -49,20 +53,76 @@ class Retriever:
         limit_per_type: int = 5,
         target_paper_type: str | None = None,
         paper_type_filter: list[str] | None = None,
+        evidence_types: list[str] | None = None,
+        mode: str | None = None,
+        requested_sections: list[str] | None = None,
     ) -> dict[str, list[dict[str, Any]]]:
+        retrieval_intent = route_retrieval_intent(
+            query,
+            evidence_types=evidence_types,
+            mode=mode,
+            requested_sections=requested_sections,
+        )
+        self.last_retrieval_intent = retrieval_intent
+        selected = set(retrieval_intent.selected_evidence_types)
         tokens = _tokenize(query)
         query_embedding = self._safe_query_embedding(query)
-        result = {
-            # Discovery candidates carry a separate formal-writing gate result.
-            "sections": self._retrieve_sections(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
-            "catalyst_samples": self._retrieve_catalyst_samples(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
-            "dft_results": self._retrieve_dft_results(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
-            "electrochemical_performance": self._retrieve_electrochemical(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
-            "mechanism_claims": self._retrieve_mechanism_claims(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
-            "writing_cards": self._retrieve_writing_cards(tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter),
-            "figure_cards": self._retrieve_figure_cards(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
-            "figure_data_points": self._retrieve_figure_data(tokens, query_embedding, paper_ids, limit_per_type, target_paper_type, paper_type_filter),
+        result: dict[str, list[dict[str, Any]]] = {
+            evidence_type: [] for evidence_type in SUPPORTED_EVIDENCE_TYPES
         }
+        # Discovery candidates carry a separate formal-writing gate result.
+        if "sections" in selected:
+            result["sections"] = self._retrieve_sections(
+                tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter
+            )
+        if "catalyst_samples" in selected:
+            result["catalyst_samples"] = self._retrieve_catalyst_samples(
+                tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter
+            )
+        if "dft_results" in selected:
+            result["dft_results"] = self._retrieve_dft_results(
+                tokens,
+                query_embedding,
+                paper_ids,
+                limit_per_type,
+                target_paper_type,
+                paper_type_filter,
+            )
+        if "electrochemical_performance" in selected:
+            result["electrochemical_performance"] = self._retrieve_electrochemical(
+                tokens,
+                query_embedding,
+                paper_ids,
+                limit_per_type,
+                target_paper_type,
+                paper_type_filter,
+            )
+        if "mechanism_claims" in selected:
+            result["mechanism_claims"] = self._retrieve_mechanism_claims(
+                tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter
+            )
+        if "writing_cards" in selected:
+            result["writing_cards"] = self._retrieve_writing_cards(
+                tokens, query_embedding, paper_ids, limit_per_type, paper_type_filter
+            )
+        if "figure_cards" in selected:
+            result["figure_cards"] = self._retrieve_figure_cards(
+                tokens,
+                query_embedding,
+                paper_ids,
+                limit_per_type,
+                target_paper_type,
+                paper_type_filter,
+            )
+        if "figure_data_points" in selected:
+            result["figure_data_points"] = self._retrieve_figure_data(
+                tokens,
+                query_embedding,
+                paper_ids,
+                limit_per_type,
+                target_paper_type,
+                paper_type_filter,
+            )
         return self._global_dedup(result, limit_per_type)
 
     def _safe_query_embedding(self, query: str) -> list[float]:
@@ -99,6 +159,13 @@ class Retriever:
         paper_type_filter: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         chunk_results = self._retrieve_chunks(tokens, query_embedding, paper_ids, max(limit * 2, 4), paper_type_filter)
+        page_fragment_results = self._retrieve_section_page_fragments(
+            tokens,
+            query_embedding,
+            paper_ids,
+            max(limit * 2, 4),
+            paper_type_filter,
+        )
 
         query = select(PaperSection)
         if paper_ids:
@@ -139,7 +206,77 @@ class Retriever:
                     "can_use_for_writing": formal_eligible,
                 }
             )
-        return self._merge_section_results(chunk_results, results, limit)
+        return self._merge_section_results([*page_fragment_results, *chunk_results], results, limit)
+
+    def _retrieve_section_page_fragments(
+        self,
+        tokens: set[str],
+        query_embedding: list[float],
+        paper_ids: list[UUID] | None,
+        limit: int,
+        paper_type_filter: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        query = select(EvidenceClaim).where(
+            EvidenceClaim.source_type == "section_page_fragment"
+        )
+        if paper_ids:
+            query = query.where(EvidenceClaim.paper_id.in_(paper_ids))
+        query = self._apply_type_filter(query, EvidenceClaim, paper_type_filter)
+        rows = self._scalars_with_token_prefilter(
+            query,
+            tokens,
+            [EvidenceClaim.claim_text, EvidenceClaim.evidence_text],
+            fallback_limit=max(limit * 20, 200),
+            include_fallback=False,
+        )
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            gate = content_object_gate(self.session, "section_page_fragments", row)
+            if not (gate.can_use_for_writing or gate.can_use_for_citation):
+                continue
+            text = row.evidence_text or row.claim_text or ""
+            score, score_info = self._hybrid_score(
+                tokens,
+                query_embedding,
+                text,
+                None,
+                allow_paper_fallback=bool(paper_ids),
+            )
+            if score <= 0:
+                continue
+            parent = self.session.get(PaperSection, row.section_id) if row.section_id else None
+            locator = self._primary_evidence_locator(
+                row,
+                target_type="section_page_fragments",
+            )
+            results.append(
+                {
+                    "type": "section",
+                    "source_type": "section_page_fragment",
+                    "paper_id": row.paper_id,
+                    "paper_code": paper_code_for(self.session, row.paper_id),
+                    "object_id": row.id,
+                    "source_id": row.id,
+                    "section_id": row.section_id,
+                    "score": score,
+                    "score_breakdown": score_info,
+                    "text": text[:1200],
+                    "evidence_text": text[:1200],
+                    "evidence_locator": locator,
+                    "section_title": getattr(parent, "section_title", None) or "Page fragment",
+                    "section_type": "body_page_fragment",
+                    "page_start": row.page_start,
+                    "page_end": row.page_end,
+                    "retrieval_tier": "formal_evidence",
+                    "review_status": gate.review_gate_status,
+                    "review_gate_status": gate.review_gate_status,
+                    "can_use_for_writing": gate.can_use_for_writing,
+                    "can_use_for_citation": gate.can_use_for_citation,
+                    "page_fragment": True,
+                    "embedding_role": "retrieval_only",
+                }
+            )
+        return self._top_k(results, limit)
 
     def _retrieve_chunks(
         self,
@@ -502,6 +639,7 @@ class Retriever:
         )
         gate_by_id = bulk_export_gate_results(self.session, rows, target_type="mechanism_claims")
         results = []
+        figure_links = ContentFigureLinkService(self.session)
         for row in rows:
             gate = gate_by_id[str(row.id)]
             if not content_object_gate(
@@ -541,6 +679,7 @@ class Retriever:
                     "page_start": locator_page,
                     "page_end": locator_page,
                     "evidence_locator": locator,
+                    "linked_figures": figure_links.links_for_mechanism_claim(row),
                     "provenance_level": gate.provenance_level,
                     "locator_status": gate.locator_status,
                 }
@@ -563,37 +702,42 @@ class Retriever:
             query,
             tokens,
             [
-                WritingCard.paper_type,
                 WritingCard.research_gap,
                 WritingCard.proposed_solution,
                 WritingCard.core_hypothesis,
-                WritingCard.abstract_logic,
-                WritingCard.introduction_logic,
-                WritingCard.discussion_logic,
+                sa.cast(WritingCard.evidence_chain, sa.Text),
             ],
             fallback_limit=max(limit * 20, 200),
-            include_fallback=bool(query_embedding),
+            include_fallback=False,
+            fallback_when_empty=False,
         )
         results = []
+        figure_links = ContentFigureLinkService(self.session)
         for row in rows:
             gate = writing_card_gate(self.session, row)
-            if not is_rag_eligible(self.session, row, "writing_card"):
+            object_gate = content_object_gate(self.session, "writing_cards", row)
+            if not object_gate.can_use_for_writing:
                 continue
+            evidence_chain = normalized_evidence_chain(row.evidence_chain, limit=8)
+            evidence_text = evidence_chain_search_text(row.evidence_chain, limit=8)
             haystack = " ".join(
                 filter(
                     None,
                     [
-                        row.paper_type,
                         row.research_gap,
                         row.proposed_solution,
                         row.core_hypothesis,
-                        row.abstract_logic,
-                        row.introduction_logic,
-                        row.discussion_logic,
+                        evidence_text,
                     ],
                 )
             )
-            score, score_info = self._hybrid_score(tokens, query_embedding, haystack, row.embedding, allow_paper_fallback=bool(paper_ids))
+            score, score_info = self._hybrid_score(
+                tokens,
+                query_embedding,
+                haystack,
+                row.embedding,
+                allow_paper_fallback=bool(paper_ids and not tokens),
+            )
             if score <= 0:
                 continue
             results.append(
@@ -602,7 +746,11 @@ class Retriever:
                     **build_writing_card(
                         self.session,
                         row,
-                        evidence_text=row.research_gap or row.proposed_solution or row.core_hypothesis or "",
+                        evidence_text=(
+                            evidence_chain[0]["text"]
+                            if evidence_chain
+                            else row.research_gap or row.proposed_solution or row.core_hypothesis or ""
+                        ),
                         gate=gate,
                         review_status=writing_card_rag_review_status(self.session, row),
                     ),
@@ -615,10 +763,12 @@ class Retriever:
                     "research_gap": row.research_gap,
                     "proposed_solution": row.proposed_solution,
                     "core_hypothesis": row.core_hypothesis,
-                    "figure_logic": row.figure_logic,
+                    "evidence_chain": evidence_chain,
+                    "linked_figures": figure_links.links_for_writing_card(row),
                     "evidence_chain_status": gate.evidence_chain_status,
-                    "review_gate_status": gate.review_gate_status,
-                    "can_use_for_writing": gate.can_use_for_writing,
+                    "review_gate_status": object_gate.review_gate_status,
+                    "can_use_for_writing": object_gate.can_use_for_writing,
+                    "can_use_for_citation": object_gate.can_use_for_citation,
                 }
             )
         return self._top_k(results, limit)
@@ -933,6 +1083,7 @@ class Retriever:
         *,
         fallback_limit: int,
         include_fallback: bool = False,
+        fallback_when_empty: bool = True,
     ) -> list[Any]:
         filtered_query = self._apply_token_prefilter(query, tokens, columns)
         rows = list(self.session.scalars(filtered_query).all())
@@ -941,7 +1092,7 @@ class Retriever:
             fallback_rows = list(self.session.scalars(query.limit(fallback_limit)).all())
             rows.extend(row for row in fallback_rows if getattr(row, "id", None) not in seen)
             return rows
-        if rows or not tokens:
+        if rows or not tokens or not fallback_when_empty:
             return rows
         return list(self.session.scalars(query.limit(fallback_limit)).all())
 

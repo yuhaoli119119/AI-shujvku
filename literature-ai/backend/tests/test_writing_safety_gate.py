@@ -132,7 +132,17 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
                 paper_id=paper.id,
                 research_gap="A documented conversion limitation remains unresolved in current hosts.",
                 proposed_solution="This work develops a documented catalyst solution for conversion.",
-                evidence_chain=_safe_evidence_chain(),
+                evidence_chain=[
+                    *_safe_evidence_chain(),
+                    {
+                        "text": "A Li2S nucleation fingerprint appears in the reviewed results.",
+                        "source": "Results",
+                        "page": 4,
+                        "locator_status": "exact_page",
+                        "supports_fields": [],
+                        "evidence_type": "result",
+                    },
+                ],
             )
             session.add_all([unreviewed, reviewed])
             session.flush()
@@ -148,6 +158,16 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
                         target_resolution_status="active",
                         evidence_text="A documented conversion limitation remains unresolved.",
                     ),
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="writing_cards",
+                        target_id=str(reviewed.id),
+                        field_name="evidence_chain",
+                        reviewed_value=reviewed.evidence_chain,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text="A Li2S nucleation fingerprint appears in the reviewed results.",
+                    ),
                     EvidenceLocator(
                         paper_id=paper.id,
                         source_type="pdf",
@@ -156,6 +176,18 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
                         field_name="research_gap",
                         evidence_text="A documented conversion limitation remains unresolved.",
                         page=1,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="writing_cards",
+                        target_id=str(reviewed.id),
+                        field_name="evidence_chain",
+                        evidence_text="A Li2S nucleation fingerprint appears in the reviewed results.",
+                        page=4,
                         locator_status="exact_page",
                         locator_confidence=1.0,
                         parser_source="test_review",
@@ -169,16 +201,21 @@ def test_retriever_keeps_unsafe_writing_card_out_of_writing_path(tmp_path):
             assert detail_by_id[unreviewed.id].candidate_status == "candidate_unverified"
             assert detail_by_id[unreviewed.id].review_status == "missing"
             assert detail_by_id[unreviewed.id].can_use_for_writing is False
-            assert detail_by_id[reviewed.id].candidate_status == "reviewed_exportable"
-            assert detail_by_id[reviewed.id].review_status == "safe_verified"
-            assert detail_by_id[reviewed.id].can_use_for_writing is True
+            assert detail_by_id[reviewed.id].candidate_status == "candidate_unverified"
+            assert detail_by_id[reviewed.id].review_status == "verified"
+            assert detail_by_id[reviewed.id].review_gate_status == "blocked"
+            assert detail_by_id[reviewed.id].can_use_for_writing is False
 
             retrieved = Retriever(session).retrieve("safe unsafe gap solution", [paper.id], 5)
 
-            assert len(retrieved["writing_cards"]) == 1
-            assert retrieved["writing_cards"][0]["object_id"] == reviewed.id
-            assert retrieved["writing_cards"][0]["can_use_for_writing"] is True
-            assert retrieved["writing_cards"][0]["review_status"] == "safe_verified"
+            assert retrieved["writing_cards"] == []
+
+            result_only_query = Retriever(session).retrieve(
+                "nucleation fingerprint",
+                [paper.id],
+                5,
+            )
+            assert result_only_query["writing_cards"] == []
     finally:
         engine.dispose()
 
@@ -331,12 +368,17 @@ def test_unreviewed_extraction_fact_is_not_retrieved_for_writing(tmp_path):
             session.flush()
             session.add_all(
                 [
-                    EvidenceSpan(
+                    EvidenceLocator(
                         paper_id=paper.id,
-                        object_type="mechanism_claims",
-                        object_id=str(safe.id),
-                        text="Safe evidence.",
+                        source_type="pdf",
+                        target_type="mechanism_claims",
+                        target_id=str(safe.id),
+                        field_name="claim_text",
+                        evidence_text="Safe evidence.",
                         page=1,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
                     ),
                     ExtractionFieldReview(
                         paper_id=paper.id,

@@ -15,19 +15,35 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, ExtractionFieldReview, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, WritingCard, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.mcp.context import MCPAuthInfo
+from app.rag.multi_paper_evidence_plan import (
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CANDIDATE_POOL_PER_TYPE,
+    DEFAULT_EVIDENCE_BUDGET,
+    DEFAULT_MAX_EVIDENCE_PER_PAPER,
+    DEFAULT_MAX_SOURCES_PER_CLAIM,
+    MultiPaperEvidencePlanner,
+)
+from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
+from app.rag.retrieval_intent import route_retrieval_intent
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
+from app.schemas.ai_verification import AIVerificationSubmission, SectionPageFragmentCandidateRef
 from app.services.discovery_service import DiscoveryService
+from app.services.ai_verification_service import (
+    AIVerificationService,
+    AuthenticatedAIVerificationIdentity,
+)
 from app.services.embedding import get_embedding_service
 from app.services.codex_context_service import CodexContextService
 from app.services.content_web_review_local_verification_service import (
     ContentWebReviewLocalVerificationService,
 )
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
+from app.services.content_review_coverage_service import ContentReviewCoverageService
 from app.services.dft_audit_issue_repair_service import DFTAuditIssueRepairService
 from app.services.dft_audit_issue_service import DFTAuditIssueService
 from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dataset
@@ -35,6 +51,10 @@ from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+from app.services.evidence_page_recovery import PaperPageTextProvider
+from app.services.section_page_fragment_materialization_service import (
+    SectionPageFragmentMaterializationService,
+)
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.local_pdf_service import LocalPdfService
 from app.services.module_write_lock_service import ModuleWriteLockService
@@ -51,7 +71,23 @@ from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
+from app.utils.review_safety import (
+    bulk_export_gate_results,
+    content_object_gate,
+    summarize_gate_results,
+)
+
+
+def _enforce_postgres_read_only_transaction(session: Any) -> bool:
+    """Make read/dry-run MCP transactions incapable of mutating PostgreSQL."""
+    try:
+        bind = session.get_bind()
+        if bind.dialect.name != "postgresql":
+            return False
+        session.connection().exec_driver_sql("SET TRANSACTION READ ONLY")
+        return True
+    except AttributeError:
+        return False
 
 
 def _allowed_mcp_hosts() -> list[str]:
@@ -114,6 +150,18 @@ def _mcp_review_identity(
         )
     )
     return effective_reviewer, effective_internal_reviewer, effective_lock_owners
+
+
+def _authenticated_ai_verification_identity(auth: MCPAuthInfo) -> AuthenticatedAIVerificationIdentity:
+    if not auth.identity_verified or not str(auth.source_identity or "").strip():
+        raise PermissionError("AI verification identity is not server-authenticated")
+    return AuthenticatedAIVerificationIdentity(
+        source_identity=str(auth.source_identity),
+        source_label=str(auth.display_name),
+        model_agent=str(auth.source_prefix),
+        capabilities=auth.capabilities,
+        identity_verified=True,
+    )
 
 
 def _is_uuid_text(value: str) -> bool:
@@ -542,7 +590,103 @@ def insert_word_citation(
         return result
 
 
-@mcp_server.tool(name="verify_dft_result", description="Explicitly mark one evidence-backed DFT result candidate as reviewed after human or user-authorized PDF evidence verification; audit consensus must not call this automatically.")
+@mcp_server.tool(
+    name="get_ai_verification_tasks",
+    description=(
+        "Get one stable limit+offset page of pending content-verification tasks for one paper. "
+        "This is the single-AI workflow: it requires ai_verify_content, never invokes a second model, "
+        "and returns total/returned/has_more/next_offset plus target fingerprints and evidence candidates "
+        "without writing the database. Page size defaults to 20 and is capped at 50."
+    ),
+)
+def get_ai_verification_tasks(
+    paper_id: str,
+    limit: int = 20,
+    offset: int = 0,
+    recover_evidence: bool = True,
+    target_type: str | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        read_only_enforced = _enforce_postgres_read_only_transaction(session)
+        result = AIVerificationService(session, settings).list_tasks(
+            paper_id=UUID(paper_id),
+            limit=max(1, min(int(limit), 50)),
+            offset=int(offset),
+            recover_evidence=recover_evidence,
+            target_type=target_type,
+        )
+        result["postgres_transaction_read_only"] = read_only_enforced
+        return result
+
+
+@mcp_server.tool(
+    name="materialize_ai_section_page_fragments",
+    description=(
+        "Safely materialize up to 20 opaque page-fragment candidate IDs/fingerprints for one stored "
+        "paper section. Requires the authenticated ai_verify_content identity. The server reruns "
+        "deterministic recovery against the real PDF and rejects stale, approximate, forged, cross-paper, "
+        "or cross-section candidates. New objects remain pending/unreviewed. dry_run defaults to true and "
+        "uses a PostgreSQL read-only transaction."
+    ),
+)
+def materialize_ai_section_page_fragments(
+    paper_id: str,
+    parent_section_id: str,
+    candidates: list[dict[str, Any]],
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    identity = _authenticated_ai_verification_identity(auth)
+    validated = [SectionPageFragmentCandidateRef.model_validate(item) for item in candidates]
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        read_only_enforced = _enforce_postgres_read_only_transaction(session) if dry_run else False
+        result = SectionPageFragmentMaterializationService(session).materialize(
+            paper_id=UUID(paper_id),
+            parent_section_id=UUID(parent_section_id),
+            candidates=validated,
+            identity=identity,
+            dry_run=dry_run,
+            commit=False,
+        )
+        result["postgres_transaction_read_only"] = read_only_enforced
+        return result
+
+
+@mcp_server.tool(
+    name="submit_ai_verification_batch",
+    description=(
+        "Submit a configured bounded batch (hard maximum 20) from one authenticated AI. The server reruns deterministic PDF-page, "
+        "text, locator, snapshot, numeric/unit and conflict gates. dry_run=true performs zero writes; formal mode "
+        "can write ai_verified/rejected/exception but can never write human verified. No second AI or consensus is used."
+    ),
+)
+def submit_ai_verification_batch(
+    paper_id: str,
+    submissions: list[dict[str, Any]],
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    identity = _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    validated = [AIVerificationSubmission.model_validate(item) for item in submissions]
+    with session_scope(settings.database_url) as session:
+        read_only_enforced = _enforce_postgres_read_only_transaction(session) if dry_run else False
+        result = AIVerificationService(session, settings).process_batch(
+            paper_id=UUID(paper_id),
+            submissions=validated,
+            identity=identity,
+            dry_run=dry_run,
+            commit=False,
+        )
+        result["postgres_transaction_read_only"] = read_only_enforced
+        return result
+
+
+@mcp_server.tool(name="verify_dft_result", description="Legacy compatibility endpoint. Use submit_ai_verification_batch with ai_verify_content for deterministic single-AI verification; ordinary MCP identities cannot finalize review state.")
 def verify_dft_result(
     paper_id: str,
     dft_result_id: str,
@@ -550,20 +694,17 @@ def verify_dft_result(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability_any("review_corrections", "review_dft")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        return DFTResultReviewService(session).verify_result(
-            paper_id=UUID(paper_id),
-            result_id=UUID(dft_result_id),
-            confirm_reviewed_against_pdf=confirm_reviewed_against_pdf,
-            reviewer=auth.source_prefix,
-            reviewer_note=reviewer_note,
-            field_names=field_names,
-        )
+    require_mcp_capability_any("review_corrections", "review_dft")
+    return {
+        "paper_id": paper_id,
+        "dft_result_id": dft_result_id,
+        "status": "requires_ai_verify_content",
+        "writes_final_truth": False,
+        "reason": "dedicated_ai_verification_capability_required",
+    }
 
 
-@mcp_server.tool(name="reject_dft_result", description="Explicitly mark one DFT result candidate as rejected after human or user-authorized review so it stays blocked from ML export; audit consensus must not call this automatically.")
+@mcp_server.tool(name="reject_dft_result", description="Compatibility endpoint for DFT rejection requests. Use submit_ai_verification_batch with ai_verify_content; ordinary MCP identities cannot finalize rejection.")
 def reject_dft_result(
     paper_id: str,
     dft_result_id: str,
@@ -571,22 +712,19 @@ def reject_dft_result(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability_any("review_corrections", "review_dft")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        return DFTResultReviewService(session).reject_result(
-            paper_id=UUID(paper_id),
-            result_id=UUID(dft_result_id),
-            confirm_reject_candidate=confirm_reject_candidate,
-            reviewer=auth.source_prefix,
-            reviewer_note=reviewer_note,
-            field_names=field_names,
-        )
+    require_mcp_capability_any("review_corrections", "review_dft")
+    return {
+        "paper_id": paper_id,
+        "dft_result_id": dft_result_id,
+        "status": "requires_ai_verify_content",
+        "writes_final_truth": False,
+        "reason": "dedicated_ai_verification_capability_required",
+    }
 
 
 @mcp_server.tool(
     name="verify_dft_results_batch",
-    description="Batch-verify multiple DFT result candidates for the same paper in one call. Skips individual failures and reports them.",
+    description="Compatibility batch endpoint that reports each DFT finalization request as requiring ai_verify_content. Use submit_ai_verification_batch for final verification.",
 )
 def verify_dft_results_batch(
     paper_id: str,
@@ -595,22 +733,25 @@ def verify_dft_results_batch(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability_any("review_corrections", "review_dft")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        return DFTResultReviewService(session).verify_results_batch(
-            paper_id=UUID(paper_id),
-            result_ids=[UUID(rid) for rid in dft_result_ids],
-            confirm_reviewed_against_pdf=confirm_reviewed_against_pdf,
-            reviewer=auth.source_prefix,
-            reviewer_note=reviewer_note,
-            field_names=field_names,
-        )
+    require_mcp_capability_any("review_corrections", "review_dft")
+    skipped = [
+        {"dft_result_id": rid, "status": "requires_ai_verify_content", "reason": "dedicated_ai_verification_capability_required"}
+        for rid in dft_result_ids
+    ]
+    return {
+        "paper_id": paper_id,
+        "total_requested": len(dft_result_ids),
+        "verified": 0,
+        "skipped": len(skipped),
+        "verified_items": [],
+        "skipped_items": skipped,
+        "writes_final_truth": False,
+    }
 
 
 @mcp_server.tool(
     name="reject_dft_results_batch",
-    description="Batch-reject multiple DFT result candidates for the same paper in one call. Skips individual failures and reports them.",
+    description="Compatibility batch endpoint that reports DFT rejection requests as requiring ai_verify_content.",
 )
 def reject_dft_results_batch(
     paper_id: str,
@@ -619,17 +760,20 @@ def reject_dft_results_batch(
     reviewer_note: str | None = None,
     field_names: list[str] | None = None,
 ) -> dict[str, Any]:
-    auth = require_mcp_capability_any("review_corrections", "review_dft")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        return DFTResultReviewService(session).reject_results_batch(
-            paper_id=UUID(paper_id),
-            result_ids=[UUID(rid) for rid in dft_result_ids],
-            confirm_reject_candidate=confirm_reject_candidate,
-            reviewer=auth.source_prefix,
-            reviewer_note=reviewer_note,
-            field_names=field_names,
-        )
+    require_mcp_capability_any("review_corrections", "review_dft")
+    skipped = [
+        {"dft_result_id": rid, "status": "requires_ai_verify_content", "reason": "dedicated_ai_verification_capability_required"}
+        for rid in dft_result_ids
+    ]
+    return {
+        "paper_id": paper_id,
+        "total_requested": len(dft_result_ids),
+        "rejected": 0,
+        "skipped": len(skipped),
+        "rejected_items": [],
+        "skipped_items": skipped,
+        "writes_final_truth": False,
+    }
 
 
 @mcp_server.tool(name="propose_dft_result_correction", description="Create a pending correction proposal for one DFT result field without applying it.")
@@ -782,8 +926,8 @@ def repair_dft_audit_issue(
 @mcp_server.tool(
     name="repair_dft_audit_issues_batch",
     description=(
-        "Repair all actionable DFT audit issues for one paper in one call and optionally finalize "
-        "the resulting DFT rows. This is the default fast path for DFT data processing."
+        "Repair all actionable DFT audit issues for one paper in one call. Repair output remains "
+        "pending ai_verify_content verification; auto_finalize is retained only for compatibility and never writes final truth."
     ),
 )
 def repair_dft_audit_issues_batch(
@@ -812,7 +956,6 @@ def repair_dft_audit_issues_batch(
             issues = [issue for issue in issues if issue.id in requested_ids]
 
         repair_service = DFTAuditIssueRepairService(session)
-        review_service = DFTResultReviewService(session)
         results: list[dict[str, Any]] = []
         for issue in issues:
             try:
@@ -839,24 +982,15 @@ def repair_dft_audit_issues_batch(
                             "changed_fields": [],
                         }
                     elif action == "reject_existing":
-                        rejected = review_service.reject_result(
-                            paper_id=target_paper_id,
-                            result_id=UUID(str(issue.target_id)),
-                            confirm_reject_candidate=True,
-                            reviewer=auth.source_prefix,
-                            reviewer_note=f"Fast-mode resolution for {issue.issue_type}.",
-                            verification_actor_type="ai",
-                            source_label="mcp_fast_batch",
-                            commit=False,
-                        )
                         results.append(
                             {
                                 "issue_id": str(issue.id),
                                 "issue_type": issue.issue_type,
-                                "status": "rejected",
+                                "status": "pending_ai_verification",
                                 "dft_result_id": str(issue.target_id),
-                                "finalized": True,
-                                "result": rejected,
+                                "finalized": False,
+                                "writes_final_truth": False,
+                                "reason": "dedicated_ai_verification_capability_required",
                             }
                         )
                         continue
@@ -876,18 +1010,11 @@ def repair_dft_audit_issues_batch(
                     finalized = False
                     final_result = None
                     if auto_finalize and dft_result_id:
-                        final_result = review_service.verify_result(
-                            paper_id=target_paper_id,
-                            result_id=UUID(str(dft_result_id)),
-                            confirm_reviewed_against_pdf=True,
-                            reviewer=auth.source_prefix,
-                            reviewer_note="Fast-mode DFT processing completed from stored evidence.",
-                            evidence_payload=issue.evidence_payload or {},
-                            verification_actor_type="ai",
-                            source_label="mcp_fast_batch",
-                            commit=False,
-                        )
-                        finalized = True
+                        final_result = {
+                            "status": "pending_ai_verification",
+                            "writes_final_truth": False,
+                            "reason": "dedicated_ai_verification_capability_required",
+                        }
                     results.append(
                         {
                             "issue_id": str(issue.id),
@@ -1655,7 +1782,7 @@ async def ingest_pdf_batch(
 
 @mcp_server.tool(
     name="retrieve_evidence",
-    description="Semantic search across parsed papers for structured evidence (DFT results, mechanism claims, electrochemical data, writing cards, sections, figure data points). Use this to find relevant evidence across multiple papers by topic.",
+    description="Intent-routed semantic search across parsed papers. General writing excludes DFT unless the query, requested sections, mode, or explicit evidence_types requests it. Existing review and citation gates remain authoritative.",
 )
 def retrieve_evidence(
     query: str,
@@ -1663,8 +1790,16 @@ def retrieve_evidence(
     evidence_types: list[str] | None = None,
     limit_per_type: int = 5,
     target_paper_type: str | None = None,
+    mode: str | None = None,
+    requested_sections: list[str] | None = None,
 ) -> dict[str, Any]:
     require_mcp_capability("read_papers")
+    retrieval_intent = route_retrieval_intent(
+        query,
+        evidence_types=evidence_types,
+        mode=mode,
+        requested_sections=requested_sections,
+    )
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         embedding = get_embedding_service(
@@ -1681,6 +1816,9 @@ def retrieve_evidence(
             paper_ids=uuid_paper_ids,
             limit_per_type=limit_per_type,
             target_paper_type=target_paper_type,
+            evidence_types=evidence_types,
+            mode=mode,
+            requested_sections=requested_sections,
         )
         # Convert UUID keys to strings for JSON serialization
         serialized: dict[str, list[dict[str, Any]]] = {}
@@ -1689,18 +1827,70 @@ def retrieve_evidence(
             for item in items:
                 d = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
                 serialized[key].append(d)
-        valid_types = {
-            "sections",
-            "dft_results",
-            "electrochemical_performance",
-            "mechanism_claims",
-            "writing_cards",
-            "figure_data_points",
+        selected = set(retrieval_intent.selected_evidence_types)
+        response: dict[str, Any] = {
+            **retrieval_intent.as_dict(),
+            "results": {key: value for key, value in serialized.items() if key in selected},
         }
         if evidence_types:
-            filtered = {k: v for k, v in serialized.items() if k in evidence_types and k in valid_types}
-            return {"evidence_types_requested": evidence_types, "results": filtered}
-        return {"results": serialized}
+            response["evidence_types_requested"] = evidence_types
+        return response
+
+
+@mcp_server.tool(
+    name="plan_multi_paper_evidence",
+    description=(
+        "Read-only deterministic planning for evidence-grounded synthesis across many papers. "
+        "It validates paper scope, retrieves bounded safety-gated evidence by batches of at most "
+        "10 papers, applies global/per-paper/DFT budgets, and returns auditable batch contexts. "
+        "It never loads every paper's full text and never writes or finalizes review data."
+    ),
+)
+def plan_multi_paper_evidence(
+    query: str,
+    paper_ids: list[str],
+    evidence_types: list[str] | None = None,
+    mode: str | None = None,
+    requested_sections: list[str] | None = None,
+    evidence_budget: int = DEFAULT_EVIDENCE_BUDGET,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    max_evidence_per_paper: int = DEFAULT_MAX_EVIDENCE_PER_PAPER,
+    max_sources_per_claim: int = DEFAULT_MAX_SOURCES_PER_CLAIM,
+    candidate_pool_per_type: int = DEFAULT_CANDIDATE_POOL_PER_TYPE,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        embedding = get_embedding_service(
+            provider=settings.embedding_provider,
+            api_base=settings.embedding_api_base,
+            api_key=settings.embedding_api_key,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+        )
+        retriever = Retriever(
+            session,
+            embedding_dimension=settings.embedding_dimension,
+            embedding=embedding,
+        )
+        plan = MultiPaperEvidencePlanner(session, retriever=retriever).plan(
+            query=query,
+            paper_ids=paper_ids,
+            evidence_types=evidence_types,
+            mode=mode,
+            requested_sections=requested_sections,
+            evidence_budget=evidence_budget,
+            batch_size=batch_size,
+            max_evidence_per_paper=max_evidence_per_paper,
+            max_sources_per_claim=max_sources_per_claim,
+            candidate_pool_per_type=candidate_pool_per_type,
+        )
+        prompt_builder = PaperWriterPromptBuilder()
+        plan["batch_prompt_contexts"] = [
+            prompt_builder.build_batch_prompt_context(plan, batch["batch_id"])
+            for batch in plan["batches"]
+        ]
+        return plan
 
 
 @mcp_server.tool(
@@ -1962,8 +2152,8 @@ def compare_papers(
 @mcp_server.tool(
     name="read_paper_page",
     description=(
-        "Read the stored database layout for a specific paper page or page range. Returns parsed sections, tables, "
-        "and figures whose recorded page range overlaps the request; it does not reopen or reparse the source PDF."
+        "Read physical 1-based PDF page text for a paper page or range, together with overlapping stored sections, "
+        "tables, and figures. The PDF text layer is the authoritative page source and this tool writes nothing."
     ),
 )
 def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None) -> dict[str, Any]:
@@ -1974,9 +2164,11 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
         raise ValueError("page_end must be >= page_start when provided")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        _ensure_paper_exists(session, UUID(paper_id))
-
         pid = UUID(paper_id)
+        _ensure_paper_exists(session, pid)
+        paper = session.get(Paper, pid)
+        if paper is None:
+            raise LookupError("Paper not found")
         effective_page_end = page_end if page_end is not None else page_start
 
         # Fetch sections whose known page range overlaps with the requested range.
@@ -2053,7 +2245,15 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
                 "has_image": bool(fig.image_path),
             })
 
-        full_text = "\n\n---\n\n".join(page_parts)
+        stored_layout_text = "\n\n---\n\n".join(page_parts)
+        provider = PaperPageTextProvider(settings)
+        page_records = [provider.read_page(paper, page) for page in range(page_start, effective_page_end + 1)]
+        pdf_parts = [
+            f"## PDF page {record.page}\n{record.text}"
+            for record in page_records
+            if record.status == "ok" and record.text.strip()
+        ]
+        pdf_full_text = "\n\n---\n\n".join(pdf_parts)
 
         return {
             "paper_id": paper_id,
@@ -2063,7 +2263,12 @@ def read_paper_page(paper_id: str, page_start: int, page_end: int | None = None)
             "table_count": len(tables),
             "figure_count": len(figures),
             "figure_refs": figure_refs,
-            "full_text": full_text,
+            "full_text": pdf_full_text or stored_layout_text,
+            "pdf_full_text": pdf_full_text,
+            "stored_layout_text": stored_layout_text,
+            "page_text_source": "pymupdf_text_layer" if pdf_full_text else "stored_database_layout_fallback",
+            "pages": [record.as_dict() for record in page_records],
+            "database_writes": False,
         }
 
 
@@ -2724,7 +2929,7 @@ def review_figure(
 
 @mcp_server.tool(
     name="get_review_coverage",
-    description="Show figure/table/section coverage plus current figure-table stage and DFT review/export coverage for a paper.",
+    description="Show authoritative writing/citation eligibility and blocked reasons for sections, section page fragments, mechanism claims and writing cards; also distinguish figure/table audit state from eligibility and report DFT export coverage.",
 )
 def get_review_coverage(paper_id: str) -> dict[str, Any]:
     require_mcp_capability("read_papers")
@@ -2817,6 +3022,37 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "pages": f"{sec.page_start}-{sec.page_end}",
                 "review_status": "has_correction" if str(sec.id) in reviewed_section_ids else "unreviewed",
             })
+        authoritative_coverage = ContentReviewCoverageService(session).paper_coverage(pid)
+        sections_coverage = authoritative_coverage["sections"]
+        section_by_id = {str(section.id): section for section in all_sections}
+        for detail in sections_coverage["details"]:
+            section = section_by_id[detail["object_id"]]
+            detail.update({
+                "section_id": str(section.id),
+                "title": section.section_title,
+                "type": section.section_type,
+                "pages": f"{section.page_start}-{section.page_end}",
+                "correction_state": "has_correction" if str(section.id) in reviewed_section_ids else "none",
+            })
+
+        mechanism_rows = list(session.scalars(
+            select(MechanismClaim).where(MechanismClaim.paper_id == pid)
+        ).all())
+        mechanism_coverage = authoritative_coverage["mechanism_claims"]
+        mechanism_by_id = {str(claim.id): claim for claim in mechanism_rows}
+        for detail in mechanism_coverage["details"]:
+            claim = mechanism_by_id[detail["object_id"]]
+            detail.update({
+                "mechanism_claim_id": str(claim.id),
+                "claim_type": claim.claim_type,
+                "claim_text": claim.claim_text,
+            })
+
+        writing_card_rows = list(session.scalars(
+            select(WritingCard).where(WritingCard.paper_id == pid)
+        ).all())
+        writing_card_coverage = authoritative_coverage["writing_cards"]
+        section_page_fragment_coverage = authoritative_coverage["section_page_fragments"]
 
         external_audit_candidates = session.scalars(
             select(ExternalAnalysisCandidate)
@@ -2901,7 +3137,7 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
         reviewed_dft_target_ids = {
             target_id
             for target_id, statuses in dft_review_status_by_target.items()
-            if any(status in {"verified", "rejected"} for status in statuses)
+            if any(status in {"verified", "ai_verified", "rejected"} for status in statuses)
         }
         active_dft_target_ids = {
             str(row.id)
@@ -2909,6 +3145,20 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             if str(row.candidate_status or "").strip().lower() != "rejected"
         }
         unreviewed_dft_target_ids = sorted(active_dft_target_ids - reviewed_dft_target_ids)
+        human_verified_dft = sum(
+            "verified" in dft_review_status_by_target.get(str(row.id), set())
+            and bool(dft_gate_by_id.get(str(row.id)) and dft_gate_by_id[str(row.id)].eligible)
+            for row in dft_rows
+        )
+        ai_verified_dft = sum(
+            "ai_verified" in dft_review_status_by_target.get(str(row.id), set())
+            and bool(dft_gate_by_id.get(str(row.id)) and dft_gate_by_id[str(row.id)].eligible)
+            for row in dft_rows
+        )
+        exception_dft = sum(
+            "needs_human" in dft_review_status_by_target.get(str(row.id), set())
+            for row in dft_rows
+        )
 
         # --- Summary ---
         fig_reviewed = sum(1 for f in figure_report if f["review_status"] == "reviewed")
@@ -2919,6 +3169,12 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             "paper_id": paper_id,
             "figures": {
                 "total": len(all_figures),
+                "authoritative_reviewed": 0,
+                "can_use_for_writing": 0,
+                "can_use_for_citation": 0,
+                "blocked": len(all_figures),
+                "blocked_reasons": ({"no_unified_content_object_gate": len(all_figures)} if all_figures else {}),
+                "eligibility_basis": "audit_state_only_no_content_object_gate",
                 "reviewed": fig_reviewed,
                 "analyzed_only": fig_analyzed,
                 "unreviewed": fig_unreviewed,
@@ -2926,16 +3182,27 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             },
             "tables": {
                 "total": len(all_tables),
+                "authoritative_reviewed": 0,
+                "can_use_for_writing": 0,
+                "can_use_for_citation": 0,
+                "blocked": len(all_tables),
+                "blocked_reasons": ({"no_unified_content_object_gate": len(all_tables)} if all_tables else {}),
+                "eligibility_basis": "correction_state_only_no_content_object_gate",
                 "with_corrections": len(reviewed_table_ids),
                 "unreviewed": len(all_tables) - len(reviewed_table_ids),
                 "details": table_report,
             },
             "sections": {
-                "total": len(all_sections),
+                **sections_coverage,
                 "with_corrections": len(reviewed_section_ids),
-                "unreviewed": len(all_sections) - len(reviewed_section_ids),
-                "details": section_report,
+                "correction_unreviewed": len(all_sections) - len(reviewed_section_ids),
+                "legacy_correction_state_semantics": (
+                    "with_corrections/correction_unreviewed only; reviewed/unreviewed use explicit decisions"
+                ),
             },
+            "mechanism_claims": mechanism_coverage,
+            "writing_cards": writing_card_coverage,
+            "section_page_fragments": section_page_fragment_coverage,
             "external_audit_count": len(external_audit_candidates),
             "external_audit_source_distribution": dict(sorted(external_audit_source_distribution.items())),
             "external_audits": {
@@ -2958,6 +3225,14 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
             },
             "dft_results": {
                 "total": len(dft_rows),
+                "authoritative_reviewed": dft_summary["eligible"],
+                "can_use_for_writing": dft_summary["eligible"],
+                "can_use_for_citation": dft_summary["eligible"],
+                "human_verified": human_verified_dft,
+                "ai_verified": ai_verified_dft,
+                "exception": exception_dft,
+                "blocked": dft_summary["blocked"],
+                "blocked_reasons": dft_summary["blocked_reasons"],
                 "active": len(active_dft_target_ids),
                 "reviewed": len(reviewed_dft_target_ids & active_dft_target_ids),
                 "unreviewed": len(unreviewed_dft_target_ids),

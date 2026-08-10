@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, Base, ExtractionFieldReview, Paper, PaperChunk, PaperFigure, PaperSection
+from app.db.models import AuditLog, Base, EvidenceLocator, ExtractionFieldReview, Paper, PaperChunk, PaperFigure, PaperSection
 from app.rag.eligibility import is_rag_eligible
 from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
@@ -122,7 +122,22 @@ def test_section_and_chunk_candidates_merge_without_entering_writing_context():
             assert payload["retrieved"]["sections"] == []
             assert payload["evidence_pack"]["introduction"] == []
 
-            session.add(ExtractionFieldReview(paper_id=paper.id, target_type="sections", target_id=str(section.id), field_name="text", reviewer_status="verified", target_resolution_status="active", evidence_text=section.text))
+            session.add_all([
+                ExtractionFieldReview(paper_id=paper.id, target_type="sections", target_id=str(section.id), field_name="text", reviewer_status="verified", target_resolution_status="active", evidence_text=section.text),
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="pdf",
+                    page=3,
+                    section=section.section_title,
+                    target_type="sections",
+                    target_id=str(section.id),
+                    field_name="text",
+                    evidence_text=section.text,
+                    locator_status="exact_page",
+                    locator_confidence=1.0,
+                    parser_source="test_review",
+                ),
+            ])
             session.flush()
             formal = Retriever(session, embedding=FailingEmbedding()).retrieve("alpha beta", [paper.id], 5)["sections"]
             assert any(item["can_use_for_writing"] is True for item in formal)

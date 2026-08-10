@@ -23,6 +23,7 @@ ALL_MCP_CAPABILITIES = frozenset(
         "request_parse",
         "review_corrections",
         "review_dft",
+        "ai_verify_content",
         "repair_dft_issues",
         "export_data",
         "create_share_links",

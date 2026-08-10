@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+import json
 import re
 from types import SimpleNamespace
 from typing import Any
@@ -11,6 +12,7 @@ from weakref import WeakKeyDictionary
 from sqlalchemy import inspect, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.models import (
     CatalystSample,
     ContentEvidenceItem,
@@ -28,7 +30,16 @@ from app.db.models import (
     WritingCard,
 )
 from app.utils.evidence_anchors import first_pdf_evidence_anchor
+from app.utils.artifact_paths import resolve_paper_pdf_path
+from app.services.evidence_page_recovery import PaperPageTextProvider, compact_page_text
 from app.utils.locator_degradation import locator_degradation
+from app.utils.writing_card_content import normalized_evidence_chain
+from app.utils.ai_verification import (
+    AI_VERIFIED_STATUS,
+    ai_review_payload_structurally_valid,
+    authoritative_ai_review_valid,
+    get_ai_target,
+)
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_identity_service import (
     property_requires_atom_pair,
@@ -39,6 +50,7 @@ from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES
 
 
 SAFE_REVIEWER_STATUS = "verified"
+SAFE_REVIEWER_STATUSES = {SAFE_REVIEWER_STATUS, AI_VERIFIED_STATUS}
 SAFE_TARGET_RESOLUTION_STATUSES = {"active", "remapped"}
 UNSAFE_REVIEWER_STATUSES = {
     "stale",
@@ -47,9 +59,12 @@ UNSAFE_REVIEWER_STATUSES = {
     "unknown",
     "pending",
     "rejected",
+    "superseded",
     "conflict",
     "failed",
     "needs_human",
+    "blocked",
+    "exception",
     "",
 }
 UNSAFE_TARGET_RESOLUTION_STATUSES = {"stale", "ambiguous", "unresolved", "unknown", "conflict", "rejected", ""}
@@ -82,9 +97,21 @@ TARGET_TYPE_ALIASES: dict[str, set[str]] = {
     "dft_settings": {"dft_settings", "dft_setting", "DFTSetting"},
     "writing_cards": {"writing_cards", "writing_card", "WritingCard"},
     "sections": {"sections", "section", "paper_section", "PaperSection"},
+    "section_page_fragments": {
+        "section_page_fragments",
+        "section_page_fragment",
+        "SectionPageFragment",
+    },
 }
 
 CONTENT_OBJECT_GATE_POLICY_VERSION = "content_object_gate.v1"
+
+REQUIRED_REVIEW_FIELDS_BY_TARGET_TYPE: dict[str, tuple[str, ...]] = {
+    "mechanism_claims": ("claim_text",),
+    "sections": ("text",),
+    "section_page_fragments": ("text",),
+    "writing_cards": ("evidence_chain",),
+}
 
 LOCATOR_PAYLOAD_KEYS = {
     "locator_status",
@@ -130,6 +157,14 @@ class ContentObjectGateResult:
     policy_version: str = CONTENT_OBJECT_GATE_POLICY_VERSION
 
 
+@dataclass(frozen=True)
+class VerificationPromotionGateResult:
+    eligible: bool
+    reasons: tuple[str, ...]
+    provenance_level: str
+    locator_status: str
+
+
 def _normalized(value: Any) -> str:
     return str(value or "").strip().lower()
 
@@ -172,10 +207,35 @@ def is_safe_verified_review(review: ExtractionFieldReview | dict[str, Any] | Non
             or review.get("review_resolution_status")
             or "active"
         )
+        review_payload = review.get("review_payload")
     else:
         reviewer_status = _normalized(review.reviewer_status)
         resolution_status = _normalized(review.target_resolution_status)
+        review_payload = review.review_payload
+    payload = review_payload if isinstance(review_payload, dict) else {}
+    if reviewer_status == AI_VERIFIED_STATUS:
+        return ai_review_payload_structurally_valid(review)
+    if "ai_verification" in payload and "human_verification" not in payload:
+        return False
     return reviewer_status == SAFE_REVIEWER_STATUS and resolution_status in SAFE_TARGET_RESOLUTION_STATUSES
+
+
+def is_authoritative_verified_review(
+    session: Session,
+    review: ExtractionFieldReview,
+    target: Any,
+) -> bool:
+    """Revalidate AI evidence, locator and target snapshots at admission time."""
+
+    if _normalized(review.reviewer_status) == AI_VERIFIED_STATUS:
+        return authoritative_ai_review_valid(session, review, target)
+    return is_safe_verified_review(review)
+
+
+def required_review_fields(target_type: str) -> tuple[str, ...]:
+    """Return object-type-specific fields that authorize the whole object."""
+
+    return REQUIRED_REVIEW_FIELDS_BY_TARGET_TYPE.get(_canonical_content_target_type(target_type), ())
 
 
 def get_target_reviews(
@@ -267,15 +327,28 @@ def has_safe_verified_review(
     target_type: str,
     target_id: Any,
 ) -> bool:
-    return any(
-        is_safe_verified_review(review)
-        for review in get_target_reviews(
-            session,
-            paper_id=paper_id,
-            target_type=target_type,
-            target_id=target_id,
-        )
-    )
+    for review in get_target_reviews(
+        session,
+        paper_id=paper_id,
+        target_type=target_type,
+        target_id=target_id,
+    ):
+        if _normalized(review.reviewer_status) != AI_VERIFIED_STATUS:
+            if is_safe_verified_review(review):
+                return True
+            continue
+        try:
+            _canonical, target = get_ai_target(
+                session,
+                paper_id=UUID(str(paper_id)),
+                target_type=target_type,
+                target_id=str(target_id),
+            )
+        except (LookupError, ValueError):
+            continue
+        if is_authoritative_verified_review(session, review, target):
+            return True
+    return False
 
 
 def has_required_evidence_text(row: Any) -> bool:
@@ -296,6 +369,8 @@ def has_required_evidence_reference(
     paper_id: Any,
     target_type: str,
     target_id: Any,
+    field_name: str | None = None,
+    require_field_match: bool = False,
 ) -> bool:
     target_id_str = str(target_id)
     batch_evidence_ids = session.info.get(_BATCH_EVIDENCE_CACHE_KEY)
@@ -303,7 +378,7 @@ def has_required_evidence_reference(
     if isinstance(batch_evidence_ids, set) and cache_key in batch_evidence_ids:
         return True
     target_types = _target_type_values(target_type)
-    if _table_exists(session, "evidence_spans"):
+    if not require_field_match and _table_exists(session, "evidence_spans"):
         span_exists = session.scalar(
             select(EvidenceSpan.id)
             .where(
@@ -318,7 +393,7 @@ def has_required_evidence_reference(
         if span_exists is not None:
             return True
 
-    if _table_exists(session, "evidence_claims"):
+    if not require_field_match and _table_exists(session, "evidence_claims"):
         claim_exists = session.scalar(
             select(EvidenceClaim.id)
             .where(
@@ -334,17 +409,16 @@ def has_required_evidence_reference(
             return True
 
     if _table_exists(session, "evidence_locators"):
-        locator_exists = session.scalar(
-            select(EvidenceLocator.id)
-            .where(
-                EvidenceLocator.paper_id == paper_id,
-                EvidenceLocator.target_id == target_id_str,
-                EvidenceLocator.target_type.in_(target_types),
-                EvidenceLocator.evidence_text.is_not(None),
-                EvidenceLocator.evidence_text != "",
-            )
-            .limit(1)
+        locator_stmt = select(EvidenceLocator.id).where(
+            EvidenceLocator.paper_id == paper_id,
+            EvidenceLocator.target_id == target_id_str,
+            EvidenceLocator.target_type.in_(target_types),
+            EvidenceLocator.evidence_text.is_not(None),
+            EvidenceLocator.evidence_text != "",
         )
+        if require_field_match:
+            locator_stmt = locator_stmt.where(EvidenceLocator.field_name == field_name)
+        locator_exists = session.scalar(locator_stmt.limit(1))
         return locator_exists is not None
     return False
 
@@ -428,6 +502,8 @@ def _locator_summary(
     target_type: str,
     target_id: Any,
     reviews: list[ExtractionFieldReview] | None = None,
+    field_name: str | None = None,
+    require_field_match: bool = False,
 ) -> tuple[str, str]:
     for review in reviews or []:
         if _review_has_safe_imported_page_anchor(review):
@@ -446,7 +522,11 @@ def _locator_summary(
             )
         ).all()
     )
+    if require_field_match:
+        locators = [locator for locator in locators if locator.field_name == field_name]
     if not locators:
+        if require_field_match:
+            return "text_evidence_only", "missing_locator"
         span_pages = []
         if _table_exists(session, "evidence_spans"):
             span_pages = list(
@@ -517,6 +597,56 @@ def _locator_summary(
     return "text_evidence_only", "missing_page"
 
 
+def verification_promotion_gate(
+    session: Session,
+    *,
+    paper: Paper | None,
+    review: ExtractionFieldReview,
+    evidence_text: Any | None = None,
+) -> VerificationPromotionGateResult:
+    """Shared exact-PDF gate for final review promotion.
+
+    This deliberately evaluates canonical evidence rows rather than request
+    booleans or projection state. The resulting locator semantics are the same
+    ones used by export/content-object gates.
+    """
+
+    reasons: list[str] = []
+    resolved_pdf = (
+        resolve_paper_pdf_path(paper.pdf_path, get_settings().storage_root)
+        if paper is not None and not _is_blank(paper.pdf_path)
+        else None
+    )
+    if paper is None or resolved_pdf is None or _normalized(paper.oa_status) == "metadata_only":
+        reasons.append("missing_real_pdf")
+    resolved_evidence_text = review.evidence_text if evidence_text is None else evidence_text
+    if _is_blank(resolved_evidence_text):
+        reasons.append("missing_evidence_text")
+    resolution_status = _normalized(review.target_resolution_status)
+    if resolution_status not in SAFE_TARGET_RESOLUTION_STATUSES:
+        reasons.append(f"unsafe_target_resolution_status:{resolution_status or 'missing'}")
+
+    canonical_type = _canonical_content_target_type(review.target_type)
+    strict_field_match = canonical_type == "mechanism_claims"
+    provenance_level, locator_status = _locator_summary(
+        session,
+        paper_id=review.paper_id,
+        target_type=review.target_type,
+        target_id=review.target_id,
+        reviews=[review],
+        field_name=review.field_name,
+        require_field_match=strict_field_match,
+    )
+    if provenance_level != "exact_pdf_page" or locator_status != "exact_page":
+        reasons.append(f"locator_not_exact_page:{locator_status}")
+    return VerificationPromotionGateResult(
+        eligible=not reasons,
+        reasons=tuple(dict.fromkeys(reasons)),
+        provenance_level=provenance_level,
+        locator_status=locator_status,
+    )
+
+
 def build_export_gate_reason(
     *,
     has_review: bool,
@@ -560,15 +690,36 @@ def is_export_eligible_extraction(
         target_type=target_type,
         target_id=row.id,
     )
-    has_review = bool(reviews)
-    safe_review = next((review for review in reviews if is_safe_verified_review(review)), None)
-    has_unsafe_review = any(is_unsafe_review_status(review) for review in reviews)
-    effective_safe_review = safe_review if (is_dft_target or not has_unsafe_review) else None
+    required_fields = required_review_fields(target_type)
+    gate_reviews = (
+        [review for review in reviews if review.field_name in required_fields]
+        if required_fields
+        else reviews
+    )
+    has_review = (
+        all(any(review.field_name == field_name for review in gate_reviews) for field_name in required_fields)
+        if required_fields
+        else bool(gate_reviews)
+    )
+    safe_review = next((review for review in gate_reviews if is_authoritative_verified_review(session, review, row)), None)
+    has_unsafe_review = any(is_unsafe_review_status(review) for review in gate_reviews)
+    required_reviews_safe = (
+        all(
+            any(review.field_name == field_name and is_authoritative_verified_review(session, review, row) for review in gate_reviews)
+            for field_name in required_fields
+        )
+        if required_fields
+        else safe_review is not None
+    )
+    effective_safe_review = safe_review if required_reviews_safe and (is_dft_target or not has_unsafe_review) else None
+    required_field_name = required_fields[0] if len(required_fields) == 1 else None
     has_evidence_reference = has_required_evidence_reference(
         session,
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
+        field_name=required_field_name,
+        require_field_match=bool(required_fields),
     )
     has_evidence_text = has_required_evidence_text(row) or (
         not is_dft_target and has_evidence_reference
@@ -578,7 +729,9 @@ def is_export_eligible_extraction(
         paper_id=row.paper_id,
         target_type=target_type,
         target_id=row.id,
-        reviews=reviews,
+        reviews=gate_reviews,
+        field_name=required_field_name,
+        require_field_match=bool(required_fields),
     )
     reasons = build_export_gate_reason(
         has_review=has_review,
@@ -589,6 +742,12 @@ def is_export_eligible_extraction(
         has_material_identity=has_required_material_identity(session, row),
         borrowed_supporting_reference=is_borrowed_supporting_reference(row),
     )
+    if required_fields and not has_review:
+        reasons = tuple(
+            dict.fromkeys(
+                (*reasons, *(f"missing_required_review:{field_name}" for field_name in required_fields))
+            )
+        )
     if is_dft_target and has_evidence_text:
         reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
     if is_dft_target and _normalized(getattr(row, "candidate_status", None)) in DFT_REJECTED_STATUSES and "target_rejected" not in reasons:
@@ -627,6 +786,7 @@ def bulk_export_gate_results(
     paper_ids = {row.paper_id for row in rows}
     dft_aliases = {_normalized(value) for value in _target_type_values("dft_results")}
     is_dft_target = _normalized(target_type) in dft_aliases
+    required_fields = required_review_fields(target_type)
 
     reviews_by_target: dict[str, list[ExtractionFieldReview]] = {target_id: [] for target_id in target_ids}
     if _table_exists(session, "extraction_field_reviews"):
@@ -704,21 +864,55 @@ def bulk_export_gate_results(
     gates: dict[str, ExportGateResult] = {}
     for target_id, row in row_by_id.items():
         reviews = reviews_by_target.get(target_id, [])
-        safe_review = next((review for review in reviews if is_safe_verified_review(review)), None)
-        has_unsafe_review = any(is_unsafe_review_status(review) for review in reviews)
-        effective_safe_review = safe_review if (is_dft_target or not has_unsafe_review) else None
+        gate_reviews = (
+            [review for review in reviews if review.field_name in required_fields]
+            if required_fields
+            else reviews
+        )
+        has_required_reviews = (
+            all(any(review.field_name == field_name for review in gate_reviews) for field_name in required_fields)
+            if required_fields
+            else bool(gate_reviews)
+        )
+        safe_review = next((review for review in gate_reviews if is_authoritative_verified_review(session, review, row)), None)
+        has_unsafe_review = any(is_unsafe_review_status(review) for review in gate_reviews)
+        required_reviews_safe = (
+            all(
+                any(review.field_name == field_name and is_authoritative_verified_review(session, review, row) for review in gate_reviews)
+                for field_name in required_fields
+            )
+            if required_fields
+            else safe_review is not None
+        )
+        effective_safe_review = (
+            safe_review
+            if required_reviews_safe and (is_dft_target or not has_unsafe_review)
+            else None
+        )
+        required_field_name = required_fields[0] if len(required_fields) == 1 else None
+        target_locators = locators_by_target.get(target_id, [])
+        if required_fields:
+            target_locators = [
+                locator for locator in target_locators
+                if locator.field_name == required_field_name
+            ]
         provenance_level, locator_status = _bulk_locator_summary(
-            locators_by_target.get(target_id, []),
-            span_pages_by_target.get(target_id, []),
-            claim_pages_by_target.get(target_id, []),
-            reviews,
+            target_locators,
+            [] if required_fields else span_pages_by_target.get(target_id, []),
+            [] if required_fields else claim_pages_by_target.get(target_id, []),
+            gate_reviews,
+        )
+        has_evidence_reference = (
+            any(not _is_blank(locator.evidence_text) for locator in target_locators)
+            if required_fields
+            else target_id in evidence_reference_ids
         )
         reasons = build_export_gate_reason(
-            has_review=bool(reviews),
+            has_review=has_required_reviews,
             has_safe_review=effective_safe_review is not None,
-            has_evidence_reference=target_id in evidence_reference_ids,
+            has_evidence_reference=has_evidence_reference,
             has_evidence_text=has_required_evidence_text(row) or (
-                not is_dft_target and target_id in evidence_reference_ids
+                not is_dft_target and has_evidence_reference
             ),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
             has_material_identity=(
@@ -728,6 +922,12 @@ def bulk_export_gate_results(
             ),
             borrowed_supporting_reference=is_dft_target and is_borrowed_supporting_reference(row),
         )
+        if required_fields and not has_required_reviews:
+            reasons = tuple(
+                dict.fromkeys(
+                    (*reasons, *(f"missing_required_review:{field_name}" for field_name in required_fields))
+                )
+            )
         if is_dft_target and has_required_evidence_text(row):
             reasons = tuple(reason for reason in reasons if reason not in {"missing_evidence", "unsafe_locator"})
         if is_dft_target and _normalized(getattr(row, "candidate_status", None)) in DFT_REJECTED_STATUSES and "target_rejected" not in reasons:
@@ -739,8 +939,8 @@ def bulk_export_gate_results(
                     reasons = (*reasons, "open_result_level_conflict")
             reasons = tuple(dict.fromkeys(reasons))
         review_status = effective_safe_review.reviewer_status if effective_safe_review is not None else (
-            ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in reviews}))
-            if reviews
+            ",".join(sorted({_normalized(review.reviewer_status) or "unknown" for review in gate_reviews}))
+            if gate_reviews
             else "missing"
         )
         gates[target_id] = ExportGateResult(
@@ -879,7 +1079,7 @@ def _safe_locator_payload(item: dict[str, Any]) -> bool:
     )
 
 
-_WRITING_CORE_FIELDS = ("research_gap", "proposed_solution", "core_hypothesis")
+_WRITING_CORE_FIELDS = ("research_gap", "proposed_solution", "core_hypothesis", "section_strategy")
 _WRITING_PLACEHOLDER_RE = re.compile(
     r"^(?:not explicitly stated|not clearly extracted|unknown|none|n/?a|"
     r"research gap not explicitly stated|solution not clearly extracted|hypothesis not explicitly stated)[.!]?$",
@@ -901,6 +1101,12 @@ def _writing_content_tokens(value: str) -> set[str]:
         for token in _WRITING_WORD_RE.findall(value)
         if token.lower() not in _WRITING_STOPWORDS
     }
+
+
+def _writing_field_text(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return str(value or "")
 
 
 def writing_card_content_gate(card: WritingCard) -> WritingGateResult:
@@ -933,7 +1139,7 @@ def writing_card_content_gate(card: WritingCard) -> WritingGateResult:
         reasons.append("unsafe_locator")
     reliable_fields = 0
     for field_name in _WRITING_CORE_FIELDS:
-        value = str(getattr(card, field_name, None) or "").strip()
+        value = _writing_field_text(getattr(card, field_name, None)).strip()
         if not value or _WRITING_PLACEHOLDER_RE.match(value):
             continue
         supporting = [
@@ -993,12 +1199,145 @@ def writing_card_content_gate(card: WritingCard) -> WritingGateResult:
     )
 
 
-def writing_card_gate(session: Session, card: WritingCard) -> WritingGateResult:
-    """Final writing admission gate: grounded content plus object-level safe review."""
+def _canonical_writing_source_type(value: Any) -> str | None:
+    normalized = _normalized(value).replace("-", "_").replace(" ", "_")
+    if normalized in {_normalized(item) for item in _target_type_values("mechanism_claims")}:
+        return "mechanism_claims"
+    if normalized in {_normalized(item) for item in _target_type_values("sections")}:
+        return "sections"
+    if normalized in {
+        _normalized(item) for item in _target_type_values("section_page_fragments")
+    }:
+        return "section_page_fragments"
+    return None
+
+
+def _writing_chain_item_source(
+    session: Session,
+    card: WritingCard,
+    item: dict[str, Any],
+) -> tuple[str | None, Any | None, str | None]:
+    text = str(item.get("text") or "").strip()
+    if not text:
+        return None, None, "empty_evidence_chain_item"
+    page = item.get("page") if isinstance(item.get("page"), int) else None
+    if page is None or _normalized(item.get("locator_status")) not in {"exact_page", "exact_bbox"}:
+        return None, None, "unsafe_evidence_chain_locator"
+
+    explicit_type = _canonical_writing_source_type(
+        item.get("source_target_type") or item.get("target_type") or item.get("object_type")
+    )
+    explicit_id = item.get("source_target_id") or item.get("target_id") or item.get("object_id")
+    locators = list(
+        session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id == card.paper_id,
+                EvidenceLocator.page == page,
+                EvidenceLocator.locator_status.in_(["exact_page", "exact_bbox"]),
+                EvidenceLocator.target_type.in_(
+                    sorted(
+                        _target_type_values("mechanism_claims")
+                        | _target_type_values("sections")
+                        | _target_type_values("section_page_fragments")
+                    )
+                ),
+            )
+        ).all()
+    )
+    wanted = compact_page_text(text)
+    matches: list[tuple[str, Any]] = []
+    for locator in locators:
+        canonical = _canonical_writing_source_type(locator.target_type)
+        if canonical is None:
+            continue
+        if explicit_type and canonical != explicit_type:
+            continue
+        if explicit_id and str(locator.target_id) != str(explicit_id):
+            continue
+        located = compact_page_text(locator.evidence_text)
+        if not located or (wanted not in located and located not in wanted):
+            continue
+        try:
+            resolved_type, target = get_ai_target(
+                session,
+                paper_id=card.paper_id,
+                target_type=canonical,
+                target_id=str(locator.target_id),
+            )
+        except (LookupError, ValueError):
+            continue
+        gate = content_object_gate(session, resolved_type, target)
+        if not gate.can_use_for_writing:
+            continue
+        matches.append((resolved_type, target))
+    unique = {(target_type, str(target.id)): (target_type, target) for target_type, target in matches}
+    if not unique:
+        return None, None, "blocked_or_missing_authoritative_source"
+    if len(unique) != 1:
+        return None, None, "ambiguous_authoritative_source"
+    return next(iter(unique.values())) + (None,)
+
+
+def writing_card_authoritative_chain_gate(session: Session, card: WritingCard) -> WritingGateResult:
+    """Require every WritingCard evidence item to bind to one safe source object."""
 
     content_gate = writing_card_content_gate(card)
     if not content_gate.can_use_for_writing:
         return content_gate
+    reasons: list[str] = []
+    for index, item in enumerate(card.evidence_chain or []):
+        if not isinstance(item, dict) or not str(item.get("text") or "").strip():
+            reasons.append(f"invalid_evidence_chain_item:{index}")
+            continue
+        _target_type, _target, error = _writing_chain_item_source(session, card, item)
+        if error:
+            reasons.append(f"{error}:{index}")
+    if reasons:
+        return WritingGateResult(
+            can_use_for_writing=False,
+            evidence_chain_status="present",
+            review_gate_status="blocked",
+            blocked_reasons=tuple(dict.fromkeys(reasons)),
+        )
+    return WritingGateResult(
+        can_use_for_writing=True,
+        evidence_chain_status="present",
+        review_gate_status="authoritative_chain_verified",
+        blocked_reasons=(),
+    )
+
+
+def writing_card_gate(session: Session, card: WritingCard) -> WritingGateResult:
+    """Final writing admission gate: grounded content plus object-level safe review."""
+
+    content_gate = writing_card_authoritative_chain_gate(session, card)
+    if not content_gate.can_use_for_writing:
+        return content_gate
+
+    unscoped_results = [
+        item for item in (card.evidence_chain or [])
+        if isinstance(item, dict)
+        and not (item.get("supports_fields") or [])
+        and str(item.get("text") or "").strip()
+    ]
+    if unscoped_results:
+        reviews = get_target_reviews(
+            session,
+            paper_id=card.paper_id,
+            target_type="writing_cards",
+            target_id=card.id,
+        )
+        evidence_chain_reviewed = any(
+            review.field_name == "evidence_chain" and is_authoritative_verified_review(session, review, card)
+            for review in reviews
+        )
+        if not evidence_chain_reviewed:
+            return WritingGateResult(
+                can_use_for_writing=False,
+                evidence_chain_status=content_gate.evidence_chain_status,
+                review_gate_status="blocked",
+                blocked_reasons=("missing_evidence_chain_review",),
+            )
 
     export_gate = bulk_export_gate_results(session, [card], target_type="writing_cards")[str(card.id)]
     correction_approved = _writing_card_has_safe_approved_ide_correction(session, card)
@@ -1049,6 +1388,7 @@ def content_object_gate(
     model_by_type = {
         "abstract": Paper,
         "sections": PaperSection,
+        "section_page_fragments": EvidenceClaim,
         "mechanism_claims": MechanismClaim,
         "writing_cards": WritingCard,
     }
@@ -1087,6 +1427,28 @@ def content_object_gate(
             locator_status=export_gate.locator_status,
             blocked_reasons=writing_gate.blocked_reasons,
         ))
+
+    if canonical_type == "sections" and _normalized(resolved_target.section_type) == "body":
+        if not _body_section_has_complete_single_page_evidence(session, resolved_target):
+            return _blocked_content_object_gate(
+                "incomplete_body_section_page_coverage",
+                locator_status="incomplete_page_coverage",
+            )
+
+    if canonical_type == "section_page_fragments":
+        structure_reasons = _section_page_fragment_structure_reasons(session, resolved_target)
+        export_gate = bulk_export_gate_results(
+            session,
+            [resolved_target],
+            target_type=canonical_type,
+        )[str(resolved_target.id)]
+        if structure_reasons:
+            return _blocked_content_object_gate(
+                *structure_reasons,
+                *export_gate.reasons,
+                locator_status=export_gate.locator_status,
+            )
+        return _content_gate_from_export(export_gate)
 
     export_gate = bulk_export_gate_results(
         session,
@@ -1148,6 +1510,9 @@ def _canonical_content_target_type(target_type: str) -> str:
     aliases = {
         "abstract": {"abstract", "paper_abstract", "summary", "paper_summary"},
         "sections": {_normalized(value) for value in _target_type_values("sections")},
+        "section_page_fragments": {
+            _normalized(value) for value in _target_type_values("section_page_fragments")
+        },
         "mechanism_claims": {_normalized(value) for value in _target_type_values("mechanism_claims")},
         "writing_cards": {_normalized(value) for value in _target_type_values("writing_cards")},
     }
@@ -1174,6 +1539,7 @@ def _resolve_content_projection_target(
 
     model_by_type = {
         "sections": PaperSection,
+        "section_page_fragments": EvidenceClaim,
         "mechanism_claims": MechanismClaim,
         "writing_cards": WritingCard,
     }
@@ -1219,6 +1585,9 @@ def _content_projection_snapshot_matches(
     elif canonical_type == "mechanism_claims" and isinstance(target, MechanismClaim):
         expected_content = target.claim_text
         expected_evidence = target.evidence_text
+    elif canonical_type == "section_page_fragments" and isinstance(target, EvidenceClaim):
+        expected_content = target.claim_text
+        expected_evidence = target.evidence_text
     elif canonical_type == "writing_cards" and isinstance(target, WritingCard):
         expected_content = _writing_card_projection_content(target)
         expected_evidence = _projection_evidence_preview(target.evidence_chain)
@@ -1231,20 +1600,101 @@ def _content_projection_snapshot_matches(
     )
 
 
+def _body_section_has_complete_single_page_evidence(
+    session: Session,
+    section: PaperSection,
+) -> bool:
+    """A parent body section is safe only when its complete text fits one PDF page.
+
+    Multi-page parents deliberately remain blocked; their independently reviewed
+    section_page_fragments are the admissible objects.
+    """
+
+    wanted = compact_page_text(section.text)
+    if not wanted:
+        return False
+    target_types = _target_type_values("sections")
+    locators = list(
+        session.scalars(
+            select(EvidenceLocator).where(
+                EvidenceLocator.paper_id == section.paper_id,
+                EvidenceLocator.target_type.in_(target_types),
+                EvidenceLocator.target_id == str(section.id),
+                EvidenceLocator.field_name == "text",
+                EvidenceLocator.page.is_not(None),
+                EvidenceLocator.locator_status.in_(["exact_page", "exact_bbox"]),
+            )
+        ).all()
+    )
+    paper = session.get(Paper, section.paper_id)
+    if paper is None:
+        return False
+    provider = PaperPageTextProvider()
+    for locator in locators:
+        quote = compact_page_text(locator.evidence_text)
+        if quote != wanted:
+            continue
+        record = provider.read_page(paper, int(locator.page))
+        if record.status == "ok" and quote in compact_page_text(record.text):
+            return True
+    return False
+
+
+def _section_page_fragment_structure_reasons(
+    session: Session,
+    fragment: EvidenceClaim,
+) -> tuple[str, ...]:
+    reasons: list[str] = []
+    if _normalized(fragment.source_type) != "section_page_fragment":
+        reasons.append("invalid_section_page_fragment_source_type")
+    if fragment.section_id is None:
+        reasons.append("missing_parent_section")
+        parent = None
+    else:
+        parent = session.get(PaperSection, fragment.section_id)
+        if parent is None or parent.paper_id != fragment.paper_id:
+            reasons.append("missing_parent_section")
+    page_start = fragment.page_start
+    page_end = fragment.page_end
+    if page_start is None or page_end is None or page_start < 1 or page_start != page_end:
+        reasons.append("fragment_requires_one_physical_pdf_page")
+    claim_text = compact_page_text(fragment.claim_text)
+    evidence_text = compact_page_text(fragment.evidence_text)
+    if not claim_text or claim_text != evidence_text:
+        reasons.append("fragment_text_evidence_mismatch")
+    if parent is not None and evidence_text not in compact_page_text(parent.text):
+        reasons.append("fragment_not_contained_in_parent_section")
+    metadata = fragment.meta if isinstance(fragment.meta, dict) else {}
+    bound_parent_id = metadata.get("parent_section_id")
+    if bound_parent_id and str(bound_parent_id) != str(fragment.section_id):
+        reasons.append("fragment_parent_binding_mismatch")
+    if page_start is not None and page_start >= 1 and evidence_text:
+        paper = session.get(Paper, fragment.paper_id)
+        if paper is None:
+            reasons.append("missing_real_pdf")
+        else:
+            record = PaperPageTextProvider().read_page(paper, int(page_start))
+            if record.status != "ok":
+                reasons.append(record.status)
+            elif evidence_text not in compact_page_text(record.text):
+                reasons.append("fragment_text_not_on_pdf_page")
+    return tuple(dict.fromkeys(reasons))
+
+
 def _writing_card_projection_content(card: WritingCard) -> str:
     parts: list[str] = []
     for label, field_name in (
         ("research_gap", "research_gap"),
         ("proposed_solution", "proposed_solution"),
         ("core_hypothesis", "core_hypothesis"),
-        ("abstract_logic", "abstract_logic"),
-        ("introduction_logic", "introduction_logic"),
-        ("discussion_logic", "discussion_logic"),
-        ("figure_logic", "figure_logic"),
     ):
         value = _projection_text(getattr(card, field_name, None))
         if value:
             parts.append(f"{label}: {value}")
+    for item in normalized_evidence_chain(card.evidence_chain, limit=8):
+        if item["supports_fields"]:
+            continue
+        parts.append(f"{item['evidence_type']}: {item['text']}")
     return " | ".join(parts)
 
 
@@ -1394,6 +1844,8 @@ def is_unsafe_review_status(review: ExtractionFieldReview | dict[str, Any] | Non
     if review is None:
         return True
     rs = normalize_review_status(review)
+    if rs == AI_VERIFIED_STATUS and not is_safe_verified_review(review):
+        return True
     if rs in UNSAFE_REVIEWER_STATUSES:
         return True
     trs = normalize_target_resolution_status(review)
@@ -1413,7 +1865,7 @@ def can_ai_candidate_update_target(
     """
     if existing_review is None:
         return True
-    if normalize_review_status(existing_review) != SAFE_REVIEWER_STATUS:
+    if normalize_review_status(existing_review) not in SAFE_REVIEWER_STATUSES:
         return True
     # Existing review is verified — block AI/external overwrite
     ai_sources = {"internal_ai", "external", "mcp_review", "auto"}
@@ -1463,7 +1915,7 @@ def build_review_boundary_reason(
     if is_external_candidate:
         parts.append("external_candidate")
 
-    if rs != SAFE_REVIEWER_STATUS:
+    if rs not in SAFE_REVIEWER_STATUSES:
         parts.append(f"reviewer_status={rs}")
     elif trs not in SAFE_TARGET_RESOLUTION_STATUSES:
         parts.append(f"target_resolution={trs}")
@@ -1505,18 +1957,20 @@ def serialize_review_gate(
 
     blocked: list[str] = []
     if not safe:
-        if rs != SAFE_REVIEWER_STATUS:
+        if rs == AI_VERIFIED_STATUS:
+            blocked.append("invalid_ai_verification_payload")
+        if rs not in SAFE_REVIEWER_STATUSES:
             blocked.append(f"unsafe_reviewer_status:{rs}")
         if trs not in SAFE_TARGET_RESOLUTION_STATUSES:
             blocked.append(f"unsafe_target_resolution:{trs}")
         if review is None:
             blocked.append("missing_review")
 
-    if is_ai_candidate and rs == SAFE_REVIEWER_STATUS:
+    if is_ai_candidate and rs == "verified":
         blocked.append("ai_candidate_cannot_be_verified")
     if is_external_candidate and not has_evidence_payload:
         blocked.append("external_candidate_missing_evidence_payload")
-    if is_external_candidate and rs == SAFE_REVIEWER_STATUS:
+    if is_external_candidate and rs in SAFE_REVIEWER_STATUSES:
         blocked.append("external_candidate_cannot_be_verified")
 
     label = "safe_verified" if not blocked else "blocked"

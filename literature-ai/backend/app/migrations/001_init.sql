@@ -1045,3 +1045,47 @@ CREATE INDEX ix_evidence_locators_claim_id ON evidence_locators (claim_id);
 CREATE INDEX ix_evidence_locators_page ON evidence_locators (page);
 CREATE INDEX ix_evidence_locators_chunk_id ON evidence_locators (chunk_id);
 
+CREATE TABLE content_web_review_bundles_v2 (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    paper_id UUID NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    policy_version VARCHAR(64) NOT NULL,
+    snapshot_fingerprint VARCHAR(64) NOT NULL,
+    active_generation_key VARCHAR(64),
+    manifest JSONB NOT NULL,
+    proposal_payload JSONB,
+    status VARCHAR(32) NOT NULL DEFAULT 'generated',
+    created_by VARCHAR(128),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE content_web_review_local_verification_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    bundle_id UUID NOT NULL REFERENCES content_web_review_bundles_v2(id) ON DELETE CASCADE,
+    plan_item_id UUID NOT NULL,
+    payload_hash VARCHAR(64) NOT NULL,
+    target_type VARCHAR(64) NOT NULL,
+    target_id VARCHAR(64) NOT NULL,
+    field_name VARCHAR(128) NOT NULL,
+    object_snapshot_hash VARCHAR(64) NOT NULL,
+    applied_object_snapshot_hash VARCHAR(64),
+    outcome VARCHAR(32) NOT NULL,
+    checked_evidence_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+    checked_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+    verification_note TEXT NOT NULL,
+    verified_value JSONB,
+    status VARCHAR(32) NOT NULL,
+    stale_reasons JSONB NOT NULL DEFAULT '[]'::jsonb,
+    error_code VARCHAR(160),
+    formal_gate_before JSONB,
+    formal_gate_after JSONB,
+    correction_id UUID REFERENCES paper_corrections(id) ON DELETE SET NULL,
+    review_id UUID REFERENCES extraction_field_reviews(id) ON DELETE SET NULL,
+    locator_id UUID REFERENCES evidence_locators(id) ON DELETE SET NULL,
+    applied_by VARCHAR(128) NOT NULL,
+    applied_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_content_web_review_local_result_item UNIQUE (bundle_id, plan_item_id)
+);
+

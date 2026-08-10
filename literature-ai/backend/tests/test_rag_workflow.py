@@ -11,6 +11,7 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     ElectrochemicalPerformance,
+    EvidenceLocator,
     EvidenceSpan,
     ExtractionFieldReview,
     MechanismClaim,
@@ -92,33 +93,137 @@ def test_retriever_writer_and_citation_guard_work_together():
                 )
                 session.add_all([dft_result, electrochemical, mechanism])
                 session.flush()
-                session.add(
-                    WritingCard(
-                        paper_id=paper.id,
-                        paper_type="mixed",
-                        research_gap="existing sulfur hosts still struggle to balance adsorption and conversion",
-                        proposed_solution="Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates",
-                        core_hypothesis="strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics",
-                        figure_logic='[{"fig_id":"Figure 1","purpose":"structure"},{"fig_id":"Figure 2","purpose":"DFT evidence"}]',
-                        evidence_chain=[
-                            {
-                                "text": "Existing sulfur hosts still struggle to balance adsorption and conversion.",
-                                "source": "Introduction", "page": 1, "locator_status": "exact_page",
-                                "supports_fields": ["research_gap"],
-                            },
-                                {
-                                    "text": "Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates.",
-                                    "source": "Introduction", "page": 1, "locator_status": "exact_page",
-                                    "supports_fields": ["proposed_solution"],
-                                },
-                                {
-                                    "text": "Strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics.",
-                                    "source": "Introduction", "page": 1, "locator_status": "exact_page",
-                                    "supports_fields": ["core_hypothesis"],
-                                },
-                        ],
-                    )
+                card_evidence_texts = (
+                    "Existing sulfur hosts still struggle to balance adsorption and conversion.",
+                    "Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates.",
+                    "Strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics.",
                 )
+                card_sources = [
+                    PaperSection(
+                        paper_id=paper.id,
+                        section_title="Introduction",
+                        section_type="introduction",
+                        text=text,
+                        page_start=1,
+                        page_end=1,
+                    )
+                    for text in card_evidence_texts
+                ]
+                session.add_all(card_sources)
+                session.flush()
+                writing_card = WritingCard(
+                    paper_id=paper.id,
+                    paper_type="mixed",
+                    research_gap="existing sulfur hosts still struggle to balance adsorption and conversion",
+                    proposed_solution="Fe-N4 single-atom sites are introduced to regulate sulfur redox intermediates",
+                    core_hypothesis="strong but not overly irreversible LiPS binding can improve bidirectional redox kinetics",
+                    figure_logic='[{"fig_id":"Figure 1","purpose":"structure"},{"fig_id":"Figure 2","purpose":"DFT evidence"}]',
+                    evidence_chain=[
+                        {
+                            "text": card_evidence_texts[0],
+                            "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                            "supports_fields": ["research_gap"],
+                            "source_target_type": "sections",
+                            "source_target_id": str(card_sources[0].id),
+                        },
+                            {
+                                "text": card_evidence_texts[1],
+                                "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                                "supports_fields": ["proposed_solution"],
+                                "source_target_type": "sections",
+                                "source_target_id": str(card_sources[1].id),
+                            },
+                            {
+                                "text": card_evidence_texts[2],
+                                "source": "Introduction", "page": 1, "locator_status": "exact_page",
+                                "supports_fields": ["core_hypothesis"],
+                                "source_target_type": "sections",
+                                "source_target_id": str(card_sources[2].id),
+                            },
+                    ],
+                )
+                session.add(writing_card)
+                session.flush()
+                session.add_all(
+                    [
+                        ExtractionFieldReview(
+                            paper_id=paper.id,
+                            target_type="writing_cards",
+                            target_id=str(writing_card.id),
+                            field_name="evidence_chain",
+                            reviewed_value=writing_card.evidence_chain,
+                            reviewer_status="verified",
+                            target_resolution_status="active",
+                            evidence_text=card_evidence_texts[0],
+                        ),
+                        EvidenceLocator(
+                            paper_id=paper.id,
+                            source_type="pdf",
+                            page=1,
+                            target_type="writing_cards",
+                            target_id=str(writing_card.id),
+                            field_name="evidence_chain",
+                            evidence_text=card_evidence_texts[0],
+                            locator_status="exact_page",
+                            locator_confidence=1.0,
+                            parser_source="test_review",
+                        ),
+                    ]
+                )
+                for source, evidence_text in zip(card_sources, card_evidence_texts):
+                    session.add_all(
+                        [
+                            ExtractionFieldReview(
+                                paper_id=paper.id,
+                                target_type="sections",
+                                target_id=str(source.id),
+                                field_name="text",
+                                reviewer_status="verified",
+                                target_resolution_status="active",
+                                evidence_text=evidence_text,
+                            ),
+                            EvidenceLocator(
+                                paper_id=paper.id,
+                                source_type="pdf",
+                                page=1,
+                                target_type="sections",
+                                target_id=str(source.id),
+                                field_name="text",
+                                evidence_text=evidence_text,
+                                locator_status="exact_page",
+                                locator_confidence=1.0,
+                                parser_source="test_review",
+                            ),
+                        ]
+                    )
+                for field_name in ("research_gap", "proposed_solution", "core_hypothesis"):
+                    evidence_text = str(getattr(writing_card, field_name))
+                    session.add_all(
+                        [
+                            ExtractionFieldReview(
+                                paper_id=paper.id,
+                                target_type="writing_cards",
+                                target_id=str(writing_card.id),
+                                field_name=field_name,
+                                reviewed_value=evidence_text,
+                                reviewer_status="verified",
+                                target_resolution_status="active",
+                                evidence_text=evidence_text,
+                            ),
+                            EvidenceLocator(
+                                paper_id=paper.id,
+                                source_type="pdf",
+                                page=1,
+                                target_type="writing_cards",
+                                target_id=str(writing_card.id),
+                                field_name=field_name,
+                                evidence_text=evidence_text,
+                                locator_status="exact_page",
+                                locator_confidence=1.0,
+                                parser_source="test_review",
+                            ),
+                        ]
+                    )
                 for target_type, row, field_name, evidence_text in [
                     ("catalyst_samples", catalyst_sample, "name", catalyst_sample.evidence_strength),
                     ("dft_results", dft_result, "value", dft_result.evidence_text),
@@ -145,9 +250,28 @@ def test_retriever_writer_and_citation_guard_work_together():
                             evidence_text=evidence_text,
                         )
                     )
+                    session.add(
+                        EvidenceLocator(
+                            paper_id=paper.id,
+                            source_type="pdf",
+                            page=1,
+                            target_type=target_type,
+                            target_id=str(row.id),
+                            field_name=field_name,
+                            evidence_text=evidence_text,
+                            locator_status="exact_page",
+                            locator_confidence=1.0,
+                            parser_source="test_review",
+                        )
+                    )
                 session.commit()
 
-                retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption conversion lithium sulfur", [paper.id], 3)
+                retrieved = Retriever(session).retrieve(
+                    "Fe-N4 Li2S4 adsorption conversion lithium sulfur",
+                    [paper.id],
+                    3,
+                    mode="comprehensive",
+                )
                 assert retrieved["catalyst_samples"]
                 assert retrieved["dft_results"]
                 assert retrieved["electrochemical_performance"]
@@ -166,6 +290,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                 draft = Writer(session, settings=Settings(writer_backend="rule")).write(
                     topic="Fe-N4 single-atom catalysts for lithium-sulfur cathodes",
                     paper_ids=[paper.id],
+                    mode="comprehensive",
                 )
                 assert draft["outline"]
                 assert draft["backend_used"] == "rule"
@@ -194,6 +319,11 @@ def test_retriever_writer_and_citation_guard_work_together():
                 )
                 assert stub_draft["backend_used"] == "llm_stub"
                 assert stub_draft["introduction"].startswith("[LLM-STUB REWRITE]")
+                assert stub_draft["dft_results"] == ""
+                assert stub_draft["dft_included"] is False
+                assert all("dft" not in item.lower() for item in stub_draft["outline"])
+                assert "dft" not in stub_draft["introduction"].lower()
+                assert "dft" not in stub_draft["discussion"].lower()
                 assert stub_draft["guard_actions"] == {}
 
                 llm_draft = Writer(
@@ -297,6 +427,7 @@ def test_retriever_writer_and_citation_guard_work_together():
                     topic="Fe-N4 single-atom catalysts for lithium-sulfur cathodes",
                     paper_ids=[paper.id],
                     sections=["discussion"],
+                    mode="comprehensive",
                 )
                 assert partial_draft["backend_used"] == "custom_llm"
                 assert "1.0C" not in partial_draft["discussion"]

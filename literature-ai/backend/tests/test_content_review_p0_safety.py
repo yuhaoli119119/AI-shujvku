@@ -22,6 +22,8 @@ from app.db.models import (
 )
 from app.main import app
 from app.services.content_knowledge_service import ContentKnowledgeService
+from app.services.content_writing_plan_service import ContentWritingPlanService
+from app.services.extraction_review_service import ExtractionReviewService
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.content_review_bundle_service import (
     ContentReviewBundleService,
@@ -69,6 +71,50 @@ def _safe_mechanism(session: Session, paper: Paper) -> MechanismClaim:
             target_type="mechanism_claims",
             target_id=str(claim.id),
             field_name="claim_text",
+            page=3,
+            evidence_text=claim.evidence_text,
+            locator_status="exact_page",
+            locator_confidence=1.0,
+            parser_source="test",
+        ),
+    ])
+    session.flush()
+    return claim
+
+
+def _mechanism_with_field_review(
+    session: Session,
+    paper: Paper,
+    *,
+    field_name: str,
+    reviewer_status: str = "verified",
+    resolution_status: str = "active",
+    locator_field_name: str | None = None,
+) -> MechanismClaim:
+    claim = MechanismClaim(
+        paper_id=paper.id,
+        claim_type="conversion",
+        claim_text="Field-scoped mechanism claim",
+        evidence_text="The PDF reports the field-scoped mechanism claim.",
+    )
+    session.add(claim)
+    session.flush()
+    session.add_all([
+        ExtractionFieldReview(
+            paper_id=paper.id,
+            target_type="mechanism_claims",
+            target_id=str(claim.id),
+            field_name=field_name,
+            reviewer_status=reviewer_status,
+            target_resolution_status=resolution_status,
+            evidence_text=claim.evidence_text,
+        ),
+        EvidenceLocator(
+            paper_id=paper.id,
+            source_type="pdf",
+            target_type="mechanism_claims",
+            target_id=str(claim.id),
+            field_name=locator_field_name or field_name,
             page=3,
             evidence_text=claim.evidence_text,
             locator_status="exact_page",
@@ -377,6 +423,50 @@ def test_unmapped_projection_types_remain_blocked(setup_test_db, source_type):
         assert "no_real_object_mapping" in gate.blocked_reasons
 
 
+def test_external_candidate_projection_is_hard_excluded_from_rag_and_writing_plan(
+    setup_test_db,
+    monkeypatch,
+):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        projection = ContentEvidenceItem(
+            paper_id=paper.id,
+            category="dft_evidence",
+            source_type="external_analysis_candidate",
+            source_id=str(uuid4()),
+            content="candidate-only-secret-value",
+            evidence_text="candidate-only-secret-value",
+            evidence_locator={"page": 1},
+            page_start=1,
+            review_status="safe_verified",
+            citation_status="citable",
+        )
+        session.add(projection)
+        session.commit()
+
+        def fail_if_candidate_gate(_session, source_type, _row):
+            if source_type == "external_analysis_candidate":
+                raise AssertionError("audit candidate must be excluded before object gate evaluation")
+            return content_object_gate(_session, source_type, _row)
+
+        monkeypatch.setattr(
+            "app.services.content_knowledge_service.content_object_gate",
+            fail_if_candidate_gate,
+        )
+        assert ContentKnowledgeService(session).search_for_rag(
+            query="candidate-only-secret-value",
+            paper_ids=[paper.id],
+            include_review_assist=True,
+        ) == []
+        plan = ContentWritingPlanService(session).build(
+            query="candidate-only-secret-value",
+            paper_ids=[paper.id],
+        )
+        assert plan["evidence_pack"] == []
+        assert plan["writing_context"] == []
+        assert plan["matched_eligible"] == 0
+
+
 def test_local_ai_requires_module_locks_for_all_content_direct_writes(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session)
@@ -465,3 +555,93 @@ def test_unknown_authenticated_agent_defaults_to_module_lock_required(setup_test
             write_lock_tokens=[lock.lock_token],
         )
         assert session.get(Paper, paper.id).abstract == "Custom agent abstract"
+
+
+@pytest.mark.parametrize("field_name", ["claim_type", "key_species", "mechanism_direction"])
+def test_mechanism_non_core_field_review_cannot_authorize_claim(setup_test_db, field_name):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        claim = _mechanism_with_field_review(session, paper, field_name=field_name)
+
+        gate = content_object_gate(session, "mechanism_claims", claim)
+
+        assert gate.can_use_for_writing is False
+        assert gate.can_use_for_citation is False
+        assert "missing_required_review:claim_text" in gate.blocked_reasons
+
+
+def test_blank_mechanism_direction_is_not_prepared_as_review_item(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        claim = MechanismClaim(
+            paper_id=paper.id,
+            claim_type="conversion",
+            claim_text="Prepared claim",
+            evidence_text="Prepared evidence.",
+        )
+        session.add(claim)
+        session.commit()
+
+        prepared = ExtractionReviewService(session).prepare_pending_reviews(paper.id)
+
+        mechanism_fields = {
+            item.field_name
+            for item in prepared.items
+            if item.target_type == "mechanism_claims" and item.target_id == str(claim.id)
+        }
+        assert "mechanism_direction" not in mechanism_fields
+
+
+def test_mechanism_claim_text_review_requires_matching_field_locator(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        claim = _mechanism_with_field_review(
+            session,
+            paper,
+            field_name="claim_text",
+            locator_field_name="claim_type",
+        )
+
+        gate = content_object_gate(session, "mechanism_claims", claim)
+
+        assert gate.can_use_for_writing is False
+        assert gate.can_use_for_citation is False
+        assert "missing_evidence" in gate.blocked_reasons
+
+
+def test_mechanism_claim_text_safe_review_with_exact_evidence_passes(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        claim = _mechanism_with_field_review(session, paper, field_name="claim_text")
+
+        gate = content_object_gate(session, "mechanism_claims", claim)
+
+        assert gate.can_use_for_writing is True
+        assert gate.can_use_for_citation is True
+        assert gate.locator_status == "exact_page"
+
+
+@pytest.mark.parametrize(
+    ("reviewer_status", "resolution_status"),
+    [("rejected", "active"), ("superseded", "active"), ("verified", "stale")],
+)
+def test_mechanism_claim_text_rejected_stale_or_superseded_is_blocked(
+    setup_test_db,
+    reviewer_status,
+    resolution_status,
+):
+    with Session(setup_test_db) as session:
+        paper = _paper(session)
+        claim = _mechanism_with_field_review(
+            session,
+            paper,
+            field_name="claim_text",
+            reviewer_status=reviewer_status,
+            resolution_status=resolution_status,
+        )
+
+        gate = content_object_gate(session, "mechanism_claims", claim)
+
+        assert gate.can_use_for_writing is False
+        assert gate.can_use_for_citation is False
+        assert "unsafe_review" in gate.blocked_reasons

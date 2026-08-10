@@ -741,11 +741,25 @@ class ContentWebReviewBundleV2(Base):
     """Proposal-only web review package; never holds applied review truth."""
 
     __tablename__ = "content_web_review_bundles_v2"
+    __table_args__ = (
+        sa.Index(
+            "uq_content_web_review_bundles_v2_active_generation_key",
+            "active_generation_key",
+            unique=True,
+        ),
+        sa.Index(
+            "ix_content_web_review_bundles_v2_paper_status_created",
+            "paper_id",
+            "status",
+            "created_at",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
     paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="CASCADE"), index=True)
     policy_version: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
     snapshot_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    active_generation_key: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
     manifest: Mapped[dict] = mapped_column(json_type(), nullable=False, default=dict)
     proposal_payload: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="generated", index=True)

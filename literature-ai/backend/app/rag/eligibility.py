@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import AuditLog, DFTResult, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
+from app.db.models import AuditLog, DFTResult, EvidenceClaim, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
 from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
 from app.utils.review_safety import (
     bulk_export_gate_results,
@@ -23,6 +23,15 @@ def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:
     normalized_type = str(item_type or "").strip().lower()
     if normalized_type in {"section", "paper_section", "chunk", "paper_chunk"}:
         return _section_item_is_eligible(session, item)
+    if normalized_type in {"section_page_fragment", "section_page_fragments"}:
+        return bool(
+            isinstance(item, EvidenceClaim)
+            and content_object_gate(
+                session,
+                "section_page_fragments",
+                item,
+            ).can_use_for_writing
+        )
     if normalized_type in {"writing_card", "writing_cards"}:
         return writing_card_is_rag_eligible(session, item)
     if normalized_type in {"dft_result", "dft_results"}:
@@ -62,6 +71,26 @@ def figure_is_rag_eligible(session: Session, item: Any) -> bool:
     """Figures enter formal RAG only when image, page, caption, and review risk are safe."""
 
     return _figure_item_is_eligible(session, item)
+
+
+def figure_has_safe_review(session: Session, item: Any) -> bool:
+    """Require an explicit safe review for content-to-figure associations.
+
+    General figure RAG eligibility also permits a reliably classified figure.
+    The content workflow is intentionally stricter because its UI labels linked
+    assets as reviewed images.
+    """
+
+    figure_id = getattr(item, "figure_id", None) or getattr(item, "id", None)
+    if figure_id is None:
+        return False
+    figure = session.get(PaperFigure, figure_id)
+    if figure is None:
+        return False
+    verdict = _latest_figure_review_verdict(session, figure)
+    if verdict in {"rejected", "needs_repair"}:
+        return False
+    return verdict == "verified" or _figure_has_safe_review(session, figure)
 
 
 def _paper_has_ai_verified_content(session: Session, item: Any, field_names: set[str]) -> bool:
@@ -141,12 +170,15 @@ def _figure_item_is_eligible(session: Session, item: Any) -> bool:
     paper_id = getattr(item, "paper_id", None)
     if figure_id is None and paper_id is None:
         return False
-    query = select(PaperFigure)
-    if figure_id is not None:
-        query = query.where(PaperFigure.id == figure_id)
-    elif paper_id is not None:
-        query = query.where(PaperFigure.paper_id == paper_id)
-    figure = session.scalars(query.limit(1)).first()
+    if isinstance(item, PaperFigure):
+        figure = item
+    else:
+        query = select(PaperFigure)
+        if figure_id is not None:
+            query = query.where(PaperFigure.id == figure_id)
+        elif paper_id is not None:
+            query = query.where(PaperFigure.paper_id == paper_id)
+        figure = session.scalars(query.limit(1)).first()
     if figure is None:
         return False
     if not figure.image_path:

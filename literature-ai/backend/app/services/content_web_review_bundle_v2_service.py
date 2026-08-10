@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,7 @@ from uuid import UUID, uuid5
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -25,12 +27,14 @@ from app.db.models import (
 )
 from app.utils.artifact_paths import resolve_paper_pdf_path, resolve_persisted_artifact_path
 from app.utils.review_safety import CONTENT_OBJECT_GATE_POLICY_VERSION, content_object_gate
+from app.services.content_figure_link_service import ContentFigureLinkService
+from app.utils.writing_card_content import normalized_evidence_chain
 
 
-POLICY_VERSION = "content_web_review_bundle_v2.1"
+POLICY_VERSION = "content_web_review_bundle_v2.2"
 RESULT_SCHEMA = "content_web_review_proposal_v2"
 DECISIONS = {"PASS", "REVISE", "REJECT", "NEEDS_HUMAN"}
-MODULES = {"abstract", "sections", "mechanism_knowledge", "writing_cards"}
+MODULES = {"paper_content", "abstract", "sections", "mechanism_knowledge", "writing_cards"}
 PLAN_ITEM_NAMESPACE = UUID("4fc7b45c-08f3-58e6-bdf7-8e8420cb1c16")
 TRUSTED_LAYOUT_VERIFIER_SOURCES = {"layout_verifier", "content_layout_verifier"}
 TRUSTED_LAYOUT_STATUSES = {"verified", "consistent", "verified_consistent"}
@@ -41,6 +45,7 @@ TARGET_TYPE_ALIASES = {
     "mechanism_claim": {"mechanism_claim", "mechanism_claims", "MechanismClaim"},
     "writing_card": {"writing_card", "writing_cards", "WritingCard"},
 }
+logger = logging.getLogger(__name__)
 
 
 class ContentWebReviewBundleV2Service:
@@ -68,21 +73,41 @@ class ContentWebReviewBundleV2Service:
         manifest = self._build_manifest(paper, selected_modules=selected_modules)
         if not manifest["targets"]:
             raise ValueError("content_web_review_v2_no_targets_for_selected_modules")
-        bundle = ContentWebReviewBundleV2(
+        active_generation_key = self._active_generation_key(
             paper_id=paper.id,
-            policy_version=POLICY_VERSION,
-            snapshot_fingerprint=manifest["bundle_fingerprint"],
+            selected_modules=selected_modules,
+            bundle_fingerprint=manifest["bundle_fingerprint"],
+        )
+        self._retire_stale_active_bundles(
+            paper_id=paper.id,
+            selected_modules=selected_modules,
+            current_fingerprint=manifest["bundle_fingerprint"],
+        )
+        bundle, created = self._claim_or_create_active_bundle(
+            paper=paper,
+            selected_modules=selected_modules,
             manifest=manifest,
-            status="generated",
+            active_generation_key=active_generation_key,
             created_by=created_by,
         )
-        self.session.add(bundle)
-        self.session.flush()
-        return self._bundle_response(bundle)
+        cleanup_report = self._opportunistic_cleanup(
+            paper_id=paper.id,
+            selected_modules=selected_modules,
+            current_fingerprint=manifest["bundle_fingerprint"],
+            exclude_bundle_id=bundle.id,
+        )
+        return self._bundle_response(
+            bundle,
+            reused=not created,
+            created=created,
+            cleanup_report=cleanup_report,
+        )
 
     def download(self, bundle_id: UUID) -> dict[str, Any]:
         bundle = self._bundle(bundle_id)
-        if self._stale_report(bundle)["is_stale"]:
+        stale = self._stale_report(bundle)
+        if stale["is_stale"]:
+            self._mark_stale(bundle, stale)
             raise ValueError("content_web_review_v2_bundle_stale")
         manifest = bundle.manifest or {}
         content = self._zip(manifest)
@@ -97,10 +122,26 @@ class ContentWebReviewBundleV2Service:
         bundle = self._bundle(bundle_id)
         stale = self._stale_report(bundle)
         if stale["is_stale"]:
-            bundle.status = "stale"
-            bundle.manifest = {**(bundle.manifest or {}), "last_stale_report": stale}
-            self.session.add(bundle)
+            self._mark_stale(bundle, stale)
             return {"valid": False, "bundle_id": str(bundle.id), "status": bundle.status, "errors": ["stale_bundle"], "stale": stale}
+        if bundle.status == "stale":
+            bundle.active_generation_key = None
+            self.session.add(bundle)
+            return {
+                "valid": False,
+                "bundle_id": str(bundle.id),
+                "status": bundle.status,
+                "errors": ["stale_bundle"],
+            }
+        if bundle.proposal_payload is None and bundle.status != "generated":
+            bundle.active_generation_key = None
+            self.session.add(bundle)
+            return {
+                "valid": False,
+                "bundle_id": str(bundle.id),
+                "status": bundle.status,
+                "errors": ["content_web_review_v2_bundle_not_active_generated"],
+            }
 
         errors = self._validate_proposal(bundle, proposal)
         if errors:
@@ -114,7 +155,10 @@ class ContentWebReviewBundleV2Service:
                     "status": bundle.status,
                     "errors": errors,
                 }
-            bundle.status = "proposal_invalid"
+            # Invalid JSON does not consume the review cycle.  The same
+            # generated package remains the sole active package and can be
+            # retried with a corrected proposal.
+            bundle.status = "generated"
             bundle.manifest = {**(bundle.manifest or {}), "last_validation_errors": errors}
             self.session.add(bundle)
             return {"valid": False, "bundle_id": str(bundle.id), "status": bundle.status, "errors": errors}
@@ -146,6 +190,7 @@ class ContentWebReviewBundleV2Service:
         # turn this web proposal into an identity-verified or final truth write.
         bundle.proposal_payload = canonical_proposal
         bundle.status = "web_proposal_validated"
+        bundle.active_generation_key = None
         self.session.add(bundle)
         plan = self._local_plan(bundle)
         bundle.status = "awaiting_human" if plan["local_required_target_count"] == 0 else "awaiting_local_verification"
@@ -183,9 +228,7 @@ class ContentWebReviewBundleV2Service:
         stale = self._stale_report(bundle)
         if stale["is_stale"]:
             if persist_stale:
-                bundle.status = "stale"
-                bundle.manifest = {**(bundle.manifest or {}), "last_stale_report": stale}
-                self.session.add(bundle)
+                self._mark_stale(bundle, stale)
             return {"bundle_id": str(bundle.id), "status": "stale", "stale": stale, "local_verification_plan": None}
         if bundle.status not in {"web_proposal_validated", "awaiting_local_verification", "awaiting_human"} or not bundle.proposal_payload:
             raise ValueError("content_web_review_v2_proposal_must_be_validated")
@@ -258,6 +301,236 @@ class ContentWebReviewBundleV2Service:
             "content": content,
         }
 
+    def _claim_or_create_active_bundle(
+        self,
+        *,
+        paper: Paper,
+        selected_modules: list[str],
+        manifest: dict[str, Any],
+        active_generation_key: str,
+        created_by: str,
+    ) -> tuple[ContentWebReviewBundleV2, bool]:
+        winner = self.session.scalar(
+            select(ContentWebReviewBundleV2).where(
+                ContentWebReviewBundleV2.active_generation_key == active_generation_key
+            ).with_for_update()
+        )
+        if winner is not None:
+            if self._bundle_is_reusable(
+                winner,
+                selected_modules=selected_modules,
+                current_fingerprint=manifest["bundle_fingerprint"],
+            ):
+                return winner, False
+            winner.active_generation_key = None
+            self.session.add(winner)
+            self.session.flush()
+
+        # Legacy rows deliberately remain NULL after migration.  The first
+        # matching request claims the newest safe row under the same unique
+        # key.  Concurrent claims either update this same row or conflict on
+        # the unique index and read back the winner.
+        legacy_candidates = self.session.scalars(
+            select(ContentWebReviewBundleV2)
+            .where(
+                ContentWebReviewBundleV2.paper_id == paper.id,
+                ContentWebReviewBundleV2.policy_version == POLICY_VERSION,
+                ContentWebReviewBundleV2.snapshot_fingerprint
+                == manifest["bundle_fingerprint"],
+                ContentWebReviewBundleV2.status == "generated",
+                ContentWebReviewBundleV2.proposal_payload.is_(None),
+                ContentWebReviewBundleV2.active_generation_key.is_(None),
+                ~select(ContentWebReviewLocalVerificationResult.id)
+                .where(
+                    ContentWebReviewLocalVerificationResult.bundle_id
+                    == ContentWebReviewBundleV2.id
+                )
+                .exists(),
+            )
+            .order_by(
+                ContentWebReviewBundleV2.created_at.desc(),
+                ContentWebReviewBundleV2.id.desc(),
+            )
+            .with_for_update()
+        ).all()
+        for candidate in legacy_candidates:
+            if self._selected_modules_from_bundle(candidate) != selected_modules:
+                continue
+            claimed = self._claim_active_key(candidate, active_generation_key)
+            if claimed is not None:
+                return claimed, False
+
+        bundle = ContentWebReviewBundleV2(
+            paper_id=paper.id,
+            policy_version=POLICY_VERSION,
+            snapshot_fingerprint=manifest["bundle_fingerprint"],
+            active_generation_key=active_generation_key,
+            manifest=manifest,
+            status="generated",
+            created_by=created_by,
+        )
+        claimed = self._claim_active_key(bundle, active_generation_key)
+        if claimed is None:
+            raise RuntimeError("content_web_review_v2_active_generation_conflict_without_winner")
+        return claimed, claimed is bundle
+
+    def _claim_active_key(
+        self,
+        bundle: ContentWebReviewBundleV2,
+        active_generation_key: str,
+    ) -> ContentWebReviewBundleV2 | None:
+        try:
+            with self.session.begin_nested():
+                bundle.active_generation_key = active_generation_key
+                self.session.add(bundle)
+                self.session.flush()
+            return bundle
+        except IntegrityError:
+            winner = self.session.scalar(
+                select(ContentWebReviewBundleV2).where(
+                    ContentWebReviewBundleV2.active_generation_key
+                    == active_generation_key
+                )
+            )
+            if winner is None:
+                raise
+            return winner
+
+    def _bundle_is_reusable(
+        self,
+        bundle: ContentWebReviewBundleV2,
+        *,
+        selected_modules: list[str],
+        current_fingerprint: str,
+    ) -> bool:
+        if (
+            bundle.status != "generated"
+            or bundle.proposal_payload is not None
+            or bundle.policy_version != POLICY_VERSION
+            or bundle.snapshot_fingerprint != current_fingerprint
+            or self._selected_modules_from_bundle(bundle) != selected_modules
+        ):
+            return False
+        return self.session.scalar(
+            select(ContentWebReviewLocalVerificationResult.id)
+            .where(ContentWebReviewLocalVerificationResult.bundle_id == bundle.id)
+            .limit(1)
+        ) is None
+
+    @staticmethod
+    def _selected_modules_from_bundle(
+        bundle: ContentWebReviewBundleV2,
+    ) -> list[str]:
+        manifest = bundle.manifest if isinstance(bundle.manifest, dict) else {}
+        modules = manifest.get("selected_modules")
+        if not isinstance(modules, list):
+            return []
+        return sorted({str(value) for value in modules})
+
+    @classmethod
+    def _active_generation_key(
+        cls,
+        *,
+        paper_id: UUID,
+        selected_modules: list[str],
+        bundle_fingerprint: str,
+    ) -> str:
+        return cls._hash(
+            {
+                "paper_id": str(paper_id),
+                "policy_version": POLICY_VERSION,
+                "selected_modules": selected_modules,
+                "bundle_fingerprint": bundle_fingerprint,
+            }
+        )
+
+    def _retire_stale_active_bundles(
+        self,
+        *,
+        paper_id: UUID,
+        selected_modules: list[str],
+        current_fingerprint: str,
+    ) -> None:
+        rows = self.session.scalars(
+            select(ContentWebReviewBundleV2).where(
+                ContentWebReviewBundleV2.paper_id == paper_id,
+                ContentWebReviewBundleV2.active_generation_key.is_not(None),
+            )
+        ).all()
+        for row in rows:
+            if (
+                row.status != "generated"
+                or row.proposal_payload is not None
+                or self.session.scalar(
+                    select(ContentWebReviewLocalVerificationResult.id)
+                    .where(ContentWebReviewLocalVerificationResult.bundle_id == row.id)
+                    .limit(1)
+                )
+                is not None
+            ):
+                row.active_generation_key = None
+                self.session.add(row)
+                continue
+            if (
+                row.policy_version == POLICY_VERSION
+                and self._selected_modules_from_bundle(row) == selected_modules
+                and row.snapshot_fingerprint != current_fingerprint
+            ):
+                stale = self._stale_report(row)
+                if stale["is_stale"]:
+                    self._mark_stale(row, stale)
+
+    def _mark_stale(
+        self,
+        bundle: ContentWebReviewBundleV2,
+        stale: dict[str, Any],
+    ) -> None:
+        bundle.status = "stale"
+        bundle.active_generation_key = None
+        bundle.manifest = {
+            **(bundle.manifest or {}),
+            "last_stale_report": stale,
+        }
+        self.session.add(bundle)
+
+    def _opportunistic_cleanup(
+        self,
+        *,
+        paper_id: UUID,
+        selected_modules: list[str],
+        current_fingerprint: str,
+        exclude_bundle_id: UUID,
+    ) -> dict[str, Any]:
+        from app.services.content_web_review_bundle_retention_service import (
+            ContentWebReviewBundleRetentionService,
+        )
+
+        try:
+            with self.session.begin_nested():
+                return ContentWebReviewBundleRetentionService(self.session).cleanup(
+                    paper_id=paper_id,
+                    older_than_days=30,
+                    limit=100,
+                    dry_run=False,
+                    exclude_bundle_ids={exclude_bundle_id},
+                    current_scope_fingerprints={
+                        (paper_id, tuple(selected_modules)): current_fingerprint
+                    },
+                )
+        except Exception:
+            logger.exception(
+                "Opportunistic v2 review-bundle cleanup failed for paper %s",
+                paper_id,
+            )
+            return {
+                "scanned_count": 0,
+                "duplicate_deleted_count": 0,
+                "expired_deleted_count": 0,
+                "protected_count": 0,
+                "deleted_bundle_ids": [],
+                "error": "opportunistic_cleanup_failed",
+            }
+
     @staticmethod
     def _page_asset_mime_type(page_asset_ref: str, content: bytes) -> str:
         if content.startswith(b"\x89PNG\r\n\x1a\n"):
@@ -312,33 +585,78 @@ class ContentWebReviewBundleV2Service:
 
     def _targets(self, paper: Paper, pdf: dict[str, Any], *, selected_modules: list[str]) -> list[dict[str, Any]]:
         raw: list[tuple[str, str, str, Any, str | None, int | None, str | None]] = []
+        unified_content = "paper_content" in selected_modules
         if "abstract" in selected_modules and paper.abstract:
             raw.append(("paper_abstract", str(paper.id), "abstract", paper.abstract, paper.abstract, None, "abstract"))
         if "sections" in selected_modules:
             for section in self.session.scalars(select(PaperSection).where(PaperSection.paper_id == paper.id).order_by(PaperSection.id)).all():
                 raw.append(("paper_section", str(section.id), "text", section.text, section.text, section.page_start, section.section_title))
-        if "mechanism_knowledge" in selected_modules:
+        if unified_content or "mechanism_knowledge" in selected_modules:
             for claim in self.session.scalars(select(MechanismClaim).where(MechanismClaim.paper_id == paper.id).order_by(MechanismClaim.id)).all():
                 raw.append(("mechanism_claim", str(claim.id), "claim_text", claim.claim_text, claim.evidence_text or claim.claim_text, None, claim.claim_type))
-        card_fields = ("research_gap", "proposed_solution", "core_hypothesis", "figure_logic", "abstract_logic", "introduction_logic", "discussion_logic")
-        if "writing_cards" in selected_modules:
+        card_fields = (
+            ("research_gap", "proposed_solution", "core_hypothesis", "evidence_chain")
+            if unified_content
+            else ("research_gap", "proposed_solution", "core_hypothesis", "figure_logic", "abstract_logic", "introduction_logic", "discussion_logic")
+        )
+        if unified_content or "writing_cards" in selected_modules:
             for card in self.session.scalars(select(WritingCard).where(WritingCard.paper_id == paper.id).order_by(WritingCard.id)).all():
                 for field_name in card_fields:
                     value = getattr(card, field_name)
                     if value:
-                        raw.append(("writing_card", str(card.id), field_name, value, value, None, field_name))
+                        fallback_excerpt: Any = value
+                        fallback_page: int | None = None
+                        if field_name == "evidence_chain":
+                            normalized_chain = normalized_evidence_chain(value, limit=20)
+                            fallback_excerpt = json.dumps(normalized_chain, ensure_ascii=False)
+                            pages = [item.get("page") for item in normalized_chain]
+                            if pages and all(isinstance(page, int) for page in pages) and len(set(pages)) == 1:
+                                fallback_page = pages[0]
+                        raw.append((
+                            "writing_card", str(card.id), field_name, value,
+                            fallback_excerpt, fallback_page, field_name,
+                        ))
         targets: list[dict[str, Any]] = []
+        figure_links = ContentFigureLinkService(self.session)
         for target_type, target_id, field_name, value, fallback_excerpt, fallback_page, label in raw:
             locator = self._locator_for(paper.id, target_type, target_id, field_name)
+            if (
+                target_type == "writing_card"
+                and field_name == "evidence_chain"
+                and locator is not None
+                and locator.field_name != "evidence_chain"
+            ):
+                # A generic per-item locator cannot prove a multi-item chain.
+                # Only a prior field-level review may represent the chain as a
+                # whole; otherwise use the conservative page fallback above.
+                locator = None
             excerpt = locator.evidence_text if locator is not None else fallback_excerpt
             page = locator.page if locator is not None and locator.page is not None else fallback_page
-            object_hash = self._hash({"target_type": target_type, "target_id": target_id, "field_name": field_name, "value": value})
+            linked_figures: list[dict[str, Any]] = []
+            try:
+                if target_type == "writing_card":
+                    card = self.session.get(WritingCard, UUID(target_id))
+                    linked_figures = figure_links.links_for_writing_card(card) if card is not None else []
+                elif target_type == "mechanism_claim":
+                    claim = self.session.get(MechanismClaim, UUID(target_id))
+                    linked_figures = figure_links.links_for_mechanism_claim(claim) if claim is not None else []
+            except (TypeError, ValueError):
+                linked_figures = []
+            object_hash = self._hash({
+                "target_type": target_type,
+                "target_id": target_id,
+                "field_name": field_name,
+                "value": value,
+                "linked_figures": linked_figures,
+            })
             plan_item_id = str(uuid5(PLAN_ITEM_NAMESPACE, f"{paper.id}|{target_type}|{target_id}|{field_name}"))
             evidence_id = f"evidence:{plan_item_id}"
             page_asset = self._page_asset(pdf, page, locator)
             blockers = list(pdf["gate_blockers"])
             if page is None:
                 blockers.append("page_unlocated")
+                if target_type == "writing_card" and field_name == "evidence_chain":
+                    blockers.append("evidence_chain_requires_single_verified_page_or_human_review")
             if not str(excerpt or "").strip():
                 blockers.append("evidence_excerpt_missing")
             formal_gate = self._formal_gate_snapshot(paper.id, target_type, target_id)
@@ -361,7 +679,7 @@ class ContentWebReviewBundleV2Service:
                 "field_name": field_name, "current_value": value, "object_snapshot_hash": object_hash,
                 "target_label": label, "gate_blockers": sorted(set(blockers)),
                 "existing_formal_qualification": qualification, "formal_gate_snapshot": formal_gate,
-                "evidence": evidence,
+                "evidence": evidence, "linked_figures": linked_figures,
             })
         return targets
 
@@ -476,6 +794,7 @@ class ContentWebReviewBundleV2Service:
                 "page_asset_ref": evidence["page_asset_ref"], "page_asset_status": evidence["page_asset_status"],
                 "page_asset_origin": evidence["page_asset_origin"],
                 "bbox": evidence["bbox"], "locator_id": evidence["locator_id"], "locator_status": evidence["locator_status"],
+                "linked_figures": target.get("linked_figures") or [],
                 "requires_page_render": self._requires_page_render(target, evidence),
                 "layout_consistency_status": evidence["layout_consistency_status"],
                 "proposed_value": action.get("proposed_value"), "verification_note": action.get("verification_note"),
@@ -689,6 +1008,8 @@ class ContentWebReviewBundleV2Service:
         invalid = sorted(set(requested) - MODULES)
         if invalid:
             raise ValueError("content_web_review_v2_invalid_module:" + ",".join(invalid))
+        if "paper_content" in requested and len(set(requested)) > 1:
+            raise ValueError("content_web_review_v2_paper_content_cannot_mix_legacy_modules")
         return sorted(set(requested))
 
     def _locator_for(
@@ -823,14 +1144,22 @@ class ContentWebReviewBundleV2Service:
                 descriptors.append({key: value for key, value in descriptor.items() if key != "_local_path"} | {"source_document_type": "supplementary"})
         return descriptors
 
-    def _bundle_response(self, bundle: ContentWebReviewBundleV2) -> dict[str, Any]:
+    def _bundle_response(
+        self,
+        bundle: ContentWebReviewBundleV2,
+        *,
+        reused: bool = False,
+        created: bool = False,
+        cleanup_report: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         manifest = bundle.manifest or {}
         return {"bundle_id": str(bundle.id), "status": bundle.status, "bundle_fingerprint": bundle.snapshot_fingerprint, "manifest": manifest,
                 "download_url": f"/api/content-knowledge/review-bundles/{bundle.id}/download", "proposal_only": True,
                 "object_count": len(manifest.get("targets", [])),
                 "unique_evidence_page_count": len(manifest.get("allowed_pages", [])),
                 "web_ai_instruction": manifest.get("instructions"),
-                "writes_final_truth": False, "source_identity_verified": False, "local_ai_verification": None}
+                "writes_final_truth": False, "source_identity_verified": False, "local_ai_verification": None,
+                "reused": reused, "created": created, "cleanup_report": cleanup_report}
 
     @staticmethod
     def _dedupe(items: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:

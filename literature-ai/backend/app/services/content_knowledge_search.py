@@ -9,12 +9,27 @@ from sqlalchemy import ColumnElement, case, or_
 from app.db.models import ContentEvidenceItem, Paper
 
 
+CONTENT_RESULT_VIEW = "content"
+AUDIT_RESULT_VIEW = "audit"
+ALL_RESULT_VIEW = "all"
+RESULT_VIEWS = frozenset({CONTENT_RESULT_VIEW, AUDIT_RESULT_VIEW, ALL_RESULT_VIEW})
+AUDIT_SOURCE_TYPES = frozenset(
+    {
+        "external_analysis_candidate",
+        "external_analysis_run",
+        "dft_audit_candidate",
+        "dft_audit_issue",
+    }
+)
+
+
 def content_item_filters(
     *,
     paper_ids: Sequence[UUID],
     run_id: UUID | None,
     category: str | None,
     terms: Sequence[str],
+    result_view: str,
     include_candidates: bool,
     include_blocked: bool,
     review_status: str | None,
@@ -23,6 +38,10 @@ def content_item_filters(
     problem_status: str | None,
 ) -> list[ColumnElement[bool]]:
     filters: list[ColumnElement[bool]] = [ContentEvidenceItem.paper_id.in_(paper_ids)]
+    if result_view == CONTENT_RESULT_VIEW:
+        filters.append(ContentEvidenceItem.source_type.not_in(AUDIT_SOURCE_TYPES))
+    elif result_view == AUDIT_RESULT_VIEW:
+        filters.append(ContentEvidenceItem.source_type.in_(AUDIT_SOURCE_TYPES))
     if run_id is not None:
         filters.append(ContentEvidenceItem.run_id == run_id)
     if category:
@@ -32,8 +51,8 @@ def content_item_filters(
     if citation_status:
         filters.append(ContentEvidenceItem.citation_status == citation_status)
     if not include_candidates:
-        filters.append(ContentEvidenceItem.source_type != "external_analysis_candidate")
-    if not include_blocked:
+        filters.append(ContentEvidenceItem.source_type.not_in(AUDIT_SOURCE_TYPES))
+    if not include_blocked and result_view != AUDIT_RESULT_VIEW:
         filters.append(ContentEvidenceItem.citation_status != "blocked")
     if source_trust == "verified":
         filters.append(ContentEvidenceItem.source_identity_verified.is_(True))

@@ -26,7 +26,7 @@ class TestBuildOutlineByType:
     def test_type_a_outine(self):
         """A-type outline should contain computational methodology items."""
         w = _make_writer()
-        outline = w._build_outline("CO2 reduction", {}, "A1")
+        outline = w._build_outline("CO2 reduction", {"dft_results": [{"value": -1.0}]}, "A1")
         assert any("Computational methodology" in item or "computational" in item.lower() for item in outline)
         assert any("Electronic structure" in item for item in outline)
 
@@ -45,10 +45,11 @@ class TestBuildOutlineByType:
         assert any("Future" in item for item in outline)
 
     def test_default_outline(self):
-        """Default (None) outline should contain DFT/evidence items."""
+        """Default outline must not claim DFT evidence when none was retrieved."""
         w = _make_writer()
         outline = w._build_outline("CO2 reduction", {}, None)
-        assert any("DFT" in item for item in outline)
+        assert all("DFT" not in item for item in outline)
+        assert any("reviewed evidence" in item.lower() for item in outline)
 
 
 class TestBuildIntroductionByType:
@@ -57,7 +58,7 @@ class TestBuildIntroductionByType:
     def test_type_a_introduction(self):
         """A-type introduction should mention computational/first-principles."""
         w = _make_writer()
-        intro = w._build_introduction("CO2 reduction", {}, "A1")
+        intro = w._build_introduction("CO2 reduction", {"dft_results": [{"value": -1.0}]}, "A1")
         assert "first-principles" in intro or "computational" in intro.lower() or "density functional" in intro
 
     def test_type_c_introduction(self):

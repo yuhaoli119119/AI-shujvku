@@ -21,6 +21,9 @@ from app.services.content_review_bundle_service import (
     ContentReviewBundleService,
 )
 from app.services.content_web_review_bundle_v2_service import ContentWebReviewBundleV2Service
+from app.services.content_web_review_bundle_retention_service import (
+    ContentWebReviewBundleRetentionService,
+)
 from app.services.content_web_review_local_verification_service import (
     ContentWebReviewLocalVerificationService,
 )
@@ -50,6 +53,7 @@ def list_content_knowledge(
         pattern="^(mechanism_evidence|performance_evidence|dft_evidence|figure_table_evidence|material_evidence|method_evidence|writing_material|review_viewpoint|uncertainty_note|draft_evidence_check)$",
     ),
     query: str | None = Query(default=None),
+    result_view: str = Query(default="content", pattern="^(content|audit|all)$"),
     include_candidates: bool = Query(default=True),
     include_blocked: bool = Query(default=False),
     review_status: str | None = Query(
@@ -69,6 +73,7 @@ def list_content_knowledge(
         library_name=library_name,
         category=category,
         query=query,
+        result_view=result_view,
         include_candidates=include_candidates,
         include_blocked=include_blocked,
         review_status=review_status,
@@ -181,12 +186,31 @@ def generate_content_web_review_bundle_v2(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/review-bundles/v2/history")
+def content_web_review_bundle_v2_history(
+    paper_id: UUID = Query(...),
+    module: str | None = Query(
+        default=None,
+        pattern="^(paper_content|abstract|sections|mechanism_knowledge|writing_cards)$",
+    ),
+    limit: int = Query(default=20, ge=1, le=100),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    """Read lifecycle history and estimated JSON content sizes only."""
+    return ContentWebReviewBundleRetentionService(session).history(
+        paper_id=paper_id,
+        module=module,
+        limit=limit,
+    )
+
+
 @router.get("/review-bundles/{bundle_id}/download")
 def download_content_web_review_bundle_v2(
     bundle_id: UUID, session: Session = Depends(get_db_session)
 ) -> StreamingResponse:
     try:
         result = ContentWebReviewBundleV2Service(session).download(bundle_id)
+        session.commit()
         return StreamingResponse(
             BytesIO(result["content"]), media_type="application/zip",
             headers={
@@ -197,6 +221,10 @@ def download_content_web_review_bundle_v2(
             },
         )
     except ValueError as exc:
+        if str(exc) == "content_web_review_v2_bundle_stale":
+            session.commit()
+        else:
+            session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
@@ -267,10 +295,48 @@ def content_writing_plan(payload: dict = Body(...), session: Session = Depends(g
     if not query:
         raise HTTPException(status_code=422, detail="query must not be blank")
     try:
-        paper_ids = [UUID(str(value)) for value in (payload.get("paper_ids") or [])]
+        paper_ids = payload.get("paper_ids") or []
+        if not isinstance(paper_ids, list):
+            raise ValueError("paper_ids must be a list")
+        evidence_types = payload.get("evidence_types")
+        requested_sections = payload.get("requested_sections")
+        if evidence_types is not None and not isinstance(evidence_types, list):
+            raise ValueError("evidence_types must be a list")
+        if requested_sections is not None and not isinstance(requested_sections, list):
+            raise ValueError("requested_sections must be a list")
+
+        def bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+            value = payload.get(name, default)
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be an integer")
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{name} must be an integer") from exc
+            if parsed < minimum or parsed > maximum:
+                raise ValueError(f"{name} must be between {minimum} and {maximum}")
+            return parsed
+
+        candidate_pool_name = (
+            "candidate_pool_per_type"
+            if "candidate_pool_per_type" in payload
+            else "limit_per_type"
+        )
+        candidate_pool = bounded_int(candidate_pool_name, 24, 1, 48)
         # Plans are intentionally read-only: citations retain links to existing
-        # ContentEvidenceItem records and cannot become a new evidence source.
-        result = ContentWritingPlanService(session).build(query=query, paper_ids=paper_ids or None)
+        # safety-gated records and cannot become a new evidence source.
+        result = ContentWritingPlanService(session).build(
+            query=query,
+            paper_ids=paper_ids or None,
+            mode=str(payload.get("mode") or "narrative"),
+            evidence_types=evidence_types,
+            requested_sections=requested_sections,
+            evidence_budget=bounded_int("evidence_budget", 24, 1, 48),
+            batch_size=bounded_int("batch_size", 10, 1, 10),
+            max_evidence_per_paper=bounded_int("max_evidence_per_paper", 3, 1, 8),
+            max_sources_per_claim=bounded_int("max_sources_per_claim", 5, 3, 5),
+            candidate_pool_per_type=candidate_pool,
+        )
         return result
     except (ValueError, TypeError) as exc:
         session.rollback()

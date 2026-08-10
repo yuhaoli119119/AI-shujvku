@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     mcp_allow_unauthenticated: bool = False
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
+    ai_verification_min_confidence: float = Field(default=0.9, ge=0.0, le=1.0)
+    ai_verification_batch_limit: int = Field(default=20, ge=1, le=50)
     owner_api_token: str | None = None
     exports_enabled: bool = False
     local_ingest_roots: str = "/host/users"

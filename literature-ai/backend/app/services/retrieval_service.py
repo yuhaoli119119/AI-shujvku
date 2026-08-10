@@ -69,6 +69,7 @@ class RetrievalService:
                 limit_per_type=payload.limit_per_type,
                 target_paper_type=payload.target_paper_type,
                 paper_type_filter=normalize_paper_type_filter(payload.target_paper_type),
+                mode="comprehensive",
             )
             items = self._flatten_retrieved(retrieved)
             items = self._merge_content_knowledge(items, payload)

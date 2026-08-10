@@ -575,6 +575,7 @@ class ContentWebReviewLocalVerificationService:
             "target_id": target["target_id"],
             "field_name": target["field_name"],
             "value": applied_value,
+            "linked_figures": target.get("linked_figures") or [],
         })
         return self._store_result(
             bundle=bundle,

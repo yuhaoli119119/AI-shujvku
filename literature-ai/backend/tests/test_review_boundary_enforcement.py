@@ -405,10 +405,11 @@ def test_catalyst_sample_create_candidate_materializes_and_reuses_exact_identity
             run = service.import_run(paper.id, "ai_a", "AI A", None, payload)
             materialized = service.materialize_candidates(run.id, explicit_all=True)
             assert materialized.created_corrections == 1
-            assert materialized.auto_applied_corrections == 1
+            assert materialized.auto_applied_corrections == 0
             correction = session.query(PaperCorrection).one()
             assert correction.operation == "create"
-            assert correction.status == "approved"
+            assert correction.status == "pending"
+            correction = ReviewService(session).approve_correction(correction.id, reviewer="owner")
             first_id = correction.evidence_payload["sample_resolution"]["catalyst_sample_id"]
             assert correction.evidence_payload["sample_resolution"]["status"] == "create"
 
@@ -538,7 +539,7 @@ def test_approve_catalyst_sample_correction_requires_pdf_anchor(tmp_path):
 
 # ---- Test 7: Manual verified save requires evidence reference ----
 
-def test_mark_verified_requires_evidence_reference(tmp_path):
+def test_mark_verified_requires_real_pdf_and_exact_locator(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -558,11 +559,18 @@ def test_mark_verified_requires_evidence_reference(tmp_path):
             service = ExtractionReviewService(session)
             error_raised = False
             try:
-                service.mark_verified(paper.id, payload)
+                service.mark_verified(
+                    paper.id,
+                    payload,
+                    verification_actor_type="human",
+                    actor_name="owner",
+                    source_label="owner_api_token",
+                )
             except ValueError as exc:
                 error_raised = True
-                assert "missing_evidence_reference" in str(exc)
-            assert error_raised, "mark_verified should have raised ValueError for missing evidence reference"
+                assert "missing_real_pdf" in str(exc)
+                assert "locator_not_exact_page:missing_locator" in str(exc)
+            assert error_raised, "mark_verified should reject a missing real PDF and exact locator"
     finally:
         engine.dispose()
 
@@ -589,7 +597,13 @@ def test_mark_verified_requires_evidence_text(tmp_path):
             service = ExtractionReviewService(session)
             error_raised = False
             try:
-                service.mark_verified(paper.id, payload)
+                service.mark_verified(
+                    paper.id,
+                    payload,
+                    verification_actor_type="human",
+                    actor_name="owner",
+                    source_label="owner_api_token",
+                )
             except ValueError as exc:
                 error_raised = True
                 assert "missing_evidence_text" in str(exc)

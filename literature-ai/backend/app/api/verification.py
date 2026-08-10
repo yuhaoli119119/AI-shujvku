@@ -3,11 +3,12 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
+from app.security.owner import require_authenticated_owner_request
 from app.services.verification_service import VerificationService
 
 router = APIRouter()
@@ -23,17 +24,20 @@ class PromotionRequest(BaseModel):
 async def promote_verification(
     review_id: UUID,
     payload: PromotionRequest,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
     if not payload.confirm_human_review:
         raise HTTPException(status_code=400, detail="Explicit confirmation is required.")
+    identity = require_authenticated_owner_request(request)
         
     try:
         review, audit_id = VerificationService(session).promote(
             review_id=review_id,
             target_status=payload.target_status,
             reviewed_value=payload.reviewed_value,
-            reviewer=payload.reviewer,
+            actor_name=identity.actor,
+            actor_source=identity.source,
         )
 
         return {

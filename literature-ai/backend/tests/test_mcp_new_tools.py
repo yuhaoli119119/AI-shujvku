@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 
 import json
@@ -90,12 +91,18 @@ class TestRetrieveEvidence:
 
         assert "results" in result
         assert "sections" in result["results"]
-        assert "dft_results" in result["results"]
+        assert "dft_results" not in result["results"]
+        assert result["retrieval_intent"] == "narrative"
+        assert result["dft_included"] is False
+        assert "catalyst_samples" in result["selected_evidence_types"]
         mock_retriever_instance.retrieve.assert_called_once_with(
             query="oxygen reduction reaction catalyst",
             paper_ids=None,
             limit_per_type=5,
             target_paper_type=None,
+            evidence_types=None,
+            mode=None,
+            requested_sections=None,
         )
 
     @patch("app.mcp.server.session_scope")
@@ -119,18 +126,158 @@ class TestRetrieveEvidence:
             "sections": [mock_item],
             "dft_results": [mock_item],
             "mechanism_claims": [mock_item],
+            "figure_cards": [mock_item],
+            "catalyst_samples": [mock_item],
         }
         MockRetriever.return_value = mock_retriever_instance
 
         result = retrieve_evidence(
             query="test",
-            evidence_types=["dft_results", "mechanism_claims"],
+            evidence_types=["dft_results", "mechanism_claims", "figure_cards", "catalyst_samples"],
         )
 
         assert "evidence_types_requested" in result
         assert "dft_results" in result["results"]
         assert "mechanism_claims" in result["results"]
+        assert "figure_cards" in result["results"]
+        assert "catalyst_samples" in result["results"]
         assert "sections" not in result["results"]
+        assert result["selected_evidence_types"] == [
+            "catalyst_samples",
+            "dft_results",
+            "mechanism_claims",
+            "figure_cards",
+        ]
+        mock_retriever_instance.retrieve.assert_called_once_with(
+            query="test",
+            paper_ids=None,
+            limit_per_type=5,
+            target_paper_type=None,
+            evidence_types=["dft_results", "mechanism_claims", "figure_cards", "catalyst_samples"],
+            mode=None,
+            requested_sections=None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# plan_multi_paper_evidence
+# ---------------------------------------------------------------------------
+
+class TestPlanMultiPaperEvidence:
+    def test_tool_is_registered_with_bounded_planning_parameters(self):
+        from app.mcp.server import mcp_server
+
+        tools = asyncio.run(mcp_server.list_tools())
+        tool = next(item for item in tools if item.name == "plan_multi_paper_evidence")
+        properties = tool.inputSchema["properties"]
+
+        assert {"query", "paper_ids"}.issubset(tool.inputSchema["required"])
+        assert {
+            "evidence_types",
+            "mode",
+            "requested_sections",
+            "evidence_budget",
+            "batch_size",
+            "max_evidence_per_paper",
+            "max_sources_per_claim",
+            "candidate_pool_per_type",
+        }.issubset(properties)
+
+    def test_read_only_protocol_authentication_and_planner_parameter_downpush(self):
+        from app.mcp.server import plan_multi_paper_evidence
+
+        paper_id = str(uuid4())
+        fake_plan = {
+            "schema_version": "multi_paper_evidence_plan.v1",
+            "plan_id": "mpep_test",
+            "plan_fingerprint": "abc123",
+            "query": "compare mechanisms",
+            "retrieval_intent": "comparison",
+            "retrieval_mode": "comparison",
+            "selected_evidence_types": ["mechanism_claims"],
+            "dft_included": False,
+            "dft_included_reason": "no_dft_intent",
+            "batches": [
+                {
+                    "batch_id": "batch_001_test",
+                    "batch_index": 1,
+                    "paper_ids": [paper_id],
+                    "paper_codes": ["B0001"],
+                    "selected_evidence_ids": [],
+                    "budget": {"allocated": 0, "used": 0, "remaining": 0},
+                }
+            ],
+            "selected_evidence": [],
+            "claim_evidence_matrix": [],
+            "coverage": {"coverage_complete": False, "by_paper": []},
+            "database_writes": False,
+            "read_only": {"database_writes": False, "persistence": "none"},
+        }
+        batch_context = {
+            "batch_id": "batch_001_test",
+            "evidence_cards": [],
+            "full_text_included": False,
+            "database_writes": False,
+        }
+
+        with (
+            patch("app.mcp.server.require_mcp_capability") as mock_auth,
+            patch("app.mcp.server.get_settings") as mock_settings,
+            patch("app.mcp.server.session_scope") as mock_session_scope,
+            patch("app.mcp.server.get_embedding_service") as mock_embedding,
+            patch("app.mcp.server.Retriever") as MockRetriever,
+            patch("app.mcp.server.MultiPaperEvidencePlanner") as MockPlanner,
+            patch("app.mcp.server.PaperWriterPromptBuilder") as MockPromptBuilder,
+        ):
+            mock_settings.return_value = _make_mock_settings()
+            mock_session = MagicMock()
+            mock_session_scope.return_value.__enter__ = MagicMock(return_value=mock_session)
+            mock_session_scope.return_value.__exit__ = MagicMock(return_value=False)
+            MockPlanner.return_value.plan.return_value = fake_plan
+            MockPromptBuilder.return_value.build_batch_prompt_context.return_value = batch_context
+
+            result = plan_multi_paper_evidence(
+                query="compare mechanisms",
+                paper_ids=[paper_id],
+                evidence_types=["mechanism_claims"],
+                mode="comparison",
+                requested_sections=["discussion"],
+                evidence_budget=12,
+                batch_size=5,
+                max_evidence_per_paper=2,
+                max_sources_per_claim=3,
+                candidate_pool_per_type=16,
+            )
+
+        mock_auth.assert_called_once_with("read_papers")
+        MockRetriever.assert_called_once_with(
+            mock_session,
+            embedding_dimension=64,
+            embedding=mock_embedding.return_value,
+        )
+        MockPlanner.assert_called_once_with(
+            mock_session,
+            retriever=MockRetriever.return_value,
+        )
+        MockPlanner.return_value.plan.assert_called_once_with(
+            query="compare mechanisms",
+            paper_ids=[paper_id],
+            evidence_types=["mechanism_claims"],
+            mode="comparison",
+            requested_sections=["discussion"],
+            evidence_budget=12,
+            batch_size=5,
+            max_evidence_per_paper=2,
+            max_sources_per_claim=3,
+            candidate_pool_per_type=16,
+        )
+        MockPromptBuilder.return_value.build_batch_prompt_context.assert_called_once_with(
+            fake_plan,
+            "batch_001_test",
+        )
+        assert result["database_writes"] is False
+        assert result["read_only"]["persistence"] == "none"
+        assert result["batch_prompt_contexts"] == [batch_context]
 
 
 # ---------------------------------------------------------------------------

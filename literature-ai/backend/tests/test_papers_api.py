@@ -54,7 +54,15 @@ def _add_object_review_audit(session, row: DFTResult, *, source: str = "local_ai
     )
 
 
+def _write_test_pdf(paper: Paper) -> None:
+    pdf_file = Path(get_settings().storage_root) / str(paper.pdf_path)
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
+    pdf_file.write_bytes(b"%PDF-1.4\nDFT verification fixture\n%%EOF\n")
+
+
 def _verify_dft_ready(session, row: DFTResult, *, page: int) -> None:
+    paper = session.get(Paper, row.paper_id)
+    _write_test_pdf(paper)
     verification = DFTResultReviewService(session).verify_result(
         paper_id=row.paper_id,
         result_id=row.id,
@@ -63,8 +71,9 @@ def _verify_dft_ready(session, row: DFTResult, *, page: int) -> None:
         reviewer_note="Verified against the exact-page test evidence.",
         expected_write_versions={"value": 1},
         evidence_payload={"page": page, "quoted_text": row.evidence_text},
-        verification_actor_type="ai",
-        source_label="correlation_test",
+        verification_actor_type="human",
+        actor_name="owner",
+        source_label="owner_api_token",
         commit=False,
     )
     assert verification["export_safety"]["eligible"] is True
@@ -1110,7 +1119,7 @@ def test_codex_context_endpoint_returns_candidate_aware_bundle(setup_test_db):
     assert sample_data["context"]["source_assets"]["pdf_url"].endswith(f"/api/papers/{paper_id}/pdf")
     assert sample_data["context"]["item"]["sample_identity_status"] == "usable_identity"
     assert sample_data["context"]["item"]["evidence_anchor_status"] == "sufficient"
-    assert sample_data["context"]["item"]["dependent_dft_summary"]["total"] == 1
+    assert sample_data["context"]["item"]["dependent_dft_summary"]["total"] == 0
     assert sample_data["context"]["correction_history"]["count"] == 1
     assert sample_data["context"]["correction_history"]["items"][0]["evidence_anchor"]["figure"] == "Figure 1"
     assert any("open the original pdf" in action.lower() for action in sample_data["context"]["recommended_next_actions"])
@@ -1357,7 +1366,12 @@ def test_paper_knowledge_context_uses_section_fallback_and_external_candidates(s
     assert codex["structured_candidates"]["knowledge_candidates"]
 
 
-def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
+def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db, monkeypatch):
+    monkeypatch.setenv("LITAI_OWNER_API_TOKEN", "owner-secret")
+    get_settings.cache_clear()
+    pdf_file = Path(get_settings().storage_root) / "dft-verify.pdf"
+    pdf_file.parent.mkdir(parents=True, exist_ok=True)
+    pdf_file.write_bytes(b"%PDF-1.4\nDFT verification test\n%%EOF\n")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     with Session() as session:
@@ -1426,7 +1440,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         dft_result_id = dft_result.id
         missing_locator_result_id = missing_locator_result.id
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "owner-secret"})
     not_confirmed = client.post(
         f"/api/papers/{paper_id}/dft-results/{dft_result_id}/verify",
         json={"confirm_reviewed_against_pdf": False},
@@ -1438,7 +1452,7 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         json={"confirm_reviewed_against_pdf": True, "reviewer": "codex_test"},
     )
     assert missing_locator.status_code == 400
-    assert "missing_evidence_reference" in missing_locator.json()["detail"]
+    assert "locator_not_exact_page:missing_locator" in missing_locator.json()["detail"]
 
     verified = client.post(
         f"/api/papers/{paper_id}/dft-results/{dft_result_id}/verify",
@@ -1518,7 +1532,8 @@ def test_verify_dft_result_promotes_candidate_to_exportable(setup_test_db):
         assert audit.target_id == str(dft_result_id)
 
 
-def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
+def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "owner_api_token", "papers-owner-secret")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     with Session() as session:
@@ -1553,7 +1568,7 @@ def test_dft_review_queue_flags_suspicious_real_world_candidates(setup_test_db):
         paper_id = paper.id
         row_id = row.id
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "papers-owner-secret"})
     response = client.get("/api/papers/export/dft-review-queue")
     assert response.status_code == 200
     queue_row = response.json()["rows"][0]
@@ -1751,7 +1766,8 @@ def test_manual_dft_update_applies_audited_changes_and_invalidates_review(setup_
         assert audit.payload["after"]["value"] == -1.25
 
 
-def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_test_db):
+def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_test_db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "owner_api_token", "papers-owner-secret")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     with Session() as session:
@@ -1789,7 +1805,7 @@ def test_reject_dft_result_requires_and_accepts_existing_review_versions(setup_t
         paper_id = str(paper.id)
         row_id = str(row.id)
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "papers-owner-secret"})
 
     missing_version = client.post(
         f"/api/papers/{paper_id}/dft-results/{row_id}/reject",
@@ -2905,7 +2921,8 @@ def test_visuals_dft_matrix_uses_catalyst_adsorbate_categories(setup_test_db):
     assert rows[("Ni / graphdiyne", "CO2")]["reaction_category"] == "CO2RR"
 
 
-def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(setup_test_db):
+def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(setup_test_db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "owner_api_token", "papers-owner-secret")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     rows_to_verify = []
@@ -2924,6 +2941,7 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
             )
             session.add(paper)
             session.flush()
+            _write_test_pdf(paper)
             catalyst = CatalystSample(
                 paper_id=paper.id,
                 name=f"Fe-GDY-{index}",
@@ -2977,7 +2995,7 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
                 rows_to_verify.append((paper.id, row.id))
         session.commit()
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "papers-owner-secret"})
     before_response = client.get(
         "/api/visuals/correlation-pairs",
         params={
@@ -3040,7 +3058,8 @@ def test_visuals_descriptor_correlation_uses_only_reviewed_paired_dft_results(se
     assert {point["match_scope"] for point in pairs["points"]} == {"direct_catalyst"}
 
 
-def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setup_test_db):
+def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setup_test_db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "owner_api_token", "papers-owner-secret")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     rows_to_verify = []
@@ -3059,6 +3078,7 @@ def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setu
             )
             session.add(paper)
             session.flush()
+            _write_test_pdf(paper)
             catalyst = CatalystSample(
                 paper_id=paper.id,
                 name=f"Pt-surface-{index}",
@@ -3111,7 +3131,7 @@ def test_visuals_descriptor_correlation_pairs_same_material_across_sections(setu
                 rows_to_verify.append((paper.id, row.id))
         session.commit()
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "papers-owner-secret"})
     for paper_id, row_id in rows_to_verify:
         verify_response = client.post(
             f"/api/papers/{paper_id}/dft-results/{row_id}/verify",
@@ -3349,7 +3369,8 @@ def test_visuals_total_correlation_matrix_pairs_energy_variables(setup_test_db):
     assert rds_pairs["x_property"] == "rds_energy"
 
 
-def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pairs(setup_test_db):
+def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pairs(setup_test_db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "owner_api_token", "papers-owner-secret")
     engine = setup_test_db
     Session = sessionmaker(bind=engine)
     rows_to_verify = []
@@ -3368,6 +3389,7 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
             )
             session.add(paper)
             session.flush()
+            _write_test_pdf(paper)
             catalyst = CatalystSample(
                 paper_id=paper.id,
                 name=f"Fe-GDY-{index}",
@@ -3421,7 +3443,7 @@ def test_visuals_descriptor_correlation_falls_back_to_exploratory_same_sample_pa
                 rows_to_verify.append((paper.id, row.id))
         session.commit()
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"X-LitAI-Owner-Token": "papers-owner-secret"})
     for paper_id, row_id in rows_to_verify:
         verify_response = client.post(
             f"/api/papers/{paper_id}/dft-results/{row_id}/verify",

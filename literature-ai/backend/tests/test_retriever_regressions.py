@@ -1,6 +1,7 @@
 import os
 import pytest
 from app.rag.retriever import Retriever
+from app.services.content_writing_plan_service import ContentWritingPlanService
 from app.services.embedding import EmbeddingUnavailableError
 from app.services.retrieval_service import RetrievalService
 from app.schemas.retrieval import RetrievalSearchRequest
@@ -23,6 +24,7 @@ from app.db.models import (
     EvidenceSpan,
     ExtractionFieldReview,
     FigureDataPoint,
+    MechanismClaim,
     Paper,
     PaperFigure,
     PaperSection,
@@ -279,37 +281,98 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
                 evidence_text="Candidate-only Li2S6 adsorption energy was -0.88 eV.",
                 candidate_status="candidate",
             )
+            rejected_dft = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                adsorbate="Li2S8",
+                property_type="adsorption_energy",
+                value=-9.99,
+                unit="eV",
+                source_section="Results",
+                source_figure="Figure 2",
+                evidence_text="Rejected Li2S8 adsorption energy was -9.99 eV.",
+            )
+            card_evidence_texts = (
+                "Existing Li-S DFT studies lack reliable Fe-N4 Li2S4 adsorption comparisons.",
+                "Use Fe-N4 active sites to regulate Li2S4 adsorption.",
+                "Verified writing card: Fe-N4 improves Li2S4 adsorption energetics.",
+            )
+            card_sources = [
+                MechanismClaim(
+                    paper_id=paper.id,
+                    claim_type="writing_support",
+                    claim_text=text,
+                    evidence_text=text,
+                    evidence_types=["writing_card_support"],
+                )
+                for text in card_evidence_texts
+            ]
+            session.add_all(card_sources)
+            session.flush()
             writing_card = WritingCard(
                 paper_id=paper.id,
                 paper_type="A_dft",
                 research_gap="Existing Li-S DFT studies lack reliable Fe-N4 Li2S4 adsorption comparisons.",
                 proposed_solution="Use Fe-N4 active sites to regulate Li2S4 adsorption.",
                 core_hypothesis="Verified writing card: Fe-N4 improves Li2S4 adsorption energetics.",
-                    evidence_chain=[
+                abstract_logic="legacyexclusiveabstracttoken appears only in retired abstract logic",
+                introduction_logic="legacyexclusiveintroductiontoken appears only in retired introduction logic",
+                discussion_logic="legacyexclusivediscussiontoken appears only in retired discussion logic",
+                evidence_chain=[
                         {
-                            "text": "Existing Li-S DFT studies lack reliable Fe-N4 Li2S4 adsorption comparisons.",
+                            "text": card_evidence_texts[0],
                             "source": "Introduction",
                             "page": 6,
                             "locator_status": "exact_page",
                             "supports_fields": ["research_gap"],
+                            "source_target_type": "mechanism_claims",
+                            "source_target_id": str(card_sources[0].id),
                         },
                         {
-                            "text": "Use Fe-N4 active sites to regulate Li2S4 adsorption.",
+                            "text": card_evidence_texts[1],
                             "source": "Introduction",
                             "page": 6,
                             "locator_status": "exact_page",
                             "supports_fields": ["proposed_solution"],
+                            "source_target_type": "mechanism_claims",
+                            "source_target_id": str(card_sources[1].id),
                         },
                         {
-                            "text": "Verified writing card: Fe-N4 improves Li2S4 adsorption energetics.",
+                            "text": card_evidence_texts[2],
                             "source": "Introduction",
                             "page": 6,
                             "locator_status": "exact_page",
                             "supports_fields": ["core_hypothesis"],
+                            "source_target_type": "mechanism_claims",
+                            "source_target_id": str(card_sources[2].id),
                         },
                 ],
             )
-            session.add_all([raw_section, figure, dft, candidate_dft, writing_card])
+            blocked_writing_card = WritingCard(
+                paper_id=paper.id,
+                paper_type="A_dft",
+                research_gap="Blocked Fe-N4 Li2S4 writing card must never enter planning.",
+                proposed_solution="Blocked unreviewed solution.",
+                core_hypothesis="Blocked unreviewed hypothesis.",
+                evidence_chain=[
+                    {
+                        "text": "Blocked Fe-N4 Li2S4 writing card must never enter planning.",
+                        "source": "Introduction",
+                        "page": 7,
+                        "locator_status": "exact_page",
+                        "supports_fields": ["research_gap"],
+                    },
+                ],
+            )
+            session.add_all([
+                raw_section,
+                figure,
+                dft,
+                candidate_dft,
+                rejected_dft,
+                writing_card,
+                blocked_writing_card,
+            ])
             session.flush()
             session.add(
                 EvidenceSpan(
@@ -333,8 +396,41 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
                     evidence_text=dft.evidence_text,
                 )
             )
+            session.add(
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(rejected_dft.id),
+                    field_name="value",
+                    reviewer_status="rejected",
+                    target_resolution_status="active",
+                    evidence_text=rejected_dft.evidence_text,
+                )
+            )
             session.add_all(
                 [
+                    ExtractionFieldReview(
+                        paper_id=paper.id,
+                        target_type="writing_cards",
+                        target_id=str(writing_card.id),
+                        field_name="evidence_chain",
+                        reviewed_value=writing_card.evidence_chain,
+                        reviewer_status="verified",
+                        target_resolution_status="active",
+                        evidence_text=card_evidence_texts[0],
+                    ),
+                    EvidenceLocator(
+                        paper_id=paper.id,
+                        source_type="pdf",
+                        target_type="writing_cards",
+                        target_id=str(writing_card.id),
+                        field_name="evidence_chain",
+                        evidence_text=card_evidence_texts[0],
+                        page=6,
+                        locator_status="exact_page",
+                        locator_confidence=1.0,
+                        parser_source="test_review",
+                    ),
                     ExtractionFieldReview(
                         paper_id=paper.id,
                         target_type="writing_cards",
@@ -359,6 +455,32 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
                     ),
                 ]
             )
+            for source, evidence_text in zip(card_sources, card_evidence_texts):
+                session.add_all(
+                    [
+                        ExtractionFieldReview(
+                            paper_id=paper.id,
+                            target_type="mechanism_claims",
+                            target_id=str(source.id),
+                            field_name="claim_text",
+                            reviewer_status="verified",
+                            target_resolution_status="active",
+                            evidence_text=evidence_text,
+                        ),
+                        EvidenceLocator(
+                            paper_id=paper.id,
+                            source_type="pdf",
+                            target_type="mechanism_claims",
+                            target_id=str(source.id),
+                            field_name="claim_text",
+                            evidence_text=evidence_text,
+                            page=6,
+                            locator_status="exact_page",
+                            locator_confidence=1.0,
+                            parser_source="test_review",
+                        ),
+                    ]
+                )
             session.commit()
 
             retrieved = Retriever(session).retrieve("Fe-N4 Li2S4 adsorption energy Figure 2", [paper.id], 5)
@@ -385,6 +507,7 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
             assert retrieved["dft_results"][0]["page"] == 6
             assert retrieved["dft_results"][0]["review_status"] == "verified"
             assert all(item["object_id"] != candidate_dft.id for item in retrieved["dft_results"])
+            assert all(item["object_id"] != rejected_dft.id for item in retrieved["dft_results"])
             assert retrieved["writing_cards"]
             assert retrieved["writing_cards"][0]["object_id"] == writing_card.id
             assert retrieved["writing_cards"][0]["source_type"] == "writing_card"
@@ -392,6 +515,60 @@ def test_retriever_returns_safe_cards_and_marks_raw_sections_discovery_only():
             assert retrieved["writing_cards"][0]["paper_code"] == "A0002"
             assert retrieved["writing_cards"][0]["page"] == 6
             assert retrieved["writing_cards"][0]["review_status"] == "safe_verified"
+            assert retrieved["writing_cards"][0]["can_use_for_writing"] is True
+            assert retrieved["writing_cards"][0]["can_use_for_citation"] is False
+            assert all(
+                item["object_id"] != blocked_writing_card.id
+                for item in retrieved["writing_cards"]
+            )
+
+            writing_plan = ContentWritingPlanService(session).build(
+                query="Verified writing card Fe-N4 improves Li2S4",
+                paper_ids=[paper.id],
+                evidence_types=["writing_cards"],
+            )
+            assert len(writing_plan["selected_evidence"]) == 1
+            assert writing_plan["selected_evidence"][0]["object_id"] == str(writing_card.id)
+            assert writing_plan["selected_evidence"][0]["can_use_for_writing"] is True
+            assert writing_plan["selected_evidence"][0]["can_use_for_citation"] is False
+            assert writing_plan["citation_plan"] == []
+            assert writing_plan["evidence_pack"] == []
+            assert len(writing_plan["writing_context"]) == 1
+            assert writing_plan["writing_context"][0]["content_item_id"] == (
+                writing_plan["selected_evidence"][0]["evidence_id"]
+            )
+            assert all(
+                item["object_id"] != str(blocked_writing_card.id)
+                for item in writing_plan["selected_evidence"]
+            )
+
+            legacy_only = Retriever(session).retrieve(
+                "legacyexclusiveabstracttoken",
+                [paper.id],
+                5,
+            )
+            assert legacy_only["writing_cards"] == []
+
+            requested_dft = Retriever(session).retrieve(
+                "summarize this paper",
+                [paper.id],
+                5,
+                requested_sections=["dft_results"],
+            )
+            assert [item["object_id"] for item in requested_dft["dft_results"]] == [dft.id]
+
+            explicit_dft = Retriever(session).retrieve(
+                "",
+                [paper.id],
+                5,
+                evidence_types=["dft_results"],
+            )
+            assert [item["object_id"] for item in explicit_dft["dft_results"]] == [dft.id]
+            assert all(
+                not items
+                for evidence_type, items in explicit_dft.items()
+                if evidence_type != "dft_results"
+            )
 
         engine.dispose()
 
