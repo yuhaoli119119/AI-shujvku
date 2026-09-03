@@ -22,12 +22,13 @@ echo "==> [2/4] 同步代码到运行目录（保护 .env / data / docling_cache
 rsync -av --delete \
   --exclude '.env' \
   --exclude 'data/' \
+  --exclude 'node_modules/' \
   --exclude '**/__pycache__/' \
   "$SRC/literature-ai/" "$RUN/"
 
-echo "==> [3/4] 重建应用容器（backend / worker / worker-pdf / owner-gateway / share-gateway）"
+echo "==> [3/4] 强制重建应用容器（backend / worker / worker-pdf / owner-gateway / share-gateway），确保加载新代码与 .env"
 cd "$RUN"
-docker compose up -d --no-deps backend worker worker-pdf owner-gateway share-gateway
+docker compose up -d --no-deps --force-recreate backend worker worker-pdf owner-gateway share-gateway
 
 echo "==> [4/4] 等待健康检查"
 sleep 5
