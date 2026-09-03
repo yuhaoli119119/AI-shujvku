@@ -1,11 +1,14 @@
 /* ============================================================
-   只读文献知识库 · readonly frontend
+   只读文献知识库 · readonly frontend（融合版）
+   - 公开模式：整库浏览检索（/api/papers/...）
+   - 分享模式：?token=xxx，仅访问 token 授权范围（/api/share/...）
    本文件只发起 GET 请求；不存在任何新增/修改/删除类操作。
    ============================================================ */
 "use strict";
 
 const PAGE_SIZE = 20;
 const state = {
+  shareToken: "",
   libraries: [],
   library: "",
   q: "",
@@ -19,6 +22,7 @@ const state = {
   selectedId: null,
   detail: null,
   dftLoadedAll: false,
+  correctionsLoaded: false,
 };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -88,6 +92,9 @@ async function loadLibraries() {
 }
 
 function listQuery() {
+  if (state.shareToken) {
+    return `/api/share/${encodeURIComponent(state.shareToken)}/papers?limit=${PAGE_SIZE}&offset=${state.offset}`;
+  }
   const p = new URLSearchParams();
   if (state.library) p.set("library_name", state.library);
   if (state.q.trim()) p.set("q", state.q.trim());
@@ -101,14 +108,17 @@ function listQuery() {
 }
 
 async function loadPapers(reset) {
-  if (reset) state.offset = 0;
+  if (reset) { state.offset = 0; state.correctionsLoaded = false; }
   const list = $("#paperList");
   list.innerHTML = '<div class="list-skeleton">正在检索文献…</div>';
   try {
-    const rows = await api(listQuery());
-    state.papers = Array.isArray(rows) ? rows : [];
-    // 筛选/搜索时服务端不返回总数，用返回长度推断
-    if (state.q.trim() || state.paperType || state.hasPdf) {
+    const resp = await api(listQuery());
+    // 兼容公开模式(数组)与分享模式({items,limit,offset})
+    const rows = Array.isArray(resp) ? resp : (resp.items || []);
+    state.papers = rows;
+    if (state.shareToken) {
+      state.total = state.offset + state.papers.length + (state.papers.length === PAGE_SIZE ? 1 : 0);
+    } else if (state.q.trim() || state.paperType || state.hasPdf) {
       state.total = state.offset + state.papers.length + (state.papers.length === PAGE_SIZE ? 1 : 0);
     } else {
       const cur = state.libraries.find(l => l.name === state.library);
@@ -162,24 +172,36 @@ function renderPager() {
   const end = state.offset + state.papers.length;
   const curPage = Math.floor(state.offset / PAGE_SIZE) + 1;
   const pages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
-  $("#listMeta").textContent =
-    `${esc(state.library)} · 共 ${state.total} 篇 · 显示 ${start}–${end}`;
+  const scopeLabel = state.shareToken ? "分享范围" : esc(state.library);
+  $("#listMeta").textContent = `${scopeLabel} · 共 ${state.total} 篇 · 显示 ${start}–${end}`;
   $("#pageInfo").textContent = `${curPage} / ${pages}`;
   $("#prevPage").disabled = state.offset === 0;
   $("#nextPage").disabled = state.papers.length < PAGE_SIZE;
 }
 
 /* ---------------- 详情 ---------------- */
+function detailUrl(id) {
+  return state.shareToken
+    ? `/api/share/${encodeURIComponent(state.shareToken)}/papers/${encodeURIComponent(id)}?mode=full`
+    : `/api/papers/${encodeURIComponent(id)}?mode=full`;
+}
+function correctionsUrl(id) {
+  return state.shareToken
+    ? `/api/share/${encodeURIComponent(state.shareToken)}/corrections/${encodeURIComponent(id)}`
+    : `/api/papers/${encodeURIComponent(id)}/corrections`;
+}
+
 async function selectPaper(id) {
   state.selectedId = id;
   state.dftLoadedAll = false;
+  state.correctionsLoaded = false;
   renderList();
   $("#detailEmpty").hidden = true;
   $("#detailBody").hidden = false;
   setTab("overview");
   $("#pOverview").innerHTML = '<div class="loading">正在加载文献详情…</div>';
   try {
-    const d = await api(`/api/papers/${encodeURIComponent(id)}?mode=full`);
+    const d = await api(detailUrl(id));
     state.detail = d;
     renderDetail();
     syncUrl();
@@ -193,6 +215,12 @@ function metaItem(k, v) {
 }
 function statBadge(n, label, cls = "") {
   return `<span class="badge ${cls}">${label} ${n ?? 0}</span>`;
+}
+function statusPill(s) {
+  const v = String(s || "").toLowerCase();
+  if (/(ml_ready|verified|safe|export|ready|approved|完成)/.test(v)) return `<span class="pill ok">${esc(s)}</span>`;
+  if (/(candidate|pending|system|待|requires)/.test(v)) return `<span class="pill wait">${esc(s)}</span>`;
+  return s ? `<span class="pill gray">${esc(s)}</span>` : "";
 }
 
 function renderDetail() {
@@ -223,6 +251,7 @@ function renderDetail() {
     statBadge((d.tables || []).length, "数据表", "gray"),
     statBadge((d.dft_results_items || []).length, "DFT 条目"),
     statBadge((d.mechanism_claims_items || []).length, "机理论断", "gray"),
+    statBadge((d.paper_notes || []).length, "批注"),
   ].join("");
   const pdfBtn = $("#dPdfBtn");
   if (d.pdf_exists) {
@@ -237,7 +266,10 @@ function renderDetail() {
   renderTables();
   renderDft(false);
   renderMechanism();
+  renderNotes();
   renderTranslation();
+  // corrections 懒加载，切换到该 tab 时再请求
+  $("#pCorrections").innerHTML = '<div class="loading">切换到此标签页时加载更正历史…</div>';
 }
 
 function renderOverview() {
@@ -306,13 +338,6 @@ function renderTables() {
       <h3>${esc(t.caption || "数据表")} <span class="muted small">${t.page ? "· 第 " + t.page + " 页" : ""}</span></h3>
       ${mdTable(t.markdown_content)}
     </div>`).join("");
-}
-
-function statusPill(s) {
-  const v = String(s || "").toLowerCase();
-  if (/(ml_ready|verified|safe|export|ready|完成)/.test(v)) return `<span class="pill ok">${esc(s)}</span>`;
-  if (/(candidate|pending|system|待)/.test(v)) return `<span class="pill wait">${esc(s)}</span>`;
-  return s ? `<span class="pill gray">${esc(s)}</span>` : "";
 }
 
 function renderDft(loadedAll) {
@@ -389,6 +414,51 @@ function renderMechanism() {
     </div>`).join("");
 }
 
+/* ---------- Notes (AI 批注) ---------- */
+function renderNotes() {
+  const notes = state.detail.paper_notes || [];
+  if (!notes.length) { $("#pNotes").innerHTML = '<div class="empty-block">暂无 AI 批注</div>'; return; }
+  $("#pNotes").innerHTML = notes.map(n => `
+    <div class="note-card">
+      <div class="note-head">
+        <span class="note-source">${esc(n.source || "AI")}</span>
+        ${n.field_name ? `<span class="note-field">${esc(n.field_name)}</span>` : ""}
+        ${n.section_title ? `<span class="note-loc">📑 ${esc(n.section_title)}${n.page ? " · p." + n.page : ""}</span>` : (n.page ? `<span class="note-loc">p.${esc(n.page)}</span>` : "")}
+      </div>
+      ${n.quoted_text ? `<div class="note-quote">${esc(n.quoted_text)}</div>` : ""}
+      <div class="note-content">${esc(n.content || "")}</div>
+    </div>`).join("");
+}
+
+/* ---------- Corrections (更正历史，懒加载) ---------- */
+async function loadCorrections() {
+  if (state.correctionsLoaded) return;
+  state.correctionsLoaded = true;
+  const id = state.detail.id;
+  try {
+    const r = await api(correctionsUrl(id));
+    const items = r.items || (Array.isArray(r) ? r : []);
+    const total = r.total != null ? r.total : items.length;
+    if (!items.length) { $("#pCorrections").innerHTML = '<div class="empty-block">暂无更正记录</div>'; return; }
+    $("#pCorrections").innerHTML = `
+      <div class="corr-toolbar"><span class="muted small">共 ${total} 条更正记录</span></div>
+      ${items.map(c => `
+        <div class="corr-card">
+          <div class="corr-head">
+            <span class="corr-field">${esc(c.field_name || "字段")}</span>
+            <span class="corr-source">${esc(c.source || "")}</span>
+            ${statusPill(c.status)}
+            <span class="corr-date">${esc((c.created_at || "").slice(0, 10))}</span>
+          </div>
+          <div class="corr-value">${esc(c.proposed_value != null ? String(c.proposed_value) : "")}</div>
+          ${c.review_comment ? `<div class="corr-comment">💬 ${esc(c.review_comment)}</div>` : ""}
+        </div>`).join("")}`;
+  } catch (e) {
+    state.correctionsLoaded = false;
+    $("#pCorrections").innerHTML = `<div class="empty-block">更正记录加载失败：${esc(e.message)}</div>`;
+  }
+}
+
 function renderTranslation() {
   const t = state.detail.full_translation_zh;
   $("#pTranslation").innerHTML = t
@@ -400,6 +470,7 @@ function renderTranslation() {
 function setTab(name) {
   $$(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   $$(".tab-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === name));
+  if (name === "corrections") loadCorrections();
 }
 function openLightbox(f) {
   $("#lightboxImg").src = f.asset_url || "";
@@ -410,8 +481,12 @@ function openLightbox(f) {
 /* ---------------- URL 同步 ---------------- */
 function syncUrl() {
   const p = new URLSearchParams();
-  if (state.library) p.set("library", state.library);
-  if (state.q.trim()) p.set("q", state.q.trim());
+  if (state.shareToken) {
+    p.set("token", state.shareToken);
+  } else {
+    if (state.library) p.set("library", state.library);
+    if (state.q.trim()) p.set("q", state.q.trim());
+  }
   if (state.selectedId) p.set("paper", state.selectedId);
   history.replaceState(null, "", "?" + p.toString());
 }
@@ -443,9 +518,18 @@ function bind() {
 (async function boot() {
   bind();
   const params = new URLSearchParams(location.search);
-  $("#searchInput").value = params.get("q") || "";
-  state.q = $("#searchInput").value;
-  await loadLibraries();
+  state.shareToken = params.get("token") || "";
+  if (state.shareToken) {
+    // 分享模式：隐藏检索/筛选控件，显示只读分享标识
+    document.getElementById("topControls").hidden = true;
+    document.getElementById("shareBanner").hidden = false;
+    document.getElementById("shareScope").textContent = "授权范围内的文献";
+    await loadPapers(true);
+  } else {
+    $("#searchInput").value = params.get("q") || "";
+    state.q = $("#searchInput").value;
+    await loadLibraries();
+  }
   const paper = params.get("paper");
   if (paper) selectPaper(paper);
 })();

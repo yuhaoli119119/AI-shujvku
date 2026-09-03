@@ -16,8 +16,8 @@
     </div>
   </div>
 
-  <div class="top-controls">
-    <div class="field">
+  <div class="top-controls" id="topControls">
+    <div class="field" id="libField">
       <label>文献库</label>
       <select id="libSelect" title="切换文献库（只读，不改变系统状态）"></select>
     </div>
@@ -53,6 +53,13 @@
     </div>
   </div>
 </header>
+
+<div class="share-banner" id="shareBanner" hidden>
+  <span class="share-icon">🔗</span>
+  <span class="share-text">只读分享视图</span>
+  <span class="share-scope" id="shareScope"></span>
+  <span class="share-note">仅可查看，不可修改</span>
+</div>
 
 <div class="layout">
   <aside class="list-pane" id="listPane">
@@ -92,6 +99,8 @@
         <button class="tab" data-tab="tables" type="button">数据表</button>
         <button class="tab" data-tab="dft" type="button">DFT 数据</button>
         <button class="tab" data-tab="mechanism" type="button">机理论断</button>
+        <button class="tab" data-tab="notes" type="button">AI 批注</button>
+        <button class="tab" data-tab="corrections" type="button">更正历史</button>
         <button class="tab" data-tab="translation" type="button">中文译文</button>
       </nav>
 
@@ -101,6 +110,8 @@
       <section class="tab-panel" data-panel="tables"><div id="pTables"></div></section>
       <section class="tab-panel" data-panel="dft"><div id="pDft"></div></section>
       <section class="tab-panel" data-panel="mechanism"><div id="pMechanism"></div></section>
+      <section class="tab-panel" data-panel="notes"><div id="pNotes"></div></section>
+      <section class="tab-panel" data-panel="corrections"><div id="pCorrections"></div></section>
       <section class="tab-panel" data-panel="translation"><div id="pTranslation"></div></section>
     </article>
   </main>

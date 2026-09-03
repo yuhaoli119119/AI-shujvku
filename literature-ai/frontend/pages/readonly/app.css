@@ -229,6 +229,44 @@ table.mk-table tr:nth-child(even) td{background:#fbfcfe;}
 .loading,.empty-block{padding:34px;text-align:center;color:var(--text-3);font-size:13.5px;}
 .list-skeleton{padding:14px 16px;border-bottom:1px solid var(--border);color:var(--text-3);font-size:13px;}
 
+/* ---------- Share banner (token 模式) ---------- */
+.share-banner{
+  display:flex;align-items:center;gap:12px;flex-shrink:0;
+  background:linear-gradient(90deg,#0e7c66,#1a9d82);
+  color:#fff;padding:7px 20px;font-size:13px;
+}
+.share-banner[hidden]{display:none;}
+.share-icon{font-size:15px;}
+.share-text{font-weight:700;letter-spacing:.5px;}
+.share-scope{background:rgba(255,255,255,.18);padding:2px 10px;border-radius:999px;font-size:12px;}
+.share-note{margin-left:auto;opacity:.85;font-size:12px;}
+
+/* ---------- Notes (AI 批注) ---------- */
+.note-card{
+  border-left:3px solid var(--accent);background:#f4faf8;
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  padding:12px 15px;margin-bottom:10px;
+}
+.note-card .note-head{display:flex;gap:10px;align-items:center;margin-bottom:6px;flex-wrap:wrap;}
+.note-card .note-source{font-size:11px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;}
+.note-card .note-field{font-size:11.5px;color:var(--text-3);background:#fff;padding:1px 8px;border-radius:999px;border:1px solid var(--border);}
+.note-card .note-loc{font-size:11.5px;color:var(--text-3);}
+.note-card .note-quote{font-size:12px;color:var(--text-2);border-left:2px solid var(--border-strong);padding-left:10px;margin:6px 0;font-style:italic;}
+.note-card .note-content{font-size:13.5px;color:var(--text);line-height:1.6;white-space:pre-wrap;}
+
+/* ---------- Corrections (更正历史) ---------- */
+.corr-toolbar{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
+.corr-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:11px 14px;margin-bottom:8px;box-shadow:var(--shadow);
+}
+.corr-card .corr-head{display:flex;align-items:center;gap:10px;margin-bottom:5px;flex-wrap:wrap;}
+.corr-card .corr-field{font-weight:700;font-size:13px;color:var(--ink);}
+.corr-card .corr-source{font-size:11px;color:var(--text-3);}
+.corr-card .corr-value{font-size:13px;color:var(--text);margin:4px 0;font-family:var(--mono);background:var(--surface-alt);padding:5px 9px;border-radius:4px;word-break:break-word;}
+.corr-card .corr-comment{font-size:12px;color:var(--text-2);margin-top:4px;}
+.corr-card .corr-date{font-size:11px;color:var(--text-3);margin-left:auto;}
+
 @media (max-width:900px){
   /* 窄屏：整页可滚动，列表在上、详情在下 */
   body{height:auto;overflow:auto;}

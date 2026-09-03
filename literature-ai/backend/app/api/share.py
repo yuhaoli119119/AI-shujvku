@@ -151,9 +151,28 @@ def list_papers(
 # ---------------------------------------------------------------------------
 
 @router.get("/{share_token}/papers/{paper_id}")
-def get_paper(share_token: str, paper_id: str, session: Session = Depends(get_db_session)):
+def get_paper(
+    share_token: str,
+    paper_id: str,
+    mode: str = Query("basic", pattern="^(basic|full)$"),
+    session: Session = Depends(get_db_session),
+):
     token_record = verify_share_token(share_token, session)
     _check_scope(token_record, paper_id, session)
+    if mode == "full":
+        # 完整详情（章节/图表/DFT/机理/译文/批注等），与 /api/papers/{id}?mode=full 同构，
+        # 但受 token scope 限定，仅可访问 token 授权范围内的文献。
+        from app.services.paper_query import PaperQueryService
+        detail = PaperQueryService(session).get_paper_detail(
+            _paper_uuid(paper_id),
+            compact=False,
+            include_expensive_status=True,
+            include_dft_payload=True,
+            include_mechanism_claims_payload=True,
+        )
+        if not detail:
+            raise HTTPException(status_code=404, detail="Paper not found")
+        return detail
     paper = session.get(Paper, _paper_uuid(paper_id))
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")

@@ -11,6 +11,7 @@ from .aggregation import router as aggregation_router
 from .assets import router as assets_router
 from .classification import router as classification_router
 from .common import normalize_library_name, rewrite_ai_search_query
+from .corrections_public import router as corrections_public_router
 from .discovery import ai_search, discovery_download_and_ingest, discovery_search
 from .discovery import router as discovery_router
 from .ingestion import router as ingestion_router
@@ -30,6 +31,7 @@ router.include_router(classification_router)
 router.include_router(workflow_router)
 router.include_router(listing_router)
 router.include_router(detail_router)
+router.include_router(corrections_public_router)
 router.include_router(review_bundle_router)
 
 __all__ = [
