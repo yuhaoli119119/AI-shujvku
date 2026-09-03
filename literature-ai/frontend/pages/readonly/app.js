@@ -451,7 +451,7 @@ async function loadCorrections() {
             <span class="corr-date">${esc((c.created_at || "").slice(0, 10))}</span>
           </div>
           <div class="corr-value">${esc(c.proposed_value != null ? String(c.proposed_value) : "")}</div>
-          ${c.review_comment ? `<div class="corr-comment">💬 ${esc(c.review_comment)}</div>` : ""}
+          ${c.reason ? `<div class="corr-comment">💬 ${esc(c.reason)}</div>` : ""}
         </div>`).join("")}`;
   } catch (e) {
     state.correctionsLoaded = false;

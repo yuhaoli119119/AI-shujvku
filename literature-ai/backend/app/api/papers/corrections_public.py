@@ -44,7 +44,7 @@ def list_paper_corrections(
                 "field_name": c.field_name,
                 "proposed_value": c.proposed_value,
                 "status": c.status,
-                "review_comment": c.review_comment,
+                "reason": c.reason,
                 "created_at": c.created_at.isoformat() if c.created_at else None,
             }
             for c in items
