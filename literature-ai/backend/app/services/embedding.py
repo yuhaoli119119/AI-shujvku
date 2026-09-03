@@ -168,12 +168,13 @@ def get_embedding_service(
     model: str | None = None,
     dimension: int = 1024,
 ) -> EmbeddingService:
-    """Factory: return the appropriate embedding service based on configuration.
+    """Factory: return the embedding service. Local deterministic (hashed) vectorization
+    has been PERMANENTLY RETIRED - a real semantic embedding backend is mandatory.
 
-    - provider="deterministic" or provider is None → DeterministicEmbeddingService
-    - provider="openai_compatible" → OpenAICompatibleEmbeddingService
+    - provider="openai_compatible" (or None -> default) -> OpenAICompatibleEmbeddingService
+    - any other provider -> raises, never silently falls back to local hashing.
     """
-    provider = (provider or "deterministic").lower()
+    provider = (provider or "openai_compatible").lower()
     if provider == "openai_compatible":
         return OpenAICompatibleEmbeddingService(
             api_base=api_base or "",
@@ -181,4 +182,7 @@ def get_embedding_service(
             model=model or "BAAI/bge-m3",
             dimension=dimension,
         )
-    return DeterministicEmbeddingService(dimension=dimension)
+    raise ValueError(
+        "Unsupported embedding provider {0!r}: deterministic local vectorization "
+        "has been permanently retired. Configure LITAI_EMBEDDING_PROVIDER=openai_compatible.".format(provider)
+    )

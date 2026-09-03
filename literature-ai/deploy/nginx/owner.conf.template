@@ -10,6 +10,10 @@ server {
     error_log /dev/stderr crit;
     client_max_body_size 32m;
 
+    location = / {
+        return 302 https://$host/pages/literature_library/index.html;
+    }
+
     location / {
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;

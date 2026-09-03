@@ -41,8 +41,13 @@ class Retriever:
 
     def __init__(self, session: Session, embedding_dimension: int = 1024, embedding: EmbeddingService | None = None) -> None:
         self.session = session
-        self.embedding = embedding or DeterministicEmbeddingService(embedding_dimension)
-        self._semantic_enabled = not isinstance(self.embedding, DeterministicEmbeddingService)
+        if embedding is None:
+            raise RuntimeError(
+                "An embedding service is required: deterministic local vectorization has "
+                "been permanently retired. Construct Retriever with a real embedding backend."
+            )
+        self.embedding = embedding
+        self._semantic_enabled = True  # deterministic hashing is permanently retired
         self._text_embedding_cache: dict[str, list[float]] = {}
         self.last_retrieval_intent: RetrievalIntent | None = None
 
