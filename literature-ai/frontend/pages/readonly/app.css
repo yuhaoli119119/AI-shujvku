@@ -33,6 +33,8 @@ body{
   font-size:14.5px;
   line-height:1.65;
   -webkit-font-smoothing:antialiased;
+  /* 整页 flex 列：顶栏固定高度自适应，主体占满剩余，避免 calc(100vh-60px) 依赖顶栏固定高度 */
+  display:flex;flex-direction:column;height:100vh;overflow:hidden;
 }
 button{font-family:inherit;}
 h1,h2,h3,h4{margin:0;color:var(--ink);line-height:1.35;}
@@ -56,7 +58,7 @@ h1,h2,h3,h4{margin:0;color:var(--ink);line-height:1.35;}
 .topbar{
   display:flex;align-items:center;gap:22px;
   background:var(--surface);border-bottom:1px solid var(--border);
-  padding:10px 20px;position:sticky;top:0;z-index:50;box-shadow:var(--shadow);
+  padding:10px 20px;flex-shrink:0;z-index:50;box-shadow:var(--shadow);
 }
 .brand{display:flex;align-items:center;gap:11px;flex-shrink:0;}
 .brand-mark{
@@ -81,7 +83,7 @@ h1,h2,h3,h4{margin:0;color:var(--ink);line-height:1.35;}
 #searchInput{width:100%;}
 
 /* ---------- Layout ---------- */
-.layout{display:flex;height:calc(100vh - 60px);}
+.layout{display:flex;flex:1;min-height:0;}
 .list-pane{
   width:380px;flex-shrink:0;display:flex;flex-direction:column;
   background:var(--surface);border-right:1px solid var(--border);min-height:0;
@@ -228,8 +230,9 @@ table.mk-table tr:nth-child(even) td{background:#fbfcfe;}
 .list-skeleton{padding:14px 16px;border-bottom:1px solid var(--border);color:var(--text-3);font-size:13px;}
 
 @media (max-width:900px){
-  /* 窄屏改为上下单栏：列表在上、详情在下，避免横向滚动 */
-  .layout{flex-direction:column;height:auto;overflow:visible;}
+  /* 窄屏：整页可滚动，列表在上、详情在下 */
+  body{height:auto;overflow:auto;}
+  .layout{flex-direction:column;flex:none;}
   .list-pane{width:100%;max-height:52vh;border-right:none;border-bottom:1px solid var(--border);}
   .detail-pane{overflow:visible;}
   .detail-empty{min-height:40vh;}
