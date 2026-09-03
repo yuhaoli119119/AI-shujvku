@@ -169,6 +169,20 @@ services:
     volumes:
       - ./deploy/nginx/share.conf:/etc/nginx/conf.d/default.conf:ro
 
+  # 对外只读展示站（ml.researchlife.top）。只暴露只读前端 /pages/readonly/
+  # 与只读 GET 查询接口 /api/papers/；写方法 405、其余路径 404。
+  # 仅绑定回环地址，由 cloudflared/面板隧道对外，不直接暴露端口。
+  public-gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LITAI_PUBLIC_PORT:-18000}:8080"
+    volumes:
+      - ./deploy/nginx/public.conf:/etc/nginx/conf.d/default.conf:ro
+
   worker:
     restart: unless-stopped
     build:

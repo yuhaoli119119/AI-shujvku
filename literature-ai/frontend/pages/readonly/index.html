@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文献知识库 · 只读阅览</title>
+<link rel="stylesheet" href="./app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">文</div>
+    <div class="brand-text">
+      <div class="brand-title">文献知识库</div>
+      <div class="brand-sub">READ-ONLY LIBRARY</div>
+    </div>
+  </div>
+
+  <div class="top-controls">
+    <div class="field">
+      <label>文献库</label>
+      <select id="libSelect" title="切换文献库（只读，不改变系统状态）"></select>
+    </div>
+    <div class="field grow">
+      <label>检索</label>
+      <input id="searchInput" type="search" placeholder="标题 / 作者 / 期刊 / DOI / 摘要 / 关键词" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>类型</label>
+      <select id="typeFilter">
+        <option value="">全部类型</option>
+        <option value="A">A 类 · 计算</option>
+        <option value="B">B 类 · 计算+实验</option>
+        <option value="C">C 类 · 实验</option>
+        <option value="R">R 类 · 综述</option>
+        <option value="supplementary">SI 支撑文献</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>PDF</label>
+      <select id="pdfFilter">
+        <option value="">不限</option>
+        <option value="true">仅有 PDF</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>排序</label>
+      <select id="sortSelect">
+        <option value="year_serial:desc">年份 ↓ 新到旧</option>
+        <option value="year_serial:asc">年份 ↑ 旧到新</option>
+        <option value="title:asc">标题 A→Z</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="list-pane" id="listPane">
+    <div class="list-meta" id="listMeta">正在加载…</div>
+    <div class="paper-list" id="paperList"></div>
+    <div class="pager">
+      <button class="btn ghost" id="prevPage" type="button">上一页</button>
+      <span id="pageInfo" class="page-info">–</span>
+      <button class="btn ghost" id="nextPage" type="button">下一页</button>
+    </div>
+  </aside>
+
+  <main class="detail-pane" id="detailPane">
+    <div class="detail-empty" id="detailEmpty">
+      <div class="empty-mark">📚</div>
+      <h2>选择左侧文献开始阅览</h2>
+      <p>这里以只读方式展示文献题录、摘要、解析正文、图表、DFT 数据与中文译文。<br>本站点不提供任何上传、编辑、删除或提交操作。</p>
+    </div>
+
+    <article class="detail-body" id="detailBody" hidden>
+      <div class="detail-head">
+        <h1 id="dTitle"></h1>
+        <div id="dTitleZh" class="title-zh"></div>
+        <div id="dMeta" class="meta-grid"></div>
+        <div id="dBadges" class="badge-row"></div>
+        <div class="head-actions">
+          <a class="btn primary" id="dPdfBtn" target="_blank" rel="noopener">📄 查看 PDF 原文</a>
+          <button class="btn ghost" id="dPdfInlineBtn" type="button">在页内阅读 PDF</button>
+          <span id="dDoi" class="doi-line"></span>
+        </div>
+      </div>
+
+      <nav class="tabs" id="dTabs">
+        <button class="tab active" data-tab="overview" type="button">概览</button>
+        <button class="tab" data-tab="sections" type="button">解析正文</button>
+        <button class="tab" data-tab="figures" type="button">图表</button>
+        <button class="tab" data-tab="tables" type="button">数据表</button>
+        <button class="tab" data-tab="dft" type="button">DFT 数据</button>
+        <button class="tab" data-tab="mechanism" type="button">机理论断</button>
+        <button class="tab" data-tab="translation" type="button">中文译文</button>
+      </nav>
+
+      <section class="tab-panel active" data-panel="overview"><div id="pOverview"></div></section>
+      <section class="tab-panel" data-panel="sections"><div id="pSections"></div></section>
+      <section class="tab-panel" data-panel="figures"><div id="pFigures"></div></section>
+      <section class="tab-panel" data-panel="tables"><div id="pTables"></div></section>
+      <section class="tab-panel" data-panel="dft"><div id="pDft"></div></section>
+      <section class="tab-panel" data-panel="mechanism"><div id="pMechanism"></div></section>
+      <section class="tab-panel" data-panel="translation"><div id="pTranslation"></div></section>
+    </article>
+  </main>
+</div>
+
+<!-- 图片放大 -->
+<div class="overlay" id="lightbox" hidden>
+  <div class="overlay-box lightbox-box">
+    <div class="overlay-bar">
+      <div id="lightboxCaption" class="overlay-title"></div>
+      <button class="btn ghost small" id="lightboxClose" type="button">关闭</button>
+    </div>
+    <img id="lightboxImg" alt="图表大图">
+  </div>
+</div>
+
+<!-- 页内 PDF -->
+<div class="overlay" id="pdfOverlay" hidden>
+  <div class="overlay-box pdf-box">
+    <div class="overlay-bar">
+      <div class="overlay-title">PDF 原文</div>
+      <button class="btn ghost small" id="pdfClose" type="button">关闭</button>
+    </div>
+    <iframe id="pdfFrame" title="PDF 预览"></iframe>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="./app.js"></script>
+</body>
+</html>
