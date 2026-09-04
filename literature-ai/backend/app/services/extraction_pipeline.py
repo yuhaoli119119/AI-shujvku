@@ -39,6 +39,7 @@ from app.domain.reaction_taxonomy import (
 from app.normalizers.chemistry_normalizer import ChemistryNormalizer
 from app.normalizers.dft_normalizer import DFTNormalizer
 from app.schemas.documents import UnifiedPaperDocument
+from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 from app.services.embedding import EmbeddingUnavailableError, get_embedding_service
 from app.services.evidence_locator_service import EvidenceLocatorService
 from app.services.review_target_resolver import ReviewTargetResolver
@@ -742,8 +743,16 @@ class ExtractionPipelineService:
             "out_of_scope": 0,
             "ambiguous": 0,
         }
-        merged_items = self._merge_duplicate_dft_items(items)
-        existing_by_key = self._existing_dft_results_by_key(paper_id)
+        merged_items = self._merge_duplicate_dft_items(items, paper_id=paper_id)
+        existing_rows = self.session.scalars(
+            select(DFTResult).where(DFTResult.paper_id == paper_id)
+        ).all()
+        existing_by_key = self._existing_dft_results_by_key(paper_id, rows=existing_rows)
+        existing_by_observation = {
+            str(row.observation_key): row
+            for row in existing_rows
+            if row.identity_version == 2 and row.observation_key
+        }
         catalyst_rows = self.session.scalars(
             select(CatalystSample).where(CatalystSample.paper_id == paper_id)
         ).all()
@@ -753,8 +762,10 @@ class ExtractionPipelineService:
             if row.name
         }
         for item in merged_items:
-            key = self._normalized_dft_candidate_key(item)
+            legacy_key = self._normalized_dft_candidate_key(item)
+            key = f"legacy:{legacy_key}"
             record: DFTResult | None = None
+            identity = None
             persisted_status: str | None = None
             try:
                 with self.session.begin_nested():
@@ -795,18 +806,35 @@ class ExtractionPipelineService:
                             "source_count": len(item.get("evidence_sources") or []),
                             "policy": "Near-duplicate system candidates are merged into one candidate record; original evidence sources are retained.",
                         }
-                    existing = existing_by_key.get(key)
+                    identity = self._stage2_dft_identity(
+                        paper_id=paper_id,
+                        item=item,
+                        evidence_payload=evidence_payload,
+                    )
+                    if identity.observation_key:
+                        key = f"identity_v2:{identity.observation_key}"
+                        existing = existing_by_observation.get(identity.observation_key)
+                    else:
+                        existing = existing_by_key.get(legacy_key)
                     if existing is not None:
-                        if existing.catalyst_sample_id is None and catalyst is not None:
-                            existing.catalyst_sample_id = catalyst.id
-                        self._fill_missing_dft_reaction_fields(existing, reaction_fields)
-                        self._merge_existing_dft_result(
-                            existing,
-                            item=item,
-                            norm_item=norm_item,
-                            location=location,
-                            evidence_payload=evidence_payload,
-                        )
+                        if identity.observation_key:
+                            existing.evidence_payload = self._merge_dft_evidence_payload(
+                                existing.evidence_payload,
+                                evidence_payload,
+                            )
+                            self.session.add(existing)
+                            self.session.flush()
+                        else:
+                            if existing.catalyst_sample_id is None and catalyst is not None:
+                                existing.catalyst_sample_id = catalyst.id
+                            self._fill_missing_dft_reaction_fields(existing, reaction_fields)
+                            self._merge_existing_dft_result(
+                                existing,
+                                item=item,
+                                norm_item=norm_item,
+                                location=location,
+                                evidence_payload=evidence_payload,
+                            )
                         persisted_status = existing.reaction_validation_status
                     else:
                         record = DFTResult(
@@ -826,6 +854,7 @@ class ExtractionPipelineService:
                             extraction_protocol_version=EXTRACTION_PROTOCOL_VERSION,
                             **reaction_fields,
                         )
+                        DFTAuditIssueLifecycleService.apply_result_identity(record, identity)
                         self.session.add(record)
                         self.session.flush()
                         self._persist_evidence_span(
@@ -836,7 +865,10 @@ class ExtractionPipelineService:
                         )
                         persisted_status = record.reaction_validation_status
                 if record is not None:
-                    existing_by_key[key] = record
+                    if identity is not None and identity.observation_key:
+                        existing_by_observation[identity.observation_key] = record
+                    else:
+                        existing_by_key[legacy_key] = record
                 count += 1
                 if persisted_status in reaction_counts:
                     reaction_counts[persisted_status] += 1
@@ -983,8 +1015,18 @@ class ExtractionPipelineService:
             if getattr(row, name) is None:
                 setattr(row, name, value)
 
-    def _existing_dft_results_by_key(self, paper_id: UUID) -> dict[str, DFTResult]:
-        rows = self.session.scalars(select(DFTResult).where(DFTResult.paper_id == paper_id)).all()
+    def _existing_dft_results_by_key(
+        self,
+        paper_id: UUID,
+        *,
+        rows: list[DFTResult] | None = None,
+    ) -> dict[str, DFTResult]:
+        if rows is None:
+            rows = list(
+                self.session.scalars(
+                    select(DFTResult).where(DFTResult.paper_id == paper_id)
+                ).all()
+            )
         catalyst_ids = {row.catalyst_sample_id for row in rows if row.catalyst_sample_id}
         catalyst_names = (
             {
@@ -1037,8 +1079,7 @@ class ExtractionPipelineService:
         evidence_payload: dict[str, Any],
     ) -> None:
         row.evidence_payload = self._merge_dft_evidence_payload(row.evidence_payload, evidence_payload)
-        locked_statuses = {"ML_Ready", "Rejected", "human_verified", "verified"}
-        if (row.candidate_status or "") in locked_statuses:
+        if (row.candidate_status or "").strip().lower() not in {"", "system_candidate"}:
             self.session.add(row)
             self.session.flush()
             return
@@ -1090,10 +1131,24 @@ class ExtractionPipelineService:
             }
         return merged
 
-    def _merge_duplicate_dft_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _merge_duplicate_dft_items(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        paper_id: UUID | None = None,
+    ) -> list[dict[str, Any]]:
         merged: dict[str, dict[str, Any]] = {}
         for item in items or []:
-            key = self._normalized_dft_candidate_key(item)
+            identity = (
+                self._stage2_dft_identity(paper_id=paper_id, item=item)
+                if paper_id is not None
+                else None
+            )
+            key = (
+                f"identity_v2:{identity.observation_key}"
+                if identity is not None and identity.observation_key
+                else f"legacy:{self._normalized_dft_candidate_key(item)}"
+            )
             source = self._dft_evidence_source(item)
             existing = merged.get(key)
             if existing is None:
@@ -1110,6 +1165,78 @@ class ExtractionPipelineService:
                 replacement["evidence_sources"] = preserved_sources
                 merged[key] = replacement
         return list(merged.values())
+
+    def _stage2_dft_identity(
+        self,
+        *,
+        paper_id: UUID,
+        item: dict[str, Any],
+        evidence_payload: dict[str, Any] | None = None,
+    ):
+        """Adapt existing Stage-2 fields to the authoritative Identity v2 input."""
+
+        norm = self.chemistry_normalizer.normalize(
+            {
+                "adsorbate": item.get("adsorbate") or "",
+                "property_type": item.get("category") or "",
+            }
+        )
+        material_identity, _ = self._canonical_dft_material_identity(item)
+        evidence = dict(
+            evidence_payload
+            if isinstance(evidence_payload, dict)
+            else item.get("evidence_payload")
+            if isinstance(item.get("evidence_payload"), dict)
+            else {}
+        )
+
+        def first(*values: Any) -> Any:
+            return next((value for value in values if value not in (None, "", [])), None)
+
+        corrected_value = {
+            "material_identity": material_identity or None,
+            "property_type": norm.get("property_type") or item.get("category"),
+            "adsorbate": norm.get("adsorbate") or item.get("adsorbate"),
+            "reaction_step": item.get("reaction_step"),
+            "reaction_type": item.get("reaction_type"),
+            "value": item.get("value"),
+            "value_upper": item.get("value_upper"),
+            "value_kind": item.get("value_kind"),
+            "unit": item.get("unit"),
+            "property_subtype": first(item.get("property_subtype"), evidence.get("property_subtype")),
+            "active_site_instance_key": first(
+                item.get("active_site_instance_key"),
+                evidence.get("active_site_instance_key"),
+            ),
+            "atom_pair": first(item.get("atom_pair"), evidence.get("atom_pair")),
+            "site_label": first(
+                item.get("site_label"),
+                evidence.get("site_label"),
+                item.get("active_site_context"),
+                evidence.get("active_site_context"),
+            ),
+            "state_context": first(
+                item.get("state_context"),
+                evidence.get("state_context"),
+                item.get("structure_context"),
+                evidence.get("structure_context"),
+            ),
+        }
+        corrected_value.update(
+            {
+                key: first(item.get(key), evidence.get(key))
+                for key in ("method", "functional")
+                if first(item.get(key), evidence.get(key)) is not None
+            }
+        )
+        return DFTAuditIssueLifecycleService.build_identity(
+            paper_id=paper_id,
+            payload={
+                **dict(item),
+                "corrected_value": corrected_value,
+                "evidence_payload": evidence,
+            },
+        )
 
     def _normalized_dft_candidate_key(self, item: dict[str, Any]) -> str:
         norm = self.chemistry_normalizer.normalize({

@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
     <link rel="stylesheet" href="./page.css?v=20260715-dft-actions-row1">
-    <script src="../../shared/topnav.js?v=20260606-ui3"></script>
+    <script src="../../shared/topnav.js?v=20260904-core-nav"></script>
     <script>ThemeManager.init();</script>
 </head>
 <body>
@@ -30,9 +30,6 @@
                 <select id="librarySelect" class="library-select" onchange="activateLibraryByName(this.value)">
                     <option value="">加载中...</option>
                 </select>
-                <button class="btn ghost" onclick="openCreateLibraryDialog()">新建库</button>
-                <button class="btn ghost" onclick="openImportLibraryDialog()">导入已有库</button>
-                <button class="btn danger" onclick="removeCurrentLibrary()">移除库</button>
                 <span id="libStatus" class="status-line subtle"></span>
                 <button class="btn ghost small" onclick="toggleSidebar()" id="toggleSidebarBtn">隐藏列表</button>
                 <button class="btn ghost small" onclick="toggleWorkspace()" id="toggleWorkspaceBtn">隐藏详情</button>
@@ -44,18 +41,8 @@
             <div class="toolbar-row">
                 <input id="searchInput" class="search-input" type="text" placeholder="搜索标题、DOI、作者、摘要、关键词">
                 <button class="btn ghost" onclick="searchLocal()">搜索</button>
-                <div class="dropdown" id="addLiteratureDropdown">
-                    <button id="addLiteratureBtn" class="btn primary" type="button" onclick="toggleAddLiteratureMenu(event)">添加文献 ▼</button>
-                    <div id="addLiteratureMenu" class="dropdown-menu">
-                        <button type="button" data-add-mode="pdf" onclick="openAddLiteraturePanel('pdf')">上传 PDF</button>
-                        <button type="button" data-add-mode="doi" onclick="openAddLiteraturePanel('doi')">DOI / URL 下载</button>
-                        <button type="button" data-add-mode="online" onclick="openAddLiteraturePanel('online')">在线检索</button>
-                        <button type="button" data-add-mode="folder" onclick="openAddLiteraturePanel('folder')">导入本地文件夹</button>
-                    </div>
-                </div>
+                <button id="addLiteratureBtn" class="btn primary" type="button" onclick="openAddLiteraturePanel('pdf')">添加 PDF</button>
                 <button class="btn ghost" onclick="refreshCurrentPage()">刷新</button>
-                <button class="btn ghost" onclick="openExtractionJobCenter()">解析任务</button>
-                <button class="btn ghost" onclick="openMetadataDiagnostics()">元数据诊断</button>
             </div>
             <div class="toolbar-row">
                 <input id="filterYear" class="small-input" type="number" placeholder="年份">
@@ -124,17 +111,12 @@
                             <div class="paper-actionbar">
                                 <button id="pdfEvidenceHeaderBtn" class="btn primary small" onclick="openSelectedPdfEvidence()">查看 PDF</button>
                                 <button id="refreshPaperDetailBtn" class="btn ghost small" type="button" title="仅刷新当前文献详情" onclick="refreshSelectedPaperDetailFromHeader()">刷新详情</button>
-                                <button class="btn ghost small" onclick="openSelectedReviewCenter()">审核中心</button>
                                 <button class="btn ghost small" onclick="reparseSelectedPaper()">重新解析</button>
-                                <button class="btn ghost small" onclick="rerunExtraction()">刷新 IDE AI 材料</button>
                                 <div class="dropdown" id="paperMoreDropdown">
                                     <button class="btn ghost small" type="button" onclick="togglePaperMoreMenu(event)">更多操作 ▼</button>
                                     <div id="paperMoreMenu" class="dropdown-menu right">
                                         <button type="button" onclick="copyPaperIdentity()">复制 DOI / 标题</button>
                                         <button type="button" onclick="triggerSupplementaryUpload()">上传支撑文献 / 上传 SI</button>
-                                        <button type="button" onclick="addToEvidencePack()">加入写作证据包</button>
-                                        <button type="button" onclick="openAggregateView()">查看聚合视图</button>
-                                        <button type="button" onclick="promptAddRelationship(state.selectedPaperId)">添加关联文献</button>
                                         <button type="button" onclick="resetCurrentPaperUpload(event)">保留条目并重传 PDF</button>
                                         <button type="button" class="danger-menu-item" onclick="openDeletePaperDialog(event)">删除当前文献</button>
                                     </div>
@@ -144,20 +126,25 @@
                     </div>
 
                     <div class="tabs">
-                        <button class="tab-btn active" data-tab="summary" onclick="switchTab('summary')">摘要</button>
-                        <button class="tab-btn" data-tab="figures" onclick="switchTab('figures')">图表</button>
-                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">候选 DFT 数据</button>
-                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')">论文内容</button>
-                        <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')">中文译文</button>
-                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')">AI任务中心</button>
+                        <button class="tab-btn" data-tab="summary" onclick="switchTab('summary')" hidden>摘要</button>
+                        <button class="tab-btn active" data-tab="figures" onclick="switchTab('figures')">图表</button>
+                        <button class="tab-btn" data-tab="mechanism" onclick="switchTab('mechanism')">机理</button>
+                        <button class="tab-btn" data-tab="dft" onclick="switchTab('dft')">DFT 数据</button>
+                        <button class="tab-btn" data-tab="writing" onclick="switchTab('writing')" hidden>论文内容</button>
+                        <button class="tab-btn" data-tab="translation" onclick="switchTab('translation')" hidden>中文译文</button>
+                        <button class="tab-btn" data-tab="review" onclick="switchTab('review')" hidden>AI任务中心</button>
                     </div>
 
-                    <section id="tab-summary" class="tab-panel active">
+                    <section id="tab-summary" class="tab-panel">
                         <div id="summaryContent"></div>
                     </section>
 
-                    <section id="tab-figures" class="tab-panel">
+                    <section id="tab-figures" class="tab-panel active">
                         <div id="figuresContent"></div>
+                    </section>
+
+                    <section id="tab-mechanism" class="tab-panel">
+                        <div id="mechanismContent"></div>
                     </section>
 
                     <section id="tab-dft" class="tab-panel">
@@ -207,13 +194,6 @@
                 <h3>添加文献</h3>
                 <button class="btn ghost small" onclick="closeAddLiteraturePanel()">关闭</button>
             </div>
-            <div class="ingest-tabs">
-                <button class="ingest-tab active" data-ingest-mode="pdf" onclick="switchAcquisitionMode('pdf')">上传 PDF</button>
-                <button class="ingest-tab" data-ingest-mode="doi" onclick="switchAcquisitionMode('doi')">DOI / URL 下载</button>
-                <button class="ingest-tab" data-ingest-mode="online" onclick="switchAcquisitionMode('online')">在线检索</button>
-                <button class="ingest-tab" data-ingest-mode="folder" onclick="switchAcquisitionMode('folder')">本地文件夹</button>
-            </div>
-
             <div id="acq-pdf" class="acq-panel">
                 <div class="writer-block" style="padding: 16px; margin-bottom: 16px;">
                     <h4 style="margin-bottom: 6px;">直接上传 PDF 文件</h4>
@@ -401,16 +381,16 @@
         </div>
     </div>
 
-    <script src="./state.js?v=20260712-detail-perf1" defer></script>
+    <script src="./state.js?v=20260904-core-detail-tabs" defer></script>
     <script src="./api.js?v=20260628-library-switch1" defer></script>
     <script src="./render-list.js?v=20260704-si-year-impact-hidden1" defer></script>
-    <script src="./detail-content.js?v=20260628-detail-split1" defer></script>
+    <script src="./detail-content.js?v=20260904-mechanism-tab" defer></script>
     <script src="./dft-sample-groups.js?v=20260715-dft-sample-single-line1" defer></script>
-    <script src="./review-card-renderers.js?v=20260715-dft-terminal-reject1" defer></script>
+    <script src="./review-card-renderers.js?v=20260904-mechanism-tab" defer></script>
     <script src="./evidence-viewer.js?v=20260712-detail-perf1" defer></script>
     <script src="./review-status.js?v=20260713-duplicate-card-status1" defer></script>
-    <script src="./render-detail.js?v=20260713-duplicate-card-status1" defer></script>
-    <script src="./detail-loader.js?v=20260712-detail-perf1" defer></script>
+    <script src="./render-detail.js?v=20260904-core-detail-tabs" defer></script>
+    <script src="./detail-loader.js?v=20260904-mechanism-tab" defer></script>
     <script src="./dft-workflow.js?v=20260712-detail-perf1" defer></script>
     <script src="./detail-actions.js?v=20260715-dft-terminal-reject1" defer></script>
     <script src="./dft-review-logic.js?v=20260627-refactor1" defer></script>
@@ -422,7 +402,7 @@
     <script src="./jobs.js?v=20260628-jobs-split1" defer></script>
     <script src="./writer.js?v=20260531-aiuxfix" defer></script>
     <script src="./review.js?v=20260614-review-ui1" defer></script>
-    <script src="./page-list-controls.js?v=20260712-detail-perf1" defer></script>
+    <script src="./page-list-controls.js?v=20260904-core-detail-tabs" defer></script>
     <script src="./page-actions.js?v=20260712-detail-perf1" defer></script>
     <script src="./page-layout.js?v=20260628-page-split1" defer></script>
     <script src="./page.js?v=20260628-page-split1" defer></script>

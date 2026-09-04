@@ -25,6 +25,7 @@ from app.services.catalyst_analysis_service import (
 from app.services.dft_export_service import build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
 from app.services.dft_audit_report_service import DFTAuditReportService
 from app.services.dft_audit_issue_service import DFT_AUDIT_ISSUE_OPEN_STATUSES, DFTAuditIssueService
+from app.services.dft_candidate_preview_service import DFTCandidatePreviewService
 from app.services.project_library_bundle_service import ProjectLibraryBundleService
 from app.services.project_library_ml_service import ProjectLibraryMLService
 from app.services.project_library_quality_service import ProjectLibraryQualityService
@@ -36,6 +37,19 @@ from app.services.project_library_submission_service import (
 
 
 router = APIRouter()
+
+
+@router.get("/candidate-preview")
+def get_dft_candidate_preview(
+    paper_id: UUID = Query(...),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    """Return a read-only multi-source DFT candidate clustering preview."""
+
+    try:
+        return DFTCandidatePreviewService(session).build_preview(paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 def _v3_filename(task: str, suffix: str) -> str:

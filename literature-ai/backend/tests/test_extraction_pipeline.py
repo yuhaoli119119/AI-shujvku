@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from uuid import uuid4
 
+import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
@@ -239,6 +240,242 @@ def test_dft_persist_merges_existing_duplicate_candidate_without_new_row():
                 assert len(existing.evidence_payload["evidence_sources"]) >= 2
         finally:
             engine.dispose()
+
+
+def test_stage2_identity_v2_merges_text_caption_and_table_into_one_observation():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            paper = Paper(title="Identity v2 provenance", pdf_path="identity-v2.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = ExtractionPipelineService(session=session, settings=get_settings())
+            base = {
+                "catalyst_name": "Fe-N4",
+                "category": "adsorption_energy",
+                "adsorbate": "Li2S4",
+                "value": -1.2,
+                "unit": "eV",
+                "reaction_step": "Li2S4 adsorption",
+                "active_site_context": "Fe-N4",
+            }
+
+            count = service._persist_dft_results(
+                paper.id,
+                [
+                    {
+                        **base,
+                        "evidence_text": "The text reports -1.2 eV.",
+                        "source_location": {"section": "Results", "page": 3},
+                        "confidence": 0.8,
+                    },
+                    {
+                        **base,
+                        "evidence_text": "Table S2 reports -1.2 eV.",
+                        "source_table_id": "table-s2",
+                        "source_row_index": 4,
+                        "source_column_index": 2,
+                        "source_location": {"table": "Table S2", "page": 12},
+                        "confidence": 0.9,
+                    },
+                    {
+                        **base,
+                        "evidence_text": "Figure 4 caption reports -1.2 eV.",
+                        "source_location": {"figure": "Figure 4", "page": 7},
+                        "confidence": 0.85,
+                    },
+                ],
+            )
+            session.commit()
+
+            rows = list(session.scalars(select(DFTResult).where(DFTResult.paper_id == paper.id)))
+            assert count == 1
+            assert len(rows) == 1
+            assert rows[0].identity_version == 2
+            assert rows[0].subject_key
+            assert rows[0].observation_key
+            assert len(rows[0].evidence_payload["evidence_sources"]) == 3
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.no_test_database
+def test_stage2_identity_v2_keeps_different_sites_values_and_available_contexts_distinct():
+    service = object.__new__(ExtractionPipelineService)
+    service.chemistry_normalizer = ChemistryNormalizer()
+    paper_id = uuid4()
+    base = {
+        "catalyst_name": "Fe-N4",
+        "category": "adsorption_energy",
+        "adsorbate": "Li2S4",
+        "value": -1.2,
+        "unit": "eV",
+        "reaction_step": "Li2S4 adsorption",
+        "active_site_context": "top",
+    }
+
+    identity = service._stage2_dft_identity(paper_id=paper_id, item=base)
+    different_site = service._stage2_dft_identity(
+        paper_id=paper_id,
+        item={**base, "active_site_context": "bridge"},
+    )
+    different_value = service._stage2_dft_identity(
+        paper_id=paper_id,
+        item={**base, "value": -1.3},
+    )
+    different_context = service._stage2_dft_identity(
+        paper_id=paper_id,
+        item={**base, "structure_context": "solvated"},
+    )
+    same_observation_from_table = {
+        **base,
+        "source_table_id": "table-s2",
+        "source_row_index": 4,
+        "source_column_index": 2,
+        "evidence_text": "Table S2 reports the same observation.",
+        "source_location": {"table": "Table S2", "page": 12},
+    }
+    same_observation_from_text = {
+        **base,
+        "evidence_text": "The text reports the same observation.",
+        "source_location": {"section": "Results", "page": 3},
+    }
+    same_observation_from_caption = {
+        **base,
+        "evidence_text": "Figure 4 caption reports the same observation.",
+        "source_location": {"figure": "Figure 4", "page": 7},
+    }
+    merged = service._merge_duplicate_dft_items(
+        [
+            same_observation_from_text,
+            same_observation_from_caption,
+            same_observation_from_table,
+        ],
+        paper_id=paper_id,
+    )
+    incomplete = service._stage2_dft_identity(
+        paper_id=paper_id,
+        item={key: value for key, value in base.items() if key != "catalyst_name"},
+    )
+
+    assert identity.subject_key != different_site.subject_key
+    assert identity.observation_key != different_site.observation_key
+    assert identity.subject_key == different_value.subject_key
+    assert identity.observation_key != different_value.observation_key
+    assert identity.subject_key != different_context.subject_key
+    assert identity.observation_key != different_context.observation_key
+    assert len(merged) == 1
+    assert len(merged[0]["evidence_sources"]) == 3
+    assert incomplete.observation_key is None
+    assert "missing_material_identity" in incomplete.error_codes
+
+
+def test_stage2_identity_v2_exact_match_only_merges_evidence_into_verified_row():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            paper = Paper(title="Verified identity v2", pdf_path="verified.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = ExtractionPipelineService(session=session, settings=get_settings())
+            item = {
+                "catalyst_name": "Fe-N4",
+                "category": "adsorption_energy",
+                "adsorbate": "Li2S4",
+                "value": -1.2,
+                "unit": "eV",
+                "reaction_step": "Li2S4 adsorption",
+                "active_site_context": "Fe-N4",
+            }
+            identity = service._stage2_dft_identity(paper_id=paper.id, item=item)
+            existing = DFTResult(
+                paper_id=paper.id,
+                adsorbate="Li2S4",
+                property_type="adsorption_energy",
+                value=-1.2,
+                unit="eV",
+                reaction_step="Li2S4 adsorption",
+                evidence_text="Authoritative evidence.",
+                confidence=0.6,
+                candidate_status="ai_verified_ml_ready",
+                evidence_payload={
+                    "material_identity": "Fe-N4",
+                    "site_label": "Fe-N4",
+                    "evidence_sources": [{"evidence_text": "Authoritative evidence."}],
+                },
+                identity_version=identity.identity_version,
+                subject_key=identity.subject_key,
+                observation_key=identity.observation_key,
+                identity_payload=identity.identity_payload,
+            )
+            session.add(existing)
+            session.flush()
+
+            count = service._persist_dft_results(
+                paper.id,
+                [
+                    {
+                        **item,
+                        "evidence_text": "New system evidence.",
+                        "source_location": {"table": "Table 4", "page": 8},
+                        "confidence": 0.99,
+                    }
+                ],
+            )
+            session.commit()
+            session.refresh(existing)
+
+            assert count == 1
+            assert session.query(DFTResult).count() == 1
+            assert existing.candidate_status == "ai_verified_ml_ready"
+            assert existing.value == -1.2
+            assert existing.unit == "eV"
+            assert existing.evidence_text == "Authoritative evidence."
+            assert existing.confidence == 0.6
+            assert len(existing.evidence_payload["evidence_sources"]) == 2
+    finally:
+        engine.dispose()
+
+
+def test_stage2_incomplete_identity_uses_legacy_fallback_and_keeps_candidate():
+    engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            paper = Paper(title="Incomplete identity", pdf_path="incomplete.pdf", authors=[])
+            session.add(paper)
+            session.flush()
+            service = ExtractionPipelineService(session=session, settings=get_settings())
+
+            count = service._persist_dft_results(
+                paper.id,
+                [
+                    {
+                        "category": "adsorption_energy",
+                        "adsorbate": "H2O",
+                        "value": -0.1,
+                        "unit": "eV",
+                        "reaction_step": "solvent effect",
+                        "evidence_text": "Material identity is unavailable.",
+                        "source_location": {"section": "Results", "page": 2},
+                        "confidence": 0.7,
+                    }
+                ],
+            )
+            session.commit()
+
+            row = session.scalar(select(DFTResult).where(DFTResult.paper_id == paper.id))
+            assert count == 1
+            assert row is not None
+            assert row.identity_version == 2
+            assert row.subject_key
+            assert row.observation_key is None
+            assert "missing_material_identity" in row.identity_payload["errors"]
+            assert row.evidence_text == "Material identity is unavailable."
+    finally:
+        engine.dispose()
 
 
 def test_extraction_pipeline_persists_stage2_outputs():

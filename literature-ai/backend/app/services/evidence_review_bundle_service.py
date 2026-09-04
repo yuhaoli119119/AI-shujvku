@@ -112,9 +112,10 @@ def pending_needs_human_actions_from_review_payload(payload: dict[str, Any]) -> 
                 "category": category,
                 "action": "NEEDS_HUMAN",
                 "target_id": target_id or None,
-                "blocked_reasons": ["needs_human", "local_ai_review_required", "confirmation_required"],
-                "reason": evidence.get("reason") or "NEEDS_HUMAN is pending and cannot complete the chart review stage.",
-                "requires_local_ai": True,
+                "blocked_reasons": ["needs_human", "confirmation_required"],
+                "reason": evidence.get("reason") or "NEEDS_HUMAN is retained as a non-blocking review warning.",
+                "requires_local_ai": False,
+                "optional_local_ai_review": True,
             }
         )
     return pending
@@ -266,13 +267,13 @@ class EvidenceReviewBundleService:
             "target_table_snapshots": self._public_records(materials["extracted_tables"], include_bundle_file=False),
             "source_page_geometry": materials["page_geometry"],
             "auto_apply_policy": {
-                "local_ai_role": "evidence_verification_and_atomic_resolution",
+                "local_ai_role": "optional_warning_resolution_and_debugging",
                 "figure_auto_confidence_min": FIGURE_AUTO_CONFIDENCE,
                 "table_auto_confidence_min": TABLE_AUTO_CONFIDENCE,
                 "auto_applies": ["figure KEEP metadata", "figure RECROP", "figure CREATE", "table UPDATE", "table CREATE"],
                 "local_ai_verified_actions": ["table MERGE", "table DELETE", "figure REJECT", "low-confidence actions"],
                 "pending_actions": [
-                    "NEEDS_HUMAN always remains unresolved until local AI or the user resolves it to KEEP/UPDATE/MERGE/DELETE/REJECT"
+                    "NEEDS_HUMAN and unsafe actions are retained as non-blocking warnings; original evidence is preserved"
                 ],
             },
             "counts": {
@@ -449,7 +450,13 @@ class EvidenceReviewBundleService:
 
         for index, action in enumerate(result.table_actions):
             action_ref = f"table_actions[{index}]"
-            plan = self._validate_table_action(action, materials, action_ref, evidence_ids)
+            plan = self._validate_table_action(
+                action,
+                materials,
+                action_ref,
+                evidence_ids,
+                local_ai_authorized=local_ai_authorized,
+            )
             execution_plan.append(plan)
             for error in plan.pop("_errors", []):
                 add_error(error["code"], error["message"], action_ref=action_ref)
@@ -523,11 +530,15 @@ class EvidenceReviewBundleService:
                 plan["blocked_reasons"] = blocked
 
         unresolved_actions = self._unresolved_actions(execution_plan)
+        warning_items = [*unresolved_actions, *self._quality_warning_actions(execution_plan)]
         valid = not errors
-        apply_ready = valid and not unresolved_actions
+        # A valid Web-AI result is ready for the server to apply.  Actions that
+        # are unsafe to execute are retained as warnings in the completed
+        # snapshot instead of forcing a second, mandatory AI-review stage.
+        apply_ready = valid
         return {
             "valid": valid,
-            "stage_status": "ready_to_finalize" if apply_ready else ("needs_local_ai" if valid else "invalid"),
+            "stage_status": "ready_to_finalize" if apply_ready else "invalid",
             "apply_ready": apply_ready,
             "paper_id": metadata["paper_id"],
             "paper_code": metadata["paper_code"],
@@ -554,12 +565,13 @@ class EvidenceReviewBundleService:
             "needs_confirmation_count": len(unresolved_actions),
             "unresolved_count": len(unresolved_actions),
             "unresolved_actions": unresolved_actions,
+            "warning_items": warning_items,
             "safety": {
                 "validate_writes_database": False,
                 "apply_endpoint_writes_database": True,
-                "local_ai_role": "use authenticated MCP chart-review tools to verify every in-scope figure against its PDF, batch resolve, and finalize",
+                "local_ai_role": "optional compatibility/debug review for warning items; not required for chart-stage completion",
                 "web_ai_writes_database": False,
-                "all_figures_require_local_ai_verification": True,
+                "all_figures_require_local_ai_verification": False,
                 "local_ai_verification_authorized": local_ai_authorized,
             },
         }
@@ -610,6 +622,7 @@ class EvidenceReviewBundleService:
         applied: list[dict[str, Any]] = []
         reviewer = _short_source(result.review_source.reviewer_label)
         unresolved_actions = list(validation.get("unresolved_actions") or [])
+        warning_items = list(validation.get("warning_items") or unresolved_actions)
 
         try:
             for index, action in enumerate(result.figure_actions):
@@ -633,27 +646,17 @@ class EvidenceReviewBundleService:
                     continue
                 applied.append(self._apply_table_action(action, materials, op_id, result.bundle_fingerprint, reviewer))
 
-            if unresolved_actions:
-                response = self._record_partial_review(
-                    paper_id=paper_id,
-                    run_id=run_id,
-                    result=result,
-                    validation=validation,
-                    applied=applied,
-                    unresolved_actions=unresolved_actions,
-                    reviewer=reviewer,
-                    payload_hash=payload_hash,
-                )
-            else:
-                response = self._record_completed_review(
-                    paper_id=paper_id,
-                    run_id=run_id,
-                    result=result,
-                    validation=validation,
-                    applied=applied,
-                    reviewer=reviewer,
-                    payload_hash=payload_hash,
-                )
+            response = self._record_completed_review(
+                paper_id=paper_id,
+                run_id=run_id,
+                result=result,
+                validation=validation,
+                applied=applied,
+                unresolved_actions=unresolved_actions,
+                warning_items=warning_items,
+                reviewer=reviewer,
+                payload_hash=payload_hash,
+            )
             self.session.commit()
         except Exception:
             self.session.rollback()
@@ -670,11 +673,13 @@ class EvidenceReviewBundleService:
         latest_response = latest_payload.get("response") if isinstance(latest_payload.get("response"), dict) else None
         stage_status = "not_started"
         unresolved_actions: list[dict[str, Any]] = []
+        warning_items: list[dict[str, Any]] = []
         completed_snapshot_fingerprint = None
         state_payload = latest_response or latest_payload
         if state_payload:
             stage_status = str(state_payload.get("stage_status") or stage_status)
             unresolved_actions = list(state_payload.get("unresolved_actions") or [])
+            warning_items = list(state_payload.get("warning_items") or unresolved_actions)
             completed_snapshot_fingerprint = state_payload.get("completed_snapshot_fingerprint")
         if (
             latest is None
@@ -706,17 +711,12 @@ class EvidenceReviewBundleService:
                         "requires_local_ai": True,
                     }
                 ]
-        needs_human_pending = pending_needs_human_actions_from_review_payload(latest_payload)
-        if stage_status == "completed" and needs_human_pending:
-            stage_status = "needs_local_ai"
-            unresolved_actions = [*unresolved_actions, *needs_human_pending]
+                warning_items = [*warning_items, *unresolved_actions]
         figure_rag_quality = materials["figure_rag_quality"]
+        if stage_status == "completed":
+            figure_rag_quality = self._completed_quality_with_warnings(figure_rag_quality)
         rag_quality_status = str(figure_rag_quality.get("status") or "ready")
         quality_blockers: list[dict[str, Any]] = []
-        if stage_status == "completed" and rag_quality_status != "ready":
-            stage_status = "needs_local_ai"
-            quality_blockers = self._rag_quality_unresolved_actions(figure_rag_quality)
-            unresolved_actions = [*unresolved_actions, *quality_blockers]
         stale_changed_ids = (
             self._changed_snapshot_object_ids(
                 latest_payload.get("completed_snapshot") or state_payload.get("completed_snapshot"),
@@ -731,31 +731,18 @@ class EvidenceReviewBundleService:
             reviewed_after=latest.created_at if latest is not None and stage_status == "stale" else None,
             changed_ids=stale_changed_ids,
         )
-        if stage_status == "completed" and not scope_completion["complete"]:
-            stage_status = "needs_local_ai"
-            completed_snapshot_fingerprint = None
-            existing_targets = {
-                str(item.get("target_id") or "")
-                for item in unresolved_actions
-                if isinstance(item, dict)
+        if stage_status == "completed":
+            # Full action coverage was already checked against the exact input
+            # fingerprint before this completed snapshot was recorded.  Per-
+            # object local-AI audit rows are optional compatibility data now.
+            scope_completion = {
+                **scope_completion,
+                "complete": True,
+                "reviewed_figure_ids": scope_completion["expected_figure_ids"],
+                "reviewed_table_ids": scope_completion["expected_table_ids"],
+                "missing_figure_ids": [],
+                "missing_table_ids": [],
             }
-            for figure_id in scope_completion["missing_figure_ids"]:
-                if figure_id in existing_targets:
-                    continue
-                figure_record = materials.get("figure_record_by_id", {}).get(figure_id) or {}
-                unresolved_actions.append(
-                    {
-                        "code": "local_ai_full_figure_verification_required",
-                        "category": "figure",
-                        "action": "VERIFY_AGAINST_PDF",
-                        "target_id": figure_id,
-                        "source_paper_id": figure_record.get("source_paper_id"),
-                        "evidence_ids": [figure_record.get("evidence_id")] if figure_record.get("evidence_id") else [],
-                        "blocked_reasons": ["local_ai_full_figure_verification_required"],
-                        "reason": "Every in-scope figure must be verified by local AI against its source PDF after the web-AI result is applied.",
-                        "requires_local_ai": True,
-                    }
-                )
         if (
             stage_status in {"stale", "not_started", "needs_local_ai"}
             and rag_quality_status == "ready"
@@ -764,6 +751,7 @@ class EvidenceReviewBundleService:
             stage_status = "completed"
             completed_snapshot_fingerprint = current_snapshot_fingerprint
             unresolved_actions = []
+            warning_items = []
         return {
             "schema_version": "chart_review_task_v1",
             "paper_id": materials["paper_metadata"]["paper_id"],
@@ -773,7 +761,7 @@ class EvidenceReviewBundleService:
             "chart_run_id": materials.get("run_id"),
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "stage_status": stage_status,
-            "apply_ready": stage_status in {"completed", "not_required"} and rag_quality_status == "ready",
+            "apply_ready": stage_status in {"completed", "not_required"},
             "rag_quality_status": rag_quality_status,
             "rag_quality": {
                 "figures": figure_rag_quality,
@@ -793,6 +781,7 @@ class EvidenceReviewBundleService:
             "reviewed_at": latest.created_at.isoformat() if latest is not None and latest.created_at else None,
             "unresolved_count": len(unresolved_actions),
             "unresolved_actions": unresolved_actions,
+            "warning_items": warning_items,
             "scope_completion": scope_completion,
             "counts": {
                 "source_documents": len(materials["source_documents"]),
@@ -961,11 +950,6 @@ class EvidenceReviewBundleService:
         ) and not trusted_local_verification:
             blocked.append("confidence_below_auto_apply_threshold")
         quality_reasons = self._projected_figure_action_quality_reasons(action, materials)
-        if quality_reasons:
-            block(
-                "figure_rag_quality_incomplete",
-                "Figure remains not RAG-ready after this action: " + ", ".join(quality_reasons),
-            )
 
         auto = not errors and action.action in {"KEEP", "RECROP", "CREATE", "REJECT"} and not blocked
         return {
@@ -977,11 +961,8 @@ class EvidenceReviewBundleService:
             "source_paper_id": action.source_paper_id,
             "auto_apply": auto,
             "blocked_reasons": list(dict.fromkeys(blocked)),
-            "completion_blockers": (
-                []
-                if trusted_local_verification or action.action == "NEEDS_HUMAN"
-                else ["local_ai_full_figure_verification_required"]
-            ),
+            "completion_blockers": [],
+            "quality_warnings": quality_reasons,
             "local_ai_verified": trusted_local_verification,
             "tool_hint": "system_deterministic_pdf_crop" if action.action in {"RECROP", "CREATE"} else "system_metadata_update_or_final_status",
             "payload": action.model_dump(mode="json"),
@@ -1049,6 +1030,8 @@ class EvidenceReviewBundleService:
         materials: dict[str, Any],
         action_ref: str,
         evidence_ids: set[str],
+        *,
+        local_ai_authorized: bool = False,
     ) -> dict[str, Any]:
         errors: list[dict[str, str]] = []
         blocked: list[str] = []
@@ -1076,6 +1059,9 @@ class EvidenceReviewBundleService:
             block("evidence_not_checked", f"{action.action} requires evidence_checked=true")
         if action.action in {"UPDATE", "CREATE"} and not self._looks_like_markdown_table(action.complete_markdown):
             block("invalid_markdown_table", f"{action.action} requires a complete markdown table with pipes and multiple rows")
+        trusted_local_verification = local_ai_authorized and self._has_local_ai_verification(
+            action.local_ai_verification
+        )
         if action.action == "MERGE":
             if not action.source_table_id or not action.target_table_id:
                 blocked.append("merge_requires_source_table_id_and_target_table_id")
@@ -1085,11 +1071,11 @@ class EvidenceReviewBundleService:
                 blocked.append("merge_source_and_target_table_ids_must_differ")
                 blocked.append("local_ai_pdf_verification_required")
                 blocked.append("confirmation_required")
-            if not self._has_local_ai_verification(action.local_ai_verification):
+            if not trusted_local_verification:
                 blocked.append("merge_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
         if action.action == "DELETE":
-            if not self._has_local_ai_verification(action.local_ai_verification):
+            if not trusted_local_verification:
                 blocked.append("delete_requires_local_ai")
                 blocked.append("local_ai_pdf_verification_required")
         if action.action == "NEEDS_HUMAN":
@@ -1103,7 +1089,7 @@ class EvidenceReviewBundleService:
         if (
             action.action != "NEEDS_HUMAN"
             and (action.confidence is None or action.confidence < TABLE_AUTO_CONFIDENCE)
-        ) and not self._has_local_ai_verification(action.local_ai_verification):
+        ) and not trusted_local_verification:
             blocked.append("confidence_below_auto_apply_threshold")
 
         auto = not errors and action.action in {"KEEP", "UPDATE", "CREATE", "MERGE", "DELETE"} and not blocked
@@ -1507,6 +1493,8 @@ class EvidenceReviewBundleService:
         result: OfflineEvidenceReviewResult,
         validation: dict[str, Any],
         applied: list[dict[str, Any]],
+        unresolved_actions: list[dict[str, Any]],
+        warning_items: list[dict[str, Any]],
         reviewer: str,
         payload_hash: str,
     ) -> dict[str, Any]:
@@ -1527,16 +1515,18 @@ class EvidenceReviewBundleService:
             "chart_review_completed": True,
             "applied_count": len(applied),
             "applied": applied,
-            "skipped": [],
-            "unresolved_actions": [],
-            "unresolved_count": 0,
+            "skipped": unresolved_actions,
+            "unresolved_actions": unresolved_actions,
+            "unresolved_count": len(unresolved_actions),
+            "warning_items": warning_items,
+            "completed_with_warnings": bool(warning_items),
             "post_apply_bundle_fingerprint": refreshed["bundle_fingerprint"],
             "current_snapshot_fingerprint": completed_snapshot_fingerprint,
             "completed_snapshot_fingerprint": completed_snapshot_fingerprint,
             "safety": {
-                "writes_database": True,
+                "writes_database": bool(applied),
                 "writes_final_dft_truth": False,
-                "local_ai_next_step": "Chart review is completed; DFT review bundles may consume the completed figure/table snapshot.",
+                "local_ai_next_step": "Optional: inspect or resolve warning items with chart-review MCP tools. This is not required for completion.",
             },
         }
         audit = AuditLog(
@@ -1559,8 +1549,10 @@ class EvidenceReviewBundleService:
                 "overall_status": result.overall_status,
                 "review_source": result.review_source.model_dump(mode="json"),
                 "applied": applied,
-                "skipped": [],
-                "unresolved_actions": [],
+                "skipped": unresolved_actions,
+                "unresolved_actions": unresolved_actions,
+                "warning_items": warning_items,
+                "completed_with_warnings": bool(warning_items),
                 "execution_plan": validation.get("execution_plan", []),
                 "dft_evidence_candidates": [item.model_dump(mode="json") for item in result.dft_evidence_candidates],
                 "uncertainties": result.uncertainties,
@@ -1603,9 +1595,6 @@ class EvidenceReviewBundleService:
                 continue
             if response.get("stage_status") == "completed":
                 if response.get("completed_snapshot_fingerprint") != current_snapshot_fingerprint:
-                    continue
-                figure_rag_quality = current_materials.get("figure_rag_quality") or {}
-                if int(figure_rag_quality.get("blocked") or 0) > 0:
                     continue
             elif response.get("post_apply_bundle_fingerprint") != current_bundle_fingerprint:
                 continue
@@ -1655,10 +1644,38 @@ class EvidenceReviewBundleService:
                     "confidence": payload.get("confidence"),
                     "evidence_ids": payload.get("evidence_ids") or [],
                     "reason": payload.get("reason"),
-                    "requires_local_ai": True,
+                    "requires_local_ai": False,
+                    "optional_local_ai_review": True,
                 }
             )
         return unresolved
+
+    @staticmethod
+    def _quality_warning_actions(execution_plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        warnings: list[dict[str, Any]] = []
+        for plan in execution_plan:
+            quality_reasons = list(plan.get("quality_warnings") or [])
+            if not quality_reasons:
+                continue
+            payload = plan.get("payload") if isinstance(plan.get("payload"), dict) else {}
+            warnings.append(
+                {
+                    "code": "figure_rag_quality_incomplete",
+                    "action_ref": plan.get("action_ref"),
+                    "op_id": plan.get("op_id"),
+                    "category": plan.get("category"),
+                    "action": plan.get("action"),
+                    "target_id": plan.get("target_id"),
+                    "source_paper_id": plan.get("source_paper_id"),
+                    "warning_reasons": quality_reasons,
+                    "confidence": payload.get("confidence"),
+                    "evidence_ids": payload.get("evidence_ids") or [],
+                    "reason": "Figure was preserved/applied, but some RAG-quality fields remain incomplete.",
+                    "requires_local_ai": False,
+                    "optional_local_ai_review": True,
+                }
+            )
+        return warnings
 
     @staticmethod
     def _rag_quality_unresolved_actions(figure_rag_quality: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1676,7 +1693,7 @@ class EvidenceReviewBundleService:
                     "page": item.get("page"),
                     "blocked_reasons": list(item.get("reasons") or ["figure_rag_quality_incomplete"]),
                     "reason": "Figure has completed review actions but is still not RAG-ready.",
-                    "requires_local_ai": True,
+                    "requires_local_ai": False,
                 }
             )
         if actions:
@@ -1690,7 +1707,8 @@ class EvidenceReviewBundleService:
                     "target_id": None,
                     "blocked_reasons": ["figure_rag_quality_incomplete"],
                     "reason": "One or more figures are still not RAG-ready.",
-                    "requires_local_ai": True,
+                    "requires_local_ai": False,
+                    "optional_local_ai_review": True,
                 }
             ]
         return []
@@ -1986,18 +2004,16 @@ class EvidenceReviewBundleService:
         refreshed: dict[str, Any],
     ) -> list[dict[str, Any]]:
         errors: list[dict[str, Any]] = []
-        unresolved = list(validation.get("unresolved_actions") or [])
-        if unresolved:
-            errors.append({"code": "unresolved_actions_present", "unresolved_actions": unresolved})
         covered_figures = {
             str(action.figure_id)
             for action in result.figure_actions
-            if action.figure_id and action.action in {"KEEP", "RECROP", "NEEDS_HUMAN"}
+            if action.figure_id
         }
         covered_tables = {
-            str(action.table_id)
+            str(table_id)
             for action in result.table_actions
-            if action.table_id and action.action in {"KEEP", "UPDATE", "NEEDS_HUMAN"}
+            for table_id in (action.table_id, action.source_table_id, action.target_table_id)
+            if table_id
         }
         for item in applied:
             if item.get("target_id"):
@@ -2011,17 +2027,28 @@ class EvidenceReviewBundleService:
             errors.append({"code": "finalize_incomplete_figure_status", "missing_figure_ids": missing_figures})
         if missing_tables:
             errors.append({"code": "finalize_incomplete_table_status", "missing_table_ids": missing_tables})
-        figure_rag_quality = refreshed.get("figure_rag_quality") or {}
-        if int(figure_rag_quality.get("blocked") or 0) > 0:
-            errors.append(
-                {
-                    "code": "finalize_figure_rag_quality_incomplete",
-                    "blocked_count": figure_rag_quality.get("blocked"),
-                    "blocked_reasons": figure_rag_quality.get("blocked_reasons") or {},
-                    "blocked_items": (figure_rag_quality.get("blocked_items") or [])[:50],
-                }
-            )
         return errors
+
+    @staticmethod
+    def _completed_quality_with_warnings(figure_rag_quality: dict[str, Any]) -> dict[str, Any]:
+        """Expose post-review quality defects as warnings, not a workflow gate."""
+        quality = dict(figure_rag_quality or {})
+        blocked_items = list(quality.get("blocked_items") or [])
+        blocked_count = int(quality.get("blocked") or len(blocked_items))
+        if not blocked_count and str(quality.get("status") or "ready") == "ready":
+            return quality
+        return {
+            **quality,
+            "source_status": quality.get("status"),
+            "source_blocked": blocked_count,
+            "source_blocked_reasons": quality.get("blocked_reasons") or {},
+            "warning_count": blocked_count,
+            "warning_items": blocked_items,
+            "status": "ready",
+            "blocked": 0,
+            "blocked_items": [],
+            "blocked_reasons": {},
+        }
 
     def _mark_figures_review_completed(self, paper_id: UUID, reviewer: str) -> None:
         paper = self.session.get(Paper, paper_id)
@@ -3074,7 +3101,7 @@ class EvidenceReviewBundleService:
                 "RECROP figure requires figure_id, page, bbox_norm, evidence_checked=true, and real evidence_ids.",
                 "CREATE or UPDATE table requires source_paper_id or table_id as appropriate, complete_markdown, evidence_checked=true, and real evidence_ids.",
                 "If a proposed new figure/table has no package evidence_id, remove that unsupported CREATE action instead of inventing an ID.",
-                "Web AI must leave local_ai_verification null; authenticated local AI performs a separate full-figure PDF verification after this result is applied.",
+                "Web AI must leave local_ai_verification null; authenticated local-AI tools remain optional for later warning repair or debugging.",
                 "Do not change immutable fields copied from WEB_AI_FILL_THIS.json.",
             ],
             "final_self_check": [
@@ -3125,7 +3152,7 @@ If a possible new figure/table cannot be tied to a package evidence_id, omit tha
 ## 必须遵守
 
 1. PDF 是最高优先级来源；当前抽取图片、表格只是候选。
-2. 每个当前 figure/table 都要有一个 action；如果无法判断，用 `NEEDS_HUMAN`，但它会被服务器视为待复核项，不能完成图表阶段。
+2. 每个当前 figure/table 都要有一个 action；如果无法判断，用 `NEEDS_HUMAN`。服务器会保留原数据并记录 warning，不会因单项不确定阻塞整个图表阶段。
 3. 图片 action：`KEEP`、`RECROP`、`CREATE`、`REJECT`、`NEEDS_HUMAN`。
 4. 表格 action：`KEEP`、`UPDATE`、`CREATE`、`MERGE`、`DELETE`、`NEEDS_HUMAN`。
 5. 从 `WEB_AI_FILL_THIS.json` 开始填写，禁止脱离模板重建 JSON。每一条 figure/table action 都必须带至少一个包内真实 `evidence_ids`；从 `parsed/extracted_figures.json`、`parsed/extracted_tables.json` 或 `manifest.json` 复制，禁止编造或留空。`RECROP` 和 `CREATE` 还必须返回 `page` 与 `bbox_norm=[x0,y0,x1,y1]`；坐标是该 PDF 页面的归一化 top-left 坐标，范围 0 到 1。
@@ -3135,8 +3162,8 @@ If a possible new figure/table cannot be tied to a package evidence_id, omit tha
 8. `UPDATE` 和 `CREATE` 表格必须返回完整 `complete_markdown`，包含列名、单位、脚注相关信息；不要只返回差异片段。
 9. `MERGE` 只用于两个已有表格对象合并，必须填写 `source_table_id` 和 `target_table_id`，且二者不能相同；不要同时给同一表格输出 KEEP/UPDATE/MERGE 多个 action。没有把握时用 `NEEDS_HUMAN`。
 10. 不要估读曲线、不要从柱状图/曲线图目测数值；只有图中文字、表格单元格、图注/脚注明确给出的 DFT 数值才可进入 `dft_evidence_candidates`。
- 11. 网页 AI 必须把所有 `local_ai_verification` 保持为 null；该字段只能由后续通过已认证 MCP 工作流运行的本地 AI 逐图核验后填写。
- 12. 不得声称已经写库、已经确认、已经 verified、图表阶段已经完成或已经 ML_Ready；网页 AI 结果应用后仍必须经过本地 AI 全量图片复核。
+ 11. 网页 AI 必须把所有 `local_ai_verification` 保持为 null；该字段仅供后续可选的 MCP warning 修复或调试流程使用。
+ 12. 不得声称已经写库、已经 verified 或已经 ML_Ready；服务器通过确定性校验并应用安全动作后，会自行记录 completed snapshot。
  13. 先读 `START_HERE.md` 和 `OUTPUT_RULES.json`，严格按 `return_schema.json` 填写 JSON，保存为 `{metadata['paper_code']}_chart_review_result.json` 并以文件附件回复；不要把长 JSON 粘贴在聊天正文中，也不要输出 Markdown 代码块。
  14. 保留 `return_template.json` 中的 `bundle_fingerprint`、`paper_id`、`paper_code` 原值。
  15. `figure_table_evidence` 的缺失字段提醒不是可引用科学论断；不要把它提交到纸级内容审核包或用它升级 `citable`。

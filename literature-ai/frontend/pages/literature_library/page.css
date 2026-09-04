@@ -605,6 +605,11 @@ body.resizing iframe {
     flex-shrink: 0;
     justify-content: flex-end;
 }
+/* Keep task and review implementations available without exposing daily-entry buttons. */
+button[data-role="classify-unknown-btn"],
+#dftContent [data-role="dft-readiness-actions"] button[onclick="openSelectedReviewCenter()"] {
+    display: none;
+}
 .tabs {
     display: flex;
     gap: 18px;

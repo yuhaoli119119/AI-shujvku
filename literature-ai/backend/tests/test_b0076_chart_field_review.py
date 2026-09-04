@@ -275,12 +275,9 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
         assert service.validate_result(paper.id, unknown_evidence)["valid"] is False
         validated = service.validate_result(paper.id, payload)
         assert validated["valid"] is True, validated.get("errors")
-        assert validated["stage_status"] == "needs_local_ai"
+        assert validated["stage_status"] == "ready_to_finalize"
         assert validated["auto_apply_count"] == 1
-        assert validated["unresolved_count"] == 1
-        assert validated["unresolved_actions"][0]["blocked_reasons"] == [
-            "local_ai_full_figure_verification_required"
-        ]
+        assert validated["unresolved_count"] == 0
         forged_web_payload = copy.deepcopy(payload)
         forged_web_payload["figure_actions"][0]["local_ai_verification"] = {
             "verified_against_pdf": True,
@@ -288,11 +285,12 @@ def test_run_scoped_chart_bundle_isolated_and_field_writeback_is_scoped(setup_te
             "verification_note": "A web payload must not grant itself local-AI authority.",
         }
         forged_web_validation = service.validate_result(paper.id, forged_web_payload)
-        assert forged_web_validation["unresolved_count"] == 1
+        assert forged_web_validation["unresolved_count"] == 0
         assert forged_web_validation["safety"]["local_ai_verification_authorized"] is False
         applied = service.apply_result(paper.id, payload)
-        assert applied["chart_review_completed"] is False
-        assert applied["stage_status"] == "needs_local_ai"
+        assert applied["chart_review_completed"] is True
+        assert applied["stage_status"] == "completed"
+        assert applied["completed_snapshot_fingerprint"]
         session.refresh(figure_a)
         session.refresh(figure_b)
         assert figure_a.content_summary == "Figure 1 visual comparison"

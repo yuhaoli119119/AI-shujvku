@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from uuid import uuid4
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,6 +14,62 @@ from app.mcp.context import mcp_auth_context
 from app.mcp.server import finalize_chart_review, get_chart_review_task, resolve_chart_review_actions
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.table_curation_service import TableCurationService
+
+
+@pytest.mark.no_test_database
+def test_completed_quality_defects_are_exposed_as_nonblocking_warnings():
+    result = EvidenceReviewBundleService._completed_quality_with_warnings(
+        {
+            "status": "blocked",
+            "total": 1,
+            "eligible": 0,
+            "blocked": 1,
+            "blocked_reasons": {"missing_figure_role": 1},
+            "blocked_items": [{"source_id": "figure-1", "reasons": ["missing_figure_role"]}],
+        }
+    )
+
+    assert result["status"] == "ready"
+    assert result["blocked"] == 0
+    assert result["source_blocked"] == 1
+    assert result["warning_count"] == 1
+    assert result["warning_items"][0]["source_id"] == "figure-1"
+
+
+@pytest.mark.no_test_database
+def test_quality_warning_keeps_original_web_action_identity():
+    warnings = EvidenceReviewBundleService._quality_warning_actions(
+        [
+            {
+                "action_ref": "figure_actions[0]",
+                "op_id": "figure:0:KEEP",
+                "category": "figure",
+                "action": "KEEP",
+                "target_id": "figure-1",
+                "source_paper_id": "paper-1",
+                "quality_warnings": ["missing_figure_role"],
+                "payload": {"confidence": 0.61, "evidence_ids": ["main:figure:001"]},
+            }
+        ]
+    )
+
+    assert warnings == [
+        {
+            "code": "figure_rag_quality_incomplete",
+            "action_ref": "figure_actions[0]",
+            "op_id": "figure:0:KEEP",
+            "category": "figure",
+            "action": "KEEP",
+            "target_id": "figure-1",
+            "source_paper_id": "paper-1",
+            "warning_reasons": ["missing_figure_role"],
+            "confidence": 0.61,
+            "evidence_ids": ["main:figure:001"],
+            "reason": "Figure was preserved/applied, but some RAG-quality fields remain incomplete.",
+            "requires_local_ai": False,
+            "optional_local_ai_review": True,
+        }
+    ]
 
 
 def _paper_with_chart_objects(session: Session, code: str = "BCHART") -> tuple[Paper, PaperFigure, PaperTable]:
@@ -305,7 +364,7 @@ def _result_payload(session: Session, paper: Paper, figures: list[dict], tables:
     }
 
 
-def test_all_objects_needs_human_is_not_apply_ready(setup_test_db):
+def test_all_objects_needs_human_is_apply_ready_with_warnings(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH01")
         payload = _result_payload(
@@ -318,12 +377,12 @@ def test_all_objects_needs_human_is_not_apply_ready(setup_test_db):
         validation = _service(session).validate_result(paper.id, payload)
 
     assert validation["valid"] is True
-    assert validation["apply_ready"] is False
+    assert validation["apply_ready"] is True
     assert validation["unresolved_count"] == 2
     assert {item["action"] for item in validation["unresolved_actions"]} == {"NEEDS_HUMAN"}
 
 
-def test_one_skipped_item_does_not_complete_chart_stage(setup_test_db):
+def test_one_skipped_item_completes_chart_stage_with_warning(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH02")
         payload = _result_payload(
@@ -336,13 +395,14 @@ def test_one_skipped_item_does_not_complete_chart_stage(setup_test_db):
         applied = _service(session).apply_result(paper.id, payload)
         applied_logs = session.scalars(select(AuditLog).where(AuditLog.action == "offline_evidence_review_applied")).all()
 
-    assert applied["chart_review_completed"] is False
-    assert applied["stage_status"] == "needs_local_ai"
-    assert applied["unresolved_count"] == 2
-    assert applied_logs == []
+    assert applied["chart_review_completed"] is True
+    assert applied["stage_status"] == "completed"
+    assert applied["unresolved_count"] == 1
+    assert applied["completed_snapshot_fingerprint"]
+    assert len(applied_logs) == 1
 
 
-def test_documented_needs_human_remains_pending_and_blocks_chart_stage(setup_test_db):
+def test_documented_needs_human_is_warning_and_does_not_block_chart_stage(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCHNH")
         payload = _result_payload(
@@ -370,16 +430,17 @@ def test_documented_needs_human_remains_pending_and_blocks_chart_stage(setup_tes
 
     assert validation["valid"] is True
     assert validation["unresolved_count"] == 1
-    assert validation["stage_status"] == "needs_local_ai"
+    assert validation["stage_status"] == "ready_to_finalize"
     assert any(
         "needs_human" in item["blocked_reasons"]
         for item in validation["unresolved_actions"]
     )
-    assert applied["chart_review_completed"] is False
-    assert response.status_code == 409
+    assert applied["chart_review_completed"] is True
+    assert applied["completed_with_warnings"] is True
+    assert response.status_code == 200
 
 
-def test_documented_low_confidence_table_needs_human_remains_pending(setup_test_db):
+def test_documented_low_confidence_table_needs_human_is_nonblocking_warning(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCHTB")
         payload = _result_payload(
@@ -400,17 +461,17 @@ def test_documented_low_confidence_table_needs_human_remains_pending(setup_test_
         applied = _service(session).apply_result(paper.id, payload)
 
     assert validation["valid"] is True
-    assert validation["unresolved_count"] == 2
-    assert validation["stage_status"] == "needs_local_ai"
+    assert validation["unresolved_count"] == 1
+    assert validation["stage_status"] == "ready_to_finalize"
     assert any(
         "needs_human" in item["blocked_reasons"]
         for item in validation["unresolved_actions"]
     )
-    assert applied["stage_status"] == "needs_local_ai"
-    assert applied["chart_review_completed"] is False
+    assert applied["stage_status"] == "completed"
+    assert applied["chart_review_completed"] is True
 
 
-def test_manual_figures_completion_requires_tables_resolved(setup_test_db):
+def test_manual_figures_completion_accepts_completed_snapshot_with_table_warning(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCHMT")
         payload = _result_payload(
@@ -434,11 +495,9 @@ def test_manual_figures_completion_requires_tables_resolved(setup_test_db):
         json={"module": "figures", "completed": True, "reviewer": "test"},
     )
 
-    assert applied["stage_status"] == "needs_local_ai"
-    assert response.status_code == 409
-    body = response.json()
-    assert body["detail"]["code"] == "figure_table_review_not_completed"
-    assert body["detail"]["chart_review"]["unresolved_count"] == 2
+    assert applied["stage_status"] == "completed"
+    assert applied["unresolved_count"] == 1
+    assert response.status_code == 200
 
 
 def test_duplicate_conflicting_figure_actions_fail_validation(setup_test_db):
@@ -497,8 +556,8 @@ def test_web_ai_common_json_shape_issues_are_normalized_or_unresolved(setup_test
         validation = _service(session).validate_result(paper.id, payload)
 
     assert validation["valid"] is True
-    assert validation["apply_ready"] is False
-    assert validation["unresolved_count"] == 2
+    assert validation["apply_ready"] is True
+    assert validation["unresolved_count"] == 1
     assert validation["execution_plan"][0]["payload"]["dft_relevance"] == "explicit_dft"
     assert validation["execution_plan"][1]["action"] == "MERGE"
     assert validation["execution_plan"][1]["payload"]["dft_relevance"] == "none"
@@ -519,22 +578,78 @@ def test_exact_duplicate_table_actions_are_deduped_before_conflict_checks(setup_
     assert len([item for item in validation["execution_plan"] if item["category"] == "table"]) == 1
 
 
-def test_authenticated_local_ai_with_no_unresolved_actions_completes_chart_stage(setup_test_db):
+def test_standard_web_ai_result_completes_chart_stage_without_local_ai(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH05")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        result = _apply_as_local_ai(session, paper, payload)
+        result = _service(session).apply_result(paper.id, payload)
         session.refresh(paper)
         applied_logs = session.scalars(select(AuditLog).where(AuditLog.action == "offline_evidence_review_applied")).all()
 
     assert result["chart_review_completed"] is True
     assert result["stage_status"] == "completed"
     assert result["completed_snapshot_fingerprint"]
+    assert result["applied_count"] == 2
     assert paper.comprehensive_analysis["manual_review_progress"]["figures"]["completed"] is True
     assert len(applied_logs) == 1
+    assert applied_logs[0].payload["stage_status"] == "completed"
+    assert applied_logs[0].payload["review_source"]["review_source_type"] == "web_ai"
 
 
-def test_keep_without_rag_ready_figure_metadata_cannot_complete_chart_stage(setup_test_db):
+def test_web_ai_destructive_actions_are_preserved_as_nonblocking_warnings(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper, figure, table = _paper_with_chart_objects(session, "BCHWD")
+        forged_verification = _local_ai_verification()
+        payload = _result_payload(
+            session,
+            paper,
+            [_figure_action(figure, "REJECT", local_ai_verification=forged_verification)],
+            [_table_action(table, "DELETE", local_ai_verification=forged_verification)],
+        )
+        result = _service(session).apply_result(paper.id, payload)
+        remaining_figure = session.get(PaperFigure, figure.id)
+        remaining_table = session.get(PaperTable, table.id)
+
+    assert result["stage_status"] == "completed"
+    assert result["chart_review_completed"] is True
+    assert result["applied_count"] == 0
+    assert result["unresolved_count"] == 2
+    assert result["completed_with_warnings"] is True
+    assert {item["action"] for item in result["warning_items"]} == {"REJECT", "DELETE"}
+    assert remaining_figure is not None
+    assert remaining_table is not None
+
+
+def test_identity_fingerprint_and_evidence_errors_remain_fatal(setup_test_db):
+    with Session(setup_test_db) as session:
+        paper, figure, table = _paper_with_chart_objects(session, "BCHID")
+        payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
+        service = _service(session)
+
+        bad_fingerprint = {**payload, "bundle_fingerprint": "0" * 64}
+        fingerprint_validation = service.validate_result(paper.id, bad_fingerprint)
+        fingerprint_apply = service.apply_result(paper.id, bad_fingerprint)
+
+        bad_paper = {**payload, "paper_id": str(uuid4())}
+        paper_validation = service.validate_result(paper.id, bad_paper)
+
+        bad_evidence = {
+            **payload,
+            "figure_actions": [{**payload["figure_actions"][0], "evidence_ids": ["missing:evidence:id"]}],
+        }
+        evidence_validation = service.validate_result(paper.id, bad_evidence)
+
+    assert fingerprint_validation["valid"] is False
+    assert any(item["code"] == "stale_or_mismatched_bundle" for item in fingerprint_validation["errors"])
+    assert fingerprint_apply["chart_review_completed"] is False
+    assert fingerprint_apply["applied_count"] == 0
+    assert paper_validation["valid"] is False
+    assert any(item["code"] == "paper_id_mismatch" for item in paper_validation["errors"])
+    assert evidence_validation["valid"] is False
+    assert any(item["code"] == "unknown_evidence_id" for item in evidence_validation["errors"])
+
+
+def test_keep_without_rag_ready_figure_metadata_completes_with_quality_warning(setup_test_db):
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCHRG")
         figure.figure_role = "unknown"
@@ -547,11 +662,12 @@ def test_keep_without_rag_ready_figure_metadata_cannot_complete_chart_stage(setu
         result = _service(session).apply_result(paper.id, payload)
         applied_logs = session.scalars(select(AuditLog).where(AuditLog.action == "offline_evidence_review_applied")).all()
 
-    assert validation["valid"] is False
-    assert any(error["code"] == "figure_rag_quality_incomplete" for error in validation["errors"])
-    assert result["stage_status"] == "invalid"
-    assert result["chart_review_completed"] is False
-    assert applied_logs == []
+    assert validation["valid"] is True
+    assert any(item["code"] == "figure_rag_quality_incomplete" for item in validation["warning_items"])
+    assert result["stage_status"] == "completed"
+    assert result["chart_review_completed"] is True
+    assert result["completed_with_warnings"] is True
+    assert len(applied_logs) == 1
 
 
 def test_local_ai_batch_resolve_then_finalize_succeeds_via_mcp_tools(setup_test_db):
@@ -569,7 +685,7 @@ def test_local_ai_batch_resolve_then_finalize_succeeds_via_mcp_tools(setup_test_
         resolved_figure_action = _figure_action(figure, local_ai_verification=_local_ai_verification())
         resolved_table_action = _table_action(table)
 
-    assert partial["chart_review_completed"] is False
+    assert partial["chart_review_completed"] is True
     assert partial["unresolved_count"] == 1
 
     with mcp_auth_context("test-correction-only-key"):
@@ -613,7 +729,7 @@ def test_completed_chart_review_immediately_allows_dft_bundle_export(setup_test_
     with Session(setup_test_db) as session:
         paper, figure, table = _paper_with_chart_objects(session, "BCH08")
         payload = _result_payload(session, paper, [_figure_action(figure)], [_table_action(table)])
-        completed = _apply_as_local_ai(session, paper, payload)
+        completed = _service(session).apply_result(paper.id, payload)
         paper_id = paper.id
 
     response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")

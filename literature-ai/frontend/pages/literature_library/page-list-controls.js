@@ -196,6 +196,12 @@ function clearStoredLibraryFilterState() {
     }
 }
 
+const DAILY_DETAIL_TABS = ["figures", "mechanism", "dft"];
+
+function normalizeDailyDetailTab(tab) {
+    return DAILY_DETAIL_TABS.includes(tab) ? tab : "figures";
+}
+
 function applyQueryParams() {
     const params = new URLSearchParams(window.location.search);
     const paperId = params.get("paper_id") || params.get("review_paper_id");
@@ -208,7 +214,7 @@ function applyQueryParams() {
     const pdfEvidenceText = params.get("pdf_evidence_text") || "";
     state.qualityReasonContext = params.get("quality_reason") || "";
     if (paperId) state.selectedPaperId = paperId;
-    if (params.get("review_paper_id")) state.currentTab = "review";
+    if (params.get("review_paper_id")) state.currentTab = "figures";
     if (paperId && rawTargetType && targetId) {
         const typeMap = {
             section: { itemType: "section", tab: "writing" },
@@ -221,8 +227,8 @@ function applyQueryParams() {
             electrochemical_performance: { itemType: "electrochemical_performance", tab: "dft" },
             writing_card: { itemType: "writing_card", tab: "writing" },
             writing_cards: { itemType: "writing_card", tab: "writing" },
-            mechanism_claim: { itemType: "mechanism_claim", tab: "writing" },
-            mechanism_claims: { itemType: "mechanism_claim", tab: "writing" },
+            mechanism_claim: { itemType: "mechanism_claim", tab: "mechanism" },
+            mechanism_claims: { itemType: "mechanism_claim", tab: "mechanism" },
             table: { itemType: "table", tab: "figures" },
             tables: { itemType: "table", tab: "figures" },
             figure: { itemType: "figure", tab: "figures" },
@@ -257,7 +263,7 @@ function applyQueryParams() {
         sections: "writing",
         figures: "figures",
         dft: "dft",
-        mechanism: "writing",
+        mechanism: "mechanism",
         writing: "writing",
         translation: "translation",
         review: "review"
@@ -266,9 +272,9 @@ function applyQueryParams() {
         state.openAddOnLoad = "ai";
     } else if (tab && tabMap[tab]) {
         state.hasExplicitTab = true;
-        state.currentTab = tabMap[tab];
+        state.currentTab = normalizeDailyDetailTab(tabMap[tab]);
     } else if (state.pendingNavigationTarget && state.pendingNavigationTarget.tab) {
-        state.currentTab = state.pendingNavigationTarget.tab;
+        state.currentTab = normalizeDailyDetailTab(state.pendingNavigationTarget.tab);
     }
 }
 
@@ -285,9 +291,7 @@ function syncQueryParams() {
 }
 
 function switchTab(tab) {
-    if (!["summary", "figures", "dft", "writing", "translation", "review"].includes(tab)) {
-        tab = "summary";
-    }
+    tab = normalizeDailyDetailTab(tab);
     state.currentTab = tab;
     document.querySelectorAll(".tab-btn").forEach(function(btn) {
         btn.classList.toggle("active", btn.getAttribute("data-tab") === tab);
@@ -342,10 +346,9 @@ function renderLibraryEmptyState() {
         emptyEl.innerHTML =
             '<div class="empty-state-card">' +
                 '<h2>当前库还没有文献</h2>' +
-                '<p>上传 PDF、输入 DOI / URL，或使用在线检索来建立你的第一个文献库。</p>' +
+                '<p>上传 PDF 来建立你的第一个文献库。</p>' +
                 '<div class="empty-actions">' +
-                    '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加文献</button>' +
-                    '<button class="btn ghost" onclick="openAddLiteraturePanel(\'online\')">在线检索</button>' +
+                    '<button class="btn primary" onclick="openAddLiteraturePanel(\'pdf\')">添加 PDF</button>' +
                 '</div>' +
             '</div>';
     }

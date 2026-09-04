@@ -7,7 +7,7 @@ const state = {
     papers: [],
     selectedPaperId: null,
     selectedPaper: null,
-    currentTab: "summary",
+    currentTab: "figures",
     hasExplicitTab: false,
     currentLibrary: null,
     currentLibraryTotal: 0,

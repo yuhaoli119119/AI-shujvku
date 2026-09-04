@@ -33,7 +33,7 @@ function renderDetail(detail, audit) {
     const localizedSummaryCard = renderLocalizedSummary(detail);
     const comprehensiveCard = "";
 
-    const activeTab = state.currentTab || "summary";
+    const activeTab = state.currentTab || "figures";
     let figureCards = "";
     if (activeTab === "figures" && detail.figures && detail.figures.length) {
         function extractFigureNumber(caption) {
@@ -246,6 +246,7 @@ function renderDetail(detail, audit) {
 
     const summaryEl = $("summaryContent");
     const figuresEl = $("figuresContent");
+    const mechanismEl = $("mechanismContent");
     const dftEl = $("dftContent");
     const writingEl = $("writingContent");
     const translationEl = $("translationContent");
@@ -330,6 +331,12 @@ function renderDetail(detail, audit) {
             renderManualReviewCompletionCard(detail, "figures", "图表进度", "当图表对象、裁图和关键信息都核对完毕后，再手动标记完成。若后续重新补图或重裁，可取消。") +
             figureCards +
             renderJSONCards("表格", detail.tables || []);
+    }
+    if (mechanismEl && activeTab === "mechanism") {
+        const mechanismItems = detail.mechanism_claims_items || [];
+        mechanismEl.innerHTML = mechanismItems.length
+            ? renderJSONCards("机理声明", mechanismItems)
+            : '<div class="section-card"><h3>机理</h3><div class="muted">当前文献暂无已提取的机理信息。</div></div>';
     }
     if (dftEl && activeTab === "dft") {
         const dftCandidateItems = dftResultsWithSafety(detail);

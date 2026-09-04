@@ -12,11 +12,11 @@ test('literature detail unifies paper content while preserving DFT and legacy de
   const content = read('pages/literature_library/detail-content.js');
   const list = read('pages/literature_library/render-list.js');
 
-  expect(index).not.toContain('data-tab="mechanism"');
+  expect(index).toContain('data-tab="mechanism" onclick="switchTab(\'mechanism\')">机理');
   expect(index).not.toContain('data-tab="sections"');
-  expect(index).toContain('data-tab="writing" onclick="switchTab(\'writing\')">论文内容');
-  expect(controls).toContain('mechanism_claim: { itemType: "mechanism_claim", tab: "writing" }');
-  expect(controls).toContain('mechanism: "writing"');
+  expect(index).toContain('data-tab="writing" onclick="switchTab(\'writing\')" hidden>论文内容');
+  expect(controls).toContain('mechanism_claim: { itemType: "mechanism_claim", tab: "mechanism" }');
+  expect(controls).toContain('mechanism: "mechanism"');
   expect(detail).toContain('renderJSONCards("机理内容", mechanismItems)');
   expect(detail).toContain('renderJSONCards("论文重点", writingItems)');
   expect(detail).toContain('renderJSONCards("电化学性能", detail.electrochemical_performance_items || [])');

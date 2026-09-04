@@ -1900,17 +1900,26 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
           await expect(page.locator('#tab-online')).toBeVisible();
         } else if (pageInfo.name === 'Literature Library') {
           await page.click('#addLiteratureBtn');
-          await expect(page.locator('#addLiteratureMenu')).toBeVisible();
-          await page.click('#addLiteratureMenu [data-add-mode="online"]');
           await expect(page.locator('#addLiteratureDialog')).toBeVisible();
           await page.click('#addLiteratureDialog button:has-text("关闭")');
 
           await page.click('.paper-row');
-          await page.click('button[data-tab="writing"]');
-          await expect(page.locator('#tab-writing')).toBeVisible();
-
-          await page.click('button[data-tab="review"]');
-          await expect(page.locator('#tab-review')).toBeVisible();
+          await expect(page.locator('button[data-tab="figures"].active')).toBeVisible();
+          await expect(page.locator('#tab-figures')).toBeVisible();
+          await expect(page.locator('#figuresContent')).toContainText('图表进度');
+          await expect(page.locator('#pdfEvidenceHeaderBtn')).toBeEnabled();
+          for (const legacyTab of ['summary', 'writing', 'translation', 'review']) {
+            await expect(page.locator(`button[data-tab="${legacyTab}"]`)).toBeHidden();
+          }
+          await page.click('button[data-tab="mechanism"]');
+          await expect(page.locator('#tab-mechanism')).toBeVisible();
+          await expect(page.locator('#mechanismContent')).toContainText('Associative pathway is favored');
+          await page.click('#pdfEvidenceHeaderBtn');
+          await expect(page.locator('#pdfViewerOverlay')).toBeVisible();
+          await page.locator('#pdfViewerOverlay button:has-text("关闭")').click();
+          await page.click('button[data-tab="dft"]');
+          await expect(page.locator('#tab-dft')).toBeVisible();
+          await expect(page.locator('#dftContent')).toContainText('DFT 数据状态');
         } else if (pageInfo.name === 'DFT Database') {
           await expect(page.locator('button[onclick="exportCSV()"]')).toBeVisible();
           await expect(page.locator('.confidence-badge.unknown')).toHaveText('未记录');
@@ -1934,6 +1943,36 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       });
     });
   }
+
+  test('business flow: literature library reuses content data for the mechanism tab', async ({ page }) => {
+    let contentRequests = 0;
+    await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+      if (new URL(route.request().url()).searchParams.get('mode') === 'content') contentRequests += 1;
+      return jsonResponse(route, PAPER_DETAIL);
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=mechanism`);
+    await expect(page.locator('button[data-tab="mechanism"].active')).toBeVisible();
+    await expect(page.locator('#mechanismContent')).toContainText('Associative pathway is favored by defect-driven charge redistribution.');
+    await expect(page.locator('#mechanismContent')).toContainText('机理类型');
+    await expect(page.locator('#mechanismContent')).toContainText('证据原文');
+    await expect(page.locator('#mechanismContent')).toContainText('置信度');
+    await expect(page).toHaveURL(/tab=mechanism/);
+
+    await page.click('button[data-tab="figures"]');
+    await page.click('button[data-tab="mechanism"]');
+    await expect.poll(() => contentRequests).toBe(1);
+  });
+
+  test('business flow: literature library mechanism tab has an empty state', async ({ page }) => {
+    await page.route(/\/api\/papers\/paper-1(?:\?.*)?$/, route => {
+      return jsonResponse(route, { ...PAPER_DETAIL, mechanism_claims_items: [] });
+    });
+
+    await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=mechanism`);
+    await expect(page.locator('button[data-tab="mechanism"].active')).toBeVisible();
+    await expect(page.locator('#mechanismContent')).toContainText('当前文献暂无已提取的机理信息。');
+  });
 
   test('literature library renders backend impact factor and ignores local cache', async ({ page }) => {
     await page.addInitScript(() => {
@@ -2654,12 +2693,49 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(compareUrls.every(rawUrl => new URL(rawUrl).searchParams.get('sort') === 'catalyst_group')).toBe(true);
   });
 
+  test('business flow: DFT database keeps table pagination after daily UI simplification', async ({ page }) => {
+    const compareOffsets = [];
+    const items = Array.from({ length: 30 }, (_, index) => ({
+      paper_id: `paged-dft-paper-${index + 1}`,
+      title: `Paged DFT Paper ${index + 1}`,
+      display_catalyst_name: 'Fe-N4',
+      adsorbate: 'Li2S4',
+      property_type: 'adsorption_energy',
+      value: -1 - index / 100,
+      unit: 'eV',
+      confidence: 0.9,
+      evidence_text: `Evidence ${index + 1}`,
+      source_section: 'Results',
+      is_exportable: true,
+    }));
+    await page.route('**/api/papers/compare**', route => {
+      const url = new URL(route.request().url());
+      const offset = Number(url.searchParams.get('offset') || 0);
+      const limit = Number(url.searchParams.get('limit') || 25);
+      compareOffsets.push(offset);
+      return jsonResponse(route, { items: items.slice(offset, offset + limit), total: items.length, has_more: offset + limit < items.length });
+    });
+
+    await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
+    await expect(page.locator('#dftList')).toContainText('Paged DFT Paper 1');
+    await expect(page.locator('#dftPaginationMeta')).toContainText('第 1 / 2 页');
+    await page.locator('#dftPaginationBar button:has-text("下一页")').click();
+    await expect(page.locator('#dftList')).toContainText('Paged DFT Paper 26');
+    await expect.poll(() => compareOffsets.includes(25)).toBe(true);
+    expect(consoleErrors).toEqual([]);
+  });
+
   test('business flow: DFT export displays safety headers', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
-    await expect(page.locator('.export-note')).toContainText('需要处理的记录不会导出');
+    await expect(page.locator('.export-note')).toBeHidden();
+    await expect(page.locator('button:has-text("数据质量概览")')).toBeVisible();
+    await expect(page.getByRole('button', { name: /审核中心|Review Center|Web AI|IDE AI|review bundle/i })).toHaveCount(0);
     await expect(page.locator('#dftTable')).toContainText('Li2S4');
+
+    await page.locator('button:has-text("数据质量概览")').click();
+    await expect(page.locator('.export-note')).toContainText('满足现有质量条件');
+    await expect(page.locator('.export-note')).toContainText('不会导出');
 
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -2985,7 +3061,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toBeHidden();
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -3018,7 +3094,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
     await page.waitForTimeout(500);
-    await expect(page.locator('.export-note')).toContainText('已确认、证据完整、定位准确');
+    await expect(page.locator('.export-note')).toBeHidden();
     
     const downloadPromise = page.waitForEvent('download');
     await page.click('button[onclick="exportCSV()"]');
@@ -3236,11 +3312,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(dialogCount).toBe(1);
   });
 
-  test('business flow: literature library opens extraction job center', async ({ page }) => {
+  test('business flow: literature library hides extraction job center shortcut', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
     await page.waitForTimeout(500);
-    await page.click('button:has-text("解析任务")');
-    await expect(page.locator('#acquisitionResult')).toContainText('任务中心');
+    await expect(page.getByRole('button', { name: '解析任务', exact: true })).toHaveCount(0);
   });
 
   test('business flow: literature library UX is Chinese, clamps DOI, and exposes key entries', async ({ page }) => {
@@ -3340,7 +3415,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(dftActions).toHaveCount(1);
     await expect(dftActions.locator('button:has-text("生成下一轮 AI 审核任务")')).toHaveCount(0);
     await expect(dftActions.locator('button:has-text("刷新审核状态")')).toBeVisible();
-    await expect(dftActions.locator('button:has-text("打开审核中心")')).toBeVisible();
+    await expect(dftActions.locator('button:has-text("打开审核中心")')).toBeHidden();
     await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
     const missingReviewLabels = await page.evaluate(() => {
       const base = {
@@ -3578,7 +3653,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await page.goto(`${BASE_URL}/pages/literature_library/index.html?paper_id=paper-1&tab=dft`);
       const nextAction = page.locator('#dftContent [data-role="dft-next-action"]');
       await expect(nextAction).toHaveCount(0);
-      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeHidden();
       expect(settleCalls).toBe(0);
     });
 
@@ -3734,9 +3809,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
       await expect(page.locator('#dftContent [data-role="dft-readiness-actions"]')).toHaveCount(1);
       await expect(page.locator('#dftContent button:has-text("生成下一轮 AI 审核任务")')).toHaveCount(0);
       await expect(page.locator('#dftContent button:has-text("刷新审核状态")')).toBeVisible();
-      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeVisible();
+      await expect(page.locator('#dftContent button:has-text("打开审核中心")')).toBeHidden();
       await expect(page.locator('#dftContent button:has-text("标记已完成")')).toHaveCount(0);
-      await expect(page.locator('#dftContent')).toContainText('打开审核中心');
       await expect(page.locator('#dftContent')).toContainText('AI 已提修正');
       await expect(page.locator('#dftContent')).toContainText('AI 确认字段');
       await expect(page.locator('#dftContent')).not.toContainText('尚未审核这些记录的 AI');
@@ -5166,8 +5240,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
     await expect(page.locator('#pdfEvidenceHeaderBtn')).toHaveText('查看 PDF');
     await expect(page.locator('#pdfEvidenceHeaderBtn')).toBeEnabled();
-    await expect(page.locator('#summaryContent')).not.toContainText('尚无 PDF');
-    await expect(page.locator('#summaryContent')).toContainText('查看 PDF / 证据定位');
+    await expect(page.locator('button[data-tab="figures"].active')).toBeVisible();
   });
 
   test('business flow: explicit missing artifact overrides stale pdf_path', async ({ page }) => {
@@ -5384,6 +5457,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('#workspaceEmpty')).not.toBeVisible();
     await expect(page.locator('#pdfEvidenceHeaderBtn')).toHaveText('查看 PDF');
     await expect(page.locator('#librarySelect')).toHaveValue('双原子催化剂');
+    await expect(page.locator('button[data-tab="figures"].active')).toBeVisible();
+    await expect(page).toHaveURL(/tab=figures/);
   });
 
   test('business flow: metadata-only attach pdf and workflow status checks', async ({ page }) => {

@@ -184,7 +184,7 @@
     .export-panel { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     .export-panel .btn { height: 32px; padding: 0 12px; font-size: 13px; }
     .export-panel .export-status { color: var(--color-primary); font-size: 12px; font-weight: 700; white-space: nowrap; }
-    .export-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+    .export-note { flex: 1 0 100%; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
     .quality-topbar {
       display: flex;
       align-items: center;
@@ -546,17 +546,17 @@
           <div class="export-panel" style="flex-wrap: nowrap; white-space: nowrap;">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
             <span id="exportSafetyStatus" class="export-status"></span>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">展开面板</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">数据质量概览</button>
           </div>
         </div>
-        <div class="export-note">CSV 仅导出已确认、证据完整、定位准确的 DFT 记录；需要处理的记录不会导出。</div>
         <div class="quality-topbar">
           <div id="qualityDonuts"><div class="empty-state">正在加载导出安全概览...</div></div>
           <div class="stat-divider"></div>
           <div class="reason-chips-bar" id="qualityReasonChips"></div>
+          <div class="export-note">仅导出满足现有质量条件的记录；未满足条件的记录不会导出。</div>
           <div class="actions-bar">
             <button class="btn btn-ghost btn-sm" type="button" onclick="loadExportSafetyOverview()">↻ 刷新概览</button>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnBody">收起面板</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnBody">收起质量概览</button>
           </div>
         </div>
       </div>
@@ -635,19 +635,19 @@
       const isCollapsed = panel.classList.contains("collapsed");
       const btnToolbar = document.getElementById("dashboardToggleBtnToolbar");
       const btnBody = document.getElementById("dashboardToggleBtnBody");
-      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "展开面板" : "收起面板";
-      if (btnBody) btnBody.textContent = isCollapsed ? "展开面板" : "收起面板";
+      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "数据质量概览" : "收起质量概览";
+      if (btnBody) btnBody.textContent = "收起质量概览";
       localStorage.setItem(DFT_DASHBOARD_STORAGE_KEY, isCollapsed ? "1" : "0");
     }
     function initDashboardState() {
       const panel = document.getElementById("exportSafetyPanel");
       if (!panel) return;
-      const isCollapsed = localStorage.getItem(DFT_DASHBOARD_STORAGE_KEY) === "1";
+      const isCollapsed = localStorage.getItem(DFT_DASHBOARD_STORAGE_KEY) !== "0";
       panel.classList.toggle("collapsed", isCollapsed);
       const btnToolbar = document.getElementById("dashboardToggleBtnToolbar");
       const btnBody = document.getElementById("dashboardToggleBtnBody");
-      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "展开面板" : "收起面板";
-      if (btnBody) btnBody.textContent = isCollapsed ? "展开面板" : "收起面板";
+      if (btnToolbar) btnToolbar.textContent = isCollapsed ? "数据质量概览" : "收起质量概览";
+      if (btnBody) btnBody.textContent = "收起质量概览";
     }
     function toggleCollapse(header) {
       const body = header.closest(".panel-actions")?.nextElementSibling || header.parentElement.nextElementSibling;

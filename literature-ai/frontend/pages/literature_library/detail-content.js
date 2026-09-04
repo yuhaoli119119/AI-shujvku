@@ -519,6 +519,7 @@ const DETAIL_FIELD_LABELS = {
     decay_per_cycle: "容量衰减",
     claim_type: "机理类型",
     claim_text: "机理描述",
+    evidence_types: "证据类型",
     key_species: "关键物种",
     mechanism_direction: "作用方向",
     paper_type: "论文类型",

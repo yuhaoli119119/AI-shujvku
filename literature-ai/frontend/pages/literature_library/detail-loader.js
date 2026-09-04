@@ -410,7 +410,7 @@ async function loadPaperDetail(paperId, options) {
         }
         applyPendingPdfJump(state.selectedPaperId);
         syncQueryParams();
-        if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) === "full") {
+        if (!opts.mode && detailMode !== "full" && detailModeForTab(state.currentTab) !== detailMode) {
             window.setTimeout(function() {
                 if (state.selectedPaperId === resolvedPaperId) {
                     ensurePaperDetailForTab(state.currentTab);
@@ -426,6 +426,12 @@ async function loadPaperDetail(paperId, options) {
         if (state.currentTab === "writer") ensureWriterStatus();
     } catch (error) {
         if (state.detailLoadToken === loadToken) {
+            if (state.currentTab === "mechanism") {
+                const mechanismEl = $("mechanismContent");
+                if (mechanismEl) {
+                    mechanismEl.innerHTML = '<div class="section-card"><h3>机理</h3><div class="muted">机理数据加载失败。</div></div>';
+                }
+            }
             showToast("详情加载失败：" + error.message, "error");
         }
     }
