@@ -44,6 +44,14 @@
 - **本机 git 注意**：当前 Windows 环境对 agent 会话的 git 写对象有沙箱拦截（`git add` 报 `Permission denied`），**commit/push 须由用户在普通终端（非 agent 会话）手动执行**；服务器侧 git 不受影响
 - 服务器更新脚本：`/opt/ai-shujvku-src/update.sh`；手动执行 `cd /opt/ai-shujvku-src && ./update.sh`
 
+### 单个静态前端文件发布（强制最短路径）
+
+- `literature-ai/frontend/` 已挂载到 backend 容器的 `/frontend`。如果本次只修改一个或少量 HTML/CSS/原生 JS 文件，且不涉及后端代码、依赖、构建产物、Compose、Nginx 或环境变量，必须使用 `local/srv_deploy/sshkit.py put` 将目标文件直接上传到 `/opt/literature-ai/frontend/` 的对应路径；文件上传后立即生效。
+- 上述场景禁止默认执行 `update.sh`、`docker compose up/restart`、重建容器或准备离线 Git bundle。只有变更确实依赖这些步骤时才允许使用，并须先说明原因。
+- 发布后至少校验本机与服务器目标文件的 SHA-256 一致，并检查 backend 健康状态；能进行浏览器验证时，再核对实际页面效果。
+- Git commit/push 用于保存代码历史，但不得把服务器从 GitHub 拉取成功作为单个静态前端文件生效的前置条件。服务器暂时无法访问 GitHub时，先完成精确文件发布，再如实报告仓库同步状态。
+- 精确上传失败时先报告具体错误，不得未经说明自动升级为全量部署或复杂离线发布方案。
+
 ## 对外访问与 MCP 接入（外部 AI 查询用）
 
 - 生产网站（工作台）：`https://dft.researchlife.top`，经 cloudflared 隧道 → 服务器本机 8000 Owner 网关。
