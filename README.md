@@ -23,6 +23,15 @@
 - **启动与恢复**：核心容器带健康检查；后端与 worker 只在 PostgreSQL、Redis、MinIO、GROBID 就绪后启动。数据库初始化使用 PostgreSQL advisory lock（咨询锁）串行化，失败可重试。
 - **测试边界**：后端数据库测试使用独立随机 schema；前端 Playwright 使用 `4173`，不会复用 Owner 网关 `8000`。
 
+## 生产环境（已部署）
+
+- 生产服务器：`192.168.110.229`（Rocky 9.4，Docker Compose 9 服务），部署目录 `/opt/literature-ai`，更新源 `/opt/ai-shujvku-src`。
+- 对外网站：`https://dft.researchlife.top`（cloudflared 隧道 → 本机 8000 Owner 网关；8080 为只读分享网关）。
+- 数据真源：服务器 PostgreSQL `literature_ai` 库；PDF/文献库配置/解析模型在 `/opt/literature-ai/data/`。
+- 备份、SSH 凭据、一键更新/运维命令、MCP key 等**敏感细节不在本 README**，统一见根 [`AGENTS.md`](./AGENTS.md) 与本机 `local/srv_deploy/README.md`（`local/` 已 gitignore，不进仓库）。
+- 改代码上线链路：本机 push GitHub → 服务器 `/opt/ai-shujvku-src/update.sh`。
+- ⚠️ 已知安全待加固项与权限分层规则见 [`AGENTS.md`](./AGENTS.md)。
+
 ## 快速启动
 
 ```bash

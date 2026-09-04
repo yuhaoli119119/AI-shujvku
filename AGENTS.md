@@ -2,6 +2,14 @@
 
 本仓库为**本地文献 AI 系统**（literature-ai，PostgreSQL+pgvector 为数据唯一真源），生产环境已部署到本地服务器。任何 AI（Codex / 豆包 / 其他 agent）在此仓库执行任务前，请先读本节。
 
+## 接手第一步（任何 AI 先做这个）
+
+1. 通读本文件；涉及服务器登录/备份的细节再读 `local/srv_deploy/README.md`（该目录 gitignore，含凭据，不外传）。
+2. 先判断任务类型：**改数据/迁移/清理 → 先备份**（见下）；**改代码 → 走代码同步链路**；**只读查询 → 不动数据**。
+3. 数据真源只有一个：服务器 PostgreSQL `literature_ai` 库；本机文件、向量、PDF 都是派生，禁止拿派生覆盖真源。
+4. 远程操作统一走 `local/srv_deploy/sshkit.py`，复杂 bash 写成 `.sh` 上传执行（见文末工程注意）。
+5. 动手前如发现现状与本文不符，**以服务器实际状态为准并回头修订本文**，不要凭文档臆测。
+
 ## 服务器部署（生产环境）
 
 - 主机：**192.168.110.229**（Rocky Linux 9.4，Docker Compose 部署 9 个服务）
@@ -35,6 +43,60 @@
 - 更新链路：本机改代码 → 推送到 GitHub → 服务器 `/opt/ai-shujvku-src` 执行 `./update.sh`（git pull → 同步到 `/opt/literature-ai`，保护 `.env` 与 `data/` → 重建容器）
 - **本机 git 注意**：当前 Windows 环境对 agent 会话的 git 写对象有沙箱拦截（`git add` 报 `Permission denied`），**commit/push 须由用户在普通终端（非 agent 会话）手动执行**；服务器侧 git 不受影响
 - 服务器更新脚本：`/opt/ai-shujvku-src/update.sh`；手动执行 `cd /opt/ai-shujvku-src && ./update.sh`
+
+## 对外访问与 MCP 接入（外部 AI 查询用）
+
+- 生产网站（工作台）：`https://dft.researchlife.top`，经 cloudflared 隧道 → 服务器本机 8000 Owner 网关。
+- MCP 端点：`https://dft.researchlife.top/mcp`（FastMCP，Streamable HTTP），鉴权头 `Authorization: Bearer <MCP_KEY>`；不带 key 返回 401。
+- MCP key 与能力清单存在服务器 `/opt/literature-ai/.env` 的 `LITAI_MCP_API_KEYS`（格式 `来源|显示名|key|能力`），本机开发用副本在根目录 `.mcp.json`（已 gitignore）。**key 不写进任何会 push 的文档。**
+- 当前 key 名 `local_ide`，能力：read_papers / append_notes / propose_corrections / request_parse / review_corrections / review_dft / create_share_links / ai_verify_content。
+- 外部 AI 的 MCP 配置示例（key 用实际值替换）：
+  ```json
+  { "mcpServers": { "literature-ai": {
+      "url": "https://dft.researchlife.top/mcp",
+      "headers": { "Authorization": "Bearer <MCP_KEY>" } } } }
+  ```
+
+## 权限分层与凭据规则（决定给其他 AI 什么权限）
+
+按"能接触到什么"把协作者分三层，**不要越层给权限**：
+
+| 层级 | 谁 | 能做什么 | 用什么接入 | 凭据 |
+|---|---|---|---|---|
+| L1 代码/文档 | 任何 AI（含云端） | 读改代码、读文档、提 PR | GitHub 仓库 | 无需密码 |
+| L2 数据查询 | 外部 AI / IDE | 只读+受控写入文献数据 | MCP 端点 | 仅给 MCP key（可吊销、能力受限） |
+| L3 服务器运维 | **仅本机 AI** | docker、备份、改 .env、重启 | SSH + sshkit.py | root 密码只在本机 `local/srv_deploy/cred.env` |
+
+铁律：
+1. **服务器 root 密码永远不进 GitHub、不发给云端/网页版 AI、不贴进公开对话**；它只存在本机 `cred.env`（gitignore）。
+2. 本机 AI 要运维服务器时，自己读 `cred.env` / 用 `sshkit.py`，**不需要用户在对话里重复发密码**。
+3. 外部 AI 只需要查数据就给 **MCP key**（L2），绝不给 SSH（L3）；需要改代码就走 GitHub（L1），由本机 AI 或用户在服务器跑 `update.sh` 落地。
+4. MCP key 泄露可在 `.env` 的 `LITAI_MCP_API_KEYS` 里删除/更换后 `--force-recreate` backend 即吊销。
+5. 一句话交接模板（对任何新 AI）：**"先读仓库根 AGENTS.md；要查数据走 MCP；要动服务器先读 local/srv_deploy/README.md 并先备份。"**
+
+## 日常运维速查（本机，在 local/srv_deploy/ 下）
+
+```powershell
+# 凭据（每个新终端先设，或 Get-Content cred.env）
+$env:SRV_HOST='192.168.110.229'; $env:SRV_USER='root'; $env:SRV_PWD='见cred.env'
+python sshkit.py run "cd /opt/literature-ai && docker compose ps" 30   # 看容器状态
+python backup_db.py backup                                              # 备份数据库（改数据前后）
+```
+服务器侧常用（root）：`docker compose logs -f backend`、`docker compose restart backend worker worker-pdf`、
+`docker exec -it literature-ai-postgres-1 psql -U literature_ai -d literature_ai`。
+健康检查：`curl https://dft.researchlife.top/api/health`。
+
+## ⚠️ 已知安全风险（最高优先级待加固，2026-09-04 外部黑盒确认）
+
+Owner 网关经 cloudflared 暴露公网，但**未对只读 API 做全局鉴权**，未带任何 token 即可：
+- `GET /api/content-knowledge` 翻页拉全库（实测 781 条证据 / 99 篇文献，含标题/DOI/正文片段/页码/内部 UUID）；
+- `GET /api/papers/` 列出文献；`GET /api/settings` 返回配置（密钥已掩码，但泄露内网 IP 与配置结构）；
+- `GET /docs`、`/redoc`、`/openapi.json` 暴露完整接口文档；`/api/health` 泄露库名与存储路径（轻微）。
+- 对照：`/mcp` 无 key 正确返回 401；`/api/system`、`/api/workbench` 等返回 404（已拦）。
+
+加固方向（未实施，动手前先备份）：Owner 网关对 `/api/*`（除 health 与登录类）强制校验 Bearer/Owner token，
+或在 Cloudflare 侧加 Access 登录层；对外关闭 `/docs`、`/redoc`、`/openapi.json`；`/api/settings` 仅 Owner 会话可读。
+**在加固完成前，该网站等同于"知道域名即可读全库"，不要往库里放未公开/敏感数据。**
 
 ## 工程注意
 

@@ -1,5 +1,8 @@
 # AGENTS.md
 
+> **先读仓库根 [`../AGENTS.md`](../AGENTS.md)**：那是全仓库唯一权威入口，含生产服务器（192.168.110.229）、部署/更新链路、数据库备份位置、MCP 外部接入、权限分层与已知安全风险。本文件只规定 `literature-ai/` 子目录内的协作与数据安全规则；若冲突以根文件为准。
+> 注意：下文 0.2 节早期写的 `/opt/AI-shujvku` 已变更——当前服务器更新源为 `/opt/ai-shujvku-src`、运行目录为 `/opt/literature-ai`，以根 AGENTS.md 为准。
+
 ## 0.1 Codex Encoding Guardrail
 
 - This rule is specifically for Codex in this repository.
