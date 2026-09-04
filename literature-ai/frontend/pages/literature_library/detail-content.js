@@ -221,7 +221,7 @@ function knowledgeCategoryMeta(category) {
         research_gap: { label: "研究空白", group: "最适合写引言", use: "引言中的问题铺垫", order: 0 },
         research_context: { label: "研究背景", group: "最适合写引言", use: "引言中的背景铺垫", order: 0 },
         proposed_solution: { label: "拟解决方案", group: "最适合写引言", use: "引言或摘要中的方案概括", order: 0 },
-        writing_logic: { label: "写作逻辑", group: "写作辅助", use: "组织摘要、引言或讨论的写作顺序", order: 3 },
+        writing_logic: { label: "写作逻辑", group: "论文内容", use: "组织摘要、引言或讨论的写作顺序", order: 3 },
         computational_method: { label: "计算方法", group: "最适合写方法", use: "方法部分的计算设置说明", order: 2 },
         synthesis_method: { label: "制备方法", group: "最适合写方法", use: "方法部分的实验或制备说明", order: 2 },
         conclusion: { label: "结论启发", group: "最适合写结论", use: "结论或讨论收束", order: 4 },

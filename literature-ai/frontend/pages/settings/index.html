@@ -589,7 +589,6 @@
                         <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，明确定义系统预处理、AI 抽取、第二指定 AI 复核、证据定位和确认入库闸门。系统规则 DFT 结果只作为 system_candidate 候选。</div>
                     </div>
                     <div class="protocol-actions">
-                        <a class="btn btn-ghost" href="../extraction_workflow/index.html">高级协议参考</a>
                         <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新协议</button>
                     </div>
                 </div>
@@ -643,7 +642,6 @@
                         <button onclick="showGuidePane('startup', event)">启动与入口</button>
                         <button onclick="showGuidePane('library', event)">文献入库</button>
                         <button onclick="showGuidePane('review', event)">IDE 审阅与确认</button>
-                        <button onclick="showGuidePane('writer', event)">写作与证据</button>
                         <button onclick="showGuidePane('ide', event)">IDE / MCP</button>
                         <button onclick="showGuidePane('troubleshooting', event)">排查问题</button>
                     </div>
@@ -657,9 +655,8 @@
                                 <h3>主要功能分区</h3>
                                 <ul>
                                     <li>文献库：上传 PDF、按 DOI / URL 入库、阅读摘要、章节和图表。</li>
-                                    <li>DFT 数据库 / 机理知识：适合做横向比对和聚合浏览。</li>
-                                    <li>IDE 审阅与确认：IDE AI 通过 MCP 回写候选，再走确认核对。</li>
-                                    <li>写作辅助：基于文献和证据链整理草稿材料。</li>
+                                    <li>DFT 数据库：适合做横向比对和聚合浏览。</li>
+                                    <li>审核中心：通过 IDE AI 回写候选，再进行证据核对与确认。</li>
                                     <li>设置：集中管理 API、MCP 和界面主题。</li>
                                 </ul>
                             </div>
@@ -678,7 +675,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                                     <li><code>/api/health</code></li>
                                     <li><code>/pages/literature_library/index.html</code></li>
                                     <li><code>/pages/paper_detail/index.html?id=&lt;paper_id&gt;</code></li>
-                                    <li><code>/pages/ai_writer/index.html</code></li>
                                     <li><code>/pages/settings/index.html</code></li>
                                 </ul>
                             </div>
@@ -705,13 +701,6 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                                     <li>由 IDE AI 核对证据并通过 import_analysis 回写候选。</li>
                                     <li>最后在确认工作台核对证据并确认。</li>
                                 </ol>
-                            </div>
-                        </div>
-
-                        <div id="guide-pane-writer" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>写作与证据</h3>
-                                <p>写作辅助依赖已入库文献、检索结果和证据链。还在 review / pending 状态的数据，不应直接当作正式结论使用；需要 AI 判断时请在 IDE 中完成。</p>
                             </div>
                         </div>
 

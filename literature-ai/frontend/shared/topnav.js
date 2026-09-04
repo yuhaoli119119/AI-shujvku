@@ -88,6 +88,7 @@ class ThemeManager {
 
 class TopNav {
   static NAV_ITEMS = [
+    { id: "dashboard", label: "Dashboard", href: "../dashboard/index.html" },
     { id: "ingestion", label: "入库 / Add Literature", href: "../ingestion/index.html" },
     { id: "literature", label: "文献库 / Literature Library", href: "../literature_library/index.html" },
     { id: "review-center", label: "审核中心 / Review Center", href: "../review_center/index.html" },

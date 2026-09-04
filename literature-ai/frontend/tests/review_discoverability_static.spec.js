@@ -49,12 +49,16 @@ test('detail review entrypoints use paper_code and keep manual progress separate
 
 test('primary navigation and legacy review URLs converge on review center', () => {
   const topnav = read('shared/topnav.js');
+  const dashboard = read('pages/dashboard/index.html');
+  const library = read('pages/literature_library/index.html');
+  const settings = read('pages/settings/index.html');
   const legacyPages = [
     'pages/content_knowledge/index.html',
     'pages/dft_audit_center/index.html',
     'pages/external_analysis_workbench/index.html',
   ].map(read);
 
+  expect(topnav).toContain('id: "dashboard"');
   expect(topnav).toContain('id: "ingestion"');
   expect(topnav).toContain('id: "literature"');
   expect(topnav).toContain('id: "review-center"');
@@ -62,6 +66,17 @@ test('primary navigation and legacy review URLs converge on review center', () =
   expect(topnav).not.toContain('id: "content-knowledge"');
   expect(topnav).not.toContain('id: "dft-audit-center"');
   expect(topnav).not.toContain('id: "external"');
+  expect(dashboard).toContain('href="../review_center/index.html"');
+  expect(dashboard).not.toContain('href="../ai_writer/index.html"');
+  expect(dashboard).not.toContain('tab=ai-search');
+  expect(dashboard).not.toContain('AI 自动搜文');
+  expect(dashboard).not.toContain('AI 写作 studio');
+  expect(library).toContain("window.location.href='../ingestion/index.html'");
+  expect(library).toContain('前往入库');
+  expect(library).not.toContain('Ingestion Center');
+  expect(settings).not.toContain('href="../extraction_workflow/index.html"');
+  expect(settings).not.toContain("showGuidePane('writer', event)");
+  expect(settings).not.toContain('/pages/ai_writer/index.html');
 
   for (const page of legacyPages) {
     expect(page).toContain('window.location.replace("../review_center/index.html" + window.location.search + window.location.hash)');
