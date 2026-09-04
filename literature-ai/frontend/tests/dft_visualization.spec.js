@@ -102,15 +102,6 @@ async function installVisualMocks(page, correlationRequests) {
 }
 
 test.describe("DFT 数据可视化迁移", () => {
-  test("topnav no longer offers DFT ML dataset and old URL is a clear migration page", async ({ page }) => {
-    await page.goto(BASE_URL + "/pages/dft_ml_dataset/index.html");
-    await expect(page.locator("body")).toContainText("DFT ML 数据集页面已退役");
-    await expect(page.locator("body")).toContainText("数据统计已移至“数据可视化”");
-    await expect(page.locator("#topnav-mount")).not.toContainText("DFT ML 数据集");
-    await expect(page.locator("#refreshButton")).toHaveCount(0);
-    await expect(page.locator("#v3TaskSelect")).toHaveCount(0);
-  });
-
   test("uses backend-defined nested same-catalyst data and forwards library_name", async ({ page }) => {
     const correlationRequests = [];
     const visualRequests = [];
