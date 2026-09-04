@@ -65,10 +65,10 @@ test('DFT deep link opens tab, expands, scrolls and highlights target card with 
 
   await expect(page.locator('#tab-dft')).toHaveClass(/active/);
   await expect(page.locator('#dftIssueContext')).toContainText('来自 DFT 核验 issue: issue-77');
-  const returnLink = page.getByRole('link', { name: '返回 DFT 核验中心' });
+  const returnLink = page.getByRole('link', { name: '返回审核中心' });
   const href = await returnLink.getAttribute('href');
   const url = new URL(href, `${BASE_URL}/pages/paper_detail/index.html`);
-  expect(url.pathname).toBe('/pages/dft_audit_center/index.html');
+  expect(url.pathname).toBe('/pages/review_center/index.html');
   expect(url.searchParams.get('paper_id')).toBe('paper-1');
 
   const targetCard = page.locator('#dftResults [data-record-id="dft-target"]');

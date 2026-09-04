@@ -37,7 +37,7 @@ test('detail review entrypoints use paper_code and keep manual progress separate
   const detail = read('pages/literature_library/render-detail.js');
 
   expect(content).toContain('params.set("paper_id", paperCode)');
-  expect(content).toContain('/pages/content_knowledge/index.html?');
+  expect(content).toContain('/pages/review_center/index.html?');
   expect(detail).toContain('renderContentKnowledgeLinkCard(detail, "论文内容审核"');
   expect(detail).not.toContain('"mechanism_evidence"');
   expect(detail).not.toContain('"writing_material"');
@@ -45,6 +45,27 @@ test('detail review entrypoints use paper_code and keep manual progress separate
   expect(status).toContain('人工浏览标记不等于审核通过');
   expect(status).toContain('人工浏览标记为已完成');
   expect(status).not.toContain("esc(status ? '取消已完成' : '标记已完成')");
+});
+
+test('primary navigation and legacy review URLs converge on review center', () => {
+  const topnav = read('shared/topnav.js');
+  const legacyPages = [
+    'pages/content_knowledge/index.html',
+    'pages/dft_audit_center/index.html',
+    'pages/external_analysis_workbench/index.html',
+  ].map(read);
+
+  expect(topnav).toContain('id: "ingestion"');
+  expect(topnav).toContain('id: "literature"');
+  expect(topnav).toContain('id: "review-center"');
+  expect(topnav).toContain('id: "dft-database"');
+  expect(topnav).not.toContain('id: "content-knowledge"');
+  expect(topnav).not.toContain('id: "dft-audit-center"');
+  expect(topnav).not.toContain('id: "external"');
+
+  for (const page of legacyPages) {
+    expect(page).toContain('window.location.replace("../review_center/index.html" + window.location.search + window.location.hash)');
+  }
 });
 
 test('review center exposes the canonical text_review prompt action', () => {

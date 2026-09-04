@@ -50,13 +50,13 @@ function contentKnowledgeHref(detail, category) {
     const params = new URLSearchParams();
     params.set("paper_id", paperCode);
     if (category) params.set("category", category);
-    return "/pages/content_knowledge/index.html?" + params.toString();
+    return "/pages/review_center/index.html?" + params.toString();
 }
 
 function renderContentKnowledgeLinkCard(detail, title, description, category) {
     const href = contentKnowledgeHref(detail, category);
     const action = href
-        ? '<a class="btn primary small" href="' + escAttr(href) + '" target="_blank" rel="noopener">去知识审核</a>'
+        ? '<a class="btn primary small" href="' + escAttr(href) + '" target="_blank" rel="noopener">进入审核中心</a>'
         : '<span class="status-chip warn" title="当前详情缺少 paper_code，不能安全生成知识审核链接。">缺少文献短号</span>';
     return '<div class="section-card figure-audit-note content-knowledge-entry">' +
         '<h3>' + esc(title) + '</h3>' +

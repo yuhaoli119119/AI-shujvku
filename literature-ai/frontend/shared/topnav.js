@@ -88,9 +88,11 @@ class ThemeManager {
 
 class TopNav {
   static NAV_ITEMS = [
-    { id: "literature", label: "文献库", href: "../literature_library/index.html" },
-    { id: "dft-database", label: "DFT 数据", href: "../dft_database/index.html" },
-    { id: "visuals", label: "数据分析", href: "../visuals/index.html" },
+    { id: "ingestion", label: "入库 / Add Literature", href: "../ingestion/index.html" },
+    { id: "literature", label: "文献库 / Literature Library", href: "../literature_library/index.html" },
+    { id: "review-center", label: "审核中心 / Review Center", href: "../review_center/index.html" },
+    { id: "dft-database", label: "DFT 数据库", href: "../dft_database/index.html" },
+    { id: "visuals", label: "数据可视化 / Analytics", href: "../visuals/index.html" },
     { id: "settings", label: "设置", href: "../settings/index.html" },
   ];
 
