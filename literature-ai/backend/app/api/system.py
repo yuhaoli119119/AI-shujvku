@@ -79,7 +79,7 @@ async def get_agent_guide() -> dict:
                 "curation_tools": ["append_note", "propose_correction", "propose_dft_result_correction", "repair_dft_audit_issue", "import_analysis", "submit_ai_verification_batch", "update_table", "create_table", "delete_table", "merge_table", "approve_correction", "reject_correction", "approve_corrections_batch", "reject_corrections_batch", "export_ml_dataset", "recrop_figure", "cleanup_unused_figure_assets"],
                 "compatibility_tools": ["verify_dft_result", "reject_dft_result", "verify_dft_results_batch", "reject_dft_results_batch", "repair_dft_audit_issues_batch"],
                 "ingestion_tools": ["scan_local_pdfs", "ingest_pdf_batch", "parse_paper", "get_parse_status", "recrop_figure", "cleanup_unused_figure_assets"],
-                "writing_tools": ["insert_word_citation"],
+                "writing_tools": [],
             },
         },
         "http_endpoints": [
@@ -174,12 +174,6 @@ async def get_agent_guide() -> dict:
                 "purpose": "Retrieve relevant evidence from parsed papers for Codex review and writing support.",
             },
             {
-                "name": "insert_word_citation",
-                "method": "POST",
-                "path": "/api/writing/word/insert-citation",
-                "purpose": "Upload a DOCX and generate a copy with a guarded draft citation inserted from the local literature database.",
-            },
-            {
                 "name": "literature_intake",
                 "method": "POST",
                 "path": "/api/intake/search",
@@ -249,7 +243,6 @@ async def get_agent_guide() -> dict:
                 "review_figure",
                 "get_review_coverage",
                 "get_field_disputes",
-                "insert_word_citation",
                 "append_note",
                 "propose_correction",
                 "propose_dft_result_correction",

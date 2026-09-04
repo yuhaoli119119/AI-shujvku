@@ -92,13 +92,9 @@ class Settings(BaseSettings):
     embedding_model: str = DATABASE_V1_EMBEDDING_MODEL
     embedding_dimension: int = DATABASE_V1_EMBEDDING_DIMENSION
     use_minio: bool = False
-    writer_backend: str = "rule"
-    writer_prompt_path: Path = Field(default=Path("prompts/paper_writer.yaml"))
     writer_model: str = "gpt-4.1-mini"
     writer_api_base: str | None = None
     writer_api_key: str | None = None
-    writer_timeout_seconds: float = 30.0
-    writer_fallback_backend: str = "rule"
     mcp_enabled: bool = True
     # HTTP MCP is key-gated.  In-process IDE integrations use mcp_auth_context
     # and are intentionally independent from this transport setting.

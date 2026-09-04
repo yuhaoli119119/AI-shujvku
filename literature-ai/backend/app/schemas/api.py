@@ -21,17 +21,6 @@ class IngestFromPathRequest(BaseModel):
     library_name: str | None = None
 
 
-class RAGWriteRequest(BaseModel):
-    topic: str
-    paper_ids: list[UUID] = Field(default_factory=list)
-    user_notes: str | None = None
-    sections: list[str] = Field(
-        default_factory=lambda: ["outline", "introduction", "dft_results", "discussion", "figure_storyline"]
-    )
-    limit_per_type: int = Field(default=5, ge=1, le=20)
-    target_paper_type: str | None = None
-
-
 class PaperListFilterParams(BaseModel):
     """Optional filter / pagination params for GET /api/papers."""
 
@@ -660,32 +649,6 @@ class CatalystSampleDuplicateMergeResponse(BaseModel):
     active_site_refresh: dict[str, Any] = Field(default_factory=dict)
 
 
-class RAGWriteResponse(BaseModel):
-    topic: str
-    query: str
-    backend_used: str = "rule"
-    prompt_preview: str = ""
-    llm_status: str | None = None
-    llm_error: str | None = None
-    llm_diagnostics: dict[str, Any] = Field(default_factory=dict)
-    outline: list[str] = Field(default_factory=list)
-    introduction: str = ""
-    dft_results: str = ""
-    discussion: str = ""
-    figure_storyline: list[str] = Field(default_factory=list)
-    retrieved: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
-    citation_guard: dict[str, Any] = Field(default_factory=dict)
-    evidence_claims: list[dict[str, Any]] = Field(default_factory=list)
-    citation_audit: dict[str, Any] = Field(default_factory=dict)
-    guard_actions: dict[str, str] = Field(default_factory=dict)
-
-
-class WriterStatusResponse(BaseModel):
-    backend_used: str = "rule"
-    llm_status: str | None = None
-    llm_error: str | None = None
-    llm_diagnostics: dict[str, Any] = Field(default_factory=dict)
-
 class PaperRelationshipItemResponse(BaseModel):
     id: UUID
     source_paper_id: UUID
@@ -829,20 +792,3 @@ class ReferenceEntryCreate(BaseModel):
     reference_number: int | None = None
     citation_context: str | None = None
     linked_paper_id: UUID | None = None
-
-
-
-class WriterSettingsResponse(BaseModel):
-    writer_backend: str | None = None
-    writer_model: str | None = None
-    writer_api_base: str | None = None
-    writer_api_key: str | None = None
-    writer_fallback_backend: str | None = None
-
-class WriterSettingsUpdateRequest(BaseModel):
-    writer_backend: str
-    writer_model: str
-    writer_api_base: str | None = None
-    writer_api_key: str | None = None
-    writer_fallback_backend: str | None = None
-

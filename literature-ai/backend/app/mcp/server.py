@@ -66,7 +66,6 @@ from app.services.review_service import ReviewService
 from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
 from app.services.table_curation_service import TableCurationService
 from app.services.verification_session_service import VerificationSessionService
-from app.services.word_citation_insertion_service import WordCitationInsertRequest, WordCitationInsertionService
 from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
@@ -549,46 +548,6 @@ def search_external_papers(
         "results_after_filter": len(filtered),
         "results": filtered,
     }
-
-
-@mcp_server.tool(name="insert_word_citation", description="Insert a safe draft citation into a DOCX copy using the local literature database citation guardrails.")
-def insert_word_citation(
-    docx_path: str,
-    selected_paper_id: str,
-    text: str,
-    output_filename: str | None = None,
-    docx_insertion_mode: str = "append_paragraph",
-    placeholder: str | None = None,
-    citation_marker: str | None = None,
-    citation_insertion_mode: str = "parenthetical",
-    citation_style: str = "draft_author_year",
-    user_note: str | None = None,
-) -> dict[str, Any]:
-    require_mcp_capability("export_data")
-    require_mcp_exports_enabled()
-    input_path = Path(docx_path).expanduser()
-    if not input_path.exists() or not input_path.is_file():
-        raise ValueError(f"DOCX file not found: {docx_path}")
-    settings = get_settings()
-    with session_scope(settings.database_url) as session:
-        result = WordCitationInsertionService(session=session, settings=settings).insert(
-            WordCitationInsertRequest(
-                document_bytes=input_path.read_bytes(),
-                filename=input_path.name,
-                text=text,
-                selected_paper_id=UUID(selected_paper_id),
-                citation_marker=citation_marker,
-                docx_insertion_mode=docx_insertion_mode,
-                citation_insertion_mode=citation_insertion_mode,
-                citation_style=citation_style,
-                placeholder=placeholder,
-                output_filename=output_filename,
-                user_note=user_note,
-            )
-        )
-        if result is None:
-            raise ValueError("Paper not found")
-        return result
 
 
 @mcp_server.tool(

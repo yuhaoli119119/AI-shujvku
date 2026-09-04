@@ -22,7 +22,6 @@
         <p>网页不生成论文草稿，只准备通过对象级安全门的结构化证据。几十篇论文会按每批最多 10 篇拆分，不会一次塞给 AI。</p>
       </div>
       <div class="hero-actions">
-        <button id="copyAllBtn" class="btn ghost" type="button" disabled>复制全部执行说明</button>
         <button id="buildPlanBtn" class="btn primary" type="button">生成安全证据计划</button>
       </div>
     </header>
@@ -107,8 +106,8 @@
         </section>
 
         <section id="planEmpty" class="card empty-plan">
-          <h2>2. 查看计划并交给本地 AI</h2>
-          <p>计划生成后，这里会显示论文覆盖、预算、DFT 路由、批次、证据来源和复制入口。</p>
+          <h2>2. 查看证据计划</h2>
+          <p>计划生成后，这里会显示论文覆盖、预算、DFT 路由、批次和证据来源。</p>
         </section>
 
         <section id="planResults" class="results" hidden>
@@ -140,8 +139,8 @@
           <section class="card">
             <div class="section-head">
               <div>
-                <h2>分批执行</h2>
-                <p>复制单批上下文给本地 AI；每个上下文只含本批次的安全证据。</p>
+                <h2>证据批次</h2>
+                <p>每个批次只展示本批次通过安全门的证据范围。</p>
               </div>
             </div>
             <div id="batchList" class="batch-list"></div>

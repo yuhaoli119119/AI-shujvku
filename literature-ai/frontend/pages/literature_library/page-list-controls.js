@@ -314,7 +314,6 @@ function switchTab(tab) {
         ensurePaperDetailForTab(tab);
     }
     if (tab === "writing") {
-        ensureWriterStatus();
         if (state.selectedPaperId && typeof loadPaperKnowledgeContext === "function") {
             loadPaperKnowledgeContext(state.selectedPaperId);
         }

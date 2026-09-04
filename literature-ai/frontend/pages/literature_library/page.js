@@ -84,4 +84,3 @@ switchTab(state.currentTab);
 if (state.openAddOnLoad) {
     openAddLiteraturePanel(state.openAddOnLoad);
 }
-loadWriterSettings();

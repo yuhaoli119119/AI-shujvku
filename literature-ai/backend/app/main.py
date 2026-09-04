@@ -31,8 +31,6 @@ from app.api.system import router as system_router
 from app.api.verification import router as verification_router
 from app.api.visuals import router as visuals_router
 from app.api.workbench import router as workbench_router
-from app.api.writer import router as writer_router
-from app.api.writing import router as writing_router
 from app.config import get_settings
 from app.db.session import session_scope
 from app.mcp import mcp_http_app, mcp_server
@@ -106,8 +104,6 @@ app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(module_locks_router, prefix="/api/module-locks", tags=["module-locks"])
 app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
-app.include_router(writing_router, prefix="/api/writing", tags=["writing"])
-app.include_router(writer_router, prefix="/api/writer", tags=["writer"])
 app.include_router(content_knowledge_router, prefix="/api/content-knowledge", tags=["content-knowledge"])
 app.include_router(verification_router, prefix="/api/reviews", tags=["verification"])
 app.include_router(corrections_router, prefix="/api/corrections", tags=["corrections"])

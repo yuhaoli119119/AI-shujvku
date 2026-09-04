@@ -2,7 +2,7 @@
 function renderDetailSkeleton() {
     const detailContainer = $("summaryContent");
     if (!detailContainer) return;
-    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "writerResult", "externalRuns", "aggregateResult"].forEach(function(id) {
+    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "externalRuns", "aggregateResult"].forEach(function(id) {
         const el = $(id);
         if (el) el.innerHTML = "";
     });
@@ -25,7 +25,7 @@ function renderDetailSkeleton() {
 }
 
 function clearDeferredDetailPanels() {
-    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "translationContent", "writerResult", "externalRuns", "aggregateResult"].forEach(function(id) {
+    ["sectionsContent", "figuresContent", "dftContent", "writingContent", "translationContent", "externalRuns", "aggregateResult"].forEach(function(id) {
         const el = $(id);
         if (el) el.innerHTML = "";
     });
@@ -423,7 +423,6 @@ async function loadPaperDetail(paperId, options) {
         }
         if (state.currentTab === "review") loadExternalRuns();
         if (state.currentTab === "aggregate") loadAggregate();
-        if (state.currentTab === "writer") ensureWriterStatus();
     } catch (error) {
         if (state.detailLoadToken === loadToken) {
             if (state.currentTab === "mechanism") {

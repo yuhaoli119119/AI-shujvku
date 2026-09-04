@@ -20,7 +20,6 @@ const state = {
     aggregateData: null,
     discoveryCache: [],
     aiWorkflowJobId: null,
-    writerSettings: null,
     jobCenterStatus: "",
     jobCenterType: "",
     qualityReasonContext: "",

@@ -703,7 +703,7 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "get_codex_item" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
     assert "get_paper_knowledge" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
     assert "get_dft_review_queue" in data["recommended_entrypoint"]["json_schema_hint"]["read_tools"]
-    assert "insert_word_citation" in data["recommended_entrypoint"]["json_schema_hint"]["writing_tools"]
+    assert data["recommended_entrypoint"]["json_schema_hint"]["writing_tools"] == []
     assert data["mcp"]["url"] == "/mcp"
     assert "get_codex_context" in data["mcp"]["common_tools"]
     assert "get_codex_item" in data["mcp"]["common_tools"]
@@ -720,7 +720,6 @@ def test_agent_guide_endpoint_exposes_connection_instructions(setup_test_db):
     assert "repair_dft_audit_issues_batch" in data["mcp"]["compatibility_tools"]
     assert "propose_dft_result_correction" in data["mcp"]["common_tools"]
     assert "retrieve_evidence" in data["mcp"]["common_tools"]
-    assert "insert_word_citation" in data["mcp"]["common_tools"]
     assert data["prompt_schema_version"] == "ide_review_prompt_v19"
     assert data["prompt_contract"]["canonical_mcp_path"] == "/mcp"
     assert "SRR_LiS" in data["prompt_contract"]["reaction_profile_templates"]

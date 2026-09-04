@@ -27,8 +27,6 @@ def _is_export_path(path: str) -> bool:
         or path == "/api/dft/catalyst-dataset.csv"
         or path == "/api/dft/project-library-ml-export"
         or path == "/api/dft/project-library-ml-export.csv"
-        or path == "/api/writing/export"
-        or path.startswith("/api/writing/word/")
     )
 
 

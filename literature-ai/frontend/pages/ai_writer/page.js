@@ -169,7 +169,6 @@ function renderPlan() {
   const evidence = plan.selected_evidence || [];
   byId("planEmpty").hidden = true;
   byId("planResults").hidden = false;
-  byId("copyAllBtn").disabled = false;
   byId("metricRequested").textContent = plan.requested_paper_count ?? scope.requested_paper_count ?? state.selectedIds.length;
   byId("metricValid").textContent = plan.valid_paper_count ?? scope.valid_paper_count ?? 0;
   byId("metricRepresented").textContent = plan.represented_paper_count ?? 0;
@@ -187,7 +186,7 @@ function renderPlan() {
     : `<strong>DFT 未启用 / 未检索：</strong>${esc(plan.dft_included_reason || "普通写作安全默认")}`;
   renderWarnings(plan, coverageComplete);
   renderCoverage(coverage.by_paper || []);
-  renderBatches(batches, plan.batch_prompt_contexts || []);
+  renderBatches(batches);
   renderEvidence(evidence);
 }
 
@@ -214,11 +213,9 @@ function renderCoverage(rows) {
     : '<div class="empty-state">没有逐篇覆盖记录。</div>';
 }
 
-function renderBatches(batches, contexts) {
-  const contextById = new Map(contexts.map((context) => [String(context.batch_id), context]));
+function renderBatches(batches) {
   byId("batchList").innerHTML = batches.length
     ? batches.map((batch) => {
-        const context = contextById.get(String(batch.batch_id));
         return `
           <article class="batch-card">
             <div class="batch-head">
@@ -226,8 +223,6 @@ function renderBatches(batches, contexts) {
                 <h3>${esc(batch.batch_id)} · ${Number(batch.paper_ids?.length || 0)} 篇论文</h3>
                 <div class="muted">${Number(batch.selected_evidence_ids?.length || 0)} 条证据 · 预算 ${esc(batch.budget?.used ?? batch.budget ?? "—")}</div>
               </div>
-              <button class="btn ghost small copy-batch-btn" type="button"
-                data-batch-id="${esc(batch.batch_id)}" ${context ? "" : "disabled"}>复制单批上下文</button>
             </div>
             <div class="tag-row">${(batch.paper_codes || []).map((code) => `<span class="tag">${esc(code)}</span>`).join("")}</div>
             <div class="muted">证据 ID：${esc((batch.selected_evidence_ids || []).join("、") || "本批无安全证据")}</div>
@@ -267,81 +262,6 @@ function formatLocator(locator) {
   return locator.label || locator.quote || locator.section_title || locator.page || JSON.stringify(locator);
 }
 
-function buildAllExecutionText(plan) {
-  const summary = {
-    schema_version: "local_ai_writing_handoff.v1",
-    plan_fingerprint: plan.plan_fingerprint,
-    query: plan.query,
-    retrieval_mode: plan.retrieval_mode,
-    selected_evidence_types: plan.selected_evidence_types,
-    dft_included: plan.dft_included,
-    dft_included_reason: plan.dft_included_reason,
-    paper_counts: {
-      requested: plan.requested_paper_count,
-      valid: plan.valid_paper_count,
-      represented: plan.represented_paper_count,
-    },
-    budgets: plan.budgets,
-    coverage: plan.coverage,
-    warnings: plan.warnings,
-    batches: (plan.batches || []).map((batch) => ({
-      batch_id: batch.batch_id,
-      paper_ids: batch.paper_ids,
-      paper_codes: batch.paper_codes,
-      selected_evidence_ids: batch.selected_evidence_ids,
-      budget: batch.budget,
-    })),
-    evidence_full_text_included: false,
-    writes_db: false,
-  };
-  return [
-    "本地 AI 分批写作执行说明",
-    "1. 一次只处理一个 batch_prompt_context，不读取或引入其他批次证据。",
-    "2. 每个事实保留 [paper_code/object_id/page或locator] 来源标记。",
-    "3. 只有 can_use_for_citation=true 的证据卡可进入正式引用；writing=true/citation=false 只可辅助组织文字。",
-    "4. 数字必须与 property、unit、context 和原论文对象绑定，不跨论文拼接。",
-    "5. 无证据不得补写；覆盖不完整时不得声称系统性、全面或穷尽性覆盖。",
-    "6. 先输出每批事实/论点摘要及 claim-evidence 映射；总综合只能使用已完成批次摘要与映射。",
-    "7. 请从网页分别复制每个单批上下文；本执行说明不包含论文全文或证据摘录。",
-    "",
-    JSON.stringify(summary, null, 2),
-  ].join("\n");
-}
-
-async function copyText(text, successMessage) {
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast(successMessage);
-  } catch (_) {
-    const textarea = document.createElement("textarea");
-    textarea.value = text;
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand("copy");
-    textarea.remove();
-    showToast(successMessage);
-  }
-}
-
-function copyBatch(batchId) {
-  const context = (state.plan?.batch_prompt_contexts || []).find(
-    (item) => String(item.batch_id) === String(batchId),
-  );
-  if (!context) {
-    showToast("该批次没有可复制的有界上下文。");
-    return;
-  }
-  const instructions = [
-    "仅处理下面这个批次；禁止使用其他批次或整篇 PDF。",
-    "事实标记格式：[paper_code/object_id/page或locator]。",
-    "只有 can_use_for_citation=true 可正式引用；writing=true/citation=false 仅可辅助组织文字。",
-    "无证据不补写；数字保持 property/unit/context 绑定。",
-    "",
-    JSON.stringify(context, null, 2),
-  ].join("\n");
-  copyText(instructions, `已复制 ${batchId} 的单批上下文。`);
-}
-
 function bindEvents() {
   byId("paperChecklist").addEventListener("change", (event) => {
     const checkbox = event.target.closest("input[data-paper-id]");
@@ -357,13 +277,6 @@ function bindEvents() {
   byId("includeDft").addEventListener("change", updateDftFormState);
   byId("buildPlanBtn").addEventListener("click", buildPlan);
   byId("buildPlanInlineBtn").addEventListener("click", buildPlan);
-  byId("copyAllBtn").addEventListener("click", () => {
-    if (state.plan) copyText(buildAllExecutionText(state.plan), "全部分批执行说明已复制。");
-  });
-  byId("batchList").addEventListener("click", (event) => {
-    const button = event.target.closest(".copy-batch-btn");
-    if (button) copyBatch(button.dataset.batchId);
-  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -374,6 +287,5 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 export {
-  buildAllExecutionText,
   buildRequestPayload,
 };

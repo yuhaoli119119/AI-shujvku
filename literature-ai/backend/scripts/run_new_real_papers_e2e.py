@@ -94,10 +94,8 @@ def configure_environment() -> tuple[str, object]:
     os.environ["LITAI_DATABASE_URL"] = database_url
     os.environ["LITAI_STORAGE_ROOT"] = str(STORAGE_DIR)
     os.environ["LITAI_GROBID_URL"] = "http://127.0.0.1:9"
-    os.environ["LITAI_WRITER_BACKEND"] = "rule"
     os.environ["LITAI_WRITER_API_BASE"] = ""
     os.environ["LITAI_WRITER_API_KEY"] = ""
-    os.environ["LITAI_WRITER_TIMEOUT_SECONDS"] = "2"
     return schema, admin_engine
 
 

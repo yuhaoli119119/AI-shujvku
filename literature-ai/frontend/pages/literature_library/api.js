@@ -1,6 +1,5 @@
 const API_BASE = "/api/papers";
 const LIB_API = "/api/libraries";
-const WRITER_API = "/api/writer";
 const EXTERNAL_API = "/api/external-analysis";
 const PAGE_SIZE = 25;
 const SYSTEM_API = "/api/system";
@@ -450,13 +449,6 @@ async function loadLibraries() {
             console.error("loadLibraries fallback failed", fallbackError);
         }
     }
-}
-
-async function loadWriterSettings() {
-    state.writerSettings = {
-        writer_backend: "disabled",
-        writer_model: ""
-    };
 }
 
 function applyActivatedLibraryState(payload, fallbackName) {

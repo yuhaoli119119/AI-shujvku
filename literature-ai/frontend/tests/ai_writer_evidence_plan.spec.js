@@ -20,21 +20,18 @@ test('AI writer source is a bounded read-only evidence plan surface', () => {
   expect(html).toContain('id="batchSize" type="number" value="10"');
   expect(html).toContain('id="maxPerPaper" type="number" value="3"');
   expect(combined).toContain('/api/content-knowledge/writing-plan');
-  expect(combined).not.toContain('/api/writer/draft');
   expect(combined).not.toContain('generateAcademicDraft');
   expect(combined).not.toContain('生成草稿');
   expect(page).toContain('requested_sections: includeDft ? ["dft_results"] : []');
   expect(page).toContain('覆盖不完整：不得声称系统性、全面或穷尽性覆盖');
-  expect(page).toContain('evidence_full_text_included: false');
-  expect(page).toContain('一次只处理一个 batch_prompt_context');
   expect(page).toContain('无证据支持');
   expect(page).toContain('不要补写事实或数字');
   expect(page).toContain('可引用');
   expect(page).toContain('仅用于写作，不可直接引用');
-  expect(page).toContain('只有 can_use_for_citation=true 的证据卡可进入正式引用');
+  expect(combined).not.toContain('clipboard.writeText');
 });
 
-test('AI writer posts safe defaults and copies only the selected batch context', async ({ page }) => {
+test('AI writer posts safe defaults and displays bounded evidence batches', async ({ page }) => {
   const paperA = '00000000-0000-0000-0000-000000000101';
   const paperB = '00000000-0000-0000-0000-000000000102';
   let requestPayload = null;
@@ -126,17 +123,7 @@ test('AI writer posts safe defaults and copies only the selected batch context',
     max_sources_per_claim: 5,
   });
 
-  const copied = await page.locator('.copy-batch-btn').first().evaluate((button) => {
-    let value = '';
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText: async (text) => { value = text; } },
-    });
-    button.click();
-    return new Promise((resolve) => setTimeout(() => resolve(value), 0));
-  });
-  expect(copied).toContain('evidence-a');
-  expect(copied).toContain('ONLY-A');
-  expect(copied).not.toContain('evidence-b');
-  expect(copied).not.toContain('ONLY-B');
+  await expect(page.locator('.batch-card')).toHaveCount(2);
+  await expect(page.locator('.batch-card').first()).toContainText('evidence-a');
+  await expect(page.locator('.batch-card').nth(1)).toContainText('evidence-b');
 });

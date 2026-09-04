@@ -13,7 +13,6 @@ from uuid import UUID, uuid4
 
 import pytest
 import fitz
-from docx import Document
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -61,7 +60,6 @@ from app.mcp.server import (
     get_content_web_review_local_verification_plan,
     get_parse_status,
     ingest_pdf_batch,
-    insert_word_citation,
     import_analysis,
     list_notes,
     parse_paper,
@@ -2102,44 +2100,6 @@ def test_mcp_get_paper_knowledge_returns_section_fallback_candidates(mcp_test_en
     assert "mechanism_context" in categories
     assert any(item["source_type"] == "paper_note" for item in payload["candidates"])
     assert payload["reliability_policy"]["knowledge_items_are_candidates"] is True
-
-
-def test_mcp_insert_word_citation_creates_guarded_docx_copy(mcp_test_env, monkeypatch):
-    monkeypatch.setenv("LITAI_EXPORTS_ENABLED", "true")
-    get_settings.cache_clear()
-    docx_path = mcp_test_env["tmpdir"] / "draft.docx"
-    document = Document()
-    document.add_paragraph("Draft manuscript body.")
-    document.save(docx_path)
-
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(
-            title="MCP Word Citation Paper",
-            year=2026,
-            journal="Citation Journal",
-            authors=[{"last": "Word"}],
-            abstract="Graphene defect citation context.",
-            pdf_path="word.pdf",
-        )
-        session.add(paper)
-        session.commit()
-        paper_id = str(paper.id)
-
-    with mcp_auth_context(_export_auth()):
-        payload = insert_word_citation(
-            docx_path=str(docx_path),
-            selected_paper_id=paper_id,
-            text="Graphene defects alter adsorption behavior.",
-            output_filename="mcp-word-citation.docx",
-        )
-
-    assert payload["status"] == "inserted"
-    assert payload["output_filename"] == "mcp-word-citation.docx"
-    assert payload["safety"]["mutates_original_file"] is False
-    assert payload["safety"]["writes_database"] is False
-    paragraphs = [paragraph.text for paragraph in Document(payload["output_path"]).paragraphs]
-    assert paragraphs[0] == "Draft manuscript body."
-    assert "[DRAFT CITATION - VERIFY SOURCE BEFORE USE: Word, 2026]" in paragraphs[-1]
 
 
 def test_admin_mcp_reject_dft_result_leaves_active_queue(mcp_test_env):
