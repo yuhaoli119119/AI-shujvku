@@ -157,6 +157,7 @@ services:
       - "127.0.0.1:8000:8080"
     volumes:
       - ./deploy/nginx/owner.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./deploy/nginx/owner.htpasswd:/etc/nginx/.htpasswd:ro
 
   share-gateway:
     image: nginx:1.27-alpine

@@ -3,6 +3,12 @@ upstream literature_ai_backend {
     keepalive 32;
 }
 
+# Owner 网关（经 cloudflared 暴露公网）。
+# 安全模型（2026-09-04 加固）：
+#   - 除 /mcp、/api/health 外，页面与所有 /api 一律要求 HTTP Basic 登录（htpasswd），
+#     浏览器首次输入后同源请求自动带凭据，工作台前端无需改动。
+#   - /mcp 关闭 Basic，交给后端用 Authorization: Bearer <MCP key> 自行鉴权。
+#   - /docs、/redoc、/openapi.json 对外直接 404，不暴露接口文档。
 server {
     listen 8080;
     server_tokens off;
@@ -10,11 +16,42 @@ server {
     error_log /dev/stderr crit;
     client_max_body_size 32m;
 
+    # MCP 端点：不走 Basic，由后端校验 Bearer MCP key（无 key 返回 401）
+    location ^~ /mcp {
+        auth_basic off;
+        proxy_pass http://literature_ai_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    # 健康检查：公开（仅暴露库名/存储根，供隧道与监控探测）
+    location = /api/health {
+        auth_basic off;
+        proxy_pass http://literature_ai_backend;
+        proxy_set_header Host $http_host;
+    }
+
+    # 对外关闭交互式接口文档与 schema
+    location ^~ /docs { return 404; }
+    location = /redoc { return 404; }
+    location = /openapi.json { return 404; }
+
+    # 根路径：登录后跳转工作台
     location = / {
+        auth_basic "Literature AI Owner";
+        auth_basic_user_file /etc/nginx/.htpasswd;
         return 302 https://$host/pages/literature_library/index.html;
     }
 
+    # 其余一切（工作台静态页 + 全部 /api）都要 Basic 登录
     location / {
+        auth_basic "Literature AI Owner";
+        auth_basic_user_file /etc/nginx/.htpasswd;
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";

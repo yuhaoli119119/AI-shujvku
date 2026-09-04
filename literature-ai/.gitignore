@@ -13,6 +13,10 @@ venv/
 # Environment configurations
 .env
 
+# Gateway basic-auth credential files (never commit password hashes)
+*.htpasswd
+deploy/nginx/*.htpasswd
+
 *#U*
 D#Uf03a*
 backend/D*/

@@ -24,6 +24,7 @@ rsync -av --delete \
   --exclude 'data/' \
   --exclude 'node_modules/' \
   --exclude '**/__pycache__/' \
+  --exclude '*.htpasswd' \
   "$SRC/literature-ai/" "$RUN/"
 
 echo "==> [3/4] 强制重建应用容器（backend / worker / worker-pdf / owner-gateway / share-gateway / public-gateway），确保加载新代码与 .env"

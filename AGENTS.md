@@ -86,17 +86,19 @@ python backup_db.py backup                                              # 备份
 `docker exec -it literature-ai-postgres-1 psql -U literature_ai -d literature_ai`。
 健康检查：`curl https://dft.researchlife.top/api/health`。
 
-## ⚠️ 已知安全风险（最高优先级待加固，2026-09-04 外部黑盒确认）
+## 网关安全加固（2026-09-04 已实施）
 
-Owner 网关经 cloudflared 暴露公网，但**未对只读 API 做全局鉴权**，未带任何 token 即可：
-- `GET /api/content-knowledge` 翻页拉全库（实测 781 条证据 / 99 篇文献，含标题/DOI/正文片段/页码/内部 UUID）；
-- `GET /api/papers/` 列出文献；`GET /api/settings` 返回配置（密钥已掩码，但泄露内网 IP 与配置结构）；
-- `GET /docs`、`/redoc`、`/openapi.json` 暴露完整接口文档；`/api/health` 泄露库名与存储路径（轻微）。
-- 对照：`/mcp` 无 key 正确返回 401；`/api/system`、`/api/workbench` 等返回 404（已拦）。
+Owner 网关（`deploy/nginx/owner.conf.template`，经 cloudflared 暴露公网）已加一层 **HTTP Basic 登录门**，外部黑盒+服务器内测 13 项全部通过：
 
-加固方向（未实施，动手前先备份）：Owner 网关对 `/api/*`（除 health 与登录类）强制校验 Bearer/Owner token，
-或在 Cloudflare 侧加 Access 登录层；对外关闭 `/docs`、`/redoc`、`/openapi.json`；`/api/settings` 仅 Owner 会话可读。
-**在加固完成前，该网站等同于"知道域名即可读全库"，不要往库里放未公开/敏感数据。**
+- **匿名访问**：页面与所有 `/api/*`（content-knowledge / papers / settings 等）一律 **401**；`/docs`、`/redoc`、`/openapi.json` 一律 **404**。
+- **`/mcp` 豁免 Basic**：`auth_basic off`，继续由后端用 `Authorization: Bearer <MCP key>` 鉴权（无 key 401、带 key 307 握手），外部 AI 接入方式不变。
+- **`/api/health` 放行**（隧道/监控探测，仅暴露库名）。
+- **带正确 Basic**：页面与 API 正常 200，工作台前端无需改动（浏览器首次输入后同源请求自动带凭据）。
+- Basic 凭据文件：服务器 `literature-ai/deploy/nginx/owner.htpasswd`（挂载到容器 `/etc/nginx/.htpasswd`），**已 gitignore、永不入库**；明文用户名/密码只记在本机 `local/srv_deploy/README.md`。
+- 改 Basic 密码：服务器上 `docker exec literature-ai-owner-gateway-1 sh -c "printf 'owner:%s\n' \"\$(openssl passwd -apr1 '新密码')\" > /etc/nginx/..."`（或改宿主机 `deploy/nginx/owner.htpasswd` 后 `docker compose up -d --no-deps --force-recreate owner-gateway`）。
+- `update.sh` 的 rsync 已 `--exclude '*.htpasswd'`，代码更新不会删凭据；`docker-compose.yml` 的 owner-gateway 已挂载 htpasswd，**改这两个文件必须同步回仓库，否则下次更新会丢挂载**。
+- 回滚：`/root/gateway_bak_*/` 有加固前的 owner.conf.template 与 docker-compose.yml 备份。
+- 可选进阶（未做）：Cloudflare Zero Trust Access 再加一层零信任登录；share-gateway 仍在局域网 `0.0.0.0:8080`（设计为只读白名单，风险低）。
 
 ## 工程注意
 
