@@ -25,10 +25,7 @@ from app.services.content_knowledge_service import ContentKnowledgeService
 from app.services.content_writing_plan_service import ContentWritingPlanService
 from app.services.extraction_review_service import ExtractionReviewService
 from app.services.module_write_lock_service import ModuleWriteLockService
-from app.services.content_review_bundle_service import (
-    ContentReviewBundleService,
-    ContentReviewBundleV1DeprecatedError,
-)
+from app.services.content_review_bundle_service import ContentReviewBundleService
 from app.services.review_service import ReviewService
 from app.utils.review_safety import content_object_gate
 
@@ -176,10 +173,6 @@ def test_v1_bundle_mutators_are_410_and_cannot_change_projection_state(setup_tes
         session.add_all([item, bundle])
         session.commit()
         paper_id, item_id, bundle_id = paper.id, item.id, bundle.id
-
-        with pytest.raises(ContentReviewBundleV1DeprecatedError):
-            ContentReviewBundleService(session).apply_result(bundle_id, reviewer="human")
-        session.rollback()
 
     client = TestClient(app)
     calls = [

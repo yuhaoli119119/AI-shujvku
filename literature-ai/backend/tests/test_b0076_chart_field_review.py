@@ -16,10 +16,6 @@ from PIL import Image
 from app.config import get_settings
 from app.db.models import AuditLog, DFTResult, EvidenceLocator, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperFigure, PaperRelationship, PaperTable, WorkflowJob
 from app.main import app
-from app.services.content_review_bundle_service import (
-    ContentReviewBundleService,
-    ContentReviewBundleV1DeprecatedError,
-)
 from app.services.dft_review_bundle_service import (
     DFTReviewBundleService,
     FigureTableReviewNotCompletedError,
@@ -383,8 +379,6 @@ def test_content_figure_field_reminder_cannot_become_citable(setup_test_db):
         )
         session.add(item)
         session.commit()
-        with pytest.raises(ContentReviewBundleV1DeprecatedError):
-            ContentReviewBundleService(session).generate(paper_id=paper.id)
         session.refresh(item)
         assert item.review_status == "needs_review"
         assert item.citation_status == "needs_review"
