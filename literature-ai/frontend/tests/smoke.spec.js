@@ -1207,30 +1207,6 @@ async function mockApi(route) {
     });
   }
 
-  if (pathname === '/api/papers/ai_workflow/jobs' && method === 'POST') {
-    return jsonResponse(route, {
-      job_id: 'job-1',
-      type: 'ai_workflow',
-      status: 'queued',
-      progress: { message: 'Queued' },
-      result: null,
-      error: null,
-      library_name: 'Default Library',
-    });
-  }
-
-  if (pathname === '/api/papers/ai_workflow/jobs/job-1') {
-    return jsonResponse(route, {
-      job_id: 'job-1',
-      type: 'ai_workflow',
-      status: 'completed',
-      progress: { message: 'Done' },
-      result: { papers: PAPERS },
-      error: null,
-      library_name: 'Default Library',
-    });
-  }
-
   if (pathname === '/api/extraction/jobs' && method === 'GET') {
     return jsonResponse(route, [
       {
@@ -1403,15 +1379,7 @@ async function mockApi(route) {
     return jsonResponse(route, AUDIT);
   }
 
-  if (pathname === '/api/papers/discovery/search') {
-    return jsonResponse(route, { items: [] });
-  }
-
-  if (pathname === '/api/papers/ai_search') {
-    return jsonResponse(route, { papers: [] });
-  }
-
-  if (pathname === '/api/papers/discovery/download' || pathname === '/api/papers/ingest/upload') {
+  if (pathname === '/api/papers/ingest/upload') {
     return jsonResponse(route, { papers: PAPERS });
   }
 
@@ -1834,10 +1802,10 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const mockedJobs = [
         {
           job_id: 'job-safe-1',
-          type: 'discovery_download_ingest',
+          type: 'local_pdf_path_ingest',
           status: 'completed',
           progress: { phase: 'completed', ingested: 5, failed: 0 },
-          summary: { source_label: '在线下载队列入库', success_count: 5, failure_count: 0 },
+          summary: { source_label: '本地 PDF 队列入库', success_count: 5, failure_count: 0 },
           result: null,
           error: null,
           created_at: today,
@@ -1846,7 +1814,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
         },
       ];
     await page.route(/\/api\/jobs.*/, route => jsonResponse(route, mockedJobs));
-    await page.route(/\/api\/papers\/ai_workflow\/jobs.*/, route => jsonResponse(route, mockedJobs));
 
     await page.goto(`${BASE_URL}/pages/ingestion/index.html`);
     await page.waitForTimeout(600);
@@ -1855,9 +1822,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(page.locator('h1')).toContainText('入库中心');
     await expect(page.locator('#calendarTitle')).toBeVisible();
     await expect(page.locator('#jobQueue')).toContainText('成功入库：5 篇');
-
-    await page.click('button[onclick="switchIngestTab(\'doi\')"]');
-    await expect(page.locator('#tab-doi')).toContainText('DOI、arXiv ID 或论文 URL');
+    await expect(page.locator('#tab-pdf')).toContainText('拖放 PDF 到这里');
+    await expect(page.locator('#tab-doi')).toHaveCount(0);
 
     const bodyText = await page.locator('body').innerText();
     expect(bodyText).not.toMatch(/[\uFFFD\u934F\u7C31\u93C8\u7EEF\u9983\u9286\u922B\u951B]/);
@@ -5358,11 +5324,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await expect(metaCard).toContainText('Metadata Only Paper');
     await expect(metaCard.locator('.status-chip.meta')).toBeVisible();
 
-    await metaCard.click();
-    await page.waitForTimeout(500);
-
-    await expect(page.locator('#summaryContent')).toContainText('尚无 PDF');
-    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    await page.locator('#addLiteratureBtn').click();
+    await page.locator('#attachPaperSelect').selectOption('paper-meta-only');
+    const uploadBtn = page.locator('#addLiteratureDialog button:has-text("上传 PDF 并合并")');
     await expect(uploadBtn).toBeVisible();
 
     const fileChooserPromise = page.waitForEvent('filechooser');
@@ -5445,10 +5409,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
-    await metaCard.click();
-    await page.waitForTimeout(500);
-
-    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    await page.locator('#addLiteratureBtn').click();
+    await page.locator('#attachPaperSelect').selectOption('paper-meta-only');
+    const uploadBtn = page.locator('#addLiteratureDialog button:has-text("上传 PDF 并合并")');
     const fileChooserPromise = page.waitForEvent('filechooser');
     await uploadBtn.click();
     const fileChooser = await fileChooserPromise;
@@ -5473,6 +5436,8 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     expect(secondCallPayload).toBeNull();
 
     // Trigger upload again to confirm
+    await page.locator('#addLiteratureBtn').click();
+    await page.locator('#attachPaperSelect').selectOption('paper-meta-only');
     const fileChooserPromise2 = page.waitForEvent('filechooser');
     await uploadBtn.click();
     const fileChooser2 = await fileChooserPromise2;
@@ -5543,10 +5508,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
-    await metaCard.click();
-    await page.waitForTimeout(500);
-
-    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    await page.locator('#addLiteratureBtn').click();
+    await page.locator('#attachPaperSelect').selectOption('paper-meta-only');
+    const uploadBtn = page.locator('#addLiteratureDialog button:has-text("上传 PDF 并合并")');
     const fileChooserPromise = page.waitForEvent('filechooser');
     await uploadBtn.click();
     const fileChooser = await fileChooserPromise;
@@ -5950,10 +5914,9 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await page.waitForTimeout(500);
 
     const metaCard = page.locator('.paper-row[data-id="paper-meta-only"]');
-    await metaCard.click();
-    await page.waitForTimeout(500);
-
-    const uploadBtn = page.locator('#summaryContent button:has-text("上传 PDF 并自动合并")');
+    await page.locator('#addLiteratureBtn').click();
+    await page.locator('#attachPaperSelect').selectOption('paper-meta-only');
+    const uploadBtn = page.locator('#addLiteratureDialog button:has-text("上传 PDF 并合并")');
     const fileChooserPromise = page.waitForEvent('filechooser');
     await uploadBtn.click();
     const fileChooser = await fileChooserPromise;
@@ -5969,64 +5932,6 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     const jumpToast = page.locator('.already-exists-toast');
     await expect(jumpToast).toBeVisible();
     await expect(jumpToast).toContainText('文献已存在');
-  });
-
-  test('business flow: AI workflow job results show metadata_only and already_exists', async ({ page }) => {
-    await page.route(/\/api\/papers\/ai_workflow\/jobs\/job-1/, route => {
-      return jsonResponse(route, {
-        job_id: 'job-1',
-        type: 'ai_workflow',
-        status: 'completed',
-        progress: { message: 'Done' },
-        result: {
-          prompt_used: 'AI Search Prompt',
-          ingested: [
-            {
-              paper_id: 'paper-1',
-              title: 'Ingested Paper 1',
-              status: 'completed',
-              identifier: 'doi:1',
-              doi: '10.1000/1'
-            },
-            {
-              paper_id: 'paper-2',
-              title: 'Metadata Only Ingested',
-              status: 'metadata_only',
-              identifier: 'doi:2',
-              doi: '10.1000/2'
-            },
-            {
-              paper_id: 'paper-3',
-              title: 'Already Existing Paper',
-              status: 'already_exists',
-              identifier: 'doi:3',
-              doi: '10.1000/3'
-            }
-          ],
-          failed: [
-            {
-              identifier: 'doi:4',
-              title: 'Failed Paper',
-              code: 'DOWNLOAD_FAILED',
-              reason: 'Server Timeout'
-            }
-          ]
-        },
-        error: null,
-        library_name: 'Default Library'
-      });
-    });
-
-    await page.goto(`${BASE_URL}/pages/literature_library/index.html`);
-    await page.waitForTimeout(500);
-    await page.evaluate(() => window.pollAIWorkflowJob && window.pollAIWorkflowJob('job-1'));
-    await expect(page.locator('#acquisitionResult')).toContainText('AI 后台检索 / 收录任务');
-    
-    const resultBox = page.locator('#acquisitionResult');
-    await expect(resultBox.locator('.status-chip.parsed').first()).toContainText('已收录');
-    await expect(resultBox.locator('.status-chip.meta').first()).toContainText('元数据');
-    await expect(resultBox.locator('.status-chip.duplicate').first()).toContainText('已存在');
-    await expect(resultBox.locator('.status-chip.failed').first()).toContainText('DOWNLOAD_FAILED');
   });
 
   test.describe('G2B Review Stability & Audit Tests', () => {

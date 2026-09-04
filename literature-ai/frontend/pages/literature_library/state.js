@@ -18,8 +18,6 @@ const state = {
     writerStatus: null,
     externalRuns: [],
     aggregateData: null,
-    discoveryCache: [],
-    aiWorkflowJobId: null,
     jobCenterStatus: "",
     jobCenterType: "",
     qualityReasonContext: "",

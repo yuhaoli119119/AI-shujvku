@@ -38,7 +38,6 @@ from app.services.journal_impact_enrichment_service import (
     JournalImpactEnrichmentService,
     _journal_search_terms,
 )
-from app.services.paper_ingestion import PaperIngestionService
 
 
 @pytest.fixture
@@ -250,30 +249,6 @@ def test_new_paper_lookup_writes_metric_and_binds_paper(impact_client):
         assert stored.impact_factor_year == 2025
         assert stored.impact_factor_source == "ablesci_jif_auto"
         assert paper.journal_id is not None
-
-
-def test_metadata_only_ingest_triggers_impact_enrichment(impact_client):
-    _, Session, _ = impact_client
-    with Session() as session:
-        service = PaperIngestionService(session=session, settings=get_settings())
-        enriched_ids = []
-
-        class FakeEnrichment:
-            def enrich_paper(self, paper):
-                enriched_ids.append(paper.id)
-
-                class Result:
-                    status = "local_cache"
-
-                return Result()
-
-        service.impact_enrichment = FakeEnrichment()
-        paper = service.ingest_metadata_only(
-            {"title": "Auto IF metadata-only paper", "journal": "Cached Journal", "year": 2026},
-            library_name="ImpactAuto",
-        )
-
-        assert enriched_ids == [paper.id]
 
 
 def test_upsert_does_not_duplicate_rows(impact_client):

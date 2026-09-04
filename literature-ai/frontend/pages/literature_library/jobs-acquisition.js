@@ -40,38 +40,6 @@ function initSSE() {
     });
 }
 
-function clampSearchLimit(value) {
-    const n = Number(value || 50);
-    if (!Number.isFinite(n)) return 50;
-    return Math.max(1, Math.min(50, Math.round(n)));
-}
-
-function discoveryKey(item) {
-    const doi = (item.doi || "").trim().toLowerCase();
-    if (doi) return "doi:" + doi;
-    const identifier = (item.identifier || item.url || "").trim().toLowerCase();
-    if (identifier) return "id:" + identifier;
-    return "title:" + String(item.title || "").trim().toLowerCase();
-}
-
-function mergeDiscoveryResults(items) {
-    const existingKeys = new Set(state.discoveryCache.map(discoveryKey));
-    let added = 0;
-    let duplicate = 0;
-    (items || []).forEach(function(item) {
-        const key = discoveryKey(item);
-        if (!key || key === "title:") return;
-        if (existingKeys.has(key)) {
-            duplicate += 1;
-            return;
-        }
-        existingKeys.add(key);
-        state.discoveryCache.push(item);
-        added += 1;
-    });
-    return { added: added, duplicate: duplicate, total: state.discoveryCache.length };
-}
-
 function acquisitionResultEl() {
     return $("acquisitionResult");
 }
@@ -90,68 +58,6 @@ function renderJobProgressNotice(job) {
     if (current) bits.push("当前：" + current);
     if (total) bits.push("总数：" + total);
     return '<div class="subtle" style="margin-top:10px;">' + esc(bits.join(" | ")) + '</div>';
-}
-
-async function searchOnline() {
-    const onlineQuery = $("onlineSearchQuery");
-    const searchInput = $("searchInput");
-    const query = ((onlineQuery && onlineQuery.value) || (searchInput ? searchInput.value : "") || "").trim();
-    if (!query) {
-        showToast("请先输入检索关键词。", "error");
-        return;
-    }
-    openAddLiteraturePanel("online");
-    if (onlineQuery) onlineQuery.value = query;
-    setAcquisitionResult('<div class="workspace-empty small-empty">正在从 OpenAlex / arXiv 检索，最多拉取 50 篇...</div>');
-    try {
-        const maxResults = $("onlineSearchMaxResults");
-        const limit = clampSearchLimit(maxResults ? maxResults.value : 100);
-        const data = await fetchJSON(API_BASE + "/discovery/search?q=" + encodeURIComponent(query) + "&limit=" + limit);
-        const stats = mergeDiscoveryResults(data.items || []);
-        renderDiscoveryResults({ items: state.discoveryCache }, stats, "在线检索结果");
-    } catch (error) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">在线检索失败：' + esc(error.message) + "</div>");
-    }
-}
-
-function renderDiscoveryResults(data, stats, title, prefixHtml) {
-    const items = data && data.items ? data.items : [];
-    if (!items.length) {
-        setAcquisitionResult('<div class="workspace-empty small-empty">没有找到在线结果。</div>');
-        return;
-    }
-    setAcquisitionResult(
-        (prefixHtml || "") +
-        '<div class="writer-block"><h3>' + esc(title || "检索结果") + '（累计去重后 ' + items.length + ' 篇）</h3><div class="subtle">本页会合并后续检索结果：新增 ' + esc(stats && stats.added != null ? stats.added : "-") + ' 篇，过滤重复 ' + esc(stats && stats.duplicate != null ? stats.duplicate : "-") + ' 篇。点击“下载并收录”时，下载失败也会按元数据入库，之后可补 PDF。</div></div>' +
-        items.map(function(item) {
-            const identifier = item.identifier || item.doi || item.url || "";
-            return (
-                '<div class="ai-result-card">' +
-                    '<h4>' + esc(item.title || "未命名文献") + "</h4>" +
-                    '<div class="subtle">' + esc(item.year || "-") + " | " + esc(item.journal || "-") + " | " + esc((item.authors || []).slice(0, 4).join(", ") || "-") + "</div>" +
-                    (item.abstract ? '<div class="prewrap" style="margin-top:10px;">' + esc(ellipsis(item.abstract, 520)) + "</div>" : "") +
-                    '<div class="modal-actions" style="justify-content:flex-start;">' +
-                        '<button class="btn green small" onclick="downloadIdentifier(' + JSON.stringify(identifier).replace(/"/g, "&quot;") + ')">下载并收录</button>' +
-                    "</div>" +
-                "</div>"
-            );
-        }).join(""));
-}
-
-function getAIQueryRewriteModel() {
-    return null;
-}
-
-function getAIQueryRewriteHint() {
-    return "网页端 AI 检索已停用；请使用在线检索，或让 IDE AI 优先通过 MCP 搜索并入库。若当前会话未暴露 MCP 工具，可改用仓库内 `literature-ai/backend` 的 `app.mcp.*` 后备路径。";
-}
-
-async function runAISearch() {
-    showToast("网页端 AI 检索已停用，请使用在线检索或 IDE AI；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
-}
-
-async function runAIWorkflow() {
-    showToast("网页端 AI 工作流已停用，请使用在线检索或 IDE AI；优先走 MCP，若当前会话未暴露工具可改用仓库内 `literature-ai/backend` 的 `app.mcp.*`。", "info");
 }
 
 // ---- 任务轮询调度：单链 / 隐藏与离线暂停 / 恢复即查 / 错误去重 / 最大持续时间 ----
@@ -209,8 +115,7 @@ function scheduleJobPoll(kind, jobId, context, delay) {
             scheduleJobPoll(kind, jobId, context, JOB_POLL_RETRY_INTERVAL_MS);
             return;
         }
-        if (kind === "ai_workflow") pollAIWorkflowJob(jobId);
-        else pollWorkflowIngestJob(jobId, context);
+        pollWorkflowIngestJob(jobId, context);
     }, delay);
 }
 
@@ -233,8 +138,7 @@ function resumeJobPolls() {
             chain.timerId = null;
         }
         chain.scheduled = false;
-        if (chain.kind === "ai_workflow") pollAIWorkflowJob(chain.jobId);
-        else pollWorkflowIngestJob(chain.jobId, chain.context);
+        pollWorkflowIngestJob(chain.jobId, chain.context);
     });
 }
 
@@ -242,36 +146,6 @@ document.addEventListener("visibilitychange", function() {
     if (!document.hidden) resumeJobPolls();
 });
 window.addEventListener("online", resumeJobPolls);
-
-async function pollAIWorkflowJob(jobId) {
-    if (!jobId) return;
-    const chain = ensureJobPollChain("ai_workflow", jobId);
-    if (chain.running) return;
-    chain.running = true;
-    try {
-        const job = await fetchJSON(API_BASE + "/ai_workflow/jobs/" + encodeURIComponent(jobId));
-        renderAIWorkflowJob(job);
-        chain.errorNotified = false;
-        if (job.status === "queued" || job.status === "running") {
-            scheduleJobPoll("ai_workflow", jobId, null, JOB_POLL_INTERVAL_MS);
-        } else if (job.status === "completed") {
-            finishJobPollChain("ai_workflow", jobId);
-            showToast("AI 工作流完成，文献列表已刷新。", "success");
-            if (typeof resetLibraryPagination === "function") resetLibraryPagination();
-            else state.currentOffset = 0;
-            refreshLibraryData({ preserveDetail: true, loadingMessage: "正在同步 AI 工作流结果..." });
-        } else if (job.status === "failed") {
-            finishJobPollChain("ai_workflow", jobId);
-            showToast("AI 工作流失败：" + (job.error || ""), "error");
-        } else {
-            finishJobPollChain("ai_workflow", jobId);
-        }
-    } catch (error) {
-        handleJobPollError("ai_workflow", jobId, null, error);
-    } finally {
-        chain.running = false;
-    }
-}
 
 function renderQueuedIngestJob(job) {
     const result = job.result || {};

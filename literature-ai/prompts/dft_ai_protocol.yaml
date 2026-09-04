@@ -4,7 +4,7 @@ stage: ai_extraction_and_review_gate
 
 role_boundary:
   system_preprocessing:
-    - Download PDF and collect metadata.
+    - Read the user-uploaded PDF and collect embedded metadata.
     - Extract native text, sections, tables, captions, figures, page numbers, crop boxes, full-page screenshots, and nearby context.
     - Rule-based DFT hints are only stored as system_candidate records.
     - System candidates must never enter the final DFT/ML database without review.
@@ -21,16 +21,11 @@ role_boundary:
     - Import ordinary AI results only as candidates or audit opinions.
     - Require the dedicated authenticated ai_verify_content path for automatic authoritative acceptance; only deterministic-gate exceptions go to the Owner-session human queue.
 
-intake_boundary:
-  current_rule: Literature discovery is a controlled candidate workflow, not direct ingestion.
-  legacy_disabled:
-    - The old /api/papers/ai_workflow and /api/papers/ai_workflow/jobs direct-ingest routes are disabled with HTTP 410.
-    - External AI workers must not assume that search results have entered the library.
+ingestion_boundary:
+  current_rule: Papers enter the system only from user-uploaded or explicitly selected local PDF files.
   approved_flow:
-    - Search or AI expansion creates LiteratureIntakeCandidate rows only.
-    - Candidate status pending_review means not downloaded, not parsed, not citeable, and not usable as evidence.
-    - A candidate must be explicitly approved before download or ingestion can start.
-    - Rejected and duplicate candidates must not be ingested unless a curator deliberately changes their state.
+    - A PDF upload or local PDF import creates or merges the Paper record and starts parsing.
+    - Supplementary files are attached to an existing Paper and parsed through the same local pipeline.
     - Only papers that already exist in the active library can be used for DFT extraction, review, writing, export, or MCP evidence retrieval.
 
 evidence_first_rules:

@@ -62,7 +62,6 @@ from app.mcp.server import (
     ingest_pdf_batch,
     import_analysis,
     list_notes,
-    parse_paper,
     propose_correction,
     propose_dft_result_correction,
     reject_dft_result,
@@ -2681,39 +2680,6 @@ async def test_scan_local_pdfs_and_ingest_pdf_batch(mcp_test_env, monkeypatch):
             rows = session.scalars(select(Paper).order_by(Paper.created_at.asc())).all()
             assert len(rows) == 2
             assert any(row.source_path == str(second_pdf.resolve()) for row in rows)
-
-
-@pytest.mark.anyio
-async def test_parse_paper_reuses_existing_paper_and_records_job(mcp_test_env, monkeypatch):
-    with Session(mcp_test_env["engine"]) as session:
-        paper = Paper(
-            doi="10.1000/existing-doi",
-            title="Existing Paper",
-            pdf_path="existing.pdf",
-        )
-        session.add(paper)
-        session.commit()
-        existing_paper_id = str(paper.id)
-
-    class FakeDiscoveryService:
-        def fetch_metadata(self, identifier, providers=None):
-            return object(), {
-                "doi": "10.1000/existing-doi",
-                "title": "Existing Paper",
-                "authors": [],
-                "providers": providers or [],
-            }
-
-    monkeypatch.setattr("app.mcp.server.DiscoveryService", FakeDiscoveryService)
-
-    with mcp_auth_context(_auth()):
-        job = await parse_paper(identifier="10.1000/existing-doi", providers=["openalex"])
-        assert job["status"] == "completed"
-        assert job["paper_id"] == existing_paper_id
-
-        fetched = get_parse_status(job_id=job["id"])
-        assert fetched["identifier"] == "10.1000/existing-doi"
-        assert fetched["status"] == "completed"
 
 
 def test_mcp_http_auth_middleware_requires_api_key(mcp_test_env):

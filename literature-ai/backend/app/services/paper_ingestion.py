@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import logging
@@ -200,31 +199,6 @@ class PaperIngestionService:
 
         if quality_report.get("needs_human_confirmation"):
             unified = self._document_metadata_only(unified)
-
-        if (
-            not external_metadata
-            and self.settings.auto_enrich_ingested_metadata
-            and self._needs_metadata_enrichment(unified.metadata)
-        ):
-            doi = unified.metadata.get("doi")
-            if doi:
-                from app.services.discovery_service import DiscoveryService
-                from fastapi.concurrency import run_in_threadpool
-
-                try:
-                    svc = DiscoveryService()
-                    _, external_metadata = await asyncio.wait_for(
-                        run_in_threadpool(svc.fetch_metadata, doi),
-                        timeout=max(0.1, float(self.settings.metadata_enrichment_timeout_seconds)),
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "Auto-enrichment via discovery timed out for DOI %s after %.1fs",
-                        doi,
-                        self.settings.metadata_enrichment_timeout_seconds,
-                    )
-                except Exception as exc:
-                    logger.warning("Auto-enrichment via discovery failed for DOI %s: %s", doi, exc)
 
         library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
         identity_metadata = self._build_identity_metadata(unified, external_metadata, source_reference)
@@ -445,29 +419,6 @@ class PaperIngestionService:
         import asyncio
 
         return asyncio.run(self.ingest_pdf(source_path=source_path, original_filename=original_filename))
-
-    def ingest_metadata_only(
-        self,
-        external_metadata: dict[str, Any],
-        identifier: str | None = None,
-        library_name: str | None = None,
-        source_reference: str | None = None,
-    ) -> Paper:
-        library = (library_name or DEFAULT_LIBRARY_NAME).strip() or DEFAULT_LIBRARY_NAME
-        paper = self.identity.upsert_metadata_only(
-            self.session,
-            external_metadata=external_metadata or {},
-            identifier=identifier,
-            library_name=library,
-            source_reference=source_reference,
-            classify_callback=self.extraction_pipeline._rule_based_classify,
-        )
-        self._enrich_impact_metadata(paper)
-        ensure_paper_codes(self.session, [paper])
-        renumber_library_papers_by_year(self.session, paper.library_name)
-        self.session.commit()
-        self.session.refresh(paper)
-        return paper
 
     def _build_quality_blocked_document(
         self,
@@ -1431,14 +1382,6 @@ class PaperIngestionService:
 
     def _artifact_ref(self, path: Path | None, *, category: str) -> str | None:
         return canonicalize_persisted_artifact_reference(path, category=category, settings=self.settings)
-
-    @staticmethod
-    def _needs_metadata_enrichment(metadata: dict[str, Any] | None) -> bool:
-        data = metadata or {}
-        title = str(data.get("title") or "").strip()
-        if not title:
-            return True
-        return not any(data.get(key) for key in ("year", "journal", "authors"))
 
     @staticmethod
     def _is_placeholder_title(title: Any, pdf_path: Path) -> bool:

@@ -2,7 +2,6 @@ from pathlib import Path
 
 from app.config import Settings
 from app.parsers.docling_parser import DoclingParser
-from app.services.discovery_service import DiscoveryService
 from app.services.paper_query import PaperQueryService
 from app.utils.text_cleaning import normalize_text_tree, repair_mojibake_text, repair_repeated_journal_title
 
@@ -58,35 +57,6 @@ def test_repair_mojibake_text_repairs_latin1_decoded_greek_symbols():
 def test_paper_query_clean_pdf_text_repairs_existing_stored_mojibake():
     shifted = "s" + "".join(chr(0x0376 + i) for i in [4, 1]) + "598-024-67393-z"
     assert PaperQueryService._clean_pdf_text(shifted) == "s41598-024-67393-z"
-
-
-def test_discovery_service_serialize_repairs_text_fields():
-    class Author:
-        def __init__(self, name: str) -> None:
-            self.name = name
-
-    class Source:
-        def __init__(self, title: str) -> None:
-            self.title = title
-
-    class Paper:
-        title = "CafÃ© catalyst"
-        doi = "10.1000/test"
-        publication_date = None
-        source = Source("Revista FranÃ§aise")
-        authors = [Author("Guangâ\x80\x90Jie Xia")]
-        abstract = "FranÃ§ois studied CafÃ© adsorption."
-        url = None
-        pdf_url = None
-        is_open_access = True
-        databases = ["openalex"]
-
-    payload = DiscoveryService._serialize_paper(Paper())
-
-    assert payload["title"] == "Café catalyst"
-    assert payload["journal"] == "Revista Française"
-    assert payload["authors"] == ["Guang‐Jie Xia"]
-    assert payload["abstract"] == "François studied Café adsorption."
 
 
 def test_docling_parser_respects_disabled_flag_and_falls_back(tmp_path: Path):

@@ -118,23 +118,13 @@ function closeAddLiteraturePanel() {
 }
 
 function switchAcquisitionMode(mode) {
-    const safeMode = ["pdf", "doi", "online", "ai", "folder"].includes(mode) ? mode : "pdf";
+    const safeMode = ["pdf", "folder"].includes(mode) ? mode : "pdf";
     document.querySelectorAll(".ingest-tab").forEach(function(btn) {
         btn.classList.toggle("active", btn.getAttribute("data-ingest-mode") === safeMode);
     });
     document.querySelectorAll(".acq-panel").forEach(function(panel) {
         panel.style.display = panel.id === "acq-" + safeMode ? "block" : "none";
     });
-    const searchInput = $("searchInput");
-    const searchValue = searchInput ? searchInput.value.trim() : "";
-    const onlineQuery = $("onlineSearchQuery");
-    if (safeMode === "online" && searchValue && onlineQuery && !onlineQuery.value.trim()) {
-        onlineQuery.value = searchValue;
-    }
-    const aiQuery = $("aiSearchQuery");
-    if (safeMode === "ai" && searchValue && aiQuery && !aiQuery.value.trim()) {
-        aiQuery.value = searchValue;
-    }
 }
 
 function addToEvidencePack() {

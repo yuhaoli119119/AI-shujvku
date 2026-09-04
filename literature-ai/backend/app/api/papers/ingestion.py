@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
@@ -17,7 +16,6 @@ from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
 from app.services.artifact_store import ArtifactStore
-from app.services.discovery_service import DiscoveryService
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.workflow_jobs import (
     JOB_TYPE_LOCAL_PDF_PATH_INGEST,
@@ -241,29 +239,18 @@ async def ingest_from_path(
 @router.post("/ingest/upload", response_model=IngestResponse)
 async def ingest_upload(
     file: UploadFile = File(...),
-    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
     library_name: str | None = Form(default=None, description="Target literature library"),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> IngestResponse:
     _validate_upload_request(file)
 
-    external_metadata = None
-    if identifier:
-        try:
-            svc = DiscoveryService()
-            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
-        except Exception as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
-
     service = PaperIngestionService(session=session, settings=settings)
     job = create_job(
         session=session,
         job_type="local_pdf_upload",
         library_name=normalize_library_name(library_name),
-        payload={"filename": file.filename, "identifier": identifier},
+        payload={"filename": file.filename},
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在解析上传的 PDF 文件"},
     )
@@ -272,7 +259,7 @@ async def ingest_upload(
     try:
         paper = await service.ingest_upload(
             file=file,
-            external_metadata=external_metadata,
+            external_metadata=None,
             library_name=normalize_library_name(library_name),
         )
         update_job(session, job.job_id, status="completed", progress={"phase": "completed", "message": "PDF 收录成功", "ingested": 1})
@@ -290,22 +277,11 @@ async def ingest_upload(
 async def queue_ingest_upload(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
     library_name: str | None = Form(default=None, description="Target literature library"),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> dict[str, Any]:
     _validate_upload_request(file)
-
-    external_metadata = None
-    if identifier:
-        try:
-            svc = DiscoveryService()
-            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
-        except Exception as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
 
     staged_pdf = await _stage_uploaded_pdf(file, settings)
     target_library = normalize_library_name(library_name)
@@ -315,9 +291,6 @@ async def queue_ingest_upload(
         "original_filename": file.filename,
         "trusted_staged_upload": True,
     }
-    if external_metadata:
-        job_payload.update(external_metadata)
-
     job = create_job(
         session=session,
         job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
@@ -428,7 +401,6 @@ async def queue_upload_supplementary_pdf(
 async def attach_pdf_to_existing_paper(
     paper_id: UUID,
     file: UploadFile = File(...),
-    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
     confirm_identity_mismatch: bool = Form(
         default=False,
         description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected.",
@@ -444,22 +416,12 @@ async def attach_pdf_to_existing_paper(
     if file.size and file.size > 30 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Maximum size is 30MB.")
 
-    external_metadata = None
-    if identifier:
-        try:
-            svc = DiscoveryService()
-            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
-        except Exception as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
-
     service = PaperIngestionService(session=session, settings=settings)
     job = create_job(
         session=session,
         job_type="local_pdf_upload",
         library_name=target.library_name,
-        payload={"filename": file.filename, "identifier": identifier, "attach_to_paper_id": str(target.id)},
+        payload={"filename": file.filename, "attach_to_paper_id": str(target.id)},
         runtime_context=build_job_runtime_context(settings),
         progress={"phase": "running", "message": "正在附加 PDF 文件"},
     )
@@ -468,7 +430,7 @@ async def attach_pdf_to_existing_paper(
     try:
         paper = await service.ingest_upload(
             file=file,
-            external_metadata=external_metadata,
+            external_metadata=None,
             library_name=target.library_name,
             attach_to_paper_id=target.id,
             confirm_identity_mismatch=confirm_identity_mismatch,
@@ -492,7 +454,6 @@ async def queue_attach_pdf_to_existing_paper(
     paper_id: UUID,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    identifier: str | None = Form(default=None, description="Optional DOI or identifier to fetch metadata"),
     confirm_identity_mismatch: bool = Form(
         default=False,
         description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected.",
@@ -505,16 +466,6 @@ async def queue_attach_pdf_to_existing_paper(
         raise HTTPException(status_code=404, detail="Paper not found")
     _validate_upload_request(file)
 
-    external_metadata = None
-    if identifier:
-        try:
-            svc = DiscoveryService()
-            _, external_metadata = await run_in_threadpool(svc.fetch_metadata, identifier)
-        except Exception as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("Failed to fetch metadata for %s: %s", identifier, exc)
-
     staged_pdf = await _stage_uploaded_pdf(file, settings)
     job_payload = {
         "pdf_path": str(staged_pdf.resolve()),
@@ -524,9 +475,6 @@ async def queue_attach_pdf_to_existing_paper(
         "attach_to_paper_id": str(target.id),
         "confirm_identity_mismatch": bool(confirm_identity_mismatch),
     }
-    if external_metadata:
-        job_payload.update(external_metadata)
-
     job = create_job(
         session=session,
         job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,

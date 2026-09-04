@@ -9,7 +9,6 @@ from contextlib import contextmanager
 
 import pytest
 from sqlalchemy import inspect, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.db import session as db_session
@@ -18,10 +17,7 @@ from app.db.models import Paper, PaperSection, WorkflowJob
 from app.api.jobs import AgentActivityRequest, record_agent_activity
 from app.api.jobs import delete_workflow_job
 from app.api.papers.listing import get_paper_type_stats
-from app.api.papers.workflow import delete_ai_workflow_job
-from app.services import workflow_jobs as workflow_jobs_service
 from app.services.workflow_jobs import (
-    JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
     JOB_TYPE_AGENT_ACTIVITY,
     JOB_TYPE_LOCAL_PDF_PATH_INGEST,
     JobPreflightError,
@@ -29,7 +25,6 @@ from app.services.workflow_jobs import (
     WORKFLOW_QUEUE_PDF_INGEST,
     clone_job_for_retry_with_status,
     create_job_or_reuse_active,
-    run_discovery_download_ingest_job,
     serialize_job,
     validate_extraction_preflight,
     workflow_queue_for_job_type,
@@ -53,7 +48,6 @@ def test_init_db_creates_workflow_jobs_table():
 
 def test_workflow_queue_routes_pdf_ingest_to_dedicated_queue():
     assert workflow_queue_for_job_type(JOB_TYPE_LOCAL_PDF_PATH_INGEST) == WORKFLOW_QUEUE_PDF_INGEST
-    assert workflow_queue_for_job_type(JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST) == WORKFLOW_QUEUE_PDF_INGEST
     assert workflow_queue_for_job_type(JOB_TYPE_AGENT_ACTIVITY) == WORKFLOW_QUEUE_DEFAULT
 
 
@@ -189,29 +183,6 @@ def test_serialize_extraction_job_includes_readable_summary_and_failure_explanat
     assert data["failure_explanation"]["reasons"][0]["code"] == "pdf_preview_failed"
 
 
-def test_serialize_ai_workflow_job_summarizes_ingest_counts_and_failed_reasons():
-    job = WorkflowJob(
-        job_id="job-2",
-        type="ai_workflow",
-        status="completed",
-        library_name="DefaultLibrary",
-        payload={"query": "lithium sulfur catalyst", "max_results": 10, "max_downloads": 3},
-        progress={"phase": "completed", "searched_total": 10, "attempted_downloads": 3},
-        result={
-            "ingested": [{"paper_id": "paper-1"}],
-            "failed": [{"identifier": "10.1/demo", "code": "download_or_ingest_failed", "reason": "download timeout"}],
-        },
-    )
-
-    data = serialize_job(job)
-
-    assert data["summary"]["query"] == "lithium sulfur catalyst"
-    assert data["summary"]["searched_total"] == 10
-    assert data["summary"]["success_count"] == 1
-    assert data["summary"]["failure_count"] == 1
-    assert data["failure_explanation"]["reasons"][0]["code"] == "download_failed"
-
-
 def test_serialize_agent_activity_job_summarizes_ai_work_trace():
     job = WorkflowJob(
         job_id="job-agent-1",
@@ -293,36 +264,6 @@ def test_force_delete_active_agent_activity_record():
 
             assert data == {"status": "deleted", "job_id": "active-agent-job"}
             assert session.get(WorkflowJob, "active-agent-job") is None
-        finally:
-            session.close()
-            db_session.get_engine(db_url).dispose()
-            db_session._session_factories.pop(db_url, None)
-            db_session._engines.pop(db_url, None)
-
-
-def test_legacy_ai_workflow_delete_endpoint_can_delete_agent_activity_record():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
-        db_session.init_db(db_url)
-
-        factory = db_session._session_factories[db_url]
-        session = factory()
-        try:
-            job = WorkflowJob(
-                job_id="legacy-agent-job",
-                type=JOB_TYPE_AGENT_ACTIVITY,
-                status="completed",
-                library_name="DefaultLibrary",
-                payload={"agent": "Gemini", "action": "table_review"},
-                progress={"phase": "table_review"},
-            )
-            session.add(job)
-            session.commit()
-
-            data = asyncio.run(delete_ai_workflow_job("legacy-agent-job", session=session))
-
-            assert data == {"ok": True, "job_id": "legacy-agent-job"}
-            assert session.get(WorkflowJob, "legacy-agent-job") is None
         finally:
             session.close()
             db_session.get_engine(db_url).dispose()
@@ -562,12 +503,12 @@ def test_create_job_or_reuse_active_ignores_stale_running_job():
         session = factory()
         try:
             stale_job = WorkflowJob(
-                job_id="stale-discovery",
-                type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+                job_id="stale-local-ingest",
+                type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
                 status="running",
                 library_name="StaleLibrary",
-                payload={"identifier": "10.1000/stale", "library_name": "StaleLibrary"},
-                progress={"phase": "fetch_metadata"},
+                payload={"pdf_path": "C:/incoming/stale.pdf", "library_name": "StaleLibrary"},
+                progress={"phase": "ingest_pdf"},
                 runtime_context={},
                 created_at=datetime.utcnow() - timedelta(hours=2),
                 updated_at=datetime.utcnow() - timedelta(hours=2),
@@ -577,9 +518,9 @@ def test_create_job_or_reuse_active_ignores_stale_running_job():
 
             job, reused = create_job_or_reuse_active(
                 session,
-                job_type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
+                job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
                 library_name="StaleLibrary",
-                payload={"identifier": "10.1000/stale", "library_name": "StaleLibrary"},
+                payload={"pdf_path": "C:/incoming/stale.pdf", "library_name": "StaleLibrary"},
                 runtime_context={},
                 progress={"phase": "queued"},
             )
@@ -591,102 +532,6 @@ def test_create_job_or_reuse_active_ignores_stale_running_job():
             assert stale_job.progress["stale_cleanup"] is True
         finally:
             session.close()
-            db_session.get_engine(db_url).dispose()
-            db_session._session_factories.pop(db_url, None)
-            db_session._engines.pop(db_url, None)
-
-
-def test_run_discovery_download_ingest_job_rolls_back_and_falls_back_to_metadata_only():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        db_url = os.environ["LITAI_TEST_DATABASE_URL"]
-        storage_root = Path(tmpdir) / "storage"
-        db_session.init_db(db_url)
-
-        factory = db_session._session_factories[db_url]
-        session = factory()
-        try:
-            session.add(
-                WorkflowJob(
-                    job_id="job-discovery-stable",
-                    type=JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST,
-                    status="queued",
-                    library_name="StableLibrary",
-                    payload={"identifier": "10.1000/fallback", "library_name": "StableLibrary"},
-                    progress={"phase": "queued"},
-                    runtime_context={},
-                )
-            )
-            session.commit()
-        finally:
-            session.close()
-
-        settings = Settings(database_url=db_url, storage_root=storage_root)
-
-        class DummyPaper:
-            pass
-
-        def fake_fetch_metadata(self, identifier, providers=None):
-            return DummyPaper(), {
-                "identifier": identifier,
-                "title": "Recovered Metadata Only",
-                "doi": "10.1000/recovered-meta",
-                "year": 2025,
-                "journal": "Stable Journal",
-                "authors": ["Alice"],
-                "abstract": "Recovered after rollback",
-                "url": "https://example.com/recovered-meta",
-            }
-
-        async def fake_download(*args, **kwargs):
-            pdf_path = Path(tmpdir) / "downloaded.pdf"
-            pdf_path.write_bytes(b"%PDF-1.4 test")
-            return pdf_path
-
-        async def fake_ingest_pdf(self, *args, **kwargs):
-            first = Paper(
-                id=uuid4(),
-                library_name="StableLibrary",
-                title="first",
-                authors=[],
-                pdf_path="first.pdf",
-            )
-            self.session.add(first)
-            self.session.flush()
-            duplicate = Paper(
-                id=first.id,
-                library_name="StableLibrary",
-                title="duplicate",
-                authors=[],
-                pdf_path="duplicate.pdf",
-            )
-            self.session.add(duplicate)
-            with pytest.raises(IntegrityError):
-                self.session.flush()
-            raise RuntimeError("ingest_pdf left the session dirty")
-
-        monkeypatch = pytest.MonkeyPatch()
-        try:
-            monkeypatch.setattr(workflow_jobs_service, "get_settings", lambda: settings)
-            monkeypatch.setattr(workflow_jobs_service.DiscoveryService, "fetch_metadata", fake_fetch_metadata)
-            monkeypatch.setattr(workflow_jobs_service, "download_discovery_candidate", fake_download)
-            monkeypatch.setattr(workflow_jobs_service.PaperIngestionService, "ingest_pdf", fake_ingest_pdf)
-
-            run_discovery_download_ingest_job("job-discovery-stable", db_url)
-
-            verify_session = factory()
-            try:
-                stored_job = verify_session.get(WorkflowJob, "job-discovery-stable")
-                paper = verify_session.scalar(select(Paper).where(Paper.doi == "10.1000/recovered-meta"))
-                assert stored_job is not None
-                assert stored_job.status == "completed"
-                assert stored_job.result["status"] == "metadata_only"
-                assert paper is not None
-                assert paper.oa_status == "metadata_only"
-                assert paper.pdf_path == ""
-            finally:
-                verify_session.close()
-        finally:
-            monkeypatch.undo()
             db_session.get_engine(db_url).dispose()
             db_session._session_factories.pop(db_url, None)
             db_session._engines.pop(db_url, None)

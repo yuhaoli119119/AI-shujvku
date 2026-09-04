@@ -118,7 +118,7 @@ git branch -vv
 
 ```bash
 cd literature-ai/backend
-python -m compileall app findpapers tests
+python -m compileall app tests
 python -m pytest -q
 ```
 

@@ -1,39 +1,3 @@
-async function downloadIdentifier(identifier) {
-    if (!identifier) return;
-    showProgress("正在创建后台收录任务...");
-    try {
-        const job = await fetchJSON(API_BASE + "/discovery/download/jobs", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ identifier: identifier, providers: [], library_name: getCurrentLibraryName() })
-        });
-        showToast("收录任务已进入后台队列。", "success");
-        renderQueuedIngestJob(job);
-        pollWorkflowIngestJob(job.job_id);
-    } catch (error) {
-        const detail = error.detail;
-        if (detail && detail.status === "already_exists") {
-            showToast("收录失败：该文献已存在", "error");
-            showAlreadyExistsPrompt(detail.paper_id, detail.title || "已存在文献");
-        } else {
-            showToast("收录失败：" + error.message, "error");
-        }
-    }
-    hideProgress();
-}
-
-function downloadByDOI() {
-    const doiInput = $("doiInput");
-    const identifier = doiInput ? doiInput.value.trim() : "";
-    if (!identifier) {
-        showToast("请输入 DOI 或 URL。", "error");
-        return;
-    }
-    downloadIdentifier(identifier).then(function() {
-        if (doiInput) doiInput.value = "";
-    });
-}
-
 async function uploadPDF(input) {
     if (!input.files || !input.files.length) return;
     const file = input.files[0];

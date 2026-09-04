@@ -118,8 +118,6 @@ class Settings(BaseSettings):
     # basic extraction (metadata/sections/tables/figures/chunks), and later AI work
     # should happen through MCP after the workspace and AI reading package are prepared.
     auto_run_stage2_extraction: bool = True
-    auto_enrich_ingested_metadata: bool = True
-    metadata_enrichment_timeout_seconds: float = 5.0
     auto_enrich_impact_factor: bool = True
     impact_factor_lookup_timeout_seconds: float = 8.0
     workflow_fallback_max_workers: int = 2

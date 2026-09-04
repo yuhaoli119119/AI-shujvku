@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -9,8 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
-from app.services.paper_serials import renumber_library_papers_by_year
-from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
+from app.utils.library_names import build_library_name_clause
 
 
 class PaperIdentityService:
@@ -181,83 +180,6 @@ class PaperIdentityService:
         return best_match
 
     @classmethod
-    def upsert_metadata_only(
-        cls,
-        session: Session,
-        *,
-        external_metadata: Mapping[str, Any],
-        identifier: str | None = None,
-        library_name: str | None = None,
-        source_reference: str | None = None,
-        classify_callback: Callable[[str, str | None], dict[str, Any]] | None = None,
-    ) -> Paper:
-        library = normalize_library_name(library_name or DEFAULT_LIBRARY_NAME)
-        metadata = dict(external_metadata or {})
-        doi = cls.normalize_doi(cls._string(metadata.get("doi")))
-        title = cls._string(metadata.get("title")) or identifier or "Untitled paper"
-        year = cls._coerce_year(metadata.get("year"))
-        source_path = (
-            source_reference
-            or cls._string(metadata.get("url"))
-            or cls._string(metadata.get("source_path"))
-            or cls._string(metadata.get("identifier"))
-            or identifier
-        )
-        arxiv_id = cls.extract_arxiv_id(
-            cls._string(metadata.get("arxiv_id")) or cls._string(metadata.get("identifier")) or source_path or identifier
-        )
-
-        existing = cls.find_existing_paper(
-            session,
-            doi=doi,
-            title=title,
-            year=year,
-            arxiv_id=arxiv_id,
-            library_name=library,
-        )
-
-        if existing is not None:
-            if existing.oa_status == "metadata_only":
-                cls._fill_missing_metadata(
-                    existing,
-                    metadata=metadata,
-                    title=title,
-                    year=year,
-                    doi=doi,
-                    source_path=source_path,
-                    classify_callback=classify_callback,
-                )
-                session.add(existing)
-                renumber_library_papers_by_year(session, existing.library_name)
-                session.commit()
-                session.refresh(existing)
-            return existing
-
-        classification = classify_callback(title, cls._string(metadata.get("journal"))) if classify_callback else {}
-        paper = Paper(
-            title=title,
-            year=year,
-            journal=cls._string(metadata.get("journal")),
-            authors=metadata.get("authors") or [],
-            abstract=cls._string(metadata.get("abstract")),
-            source_path=source_path,
-            pdf_path="",
-            doi=doi,
-            paper_type=classification.get("paper_type", "Unknown"),
-            type_confidence=classification.get("type_confidence"),
-            classification_source=classification.get("classification_source"),
-            library_name=library,
-            oa_status="metadata_only",
-            license=cls._string(metadata.get("license")),
-        )
-        session.add(paper)
-        session.flush()
-        renumber_library_papers_by_year(session, paper.library_name)
-        session.commit()
-        session.refresh(paper)
-        return paper
-
-    @classmethod
     def metadata_for_paper(cls, paper: Paper) -> dict[str, Any]:
         return {
             "doi": paper.doi,
@@ -268,43 +190,6 @@ class PaperIdentityService:
             "source_path": paper.source_path,
             "url": paper.source_path,
         }
-
-    @classmethod
-    def _fill_missing_metadata(
-        cls,
-        paper: Paper,
-        *,
-        metadata: Mapping[str, Any],
-        title: str | None,
-        year: int | None,
-        doi: str | None,
-        source_path: str | None,
-        classify_callback: Callable[[str, str | None], dict[str, Any]] | None,
-    ) -> None:
-        if doi and paper.doi != doi:
-            paper.doi = doi
-        if title and not paper.title:
-            paper.title = title
-        if year and not paper.year:
-            paper.year = year
-        cls._fill_if_empty(paper, "journal", cls._string(metadata.get("journal")))
-        cls._fill_if_empty(paper, "authors", metadata.get("authors") or None)
-        cls._fill_if_empty(paper, "abstract", cls._string(metadata.get("abstract")))
-        cls._fill_if_empty(paper, "source_path", source_path)
-        cls._fill_if_empty(paper, "license", cls._string(metadata.get("license")))
-        if not paper.paper_type and classify_callback:
-            classification = classify_callback(paper.title or title or "Untitled paper", paper.journal)
-            paper.paper_type = classification.get("paper_type", "Unknown")
-            paper.type_confidence = paper.type_confidence or classification.get("type_confidence")
-            paper.classification_source = paper.classification_source or classification.get("classification_source")
-
-    @staticmethod
-    def _fill_if_empty(paper: Paper, field_name: str, value: Any) -> None:
-        if value is None or value == "":
-            return
-        current = getattr(paper, field_name)
-        if current is None or current == "" or current == []:
-            setattr(paper, field_name, value)
 
     @classmethod
     def _title_year_score(cls, metadata_a: Mapping[str, Any], metadata_b: Mapping[str, Any]) -> float:

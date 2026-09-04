@@ -4,12 +4,10 @@ from collections import Counter
 import os
 import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-from fastapi.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
@@ -32,7 +30,6 @@ from app.rag.retriever import Retriever
 from app.rag.retrieval_intent import route_retrieval_intent
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
 from app.schemas.ai_verification import AIVerificationSubmission, SectionPageFragmentCandidateRef
-from app.services.discovery_service import DiscoveryService
 from app.services.ai_verification_service import (
     AIVerificationService,
     AuthenticatedAIVerificationIdentity,
@@ -58,7 +55,6 @@ from app.services.section_page_fragment_materialization_service import (
 from app.services.external_analysis_service import ExternalAnalysisService
 from app.services.local_pdf_service import LocalPdfService
 from app.services.module_write_lock_service import ModuleWriteLockService
-from app.services.paper_ingestion import PaperIngestionService
 from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.paper_query import PaperQueryService
 from app.services.review_conflict_service import ReviewConflictAggregationService
@@ -468,86 +464,6 @@ def get_paper_knowledge(
         if context is None:
             raise ValueError("Paper not found")
         return context
-
-
-@mcp_server.tool(
-    name="search_external_papers",
-    description=(
-        "Search external literature databases (OpenAlex, arXiv, etc.) for papers matching a query. "
-        "Supports year filtering and target type classification (computational/experimental/review). "
-        "Results include title, DOI, year, journal, abstract, and open-access status. "
-        "This tool only searches; use the controlled Literature Intake endpoints to review and approve candidates before import."
-    ),
-)
-def search_external_papers(
-    query: str,
-    providers: list[str] | None = None,
-    year_min: int | None = None,
-    year_max: int | None = None,
-    target_types: list[str] | None = None,
-    max_results: int = 20,
-) -> dict[str, Any]:
-    require_mcp_capability("read_papers")
-    settings = get_settings()
-
-    service = DiscoveryService()
-    active_providers = providers or service.DEFAULT_SEARCH_PROVIDERS
-
-    # Validate target_types
-    valid_types = {"computational", "experimental", "review"}
-    if target_types:
-        target_types = [t for t in target_types if t in valid_types]
-
-    raw_results = service.search(
-        query=query,
-        providers=active_providers,
-        limit=max(1, min(max_results * 2, 100)),  # Fetch more to allow post-filtering
-        target_types=target_types or None,
-    )
-
-    # Apply year filtering (client-side; not all provider APIs expose year filters)
-    filtered = []
-    for item in raw_results:
-        year = item.get("year")
-        if year_min is not None and (year is None or year < year_min):
-            continue
-        if year_max is not None and (year is None or year > year_max):
-            continue
-        filtered.append(item)
-
-    # Trim to requested limit after filtering
-    filtered = filtered[:max_results]
-
-    # Record search in audit log for traceability
-    with session_scope(settings.database_url) as session:
-        audit = AuditLog(
-            action="search_external_papers",
-            source="mcp",
-            target_id=None,
-            payload={
-                "query": query,
-                "providers": active_providers,
-                "year_min": year_min,
-                "year_max": year_max,
-                "target_types": target_types,
-                "max_results_requested": max_results,
-                "raw_results": len(raw_results),
-                "filtered_results": len(filtered),
-            },
-        )
-        session.add(audit)
-        session.flush()
-
-    return {
-        "query": query,
-        "providers": active_providers,
-        "year_min": year_min,
-        "year_max": year_max,
-        "target_types": target_types,
-        "total_found": len(raw_results),
-        "results_after_filter": len(filtered),
-        "results": filtered,
-    }
 
 
 @mcp_server.tool(
@@ -1595,125 +1511,6 @@ def release_module_write_lock(lock_token: str, released_by: str | None = None) -
             "status": lock.status,
             "released_at": lock.released_at.isoformat() if lock.released_at else None,
         }
-
-
-@mcp_server.tool(name="parse_paper", description="Parse a paper from DOI or arXiv identifier.")
-async def parse_paper(identifier: str, providers: list[str] | None = None) -> dict[str, Any]:
-    auth = require_mcp_capability("request_parse")
-    settings = get_settings()
-
-    with session_scope(settings.database_url) as session:
-        job = ParseJob(
-            identifier=identifier.strip(),
-            providers=providers or [],
-            requested_by=auth.source_prefix,
-            status="running",
-        )
-        session.add(job)
-        session.flush()
-        job_id = job.id
-
-    try:
-        service = DiscoveryService()
-        raw_paper, metadata = await run_in_threadpool(service.fetch_metadata, identifier, providers)
-
-        with session_scope(settings.database_url) as session:
-            job = session.get(ParseJob, job_id)
-            if job is None:
-                raise ValueError("Parse job not found")
-
-            doi = metadata.get("doi")
-            if doi:
-                existing = session.scalar(
-                    select(Paper).where(
-                        Paper.doi == doi,
-                        build_library_name_clause(Paper.library_name, DEFAULT_LIBRARY_NAME),
-                    )
-                )
-                if existing:
-                    job.status = "completed"
-                    job.paper_id = existing.id
-                    job.error_message = None
-                    session.add(
-                        AuditLog(
-                            paper_id=existing.id,
-                            action="parse_paper_existing",
-                            source=auth.source_prefix,
-                            target_type="parse_job",
-                            target_id=str(job.id),
-                            payload={"identifier": identifier, "doi": doi, "library_name": DEFAULT_LIBRARY_NAME},
-                        )
-                    )
-                    session.flush()
-                    session.refresh(job)
-                    return _serialize_parse_job(job)
-
-            ingestion = PaperIngestionService(session=session, settings=settings)
-            with TemporaryDirectory() as tmpdir:
-                pdf_path = await run_in_threadpool(service.download_pdf, raw_paper, Path(tmpdir))
-                paper = await ingestion.ingest_pdf(
-                    source_path=pdf_path,
-                    original_filename=pdf_path.name,
-                    copy_pdf=True,
-                )
-
-            updated = False
-            if doi and paper.doi != doi:
-                paper.doi = doi
-                updated = True
-            if metadata.get("title") and (not paper.title or paper.title == pdf_path.name):
-                paper.title = metadata["title"]
-                updated = True
-            if metadata.get("year") and not paper.year:
-                paper.year = metadata["year"]
-                updated = True
-            if metadata.get("journal") and not paper.journal:
-                paper.journal = metadata["journal"]
-                updated = True
-            if metadata.get("authors") and not paper.authors:
-                paper.authors = metadata["authors"]
-                updated = True
-            if metadata.get("abstract") and not paper.abstract:
-                paper.abstract = metadata["abstract"]
-                updated = True
-            if updated:
-                session.add(paper)
-
-            job.status = "completed"
-            job.paper_id = paper.id
-            job.error_message = None
-            session.add(
-                AuditLog(
-                    paper_id=paper.id,
-                    action="parse_paper",
-                    source=auth.source_prefix,
-                    target_type="parse_job",
-                    target_id=str(job.id),
-                    payload={"identifier": identifier, "providers": providers or []},
-                )
-            )
-            session.flush()
-            session.refresh(job)
-            return _serialize_parse_job(job)
-    except Exception as exc:
-        with session_scope(settings.database_url) as session:
-            job = session.get(ParseJob, job_id)
-            if job is None:
-                raise
-            job.status = "failed"
-            job.error_message = str(exc)
-            session.add(
-                AuditLog(
-                    action="parse_paper_failed",
-                    source=auth.source_prefix,
-                    target_type="parse_job",
-                    target_id=str(job.id),
-                    payload={"identifier": identifier, "error": str(exc)},
-                )
-            )
-            session.flush()
-            session.refresh(job)
-            return _serialize_parse_job(job)
 
 
 @mcp_server.tool(name="ingest_pdf_batch", description="Batch ingest local PDF files from a folder, optionally skipping already parsed files.")

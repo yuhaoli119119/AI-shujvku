@@ -6,28 +6,18 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import BackgroundTasks
-from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.models import Paper, PaperSection, ParseJob, WorkflowJob, utcnow
 from app.db.session import session_scope
-from app.schemas.api import (
-    AIWorkflowFailedItemResponse,
-    AIWorkflowIngestedPaperResponse,
-    AIWorkflowPayload,
-    AIWorkflowResponse,
-    ClassifyBatchPayload,
-)
-from app.services.discovery_service import DiscoveryService
-from app.services.paper_identity import PaperIdentityService
+from app.schemas.api import ClassifyBatchPayload
 from app.services.paper_ingestion import PaperConflictError, PaperIdentityMismatchError, PaperIngestionService
 from app.services.paper_reprocessing import PaperReprocessingService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
@@ -44,12 +34,10 @@ logger = logging.getLogger(__name__)
 _fallback_executor_lock = Lock()
 _fallback_executor: ThreadPoolExecutor | None = None
 _fallback_executor_workers = 0
-JOB_TYPE_AI_WORKFLOW = "ai_workflow"
 JOB_TYPE_CLASSIFY_BATCH = "classify_batch"
 JOB_TYPE_EXTRACTION = "extraction"
 JOB_TYPE_AGENT_ACTIVITY = "agent_activity"
 JOB_TYPE_LOCAL_PDF_PATH_INGEST = "local_pdf_path_ingest"
-JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST = "discovery_download_ingest"
 WORKFLOW_QUEUE_DEFAULT = "workflow_default"
 WORKFLOW_QUEUE_PDF_INGEST = "workflow_pdf_ingest"
 JOB_STATUSES = {"queued", "running", "completed", "failed", "cancelled"}
@@ -58,7 +46,6 @@ STALE_WORKFLOW_JOB_MINUTES = 45
 STALE_PARSE_JOB_MINUTES = 45
 
 FAILURE_MESSAGES: dict[str, tuple[str, str]] = {
-    "missing_identifier": ("缺少可检索标识", "请补充 DOI、URL、arXiv ID 或更完整的题名后再试。"),
     "missing_doi": ("未识别到 DOI", "可先按标题/作者保留元数据，之后手动补 DOI 或上传正确 PDF。"),
     "multiple_doi": ("检测到多个 DOI", "请打开论文详情核对 DOI，必要时手动修正后再解析。"),
     "doi_conflict": ("DOI 与已有文献冲突", "请检查是否选错 PDF，或打开已存在文献继续补全。"),
@@ -68,7 +55,6 @@ FAILURE_MESSAGES: dict[str, tuple[str, str]] = {
     "parsed_text_missing": ("缺少可解析正文", "系统没有找到 TEI、Docling 或正文分段，请重新上传/解析 PDF 后再重试。"),
     "tei_parse_failed": ("TEI/GROBID 解析失败", "可稍后重试；如果反复失败，建议检查 GROBID 服务或改用 Docling 解析结果。"),
     "docling_parse_failed": ("Docling 解析失败", "可重试解析；若仍失败，优先检查 PDF 是否为扫描件、加密文件或损坏文件。"),
-    "download_failed": ("下载或开放获取失败", "可换 DOI/URL 重试，或先导入元数据后手动上传 PDF。"),
     "paper_not_found": ("文献记录不存在", "请刷新文献列表，确认该论文仍在当前文献库中。"),
     "llm_failed": ("LLM 解析失败", "请检查模型配置或稍后重试；已保存的原文与证据不会被删除。"),
     "schema_invalid": ("模型输出不符合 schema", "请重试解析；如持续失败，可缩小解析 schema 范围。"),
@@ -307,28 +293,7 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
     if job.created_at and job.updated_at:
         summary["duration_seconds"] = max(0, int((job.updated_at - job.created_at).total_seconds()))
 
-    if job.type == JOB_TYPE_AI_WORKFLOW:
-        ingested = result.get("ingested") if isinstance(result.get("ingested"), list) else []
-        status_counts = _count_statuses(ingested)
-        summary.update(
-            {
-                "source_label": "AI 文献检索与入库",
-                "searched_total": _first_int(progress.get("searched_total"), result.get("searched_total")),
-                "attempted_downloads": _first_int(
-                    progress.get("attempted_downloads"), result.get("attempted_downloads")
-                ),
-                "success_count": _first_int(progress.get("ingested"), _safe_len(ingested)),
-                "failure_count": _first_int(progress.get("failed"), _safe_len(failed_items)),
-                "already_exists_count": status_counts.get("already_exists", 0),
-                "metadata_only_count": status_counts.get("metadata_only", 0),
-                "merged_count": status_counts.get("merged", 0),
-                "completed_count": status_counts.get("completed", 0),
-                "skipped_count": status_counts.get("skipped", 0),
-                "max_results": progress.get("max_results") or payload.get("max_results"),
-                "max_downloads": progress.get("max_downloads") or payload.get("max_downloads"),
-            }
-        )
-    elif job.type == JOB_TYPE_EXTRACTION:
+    if job.type == JOB_TYPE_EXTRACTION:
         extraction_summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
         if not extraction_summary:
             extraction_summary = {key: value for key, value in progress.items() if isinstance(value, int | float)}
@@ -359,17 +324,6 @@ def build_job_summary(job: WorkflowJob) -> dict[str, Any]:
                 "paper_id": result.get("paper_id") or progress.get("paper_id"),
                 "paper_title": result.get("title") or progress.get("title"),
                 "source_path": payload.get("pdf_path"),
-                "success_count": 1 if job.status == "completed" else 0,
-                "failure_count": 1 if job.status == "failed" else 0,
-            }
-        )
-    elif job.type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
-        summary.update(
-            {
-                "source_label": "在线下载队列入库",
-                "paper_id": result.get("paper_id") or progress.get("paper_id"),
-                "paper_title": result.get("title") or progress.get("title"),
-                "identifier": payload.get("identifier"),
                 "success_count": 1 if job.status == "completed" else 0,
                 "failure_count": 1 if job.status == "failed" else 0,
             }
@@ -514,17 +468,12 @@ def create_job(
 def _normalized_job_key(job_type: str, library_name: str | None, payload: dict[str, Any] | None) -> tuple[Any, ...]:
     data = payload or {}
     library = normalize_library_name(library_name)
-    if job_type == JOB_TYPE_AI_WORKFLOW:
-        query = str(data.get("query") or "").strip().lower()
-        return (job_type, library, query)
     if job_type == JOB_TYPE_EXTRACTION:
         return (job_type, library, str(data.get("paper_id") or ""))
     if job_type == JOB_TYPE_CLASSIFY_BATCH:
         return (job_type, library, bool(data.get("overwrite")))
     if job_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
         return (job_type, library, str(data.get("pdf_path") or "").strip().lower())
-    if job_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
-        return (job_type, library, str(data.get("identifier") or "").strip().lower())
     return (job_type, library)
 
 
@@ -714,20 +663,10 @@ def clone_job_for_retry_with_status(session: Session, job_id: str) -> tuple[Work
         else:
             raise ValueError("Direct file uploads without saved references cannot be retried. Please upload the file again.")
 
-    if source_type == JOB_TYPE_AI_WORKFLOW:
-        retry_payload["skip_existing"] = True
-        retry_progress.update(
-            {
-                "max_results": retry_payload.get("max_results"),
-                "max_downloads": retry_payload.get("max_downloads"),
-            }
-        )
     if source_type == JOB_TYPE_EXTRACTION:
         retry_progress.update({"paper_id": retry_payload.get("paper_id"), "schemas": retry_payload.get("schemas")})
     if source_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
         retry_progress.update({"source_path": retry_payload.get("pdf_path")})
-    if source_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
-        retry_progress.update({"identifier": retry_payload.get("identifier")})
 
     retry = create_job(
         session,
@@ -745,45 +684,10 @@ def clone_job_for_retry(session: Session, job_id: str) -> WorkflowJob:
     return retry
 
 
-def _find_existing_paper(
-    session: Session,
-    doi: str | None,
-    title: str | None,
-    year: int | None = None,
-    arxiv_id: str | None = None,
-    library_name: str | None = None,
-) -> Paper | None:
-    identity = PaperIdentityService()
-    existing = identity.find_existing_paper(
-        session,
-        doi=identity.normalize_doi(doi),
-        title=title,
-        year=year,
-        arxiv_id=arxiv_id,
-        library_name=library_name,
-    )
-    if existing is not None:
-        return existing
-    return None
-
-
 def workflow_queue_for_job_type(job_type: str) -> str:
-    if job_type in {JOB_TYPE_LOCAL_PDF_PATH_INGEST, JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST}:
+    if job_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
         return WORKFLOW_QUEUE_PDF_INGEST
     return WORKFLOW_QUEUE_DEFAULT
-
-
-def _candidate_lookup_key(value: Any) -> str:
-    return str(value or "").strip().lower()
-
-
-def _raw_result_lookup(raw: dict[str, Any]) -> list[str]:
-    keys = []
-    for field in ("doi", "identifier", "url", "title"):
-        key = _candidate_lookup_key(raw.get(field))
-        if key:
-            keys.append(key)
-    return keys
 
 
 def validate_extraction_preflight(
@@ -844,68 +748,6 @@ def validate_extraction_preflight(
         "pdf_path": str(pdf_path) if pdf_path else None,
         "oa_status": paper.oa_status,
     }
-
-
-async def download_discovery_candidate(
-    service: DiscoveryService,
-    raw_paper: Any,
-    metadata: dict[str, object],
-    dest_dir: Path,
-) -> Path:
-    try:
-        return await run_in_threadpool(service.download_pdf, raw_paper, dest_dir)
-    except Exception as primary_exc:
-        pdf_url = metadata.get("pdf_url") or metadata.get("oa_url") or metadata.get("url")
-        if not pdf_url:
-            raise primary_exc
-        filename = f"{uuid4()}.pdf"
-        try:
-            return await run_in_threadpool(service.download_pdf_url, str(pdf_url), dest_dir, filename)
-        except Exception:
-            raise primary_exc
-
-
-def _result_status_for_paper(paper: Paper) -> str:
-    oa_status = str(getattr(paper, "oa_status", "") or "").strip().lower()
-    if oa_status in {"metadata_only", "needs_upload"}:
-        return "metadata_only"
-    return "completed"
-
-
-def _recover_or_create_metadata_only_paper(
-    session: Session,
-    *,
-    ingestion: PaperIngestionService,
-    metadata: dict[str, Any],
-    identifier: str,
-    target_library: str,
-) -> tuple[Paper, str]:
-    try:
-        session.rollback()
-    except Exception:
-        logger.exception("Failed to rollback ingestion session before metadata-only fallback for %s", identifier)
-        raise
-
-    existing = _find_existing_paper(
-        session,
-        doi=metadata.get("doi"),
-        title=metadata.get("title"),
-        year=metadata.get("year"),
-        arxiv_id=PaperIdentityService.extract_arxiv_id(
-            str(metadata.get("arxiv_id") or metadata.get("identifier") or metadata.get("url") or identifier)
-        ),
-        library_name=target_library,
-    )
-    if existing is not None:
-        return existing, _result_status_for_paper(existing)
-
-    paper = ingestion.ingest_metadata_only(
-        external_metadata=metadata,
-        identifier=identifier,
-        library_name=target_library,
-        source_reference=metadata.get("url") or identifier,
-    )
-    return paper, "metadata_only"
 
 
 def _external_metadata_from_ingest_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
@@ -1020,366 +862,6 @@ def run_local_pdf_path_ingest_job(job_id: str, control_database_url: str | None 
                 update_job(control_session, job_id, status="cancelled", progress=_merge_progress(job.progress, {"phase": "cancelled"}))
     except Exception as exc:
         logger.exception("Local PDF path ingest job failed: %s", job_id)
-        with session_scope(control_db_url) as control_session:
-            update_job(
-                control_session,
-                job_id,
-                status="failed",
-                progress={"phase": "failed", "failure_code": classify_failure_code(reason=str(exc))},
-                error=f"{type(exc).__name__}: {exc}",
-            )
-
-
-def run_discovery_download_ingest_job(job_id: str, control_database_url: str | None = None) -> None:
-    base_settings = get_settings()
-    control_db_url = control_database_url or base_settings.database_url
-    with session_scope(control_db_url) as control_session:
-        job = get_job_or_raise(control_session, job_id)
-        if job.status == "cancelled":
-            return
-        runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
-        payload = dict(job.payload or {})
-        job_library_name = job.library_name
-        update_job(
-            control_session,
-            job_id,
-            status="running",
-            progress={
-                "phase": "fetch_metadata",
-                "message": "Fetching metadata and downloading PDF in the worker queue.",
-                "identifier": payload.get("identifier"),
-            },
-            error=None,
-        )
-
-    try:
-        identifier = str(payload.get("identifier") or "").strip()
-        if not identifier:
-            raise ValueError("Missing identifier")
-
-        service = DiscoveryService()
-        providers = payload.get("providers") if isinstance(payload.get("providers"), list) else None
-        raw_paper, metadata = service.fetch_metadata(identifier, providers)
-        target_library = normalize_library_name(payload.get("library_name") or job_library_name)
-        doi = metadata.get("doi")
-
-        with session_scope(runtime_settings.database_url) as job_session:
-            assert_job_not_cancelled(job_session, job_id)
-            existing = _find_existing_paper(
-                job_session,
-                doi=doi,
-                title=metadata.get("title"),
-                year=metadata.get("year"),
-                arxiv_id=PaperIdentityService.extract_arxiv_id(identifier),
-                library_name=target_library,
-            )
-            if existing:
-                result = {"paper_id": str(existing.id), "title": existing.title, "status": "already_exists"}
-            else:
-                ingestion = PaperIngestionService(session=job_session, settings=runtime_settings)
-                try:
-                    with TemporaryDirectory() as tmpdir:
-                        pdf_path = asyncio.run(download_discovery_candidate(service, raw_paper, metadata, Path(tmpdir)))
-                        try:
-                            paper = asyncio.run(
-                                ingestion.ingest_pdf(
-                                    source_path=pdf_path,
-                                    original_filename=pdf_path.name,
-                                    copy_pdf=True,
-                                    external_metadata=metadata,
-                                    source_reference=None,
-                                    library_name=target_library,
-                                )
-                            )
-                            status = _result_status_for_paper(paper)
-                        except Exception:
-                            paper, status = _recover_or_create_metadata_only_paper(
-                                job_session,
-                                ingestion=ingestion,
-                                metadata=metadata,
-                                identifier=identifier,
-                                target_library=target_library,
-                            )
-                except Exception:
-                    paper, status = _recover_or_create_metadata_only_paper(
-                        job_session,
-                        ingestion=ingestion,
-                        metadata=metadata,
-                        identifier=identifier,
-                        target_library=target_library,
-                    )
-                result = {"paper_id": str(paper.id), "title": paper.title, "status": status}
-            assert_job_not_cancelled(job_session, job_id)
-
-        with session_scope(control_db_url) as control_session:
-            update_job(
-                control_session,
-                job_id,
-                status="completed",
-                progress={
-                    "phase": "completed",
-                    "message": "Discovery download ingest completed.",
-                    "paper_id": result["paper_id"],
-                    "title": result["title"],
-                    "ingested": 1,
-                },
-                result=result,
-                error=None,
-            )
-    except JobCancelledError:
-        with session_scope(control_db_url) as control_session:
-            job = get_job(control_session, job_id)
-            if job and job.status != "cancelled":
-                update_job(control_session, job_id, status="cancelled", progress=_merge_progress(job.progress, {"phase": "cancelled"}))
-    except Exception as exc:
-        logger.exception("Discovery download ingest job failed: %s", job_id)
-        with session_scope(control_db_url) as control_session:
-            update_job(
-                control_session,
-                job_id,
-                status="failed",
-                progress={"phase": "failed", "failure_code": classify_failure_code(reason=str(exc))},
-                error=f"{type(exc).__name__}: {exc}",
-            )
-
-
-# NOTE: [LEGACY DIRECT-INGEST] 本函数保留向后兼容。
-# 新流程请使用 /api/intake/search → approve → ingest 三步走。
-async def execute_ai_workflow(
-    payload: AIWorkflowPayload,
-    *,
-    session: Session,
-    settings: Settings,
-    job_id: str | None = None,
-) -> AIWorkflowResponse:
-    from app.api.papers.common import rewrite_ai_search_query
-
-    prompt_used, llm_status, llm_error, llm_diagnostics = rewrite_ai_search_query(
-        payload.query,
-        payload.model,
-        settings,
-    )
-
-    service = DiscoveryService()
-    active_providers = payload.providers or service.DEFAULT_SEARCH_PROVIDERS
-    raw_results = await run_in_threadpool(
-        service.search,
-        prompt_used,
-        active_providers,
-        payload.max_results,
-    )
-
-    ingestion = PaperIngestionService(session=session, settings=settings)
-    target_library = normalize_library_name(payload.library_name)
-    ingested: list[AIWorkflowIngestedPaperResponse] = []
-    failed: list[AIWorkflowFailedItemResponse] = []
-    attempted_downloads = 0
-
-    for item in raw_results:
-        if job_id:
-            assert_job_not_cancelled(session, job_id)
-        if attempted_downloads >= payload.max_downloads:
-            break
-
-        identifier = item.get("doi") or item.get("url") or item.get("identifier") or item.get("title") or ""
-        if not identifier:
-            failed.append(
-                AIWorkflowFailedItemResponse(
-                    identifier="",
-                    title=item.get("title"),
-                    code="missing_identifier",
-                    reason="missing_identifier",
-                )
-            )
-            continue
-
-        doi = item.get("doi")
-        existing = _find_existing_paper(
-            session,
-            doi=doi if payload.skip_existing else None,
-            title=item.get("title") if payload.skip_existing else None,
-            year=item.get("year") if payload.skip_existing else None,
-            arxiv_id=PaperIdentityService.extract_arxiv_id(str(identifier)) if payload.skip_existing else None,
-            library_name=target_library,
-        )
-        if payload.skip_existing and existing:
-            ingested.append(
-                AIWorkflowIngestedPaperResponse(
-                    paper_id=existing.id,
-                    title=existing.title,
-                    status="already_exists",
-                    identifier=identifier,
-                    doi=doi,
-                )
-            )
-            continue
-
-        attempted_downloads += 1
-        try:
-            raw_paper, metadata = await run_in_threadpool(
-                service.fetch_metadata, identifier, active_providers
-            )
-            existing = (
-                _find_existing_paper(
-                    session,
-                    doi=metadata.get("doi"),
-                    title=metadata.get("title"),
-                    year=metadata.get("year"),
-                    arxiv_id=PaperIdentityService.extract_arxiv_id(
-                        str(metadata.get("arxiv_id") or metadata.get("identifier") or metadata.get("url") or identifier)
-                    ),
-                    library_name=target_library,
-                )
-                if payload.skip_existing
-                else None
-            )
-            if existing:
-                ingested.append(
-                    AIWorkflowIngestedPaperResponse(
-                        paper_id=existing.id,
-                        title=existing.title,
-                        status="already_exists",
-                        identifier=identifier,
-                        doi=metadata.get("doi"),
-                    )
-                )
-                continue
-
-            item_status = "completed"
-            try:
-                with TemporaryDirectory() as tmpdir:
-                    pdf_path = await download_discovery_candidate(
-                        service,
-                        raw_paper,
-                        metadata,
-                        Path(tmpdir),
-                    )
-                    try:
-                        paper = await ingestion.ingest_pdf(
-                            source_path=pdf_path,
-                            original_filename=pdf_path.name,
-                            copy_pdf=True,
-                            external_metadata=metadata,
-                            source_reference=None,
-                            library_name=target_library,
-                        )
-                        item_status = _result_status_for_paper(paper)
-                    except Exception:
-                        paper, item_status = _recover_or_create_metadata_only_paper(
-                            session,
-                            ingestion=ingestion,
-                            metadata=metadata,
-                            identifier=identifier,
-                            target_library=target_library,
-                        )
-            except Exception:
-                paper, item_status = _recover_or_create_metadata_only_paper(
-                    session,
-                    ingestion=ingestion,
-                    metadata=metadata,
-                    identifier=identifier,
-                    target_library=target_library,
-                )
-
-            ingested.append(
-                AIWorkflowIngestedPaperResponse(
-                    paper_id=paper.id,
-                    title=paper.title,
-                    status=item_status,
-                    identifier=identifier,
-                    doi=paper.doi,
-                )
-            )
-        except Exception as exc:
-            failure_code = classify_failure_code("download_or_ingest_failed", str(exc))
-            failed.append(
-                AIWorkflowFailedItemResponse(
-                    identifier=identifier,
-                    title=item.get("title"),
-                    code=failure_code,
-                    reason=str(exc),
-                )
-            )
-
-    return AIWorkflowResponse(
-        query=payload.query,
-        prompt_used=prompt_used,
-        providers=active_providers,
-        searched_total=len(raw_results),
-        attempted_downloads=attempted_downloads,
-        ingested=ingested,
-        failed=failed,
-        llm_status=llm_status,
-        llm_error=llm_error,
-        llm_diagnostics=llm_diagnostics,
-    )
-
-
-def run_ai_workflow_job(job_id: str, control_database_url: str | None = None) -> None:
-    """[LEGACY DIRECT-INGEST] 保留向后兼容，新流程请用 /api/intake。"""
-
-    base_settings = get_settings()
-    control_db_url = control_database_url or base_settings.database_url
-    with session_scope(control_db_url) as control_session:
-        job = get_job_or_raise(control_session, job_id)
-        if job.status == "cancelled":
-            return
-        runtime_settings = build_runtime_settings(base_settings, job.runtime_context)
-        payload = AIWorkflowPayload.model_validate(job.payload or {})
-        update_job(
-            control_session,
-            job_id,
-            status="running",
-            progress={
-                "phase": "search_and_ingest",
-                "message": "AI workflow is searching, deduplicating, downloading, and metadata-ingesting failures.",
-                "max_results": payload.max_results,
-                "max_downloads": payload.max_downloads,
-            },
-            error=None,
-        )
-
-    try:
-        with session_scope(runtime_settings.database_url) as job_session:
-            assert_job_not_cancelled(job_session, job_id)
-            result = asyncio.run(
-                execute_ai_workflow(
-                    payload,
-                    session=job_session,
-                    settings=runtime_settings,
-                    job_id=job_id,
-                )
-            )
-            assert_job_not_cancelled(job_session, job_id)
-
-        with session_scope(control_db_url) as control_session:
-            update_job(
-                control_session,
-                job_id,
-                status="completed",
-                progress={
-                    "phase": "completed",
-                    "searched_total": result.searched_total,
-                    "attempted_downloads": result.attempted_downloads,
-                    "ingested": len(result.ingested),
-                    "failed": len(result.failed),
-                },
-                result=result.model_dump(mode="json"),
-                error=None,
-            )
-    except JobCancelledError:
-        with session_scope(control_db_url) as control_session:
-            job = get_job(control_session, job_id)
-            if job and job.status != "cancelled":
-                update_job(
-                    control_session,
-                    job_id,
-                    status="cancelled",
-                    progress=_merge_progress(job.progress, {"phase": "cancelled", "cancel_mode": "soft"}),
-                    error=None,
-                )
-    except Exception as exc:
-        logger.exception("AI workflow job failed: %s", job_id)
         with session_scope(control_db_url) as control_session:
             update_job(
                 control_session,
@@ -1706,9 +1188,6 @@ def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None)
             return
         job_type = job.type
 
-    if job_type == JOB_TYPE_AI_WORKFLOW:
-        run_ai_workflow_job(job_id, control_database_url)
-        return
     if job_type == JOB_TYPE_CLASSIFY_BATCH:
         run_classify_batch_job(job_id, control_database_url)
         return
@@ -1718,120 +1197,4 @@ def run_workflow_job_by_id(job_id: str, control_database_url: str | None = None)
     if job_type == JOB_TYPE_LOCAL_PDF_PATH_INGEST:
         run_local_pdf_path_ingest_job(job_id, control_database_url)
         return
-    if job_type == JOB_TYPE_DISCOVERY_DOWNLOAD_INGEST:
-        run_discovery_download_ingest_job(job_id, control_database_url)
-        return
     raise ValueError(f"Unsupported workflow job type: {job_type}")
-
-
-# ---------------------------------------------------------------------------
-# Phase 3 Intake: 候选生成 workflow（绝不调用 PaperIngestionService）
-# ---------------------------------------------------------------------------
-
-async def execute_intake_search_workflow(
-    query: str,
-    *,
-    session: Session,
-    library_name: str | None = None,
-    user_need: str | None = None,
-    providers: list[str] | None = None,
-    max_results: int = 20,
-    target_types: list[str] | None = None,
-) -> dict:
-    """只生成候选，绝不调用 PaperIngestionService。
-
-    检索 -> AI/规则筛选 -> 写入 literature_intake_candidates。
-    所有候选状态为 pending_review，等待用户通过 /api/intake 确认后才触发入库。
-    """
-    from uuid import UUID as _UUID
-
-    from app.db.models import LiteratureIntakeCandidate, LiteratureIntakeSession
-    from app.services.intake_screening_service import IntakeScreeningService
-
-    target_library = normalize_library_name(library_name)
-    effective_need = user_need or query
-
-    # 1. 建会话记录
-    s = LiteratureIntakeSession(
-        library_name=target_library,
-        user_need=effective_need,
-        original_query=query,
-        providers=providers or DiscoveryService.DEFAULT_SEARCH_PROVIDERS,
-        target_types=target_types,
-        max_results=max_results,
-        status="searching",
-    )
-    session.add(s)
-    session.flush()
-
-    try:
-        # 2. 检索（不入库）
-        disc = DiscoveryService()
-        active_providers = providers or disc.DEFAULT_SEARCH_PROVIDERS
-        raw_results = await run_in_threadpool(
-            disc.search, query, active_providers, max_results, target_types
-        )
-
-        # 3. AI/规则筛选
-        screener = IntakeScreeningService(session, library_name=target_library)
-        screening_results = await run_in_threadpool(
-            screener.screen,
-            raw_results,
-            user_need=effective_need,
-            query=query,
-            target_types=target_types,
-        )
-
-        # 4. 写候选，不写 papers
-        raw_by_idx: dict[str, dict[str, Any]] = {}
-        for raw in raw_results:
-            for key in _raw_result_lookup(raw):
-                raw_by_idx.setdefault(key, raw)
-
-        candidates = []
-        for sr in screening_results:
-            raw = raw_by_idx.get(_candidate_lookup_key(sr.identifier))
-            if raw is None:
-                logger.warning("Skipping intake screening result with no matching raw result: %s", sr.identifier)
-                continue
-            status = "duplicate" if sr.is_duplicate else "pending_review"
-            c = LiteratureIntakeCandidate(
-                session_id=s.id,
-                title=raw.get("title"),
-                doi=raw.get("doi"),
-                year=raw.get("year"),
-                journal=raw.get("journal"),
-                authors=raw.get("authors") or [],
-                abstract=raw.get("abstract"),
-                identifier=raw.get("identifier") or raw.get("doi") or raw.get("url"),
-                url=raw.get("url"),
-                pdf_url=raw.get("pdf_url"),
-                providers=raw.get("databases") or [],
-                relevance_score=sr.relevance_score,
-                screening_tier=sr.screening_tier,
-                screening_reason=sr.screening_reason,
-                risk_flags=sr.risk_flags,
-                status=status,
-                duplicate_paper_id=_UUID(sr.duplicate_paper_id) if sr.duplicate_paper_id else None,
-            )
-            session.add(c)
-            candidates.append(c)
-
-        s.status = "pending_review"
-        session.commit()
-        for c in candidates:
-            session.refresh(c)
-        session.refresh(s)
-
-        return {
-            "session_id": str(s.id),
-            "candidate_count": len(candidates),
-            "searched_total": len(raw_results),
-            "library_name": target_library,
-            "status": "pending_review",
-        }
-
-    except Exception as exc:
-        s.status = "cancelled"
-        session.commit()
-        raise exc

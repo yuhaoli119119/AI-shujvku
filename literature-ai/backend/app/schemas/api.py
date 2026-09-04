@@ -45,33 +45,6 @@ class IngestResponse(BaseModel):
     status: str
 
 
-class DiscoverySearchItemResponse(BaseModel):
-    identifier: str
-    title: str
-    doi: str | None = None
-    year: int | None = None
-    journal: str | None = None
-    authors: list[str] = Field(default_factory=list)
-    abstract: str | None = None
-    url: str | None = None
-    pdf_url: str | None = None
-    is_open_access: bool | None = None
-    databases: list[str] = Field(default_factory=list)
-
-
-class DiscoverySearchResponse(BaseModel):
-    query: str
-    providers: list[str] = Field(default_factory=list)
-    total: int = 0
-    items: list[DiscoverySearchItemResponse] = Field(default_factory=list)
-
-
-class DiscoveryDownloadRequest(BaseModel):
-    identifier: str
-    providers: list[str] = Field(default_factory=list)
-    library_name: str | None = None
-
-
 class ExtractionRunResponse(BaseModel):
     paper_id: UUID
     status: str
@@ -718,67 +691,11 @@ class PaperLibraryResponse(BaseModel):
 
 
 
-class AIWorkflowPayload(BaseModel):
-    query: str
-    model: str | None = None
-    library_name: str | None = None
-    providers: list[str] | None = None
-    max_results: int = 10
-    max_downloads: int = 5
-    skip_existing: bool = True
-
 class ClassifyBatchPayload(BaseModel):
     library_name: str | None = None
     batch_size: int = 20
     interval: float = 5.0
     overwrite: bool = False
-
-
-class AISearchPayload(BaseModel):
-    query: str
-    model: str | None = None
-    providers: list[str] | None = None
-    max_results: int = 10
-    skip_guard: bool = False
-    target_types: list[str] | None = None
-
-class AISearchResponse(BaseModel):
-    query: str
-    prompt_used: str
-    providers: list[str]
-    papers: list[dict[str, Any]]
-    llm_status: str | None = None
-    llm_error: str | None = None
-    llm_diagnostics: dict[str, Any] = Field(default_factory=dict)
-    result_annotation_status: str | None = None
-
-class AIWorkflowFailedItemResponse(BaseModel):
-    identifier: str
-    title: str | None = None
-    code: str
-    reason: str
-
-class AIWorkflowIngestedPaperResponse(BaseModel):
-    paper_id: UUID
-    title: str | None = None
-    status: str
-    identifier: str
-    doi: str | None = None
-
-class AIWorkflowResponse(BaseModel):
-    query: str
-    prompt_used: str
-    providers: list[str]
-    searched_total: int
-    attempted_downloads: int
-    ingested: list[AIWorkflowIngestedPaperResponse] = Field(default_factory=list)
-    failed: list[AIWorkflowFailedItemResponse] = Field(default_factory=list)
-    llm_status: str | None = None
-    llm_error: str | None = None
-    llm_diagnostics: dict[str, Any] = Field(default_factory=dict)
-
-
-
 
 
 class ReferenceEntryCreate(BaseModel):

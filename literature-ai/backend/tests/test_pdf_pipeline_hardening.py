@@ -104,7 +104,7 @@ async def test_quality_blocked_ingest_skips_grobid_and_docling(tmp_path, monkeyp
         raise AssertionError("quality-blocked PDFs must not reach a parser")
 
     service = PaperIngestionService.__new__(PaperIngestionService)
-    service.settings = SimpleNamespace(auto_enrich_ingested_metadata=False)
+    service.settings = SimpleNamespace()
     service.session = SimpleNamespace()
     service.grobid_parser = SimpleNamespace(parse_pdf=parser_must_not_run)
     service.docling_parser = SimpleNamespace(parse_pdf=parser_must_not_run)
