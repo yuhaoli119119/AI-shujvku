@@ -101,6 +101,21 @@ class Settings(BaseSettings):
     mcp_allow_unauthenticated: bool = False
     mcp_api_keys: str = ""
     mcp_server_name: str = "Literature AI MCP"
+    # OAuth 2.1 authorization server for the ChatGPT custom MCP connector
+    # (see app/oauth.py). Access tokens are HS256 JWTs issued by this service;
+    # the legacy static MCP API key above remains as an internal fallback.
+    oauth_issuer: str = "https://dft.researchlife.top"
+    oauth_resource: str = "https://dft.researchlife.top"
+    oauth_client_id: str = "chatgpt-literature-ai"
+    oauth_client_secret: str = ""
+    oauth_redirect_uri: str = ""
+    oauth_jwt_secret: str = ""
+    oauth_login_user: str = "liyuhao"
+    oauth_login_pass: str = ""
+    oauth_scope_capabilities: str = (
+        "read_papers,append_notes,propose_corrections,request_parse,"
+        "review_corrections,review_dft,create_share_links,ai_verify_content"
+    )
     ai_verification_min_confidence: float = Field(default=0.9, ge=0.0, le=1.0)
     ai_verification_batch_limit: int = Field(default=20, ge=1, le=50)
     owner_api_token: str | None = None

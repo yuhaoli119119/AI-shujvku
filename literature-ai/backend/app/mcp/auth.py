@@ -120,14 +120,39 @@ def get_optional_request_mcp_auth(request: Request) -> MCPAuthInfo | None:
     return authenticate_mcp_request(request)
 
 
+def _oauth_challenge_header() -> str:
+    """Standard OAuth protected-resource challenge (RFC 9728)."""
+    settings = get_settings()
+    resource_metadata = f"{settings.oauth_issuer}/.well-known/oauth-protected-resource"
+    return f'Bearer resource_metadata="{resource_metadata}"'
+
+
 async def enforce_mcp_auth(request: Request, call_next):
     if not request.url.path.startswith("/mcp"):
         return await call_next(request)
 
-    try:
-        auth = authenticate_mcp_request(request)
-    except HTTPException as exc:
-        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+    auth_header = request.headers.get("Authorization", "")
+    detail = "Missing MCP API key"
+    auth: MCPAuthInfo | None = None
+    if auth_header.startswith("Bearer "):
+        token = auth_header.removeprefix("Bearer ").strip()
+        # 1) OAuth access token issued by this service (ChatGPT connector).
+        from app.oauth import verify_oauth_access_token
+
+        auth = verify_oauth_access_token(token)
+        # 2) Legacy static MCP API key fallback (internal clients keep working).
+        if auth is None:
+            try:
+                auth = authenticate_mcp_api_key(token)
+            except PermissionError:
+                detail = "Invalid MCP API key"
+
+    if auth is None:
+        return JSONResponse(
+            {"detail": detail},
+            status_code=401,
+            headers={"WWW-Authenticate": _oauth_challenge_header()},
+        )
 
     token = set_mcp_auth(auth)
     try:

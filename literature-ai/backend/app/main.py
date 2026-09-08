@@ -34,6 +34,7 @@ from app.config import get_settings
 from app.db.session import session_scope
 from app.mcp import mcp_http_app, mcp_server
 from app.mcp.auth import enforce_mcp_auth
+from app.oauth import router as oauth_router
 from app.security.exports import enforce_export_boundary
 from app.security.share import enforce_share_protection
 from app.services.workflow_jobs import expire_stale_activity
@@ -114,6 +115,7 @@ app.include_router(extraction_router, prefix="/api/extraction", tags=["extractio
 app.include_router(visuals_router, prefix="/api/visuals", tags=["visuals"])
 app.include_router(workbench_router, prefix="/api/workbench", tags=["workbench"])
 app.include_router(share_router, prefix="/api")
+app.include_router(oauth_router)
 app.mount("/mcp", mcp_http_app)
 
 frontend_dir = Path("/frontend")
