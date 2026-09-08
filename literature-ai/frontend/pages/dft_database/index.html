@@ -542,6 +542,7 @@
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
             <div class="filter-field"><label for="catalystName" style="white-space: nowrap;">催化剂</label><select id="catalystName" onchange="handleDftFilterChange()"><option value="">all</option></select></div>
             <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="未记录者保留">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
+            <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子/双金属 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双金属 (bimetallic_lis_ml)</option></select></div>
           </div>
           <div class="export-panel" style="flex-wrap: nowrap; white-space: nowrap;">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
@@ -1606,6 +1607,9 @@
       if (adsorbate) params.set("adsorbate", adsorbate);
       if (catalyst) params.set("catalyst_name", catalyst);
       params.set("min_confidence", minConf);
+      const profileEl = document.getElementById("datasetProfile");
+      const profile = profileEl ? profileEl.value.trim() : "";
+      if (profile) params.set("dataset_profile", profile);
       applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
@@ -1624,16 +1628,37 @@
         const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "";
         const exported = parseInt(resp.headers.get("X-D3-Export-Count") || "0", 10);
         const blocked = parseInt(resp.headers.get("X-D3-Block-Count") || "0", 10);
-        
-        let statusMessage = `CSV 导出规则：${gateLabel(gate)}；已导出 ${exported} 条；需处理 ${blocked} 条。`;
-        let toastMessage = "CSV 导出完成。";
-        
-        if (exported === 0 && blocked === 0) {
+        const baseEligible = parseInt(resp.headers.get("X-D3-Base-Eligible-Count") || String(exported), 10);
+        const profileIncludedHeader = resp.headers.get("X-D3-Profile-Included-Count");
+        const profileExcludedHeader = resp.headers.get("X-D3-Profile-Excluded-Count");
+        const respProfile = (resp.headers.get("X-D3-Dataset-Profile") || "").trim();
+
+        const hasProfile = Boolean(respProfile);
+        const profileExcluded = profileExcludedHeader !== null && profileExcludedHeader !== "" ? parseInt(profileExcludedHeader, 10) : 0;
+        const profileIncluded = profileIncludedHeader !== null && profileIncludedHeader !== "" ? parseInt(profileIncludedHeader, 10) : (hasProfile ? exported : baseEligible);
+
+        let statusMessage = "";
+        let toastMessage = "";
+
+        if (hasProfile) {
+          if (exported === 0) {
+            statusMessage = `CSV 导出规则：${gateLabel(gate)} [${respProfile}]；基础合格 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 0 条。`;
+            toastMessage = `CSV 导出完成：0 条导出（范围排除 ${profileExcluded} 条）。`;
+          } else {
+            statusMessage = `CSV 导出规则：${gateLabel(gate)} [${respProfile}]；基础合格 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 ${exported} 条。`;
+            toastMessage = `CSV 导出完成：已导出 ${exported} 条（范围排除 ${profileExcluded} 条）。`;
+          }
+        } else {
+          if (exported === 0 && blocked === 0) {
             statusMessage = `CSV 导出规则：${gateLabel(gate)}；没有可导出的合格记录。`;
             toastMessage = "没有记录被导出。";
-        } else if (exported === 0 && blocked > 0) {
-            statusMessage = `CSV 导出规则：${gateLabel(gate)}；0 条导出，${blocked} 条需要先处理。`;
+          } else if (exported === 0 && blocked > 0) {
+            statusMessage = `CSV 导出规则：${gateLabel(gate)}；基础合格 0 条；实际导出 0 条；待处理 ${blocked} 条。`;
             toastMessage = `没有合格记录被导出，${blocked} 条需要处理。`;
+          } else {
+            statusMessage = `CSV 导出规则：${gateLabel(gate)}；基础合格 ${baseEligible} 条；实际导出 ${exported} 条；待处理 ${blocked} 条。`;
+            toastMessage = `CSV 导出完成：已导出 ${exported} 条。`;
+          }
         }
 
         setExportSafetyStatus(statusMessage);
@@ -1679,6 +1704,9 @@
       if (adsorbate) params.set("adsorbate", adsorbate);
       if (catalyst) params.set("catalyst_name", catalyst);
       params.set("min_confidence", minConf);
+      const profileEl = document.getElementById("datasetProfile");
+      const profile = profileEl ? profileEl.value.trim() : "";
+      if (profile) params.set("dataset_profile", profile);
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
@@ -1690,11 +1718,45 @@
         try { data = text ? JSON.parse(text) : null; } catch (_) {}
         if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
         const metadata = data && data.metadata ? data.metadata : {};
-        const exported = Number(metadata.eligible_count || 0);
+        const baseEligible = Number(metadata.base_eligible_count ?? metadata.eligible_count ?? 0);
+        const respProfile = String(metadata.dataset_profile || "").trim();
+        const hasProfile = Boolean(respProfile);
+        const profileIncluded = metadata.profile_included_count_before_limit !== undefined && metadata.profile_included_count_before_limit !== null
+          ? Number(metadata.profile_included_count_before_limit)
+          : (hasProfile ? 0 : baseEligible);
+        const profileExcluded = metadata.profile_excluded_count !== undefined && metadata.profile_excluded_count !== null
+          ? Number(metadata.profile_excluded_count)
+          : 0;
+        const exportedAfterLimit = metadata.exported_count_after_limit !== undefined && metadata.exported_count_after_limit !== null
+          ? Number(metadata.exported_count_after_limit)
+          : (Array.isArray(data && data.records) ? data.records.length : (hasProfile ? profileIncluded : baseEligible));
+
         const rejected = Number((metadata.review_status_counts || {}).rejected || 0);
         const pending = Math.max(0, Number(metadata.blocked_count || 0) - rejected);
         const gate = metadata.safety_gate || "safe_verified_with_required_evidence";
-        setExportSafetyStatus(`ML 导出规则：${gateLabel(gate)}；可导出 ${exported} 条；待完成 ${pending} 条；已拒绝 ${rejected} 条。`);
+
+        let statusMessage = "";
+        let toastMessage = "";
+
+        if (hasProfile) {
+          if (exportedAfterLimit === 0) {
+            statusMessage = `ML 导出规则：${gateLabel(gate)} [${respProfile}]；基础合格 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 0 条。`;
+            toastMessage = `ML 数据集导出完成：0 条导出（范围排除 ${profileExcluded} 条）。`;
+          } else {
+            statusMessage = `ML 导出规则：${gateLabel(gate)} [${respProfile}]；基础合格 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 ${exportedAfterLimit} 条。`;
+            toastMessage = `ML 数据集导出完成：已导出 ${exportedAfterLimit} 条（范围排除 ${profileExcluded} 条）。`;
+          }
+        } else {
+          if (exportedAfterLimit === 0 && pending === 0 && rejected === 0) {
+            statusMessage = `ML 导出规则：${gateLabel(gate)}；没有可导出的合格记录。`;
+            toastMessage = "没有记录被导出。";
+          } else {
+            statusMessage = `ML 导出规则：${gateLabel(gate)}；基础合格 ${baseEligible} 条；实际导出 ${exportedAfterLimit} 条；待处理 ${pending} 条；已拒绝 ${rejected} 条。`;
+            toastMessage = `ML 数据集导出完成：已导出 ${exportedAfterLimit} 条合格数据。`;
+          }
+        }
+
+        setExportSafetyStatus(statusMessage);
 
         const pretty = JSON.stringify(data || {}, null, 2);
         const blob = new Blob([pretty], { type: "application/json;charset=utf-8" });
@@ -1706,7 +1768,7 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(downloadUrl);
-        showToast(`ML 数据集导出完成：${exported} 条可用，${pending} 条待完成，${rejected} 条已拒绝`);
+        showToast(toastMessage);
       } catch (error) {
         setExportSafetyStatus("ML 数据集导出失败：" + error.message);
         showToast("ML 数据集导出失败：" + error.message);

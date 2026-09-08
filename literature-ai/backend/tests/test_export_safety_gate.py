@@ -5,7 +5,10 @@ import os
 import asyncio
 import csv
 import io
+from pathlib import Path
+import tempfile
 
+import fitz
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -17,6 +20,7 @@ from app.db.models import (
     DFTAuditIssue,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
     EvidenceSpan,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
@@ -27,7 +31,13 @@ from app.rag.eligibility import is_rag_eligible
 from app.schemas.dft_export import DFTMLDatasetExportV2, select_training_records_v2
 from app.services.dft_export_service import _has_recommended_ml_setting, _ml_readiness_score, build_dft_ml_dataset
 from app.services.dft_review_service import DFTResultReviewService
-from app.utils.review_safety import bulk_export_gate_results, dft_export_data_quality_reasons
+from app.utils.ai_verification import ai_target_fingerprint
+from app.utils.configuration_index import extract_configuration_index
+from app.utils.review_safety import (
+    bulk_export_gate_results,
+    dft_export_data_quality_reasons,
+    required_review_fields,
+)
 
 
 @pytest.mark.parametrize("property_type", ["bond_length", "ICOHP", "COHP"])
@@ -63,7 +73,12 @@ def _session(tmp_path):
 
 
 def _paper(session: Session) -> Paper:
-    paper = Paper(title="Export Gate Paper", pdf_path="paper.pdf", authors=["A"])
+    pdf_path = Path(tempfile.mkdtemp(prefix="litai-export-gate-")) / "paper.pdf"
+    document = fitz.open()
+    document.new_page().insert_text((20, 72), "Test paper", fontsize=8)
+    document.save(pdf_path)
+    document.close()
+    paper = Paper(title="Export Gate Paper", pdf_path=str(pdf_path), authors=["A"])
     session.add(paper)
     session.flush()
     return paper
@@ -153,21 +168,95 @@ def _safe_review(
     row: DFTResult,
     *,
     add_ai_approval: bool = True,
+    add_locators: bool = True,
 ) -> ExtractionFieldReview:
-    review = ExtractionFieldReview(
-        paper_id=paper.id,
-        target_type="dft_results",
-        target_id=str(row.id),
-        field_name="value",
-        reviewer_status="verified",
-        target_resolution_status="active",
-        evidence_text=row.evidence_text,
+    session.flush()
+    session.refresh(row)
+    catalyst = session.get(CatalystSample, row.catalyst_sample_id) if row.catalyst_sample_id else None
+    type_label = {
+        "single_atom": "Single-atom SAC",
+        "dual_atom": "Dual-atom DAC",
+        "bimetallic": "Bimetallic",
+    }.get(str(getattr(catalyst, "catalyst_type", "") or "").casefold(), "Unsupported")
+    catalyst_parts = [type_label, getattr(catalyst, "name", None)]
+    if catalyst is not None and catalyst.metal_centers:
+        catalyst_parts.append("contains " + " and ".join(str(value) for value in catalyst.metal_centers))
+    if catalyst is not None and catalyst.coordination:
+        catalyst_parts.append(f"in {catalyst.coordination} coordination")
+    if catalyst is not None and catalyst.support:
+        catalyst_parts.append(f"on {catalyst.support} support")
+    evidence_lines = [" ".join(str(value) for value in catalyst_parts if value) + "."]
+    if row.evidence_text:
+        evidence_lines.append(str(row.evidence_text))
+    property_phrase = str(row.property_type or "").replace("_", " ")
+    if "barrier" in property_phrase.casefold():
+        property_phrase = f"reaction barrier ({property_phrase})"
+    evidence_lines.append(
+        f"Calculated {property_phrase} of {row.adsorbate or 'material'} "
+        f"on {getattr(catalyst, 'name', None) or 'material'}: {row.value} {row.unit or ''}."
     )
-    session.add(review)
+    if row.reaction_step:
+        evidence_lines.append(f"Reaction step {row.reaction_step}.")
+    configuration_index = extract_configuration_index(row.evidence_payload)
+    if configuration_index is not None:
+        evidence_lines.append(f"Configuration config {configuration_index}: {row.value} {row.unit or ''}.")
+    row.evidence_text = "\n".join(evidence_lines)
+
+    page_map = session.info.setdefault("export_gate_pdf_pages", {}).setdefault(str(paper.id), {})
+    page_number = len(page_map) + 1
+    page_map[page_number] = row.evidence_text
+    pdf_path = Path(paper.pdf_path)
+    document = fitz.open()
+    for page_index in range(1, max(page_map) + 1):
+        pdf_page = document.new_page()
+        pdf_page.insert_textbox(
+            fitz.Rect(20, 40, 575, 800),
+            page_map.get(page_index, ""),
+            fontsize=8,
+        )
+    temporary_path = pdf_path.with_suffix(".new.pdf")
+    document.save(temporary_path)
+    document.close()
+    temporary_path.replace(pdf_path)
+
+    reviews = []
+    for field_name in required_review_fields("dft_results", row):
+        review = ExtractionFieldReview(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name=field_name,
+            reviewer_status="verified",
+            target_resolution_status="active",
+            reviewer="human_verifier",
+            target_fingerprint=ai_target_fingerprint("dft_results", row),
+            evidence_text=row.evidence_text,
+            review_payload={
+                "human_verification": {
+                    "verification_actor_type": "human",
+                    "identity_verified": True,
+                    "writes_final_truth": True,
+                    "decision": "verified",
+                    "reviewer": "human_verifier",
+                }
+            },
+        )
+        reviews.append(review)
+        session.add(review)
+        if add_locators:
+            session.add(EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name=field_name,
+                evidence_text=row.evidence_text,
+                page=page_number,
+                locator_status="exact_page",
+            ))
     session.flush()
     if add_ai_approval:
         _object_review_audit(session, paper, row)
-    return review
+    return reviews[0]
 
 
 def _evidence_ref(session: Session, paper: Paper, row: DFTResult, *, page: int | None = None) -> EvidenceSpan:
@@ -287,20 +376,21 @@ def test_dft_export_default_excludes_unsafe_review_statuses(tmp_path):
         engine.dispose()
 
 
-def test_dft_fast_mode_allows_verified_text_without_separate_evidence_reference(tmp_path):
+def test_dft_export_blocks_verified_text_without_field_locators(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
             paper = _paper(session)
             row = _dft(session, paper)
-            _safe_review(session, paper, row)
+            _safe_review(session, paper, row, add_locators=False)
             session.commit()
 
             response, rows = _export_rows(session)
 
-            assert len(rows) == 1
-            assert response.headers["x-d1-exported-count"] == "1"
-            assert response.headers["x-d1-blocked-count"] == "0"
+            assert rows == []
+            assert response.headers["x-d1-exported-count"] == "0"
+            assert response.headers["x-d1-blocked-count"] == "1"
+            assert "missing_evidence" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
@@ -469,6 +559,7 @@ def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
             paper = _paper(session)
             row = _dft(session, paper, evidence_text="")
             _safe_review(session, paper, row)
+            row.evidence_text = ""
             _evidence_ref(session, paper, row)
             session.commit()
 
@@ -481,55 +572,33 @@ def test_dft_export_default_excludes_missing_evidence_text(tmp_path):
         engine.dispose()
 
 
-def test_dft_fast_mode_allows_text_evidence_without_fabricating_page_or_bbox(tmp_path):
+def test_dft_export_blocks_text_evidence_without_exact_pdf_locator(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
             paper = _paper(session)
-            pdf_file = tmp_path / "imported-page-anchor.pdf"
-            pdf_file.write_bytes(b"%PDF-1.4\nImported page anchor fixture\n%%EOF\n")
-            paper.pdf_path = str(pdf_file)
             row = _dft(session, paper)
-            _safe_review(session, paper, row)
+            _safe_review(session, paper, row, add_locators=False)
             _evidence_ref(session, paper, row, page=None)
             session.commit()
 
             response, rows = _export_rows(session)
 
-            assert len(rows) == 1
-            assert response.headers["x-d3-export-count"] == "1"
-            assert response.headers["x-d3-block-count"] == "0"
-            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
+            assert rows == []
+            assert response.headers["x-d3-export-count"] == "0"
+            assert response.headers["x-d3-block-count"] == "1"
+            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
 
-def test_dft_export_accepts_safe_verified_imported_pdf_page_anchor(tmp_path):
+def test_dft_export_accepts_safe_verified_exact_pdf_locators(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
             paper = _paper(session)
             row = _dft(session, paper)
-            session.add(
-                ExtractionFieldReview(
-                    paper_id=paper.id,
-                    target_type="dft_results",
-                    target_id=str(row.id),
-                    field_name="value",
-                    reviewer_status="verified",
-                    target_resolution_status="active",
-                    evidence_text=row.evidence_text,
-                    review_payload={
-                        "imported_evidence_payload": {
-                            "page": 6,
-                            "section": "Results",
-                            "quoted_text": "The adsorption energy is -1.23 eV.",
-                        }
-                    },
-                )
-            )
-            _object_review_audit(session, paper, row)
-            _evidence_ref(session, paper, row, page=None)
+            _safe_review(session, paper, row)
             session.commit()
 
             response, rows = _export_rows(session)
@@ -546,13 +615,17 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
     try:
         with SessionLocal() as session:
             paper = _paper(session)
-            pdf_file = tmp_path / "imported-page-anchor.pdf"
-            pdf_file.write_bytes(b"%PDF-1.4\nImported page anchor fixture\n%%EOF\n")
-            paper.pdf_path = str(pdf_file)
             row = _dft(session, paper)
-            _evidence_ref(session, paper, row, page=None)
-            _object_review_audit(session, paper, row, source="local_ai")
-            session.commit()
+            _safe_review(session, paper, row, add_ai_approval=False)
+            evidence_text = row.evidence_text
+            locator = session.query(EvidenceLocator).filter_by(target_id=str(row.id)).first()
+            assert locator is not None
+            evidence_page = locator.page
+            for review in session.query(ExtractionFieldReview).filter_by(target_id=str(row.id)).all():
+                session.delete(review)
+            for stored_locator in session.query(EvidenceLocator).filter_by(target_id=str(row.id)).all():
+                session.delete(stored_locator)
+            session.flush()
 
             DFTResultReviewService(session).verify_result(
                 paper_id=paper.id,
@@ -563,11 +636,11 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
                 actor_name="owner",
                 source_label="owner_api_token",
                 reviewer_note="Dual AI checked the PDF page.",
-                field_names=["value"],
+                field_names=list(required_review_fields("dft_results", row)),
                 evidence_payload={
-                    "page": 6,
+                    "page": evidence_page,
                     "section": "Results",
-                    "quoted_text": "The adsorption energy is -1.23 eV.",
+                    "quoted_text": evidence_text,
                 },
             )
 
@@ -660,7 +733,7 @@ def test_dft_export_rejects_imported_page_anchor_from_unsafe_review(tmp_path):
 
             assert rows == []
             assert "unsafe_review" in response.headers["x-d1-blocked-reasons"]
-            assert "unsafe_locator" not in response.headers["x-d1-blocked-reasons"]
+            assert "unsafe_locator" in response.headers["x-d1-blocked-reasons"]
     finally:
         engine.dispose()
 
@@ -730,6 +803,9 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
             safe_row_mev.value = 500
             safe_row_mev.unit = "meV"
             _safe_review(session, paper, safe_row_mev)
+            assert bulk_export_gate_results(
+                session, [safe_row_mev], target_type="dft_results"
+            )[str(safe_row_mev.id)].eligible is True
             _evidence_ref(session, paper, safe_row_mev, page=1)
 
             safe_row_kj = _dft(session, paper)
@@ -741,6 +817,18 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
 
             session.commit()
 
+            gates_after_all_rows = bulk_export_gate_results(
+                session,
+                [safe_row, blocked_row, safe_row_mev, safe_row_kj],
+                target_type="dft_results",
+            )
+            assert gates_after_all_rows[str(safe_row_mev.id)].eligible is True, gates_after_all_rows[
+                str(safe_row_mev.id)
+            ].reasons
+            assert gates_after_all_rows[str(safe_row_kj.id)].eligible is True, gates_after_all_rows[
+                str(safe_row_kj.id)
+            ].reasons
+
             payload2 = asyncio.run(
                 export_dft_dataset(
                     property_type=None,
@@ -751,7 +839,13 @@ def test_dft_ml_dataset_export_uses_same_safe_verified_gate(tmp_path):
                 )
             )
             # Find the new records
-            mev_record = next(r for r in payload2["records"] if r["record_id"] == str(safe_row_mev.id))
+            records_by_id = {record["record_id"]: record for record in payload2["records"]}
+            assert str(safe_row_mev.id) in records_by_id, {
+                "metadata": payload2["metadata"],
+                "numeric_ids": sorted(records_by_id),
+                "lm_ids": sorted(record["record_id"] for record in payload2["lm_records"]),
+            }
+            mev_record = records_by_id[str(safe_row_mev.id)]
             assert mev_record["target"]["normalized_value"] == 0.5
             assert mev_record["target"]["normalized_unit"] == "eV"
             assert mev_record["target"]["canonical_property_type"] == "reaction_barrier"
@@ -805,16 +899,25 @@ def test_dft_ml_dataset_v2_aggregates_descriptors_and_special_barrier_taxonomy(t
             barrier_row.property_type = "li2s_decomposition_barrier"
             barrier_row.value = 0.65
             barrier_row.unit = "eV"
+            barrier_row.evidence_payload = {"state_context": "transition_state"}
 
             for row in (target_row, descriptor_row, barrier_row):
                 _safe_review(session, paper, row)
+                gate = bulk_export_gate_results(session, [row], target_type="dft_results")[str(row.id)]
+                assert gate.eligible is True, gate.reasons
                 _evidence_ref(session, paper, row, page=2)
             session.commit()
 
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
 
             adsorption = next(r for r in payload["records"] if r["record_id"] == str(target_row.id))
-            descriptor = next(r for r in payload["records"] if r["record_id"] == str(descriptor_row.id))
+            records_by_id = {record["record_id"]: record for record in payload["records"]}
+            assert str(descriptor_row.id) in records_by_id, {
+                "metadata": payload["metadata"],
+                "numeric_ids": sorted(records_by_id),
+                "lm_ids": sorted(record["record_id"] for record in payload["lm_records"]),
+            }
+            descriptor = records_by_id[str(descriptor_row.id)]
             barrier = next(r for r in payload["records"] if r["record_id"] == str(barrier_row.id))
 
             assert adsorption["descriptor_fields"]["d_band_center"]["value"] == -1.75
@@ -876,11 +979,29 @@ def test_dft_ml_dataset_v2_normalizes_descriptor_energy_and_flags_basis_specific
 
             for row in (descriptor_row, basis_row):
                 _safe_review(session, paper, row)
+                gate = bulk_export_gate_results(session, [row], target_type="dft_results")[str(row.id)]
+                assert gate.eligible is True, gate.reasons
                 _evidence_ref(session, paper, row, page=4)
             session.commit()
 
+            gates_after_all_rows = bulk_export_gate_results(
+                session, [descriptor_row, basis_row], target_type="dft_results"
+            )
+            assert gates_after_all_rows[str(descriptor_row.id)].eligible is True, gates_after_all_rows[
+                str(descriptor_row.id)
+            ].reasons
+            assert gates_after_all_rows[str(basis_row.id)].eligible is True, gates_after_all_rows[
+                str(basis_row.id)
+            ].reasons
+
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
-            descriptor = next(r for r in payload["records"] if r["record_id"] == str(descriptor_row.id))
+            records_by_id = {record["record_id"]: record for record in payload["records"]}
+            assert str(descriptor_row.id) in records_by_id, {
+                "metadata": payload["metadata"],
+                "numeric_ids": sorted(records_by_id),
+                "lm_ids": sorted(record["record_id"] for record in payload["lm_records"]),
+            }
+            descriptor = records_by_id[str(descriptor_row.id)]
             basis = next(r for r in payload["records"] if r["record_id"] == str(basis_row.id))
 
             assert descriptor["target"]["normalized_value"] == -1.5
@@ -892,7 +1013,7 @@ def test_dft_ml_dataset_v2_normalizes_descriptor_energy_and_flags_basis_specific
         engine.dispose()
 
 
-def test_dft_ml_dataset_v2_routes_non_numeric_claims_to_lm_records(tmp_path):
+def test_dft_ml_dataset_v2_blocks_non_numeric_claims_without_value_and_unit(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -909,11 +1030,8 @@ def test_dft_ml_dataset_v2_routes_non_numeric_claims_to_lm_records(tmp_path):
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
 
             assert payload["records"] == []
-            assert len(payload["lm_records"]) == 1
-            lm_record = payload["lm_records"][0]
-            assert lm_record["claim"]["canonical_property_type"] == "dos_claim"
-            assert lm_record["claim"]["ml_role"] == "lm_auxiliary"
-            assert lm_record["claim"]["evidence_text"] == "The DOS near the Fermi level is increased."
+            assert payload["lm_records"] == []
+            assert payload["metadata"]["blocked_count"] == 1
     finally:
         engine.dispose()
 
@@ -1108,7 +1226,7 @@ def test_dft_ml_dataset_v2_contract_fields_exist_for_all_numeric_records(tmp_pat
         engine.dispose()
 
 
-def test_dft_ml_dataset_auto_binds_unbound_row_from_evidence_identity(tmp_path):
+def test_dft_ml_dataset_blocks_unbound_row_despite_evidence_identity(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -1140,16 +1258,13 @@ def test_dft_ml_dataset_auto_binds_unbound_row_from_evidence_identity(tmp_path):
             session.commit()
 
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
-            record = payload["records"][0]
-
-            assert record["catalyst"]["name"] == "Fe-N-C"
-            assert record["provenance"]["catalyst_binding_source"] == "auto_bound"
-            assert record["sample_context"]["material_scope_key"].startswith("material=catalyst_sample_")
+            assert payload["records"] == []
+            assert payload["metadata"]["blocked_count"] == 1
     finally:
         engine.dispose()
 
 
-def test_dft_ml_dataset_single_candidate_fallback_binds_unbound_row(tmp_path):
+def test_dft_ml_dataset_blocks_unbound_row_despite_single_candidate_fallback(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -1172,10 +1287,8 @@ def test_dft_ml_dataset_single_candidate_fallback_binds_unbound_row(tmp_path):
             session.commit()
 
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
-            record = payload["records"][0]
-
-            assert record["catalyst"]["name"] == "Only Catalyst"
-            assert record["provenance"]["catalyst_binding_source"] == "single_candidate_fallback"
+            assert payload["records"] == []
+            assert payload["metadata"]["blocked_count"] == 1
     finally:
         engine.dispose()
 
@@ -1245,10 +1358,9 @@ def test_dft_ml_dataset_v2_payload_validates_against_pydantic_contract(tmp_path)
             assert validated.metadata.schema_version == "dft_results_ml_v2"
             assert validated.metadata.ml_setting_field == "linked_dft_setting"
             assert len(validated.records) == 1
-            assert len(validated.lm_records) == 1
+            assert len(validated.lm_records) == 0
             assert validated.records[0].recommended_ml_setting_field == "linked_dft_setting"
             assert validated.records[0].sample_context.instance_key
-            assert validated.lm_records[0].claim.ml_role == "lm_auxiliary"
     finally:
         engine.dispose()
 
@@ -1354,7 +1466,8 @@ def test_dft_quality_panel_reports_blocked_rows_and_links(tmp_path):
             assert payload["metadata"]["blocked_reasons"]["missing_review"] == 1
             blocked = [row for row in payload["rows"] if not row["is_exportable"]][0]
             assert blocked["record_id"] == str(blocked_row.id)
-            assert blocked["blocked_reasons"] == ["missing_review"]
+            assert blocked["blocked_reasons"][0] == "missing_review"
+            assert "missing_required_review:catalyst" in blocked["blocked_reasons"]
             assert "paper_id=" + str(paper.id) in blocked["library_detail_url"]
             assert "external_analysis_workbench" in blocked["review_workbench_url"]
     finally:

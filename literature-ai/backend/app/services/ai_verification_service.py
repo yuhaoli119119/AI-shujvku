@@ -7,20 +7,24 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.db.models import (
     AuditLog,
+    CatalystSample,
     DFTAuditIssue,
     EvidenceClaim,
     EvidenceLocator,
     ExtractionFieldReview,
     Paper,
+    PaperRelationship,
     PaperSection,
 )
+from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.schemas.ai_verification import AIVerificationSubmission
+from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.dft_audit_issue_lifecycle_service import DFT_AUDIT_ISSUE_PENDING_STATUSES
 from app.services.content_knowledge_service import ContentKnowledgeService
 from app.services.evidence_page_recovery import EvidencePageRecoveryService, compact_page_text
@@ -37,7 +41,15 @@ from app.utils.ai_verification import (
     read_pdf_page_text,
     stable_hash,
 )
-from app.utils.review_safety import writing_card_authoritative_chain_gate
+from app.utils.configuration_index import extract_configuration_index
+from app.services.review_target_resolver import get_dft_catalyst_identity, preload_dft_catalyst_identity
+from app.utils.review_safety import (
+    authoritative_gate_scope,
+    is_authoritative_verified_review,
+    is_safe_verified_review,
+    required_review_fields,
+    writing_card_authoritative_chain_gate,
+)
 
 
 @dataclass(frozen=True)
@@ -88,6 +100,24 @@ class AIVerificationService:
         recover_evidence: bool = True,
         target_type: str | None = None,
     ) -> dict[str, Any]:
+        with authoritative_gate_scope(self.session):
+            return self._list_tasks_unscoped(
+                paper_id=paper_id,
+                limit=limit,
+                offset=offset,
+                recover_evidence=recover_evidence,
+                target_type=target_type,
+            )
+
+    def _list_tasks_unscoped(
+        self,
+        *,
+        paper_id: UUID,
+        limit: int = 20,
+        offset: int = 0,
+        recover_evidence: bool = True,
+        target_type: str | None = None,
+    ) -> dict[str, Any]:
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             raise LookupError("Paper not found")
@@ -96,42 +126,87 @@ class AIVerificationService:
         if page_offset < 0:
             raise ValueError("offset must be greater than or equal to zero")
         tasks: list[dict[str, Any]] = []
-        target_specs = (
-            ("mechanism_claims", "claim_text"),
-            ("dft_results", "value"),
-            ("electrochemical_performance", "capacity"),
-            ("sections", "text"),
-            ("section_page_fragments", "text"),
-            ("writing_cards", "evidence_chain"),
+        supported_target_types = (
+            "mechanism_claims",
+            "dft_results",
+            "electrochemical_performance",
+            "sections",
+            "section_page_fragments",
+            "writing_cards",
         )
         from app.utils.ai_verification import _TARGET_MODELS  # internal policy registry
 
-        supported_target_types = {item[0] for item in target_specs}
         normalized_target_type = str(target_type or "").strip() or None
         if normalized_target_type is not None:
             if normalized_target_type not in supported_target_types:
                 raise ValueError(f"Unsupported AI verification target_type: {normalized_target_type}")
-            target_specs = tuple(item for item in target_specs if item[0] == normalized_target_type)
+            active_target_types = [normalized_target_type]
+        else:
+            active_target_types = list(supported_target_types)
 
-        pending_targets: list[tuple[str, str, Any, ExtractionFieldReview | None]] = []
-        for current_target_type, field_name in target_specs:
+        target_rows_by_type: dict[str, list[Any]] = {}
+        for current_target_type in active_target_types:
             target_model = _TARGET_MODELS[current_target_type]
             target_query = select(target_model).where(target_model.paper_id == paper_id)
             if current_target_type == "section_page_fragments":
-                target_query = target_query.where(
-                    EvidenceClaim.source_type == "section_page_fragment"
+                target_query = target_query.where(EvidenceClaim.source_type == "section_page_fragment")
+            target_rows_by_type[current_target_type] = self.session.scalars(
+                target_query.order_by(target_model.id.asc())
+            ).all()
+        preload_dft_catalyst_identity(self.session, target_rows_by_type.get("dft_results", []))
+
+        all_target_ids = {str(target.id) for rows in target_rows_by_type.values() for target in rows}
+        reviews_by_key: dict[tuple[str, str, str], ExtractionFieldReview] = {}
+        if all_target_ids:
+            for review in self.session.scalars(
+                select(ExtractionFieldReview).where(
+                    ExtractionFieldReview.paper_id == paper_id,
+                    ExtractionFieldReview.target_id.in_(all_target_ids),
                 )
-            rows = self.session.scalars(target_query.order_by(target_model.id.asc())).all()
-            for target in rows:
-                existing = self._find_review(
-                    paper_id,
-                    current_target_type,
-                    str(target.id),
-                    field_name,
-                )
-                if existing is not None and existing.reviewer_status in {"verified", "ai_verified"}:
+            ).all():
+                try:
+                    canonical = canonical_ai_target_type(review.target_type)
+                except ValueError:
                     continue
-                pending_targets.append((current_target_type, field_name, target, existing))
+                reviews_by_key[(canonical, str(review.target_id), str(review.field_name or ""))] = review
+
+        related_ids = self.session.scalars(
+            select(PaperRelationship.source_paper_id).where(
+                PaperRelationship.target_paper_id == paper_id,
+                PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+            ).union_all(
+                select(PaperRelationship.target_paper_id).where(
+                    PaperRelationship.source_paper_id == paper_id,
+                    PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+                )
+            )
+        ).all() if recover_evidence else []
+        evidence_papers = [paper]
+        evidence_papers.extend(
+            related for related in (self.session.get(Paper, rel_id) for rel_id in related_ids)
+            if related is not None and related.id != paper.id
+        )
+
+        pending_targets: list[tuple[str, str, Any, ExtractionFieldReview | None]] = []
+        for current_target_type in active_target_types:
+            rows = target_rows_by_type[current_target_type]
+            for target in rows:
+                req_fields = required_review_fields(current_target_type, target)
+                if not req_fields:
+                    default_field = {
+                        "mechanism_claims": "claim_text",
+                        "electrochemical_performance": "capacity",
+                        "sections": "text",
+                        "section_page_fragments": "text",
+                        "writing_cards": "evidence_chain",
+                    }.get(current_target_type, "value")
+                    req_fields = (default_field,)
+
+                for field_name in req_fields:
+                    existing = reviews_by_key.get((current_target_type, str(target.id), field_name))
+                    if existing is not None and is_authoritative_verified_review(self.session, existing, target):
+                        continue
+                    pending_targets.append((current_target_type, field_name, target, existing))
 
         total = len(pending_targets)
         page_targets = pending_targets[page_offset : page_offset + bounded]
@@ -144,17 +219,37 @@ class AIVerificationService:
         for current_target_type, field_name, target, existing in page_targets:
             snapshot = ai_field_snapshot(current_target_type, target, field_name)
             if recover_evidence:
-                recovery = recovery_service.recover_for_target(
-                    paper=paper,
-                    target_type=current_target_type,
-                    target_id=str(target.id),
-                    field_name=field_name,
-                    target_value=snapshot.get("value"),
-                    evidence_text=str(snapshot.get("evidence_text") or ""),
-                    evidence_types=list(getattr(target, "evidence_types", None) or []),
-                    limit=3,
-                )
-                candidates = recovery["candidates"]
+                recoveries = [
+                    recovery_service.recover_for_target(
+                        paper=evidence_paper,
+                        target_type=current_target_type,
+                        target_id=str(target.id),
+                        field_name=field_name,
+                        target_value=snapshot.get("value"),
+                        evidence_text=str(snapshot.get("evidence_text") or ""),
+                        evidence_types=list(getattr(target, "evidence_types", None) or []),
+                        limit=3,
+                    )
+                    for evidence_paper in evidence_papers
+                ]
+                candidates = []
+                for evidence_paper, source_recovery in zip(evidence_papers, recoveries, strict=True):
+                    for candidate in source_recovery["candidates"]:
+                        candidates.append({
+                            **candidate,
+                            "evidence_paper_id": str(evidence_paper.id),
+                            "source_paper_id": str(evidence_paper.id),
+                        })
+                candidates.sort(key=lambda item: (-float(item.get("match_score") or 0), str(item["evidence_paper_id"]), int(item.get("page") or 0)))
+                candidates = candidates[:3]
+                recovery = {
+                    "status": "recovered" if any(item.get("status") in {"recovered", "existing_exact"} for item in recoveries) else "no_supporting_evidence",
+                    "candidate_count": sum(int(item.get("candidate_count") or 0) for item in recoveries),
+                    "exact_candidate_count": sum(int(item.get("exact_candidate_count") or 0) for item in recoveries),
+                    "blocked_reasons": sorted({reason for item in recoveries for reason in item.get("blocked_reasons", [])}),
+                    "evidence_paper_ids": [str(item.id) for item in evidence_papers],
+                    "database_writes": False,
+                }
             else:
                 locators = self._candidate_locators(
                     paper_id,
@@ -172,6 +267,8 @@ class AIVerificationService:
                         "extraction_source": locator.parser_source,
                         "match_method": "persisted_locator",
                         "warning_reason": None,
+                        "evidence_paper_id": str(locator.paper_id),
+                        "source_paper_id": str(locator.paper_id),
                     }
                     for locator in locators[:3]
                 ]
@@ -373,7 +470,7 @@ class AIVerificationService:
                 paper_id, canonical, target, submission, identity,
                 outcome="exception", status="needs_human", reasons=[conflict_reason], dry_run=dry_run,
             )
-        if existing is not None and existing.reviewer_status == "verified":
+        if existing is not None and is_safe_verified_review(existing):
             return self._finalize_failure(
                 paper_id, canonical, target, submission, identity,
                 outcome="exception", status="needs_human", reasons=["human_verified_requires_human_override"], dry_run=dry_run,
@@ -392,18 +489,77 @@ class AIVerificationService:
 
         paper = self.session.get(Paper, paper_id)
         reasons: list[str] = []
+
+        if submission.source_paper_id is not None and submission.evidence_paper_id is not None:
+            if str(submission.source_paper_id).strip() != str(submission.evidence_paper_id).strip():
+                return self._finalize_failure(
+                    paper_id, canonical, target, submission, identity,
+                    outcome="exception", status="needs_human",
+                    reasons=["conflicting_evidence_paper_ids"], dry_run=dry_run,
+                    target_paper_id=paper_id,
+                    source_paper_id=None,
+                )
+
+        evidence_paper_id_raw = submission.evidence_paper_id or submission.source_paper_id
+        resolved_evidence_paper_id: UUID | None = paper_id
+        evidence_paper = paper
+        evidence_paper_authorized = True
+
+        if evidence_paper_id_raw is not None and str(evidence_paper_id_raw).strip():
+            try:
+                candidate_evidence_uuid = UUID(str(evidence_paper_id_raw).strip())
+            except (ValueError, AttributeError):
+                candidate_evidence_uuid = None
+                evidence_paper_authorized = False
+
+            if candidate_evidence_uuid is not None:
+                if candidate_evidence_uuid == paper_id:
+                    resolved_evidence_paper_id = paper_id
+                    evidence_paper = paper
+                    evidence_paper_authorized = True
+                else:
+                    rel = self.session.scalar(
+                        select(PaperRelationship.id).where(
+                            PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+                            or_(
+                                and_(
+                                    PaperRelationship.source_paper_id == paper_id,
+                                    PaperRelationship.target_paper_id == candidate_evidence_uuid,
+                                ),
+                                and_(
+                                    PaperRelationship.target_paper_id == paper_id,
+                                    PaperRelationship.source_paper_id == candidate_evidence_uuid,
+                                ),
+                            ),
+                        ).limit(1)
+                    )
+                    if rel is not None:
+                        evidence_paper = self.session.get(Paper, candidate_evidence_uuid)
+                        if evidence_paper is not None:
+                            resolved_evidence_paper_id = candidate_evidence_uuid
+                            evidence_paper_authorized = True
+                        else:
+                            resolved_evidence_paper_id = candidate_evidence_uuid
+                            evidence_paper_authorized = False
+                    else:
+                        resolved_evidence_paper_id = candidate_evidence_uuid
+                        evidence_paper_authorized = False
+
         evidence_checks: dict[str, bool] = {
             "target_exists": True,
             "target_belongs_to_paper": True,
+            "evidence_paper_authorized": evidence_paper_authorized,
             "evidence_text_present": bool(submission.evidence_text.strip()),
             "confidence_threshold": submission.confidence >= self.settings.ai_verification_min_confidence,
             "no_unresolved_conflict": not self._has_unresolved_conflict(canonical, target),
         }
         page_text: str | None = None
         pdf_error = "missing_page" if submission.page is None else None
-        if paper is not None and submission.page is not None:
-            page_text, pdf_error, _path = read_pdf_page_text(paper, submission.page)
-        evidence_checks["real_pdf_present"] = pdf_error not in {"missing_real_pdf", "unreadable_pdf"}
+        if not evidence_paper_authorized:
+            pdf_error = "unauthorized_evidence_paper"
+        elif evidence_paper is not None and submission.page is not None:
+            page_text, pdf_error, _path = read_pdf_page_text(evidence_paper, submission.page)
+        evidence_checks["real_pdf_present"] = pdf_error not in {"missing_real_pdf", "unreadable_pdf", "unauthorized_evidence_paper"}
         evidence_checks["page_valid"] = pdf_error is None
         evidence_checks["evidence_on_pdf_page"] = (
             pdf_error is None
@@ -420,6 +576,7 @@ class AIVerificationService:
             exception_reasons = {
                 "target_exists",
                 "target_belongs_to_paper",
+                "evidence_paper_authorized",
                 "confidence_threshold",
                 "no_unresolved_conflict",
                 "real_pdf_present",
@@ -442,11 +599,13 @@ class AIVerificationService:
                 paper_id, canonical, target, submission, identity,
                 outcome=outcome, status=status, reasons=reasons, dry_run=dry_run,
                 evidence_checks=evidence_checks,
+                target_paper_id=paper_id,
+                source_paper_id=resolved_evidence_paper_id,
             )
 
         locator = matching_locator(
             self.session,
-            paper_id=paper_id,
+            paper_id=resolved_evidence_paper_id or paper_id,
             target_type=canonical,
             target_id=submission.target_id,
             field_name=submission.field_name,
@@ -456,7 +615,7 @@ class AIVerificationService:
         locator_recovered = locator is None
         if not dry_run and locator is None:
             locator = EvidenceLocator(
-                paper_id=paper_id,
+                paper_id=resolved_evidence_paper_id or paper_id,
                 source_type="pdf",
                 target_type=canonical,
                 target_id=submission.target_id,
@@ -466,6 +625,7 @@ class AIVerificationService:
                 locator_status="exact_page",
                 locator_confidence=submission.confidence,
                 parser_source="single_ai_verification",
+                bbox=None,
             )
             self.session.add(locator)
             self.session.flush()
@@ -480,9 +640,13 @@ class AIVerificationService:
             locator_fingerprint(locator)
             if locator is not None
             else stable_hash({
-                "paper_id": str(paper_id), "target_type": canonical, "target_id": submission.target_id,
-                "field_name": submission.field_name, "page": submission.page,
-                "evidence_text": normalize_evidence_text(submission.evidence_text), "locator_status": "exact_page",
+                "paper_id": str(resolved_evidence_paper_id or paper_id),
+                "target_type": canonical,
+                "target_id": submission.target_id,
+                "field_name": submission.field_name,
+                "page": submission.page,
+                "evidence_text": normalize_evidence_text(submission.evidence_text),
+                "locator_status": "exact_page",
             })
         )
         locator_checks = {
@@ -514,6 +678,8 @@ class AIVerificationService:
                     locator_checks=locator_checks,
                     idempotency_key=idempotency_key,
                     outcome=outcome,
+                    target_paper_id=paper_id,
+                    source_paper_id=resolved_evidence_paper_id or paper_id,
                 )
             }
             self.session.add(review)
@@ -532,6 +698,9 @@ class AIVerificationService:
             "target_snapshot_fingerprint": final_fingerprint,
             "idempotent": False,
             "database_writes": not dry_run,
+            "target_paper_id": str(paper_id),
+            "source_paper_id": str(resolved_evidence_paper_id or paper_id),
+            "evidence_paper_id": str(resolved_evidence_paper_id or paper_id),
         }
 
     def _finalize_failure(
@@ -547,7 +716,11 @@ class AIVerificationService:
         reasons: list[str],
         dry_run: bool,
         evidence_checks: dict[str, bool] | None = None,
+        target_paper_id: UUID | None = None,
+        source_paper_id: UUID | None = None,
     ) -> dict[str, Any]:
+        target_paper = target_paper_id or paper_id
+        resolved_source = source_paper_id or paper_id
         if not dry_run:
             review = self._upsert_review(paper_id, canonical, submission.target_id, submission.field_name)
             if review.reviewer_status != "verified":
@@ -571,6 +744,8 @@ class AIVerificationService:
                         locator_checks={"exact_page_or_bbox": False},
                         idempotency_key=self._idempotency_key(paper_id, canonical, submission, identity),
                         outcome=outcome,
+                        target_paper_id=target_paper,
+                        source_paper_id=resolved_source,
                     )
                 }
                 review.review_payload = payload
@@ -588,6 +763,9 @@ class AIVerificationService:
             "evidence_checks": evidence_checks or {},
             "idempotent": False,
             "database_writes": not dry_run,
+            "target_paper_id": str(target_paper),
+            "source_paper_id": str(resolved_source),
+            "evidence_paper_id": str(resolved_source),
         }
 
     def _verification_payload(
@@ -602,7 +780,12 @@ class AIVerificationService:
         locator_checks: dict[str, bool],
         idempotency_key: str,
         outcome: str,
+        target_paper_id: UUID | None = None,
+        source_paper_id: UUID | None = None,
     ) -> dict[str, Any]:
+        evidence_paper_str = str(source_paper_id) if source_paper_id else (
+            str(submission.evidence_paper_id or submission.source_paper_id or target_paper_id or "")
+        )
         return {
             "actor_type": "ai",
             "identity_verified": True,
@@ -617,7 +800,11 @@ class AIVerificationService:
             "decision": decision,
             "outcome": outcome,
             "reasoning_summary": submission.reasoning_summary,
+            "target_paper_id": str(target_paper_id) if target_paper_id else None,
+            "source_paper_id": evidence_paper_str or None,
+            "evidence_paper_id": evidence_paper_str or None,
             "page": submission.page,
+            "evidence_text": submission.evidence_text,
             "evidence_checks": evidence_checks,
             "locator_checks": locator_checks,
             "target_snapshot_fingerprint": target_fingerprint,
@@ -702,25 +889,160 @@ class AIVerificationService:
             checks["content_supported_by_evidence"] = bool(value_text) and (
                 value_text in evidence or len(tokens & evidence_tokens) / max(1, len(tokens)) >= 0.45
             )
-        numbers = self._NUMBER_RE.findall(str(value or ""))
-        if isinstance(value, (int, float)):
-            numbers = [str(value)]
-        if numbers:
-            evidence_numbers = [float(item) for item in self._NUMBER_RE.findall(evidence_text)]
-            checks["numeric_value_matches"] = all(
-                any(abs(float(number) - candidate) <= max(1e-8, abs(float(number)) * 1e-6) for candidate in evidence_numbers)
-                for number in numbers
-            )
-        if unit:
-            normalized_unit = normalize_evidence_text(unit).replace(" ", "")
-            normalized_page_units = evidence.replace(" ", "")
-            checks["unit_matches"] = normalized_unit in normalized_page_units
+        if canonical != "dft_results" or field_name == "value":
+            numbers = self._NUMBER_RE.findall(str(value or ""))
+            if isinstance(value, (int, float)):
+                numbers = [str(value)]
+            if numbers:
+                evidence_number_tokens = self._NUMBER_RE.findall(evidence_text)
+                evidence_numbers = [float(item) for item in evidence_number_tokens]
+                checks["numeric_value_matches"] = all(
+                    any(
+                        abs(float(number) - candidate) <= max(1e-8, abs(float(number)) * 1e-6)
+                        # Preserve a claimed negative sign; + and unsigned positive are equivalent.
+                        and (float(number) >= 0 or token.lstrip().startswith("-"))
+                        for candidate, token in zip(evidence_numbers, evidence_number_tokens)
+                    )
+                    for number in numbers
+                )
+            if canonical == "dft_results" and field_name == "value":
+                expected_values = [value]
+                value_upper = getattr(target, "value_upper", None)
+                if value_upper is not None:
+                    expected_values.append(value_upper)
+                normalized_unit = normalize_evidence_text(unit).replace(" ", "") if unit else ""
+                # Table rows/quoted fragments are line- or delimiter-bounded.  Each
+                # expected value must share one such data item with its unit; a value
+                # from one row and a unit from another cannot authorize the record.
+                evidence_items = [
+                    normalize_evidence_text(item)
+                    for item in re.split(r"[\r\n;|]+", evidence_text)
+                    if normalize_evidence_text(item)
+                ]
+                def signed_value_in_item(expected: Any, item: str) -> bool:
+                    try:
+                        expected_float = float(expected)
+                    except (TypeError, ValueError):
+                        return False
+                    for match in self._NUMBER_RE.finditer(item):
+                        token = match.group(0)
+                        context = item[max(0, match.start() - 24):match.start()]
+                        if re.search(r"\b(config(?:uration)?|conf|structure|page|table|figure)\s*[:#-]?\s*$", context, re.I):
+                            continue
+                        if (
+                            abs(expected_float - float(token)) <= max(1e-8, abs(expected_float) * 1e-6)
+                            and (expected_float >= 0 or token.lstrip().startswith("-"))
+                        ):
+                            return True
+                    return False
+                def unit_in_item(item: str) -> bool:
+                    return bool(normalized_unit) and bool(re.search(
+                        rf"(?<![A-Za-z0-9]){re.escape(normalized_unit)}(?![A-Za-z0-9])",
+                        item,
+                        re.I,
+                    ))
+                value_kind = str(getattr(target, "value_kind", None) or "").casefold()
+                def range_semantics(item: str) -> bool:
+                    if value_upper is None:
+                        return True
+                    if value_kind in {"range", "interval"}:
+                        return bool(re.search(r"\b(range|between|from)\b|\d\s*[-–—]\s*[-+]?\d", item, re.I))
+                    if value_kind in {"upper_bound", "upper", "maximum", "max"}:
+                        return bool(re.search(r"<=|≤|\b(upper bound|at most|up to|maximum|max)\b", item, re.I))
+                    return False
+                checks["value_unit_same_evidence_item"] = bool(normalized_unit) and all(
+                    any(
+                        signed_value_in_item(expected, item)
+                        and unit_in_item(item)
+                        and range_semantics(item)
+                        for item in evidence_items
+                    )
+                    for expected in expected_values
+                )
+            if unit:
+                normalized_unit = normalize_evidence_text(unit).replace(" ", "")
+                normalized_page_units = evidence.replace(" ", "")
+                checks["unit_matches"] = bool(re.search(
+                    rf"(?<![A-Za-z0-9]){re.escape(normalized_unit)}(?![A-Za-z0-9])",
+                    evidence,
+                    re.I,
+                ))
+            elif canonical == "dft_results" and field_name == "value":
+                checks["unit_matches"] = False
         if canonical == "dft_results":
             checks["material_identity_present"] = bool(target.catalyst_sample_id) or bool((target.evidence_payload or {}).get("material_identity"))
-            for entity_name in ("adsorbate", "reaction_step"):
-                entity = normalize_evidence_text(getattr(target, entity_name, None))
+            if field_name == "catalyst":
+                catalyst, active_sites = get_dft_catalyst_identity(
+                    self.session,
+                    target.catalyst_sample_id,
+                )
+                supported_types = {"single_atom", "dual_atom", "bimetallic"}
+                if (
+                    catalyst is None
+                    or not normalize_evidence_text(catalyst.name)
+                    or str(catalyst.catalyst_type or "").casefold() not in supported_types
+                ):
+                    checks["catalyst_consistent"] = False
+                else:
+                    catalyst_name = normalize_evidence_text(catalyst.name)
+                    required_phrases = [catalyst_name]
+                    if catalyst.coordination:
+                        required_phrases.append(normalize_evidence_text(catalyst.coordination))
+                    if catalyst.support:
+                        required_phrases.append(normalize_evidence_text(catalyst.support))
+                    phrase_matches = lambda phrase: bool(re.search(
+                        rf"(?<![A-Za-z0-9]){re.escape(phrase)}(?![A-Za-z0-9])", evidence_text, re.I
+                    ))
+                    if catalyst.catalyst_type == "single_atom":
+                        type_matches = any(phrase_matches(term) for term in ("single atom", "single-atom", "sac"))
+                    elif catalyst.catalyst_type in {"dual_atom", "bimetallic"}:
+                        type_matches = any(phrase_matches(term) for term in ("dual atom", "dual-atom", "dac", "bimetallic"))
+                    else:
+                        type_matches = normalize_evidence_text(catalyst.catalyst_type) in evidence
+                    metals = catalyst.metal_centers if isinstance(catalyst.metal_centers, list) else [catalyst.metal_centers]
+                    metal_matches = all(
+                        bool(re.search(rf"(?<![A-Za-z0-9]){re.escape(str(metal))}(?![A-Za-z0-9])", evidence_text, re.I))
+                        for metal in metals if metal
+                    )
+                    active_site_matches = all(
+                        phrase_matches(normalize_evidence_text(site.active_site_key))
+                        for site in active_sites
+                    )
+                    checks["catalyst_consistent"] = (
+                        all(phrase and phrase_matches(phrase) for phrase in required_phrases)
+                        and type_matches
+                        and metal_matches
+                        and active_site_matches
+                    )
+            elif field_name == "energy_type":
+                prop = str(target.property_type or "").casefold()
+                tax = get_property_taxonomy(prop)
+                canonical_prop = str(tax.get("canonical_property_type") or "").casefold()
+                synonyms = {
+                    "gibbs_free_energy_change": ("gibbs free energy", "free energy change", "delta g", "自由能变化", "吉布斯自由能"),
+                    "adsorption_energy": ("adsorption energy", "adsorption free energy"),
+                    "binding_energy": ("binding energy",),
+                    "reaction_barrier": ("reaction barrier", "activation energy", "activation barrier"),
+                }
+                concepts = synonyms.get(canonical_prop, (prop.replace("_", " "), canonical_prop.replace("_", " ")))
+                checks["energy_type_consistent"] = any(term and term in evidence for term in concepts)
+            elif field_name == "reaction_step":
+                entity = re.sub(r"\s+", "", str(value or "").replace("→", "->").replace("⟶", "->").replace("⟶", "->"))
                 if entity:
-                    checks[f"{entity_name}_consistent"] = entity in evidence
+                    normalized_page = re.sub(r"\s+", "", evidence_text.replace("→", "->").replace("⟶", "->").replace("⟶", "->"))
+                    checks["reaction_step_consistent"] = entity.casefold() in normalized_page.casefold()
+            elif field_name == "adsorbate":
+                entity = str(value or "").strip()
+                if entity:
+                    checks["adsorbate_consistent"] = bool(
+                        re.search(rf"(?<![A-Za-z0-9]){re.escape(entity)}(?![A-Za-z0-9])", evidence_text, re.I)
+                    )
+            elif field_name == "value":
+                config_idx = extract_configuration_index(getattr(target, "evidence_payload", None) if not isinstance(target, dict) else target.get("evidence_payload"))
+                if config_idx is not None:
+                    checks["configuration_consistent"] = (
+                        bool(re.search(rf"\b(config(?:uration)?|conf|structure)[-_ #]?{config_idx}\b", evidence, re.I))
+                    )
         return checks
 
     def _sync_content_projection(self, canonical: str, target: Any) -> None:
@@ -791,9 +1113,11 @@ class AIVerificationService:
             setattr(target, attr, original)
 
     def _candidate_locators(self, paper_id: UUID, target_type: str, target_id: str, field_name: str) -> list[EvidenceLocator]:
+        from app.utils.review_safety import _associated_paper_ids
+        associated_ids = _associated_paper_ids(self.session, {paper_id})
         rows = self.session.scalars(
             select(EvidenceLocator).where(
-                EvidenceLocator.paper_id == paper_id,
+                EvidenceLocator.paper_id.in_(associated_ids),
                 EvidenceLocator.target_id == target_id,
                 EvidenceLocator.field_name == field_name,
             ).order_by(EvidenceLocator.page.asc().nulls_last()).limit(10)
@@ -854,13 +1178,21 @@ class AIVerificationService:
         submission: AIVerificationSubmission,
         identity: AuthenticatedAIVerificationIdentity,
     ) -> str:
+        evidence_paper = str(submission.evidence_paper_id or submission.source_paper_id or paper_id)
         return stable_hash({
-            "paper_id": str(paper_id), "target_type": canonical, "target_id": submission.target_id,
-            "field_name": submission.field_name, "decision": submission.decision,
-            "confidence": submission.confidence, "evidence_text": normalize_evidence_text(submission.evidence_text),
-            "page": submission.page, "proposed_value": submission.proposed_value,
+            "paper_id": str(paper_id),
+            "evidence_paper_id": evidence_paper,
+            "target_type": canonical,
+            "target_id": submission.target_id,
+            "field_name": submission.field_name,
+            "decision": submission.decision,
+            "confidence": submission.confidence,
+            "evidence_text": normalize_evidence_text(submission.evidence_text),
+            "page": submission.page,
+            "proposed_value": submission.proposed_value,
             "expected_target_fingerprint": submission.expected_target_fingerprint,
-            "source_identity": identity.source_identity, "policy_version": AI_VERIFICATION_POLICY_VERSION,
+            "source_identity": identity.source_identity,
+            "policy_version": AI_VERIFICATION_POLICY_VERSION,
         })
 
     @staticmethod

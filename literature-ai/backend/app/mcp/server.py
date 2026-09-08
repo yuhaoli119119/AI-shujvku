@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
+import hashlib
+import math
 import os
 import time
 from pathlib import Path
@@ -83,6 +85,79 @@ def _enforce_postgres_read_only_transaction(session: Any) -> bool:
         return True
     except AttributeError:
         return False
+
+
+# These tools return binary MCP image blocks. Keep their limits deliberately
+# conservative: a caller controls only opaque database IDs, never a filesystem
+# path, but unbounded image/PDF decoding is still an avoidable availability risk.
+_MCP_MAX_FIGURE_IMAGE_BYTES = 25 * 1024 * 1024
+_MCP_MAX_IMAGE_PIXELS = 24_000_000
+_MCP_RENDER_MIN_DPI = 72
+_MCP_RENDER_MAX_DPI = 200
+
+
+def _mcp_image_format_and_dimensions(content: bytes) -> tuple[str, int, int]:
+    """Validate the supported image envelope before returning it to an MCP client."""
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        if len(content) < 24 or content[12:16] != b"IHDR":
+            raise ValueError("image_content_invalid_png")
+        width = int.from_bytes(content[16:20], "big")
+        height = int.from_bytes(content[20:24], "big")
+        return "png", width, height
+
+    if not content.startswith(b"\xff\xd8"):
+        raise ValueError("image_content_unsupported_format")
+
+    # JPEG dimensions are stored in a Start Of Frame segment. Parse only the
+    # segment framing needed to obtain them; malformed input is never decoded.
+    position = 2
+    while position < len(content):
+        while position < len(content) and content[position] == 0xFF:
+            position += 1
+        if position >= len(content):
+            break
+        marker = content[position]
+        position += 1
+        if marker in {0x01, *range(0xD0, 0xD8), 0xD8, 0xD9}:
+            continue
+        if position + 2 > len(content):
+            break
+        segment_size = int.from_bytes(content[position:position + 2], "big")
+        if segment_size < 2 or position + segment_size > len(content):
+            break
+        if marker in {*range(0xC0, 0xC4), *range(0xC5, 0xC8), *range(0xC9, 0xCC), *range(0xCD, 0xD0)}:
+            if segment_size < 7:
+                break
+            height = int.from_bytes(content[position + 3:position + 5], "big")
+            width = int.from_bytes(content[position + 5:position + 7], "big")
+            return "jpeg", width, height
+        position += segment_size
+    raise ValueError("image_content_invalid_jpeg")
+
+
+def _mcp_validate_image_dimensions(width: int, height: int) -> None:
+    if width < 1 or height < 1:
+        raise ValueError("image_content_invalid_dimensions")
+    if width * height > _MCP_MAX_IMAGE_PIXELS:
+        raise ValueError("image_content_exceeds_pixel_limit")
+
+
+def _mcp_read_figure_image(path: Path) -> tuple[bytes, str, dict[str, int]]:
+    try:
+        size_bytes = path.stat().st_size
+    except OSError as exc:
+        raise ValueError("figure_image_missing") from exc
+    if size_bytes < 1:
+        raise ValueError("figure_image_empty")
+    if size_bytes > _MCP_MAX_FIGURE_IMAGE_BYTES:
+        raise ValueError("figure_image_exceeds_byte_limit")
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        raise ValueError("figure_image_unreadable") from exc
+    image_format, width, height = _mcp_image_format_and_dimensions(content)
+    _mcp_validate_image_dimensions(width, height)
+    return content, image_format, {"width": width, "height": height}
 
 
 def _allowed_mcp_hosts() -> list[str]:
@@ -1906,8 +1981,134 @@ def compare_papers(
 
 
 # ---------------------------------------------------------------------------
-# On-demand atomic tools (read_paper_page, recrop_figure, review_figure)
+# On-demand atomic tools (read_paper_page, image reads, recrop_figure, review_figure)
 # ---------------------------------------------------------------------------
+
+
+@mcp_server.tool(
+    name="get_figure_image",
+    description=(
+        "Return the current stored crop for one figure as a real MCP image content block. "
+        "paper_id must exactly own figure_id (including an explicitly linked SI source paper returned by "
+        "get_chart_review_task). Read-only; callers cannot supply a file path."
+    ),
+)
+def get_figure_image(paper_id: str, figure_id: str) -> Any:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    try:
+        pid = UUID(paper_id)
+        fid = UUID(figure_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("paper_id_and_figure_id_must_be_valid_uuids") from exc
+
+    with session_scope(settings.database_url) as session:
+        read_only = _enforce_postgres_read_only_transaction(session)
+        _ensure_paper_exists(session, pid)
+        figure = session.get(PaperFigure, fid)
+        if figure is None or figure.paper_id != pid:
+            # Deliberately do not distinguish an absent figure from a figure
+            # belonging to a different paper.
+            raise LookupError("figure_not_found_for_paper")
+        image_path = resolve_persisted_artifact_path(
+            figure.image_path,
+            category="figures",
+            settings=settings,
+        )
+        if image_path is None:
+            raise ValueError("figure_image_missing_or_unsafe")
+        metadata = {
+            "paper_id": str(pid),
+            "figure_id": str(fid),
+            "figure_label": figure.figure_label,
+            "page": figure.page,
+            "caption": figure.caption,
+            "crop_status": figure.crop_status,
+            "crop_source": figure.crop_source,
+            "postgres_transaction_read_only": read_only,
+        }
+
+    content, image_format, pixel_size = _mcp_read_figure_image(image_path)
+    return [
+        {
+            **metadata,
+            "mime_type": f"image/{image_format}",
+            "pixel_size": pixel_size,
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "database_writes": False,
+        },
+        Image(data=content, format=image_format),
+    ]
+
+
+@mcp_server.tool(
+    name="render_paper_page",
+    description=(
+        "Render one physical 1-based PDF page for a stored paper and return it as a real MCP PNG image content block. "
+        "dpi is optional and restricted to a safe range. Read-only; callers cannot supply a PDF path."
+    ),
+)
+def render_paper_page(paper_id: str, page: int, dpi: int = 144) -> Any:
+    require_mcp_capability("read_papers")
+    if page < 1:
+        raise ValueError("page_must_be_at_least_1")
+    if dpi < _MCP_RENDER_MIN_DPI or dpi > _MCP_RENDER_MAX_DPI:
+        raise ValueError(f"dpi_must_be_between_{_MCP_RENDER_MIN_DPI}_and_{_MCP_RENDER_MAX_DPI}")
+    settings = get_settings()
+    try:
+        pid = UUID(paper_id)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("paper_id_must_be_a_valid_uuid") from exc
+
+    with session_scope(settings.database_url) as session:
+        read_only = _enforce_postgres_read_only_transaction(session)
+        paper = _ensure_paper_exists(session, pid)
+        pdf_path = resolve_persisted_artifact_path(
+            paper.pdf_path,
+            category="pdf",
+            settings=settings,
+        )
+        if pdf_path is None:
+            raise ValueError("paper_pdf_missing_or_unsafe")
+
+    import fitz
+
+    try:
+        document = fitz.open(str(pdf_path))
+    except Exception as exc:
+        raise ValueError("paper_pdf_unreadable") from exc
+    try:
+        page_index = page - 1
+        if page_index >= len(document):
+            raise ValueError("paper_page_out_of_bounds")
+        pdf_page = document[page_index]
+        scale = dpi / 72.0
+        expected_width = math.ceil(pdf_page.rect.width * scale)
+        expected_height = math.ceil(pdf_page.rect.height * scale)
+        _mcp_validate_image_dimensions(expected_width, expected_height)
+        pix = pdf_page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+        _mcp_validate_image_dimensions(pix.width, pix.height)
+        content = pix.tobytes("png")
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("paper_page_render_failed") from exc
+    finally:
+        document.close()
+
+    return [
+        {
+            "paper_id": str(pid),
+            "page": page,
+            "dpi": dpi,
+            "mime_type": "image/png",
+            "pixel_size": {"width": pix.width, "height": pix.height},
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "postgres_transaction_read_only": read_only,
+            "database_writes": False,
+        },
+        Image(data=content, format="png"),
+    ]
 
 
 @mcp_server.tool(
@@ -3145,6 +3346,7 @@ def export_ml_dataset(
     target_types: list[str] | None = None,
     format: str = "json",
     limit: int = 1000,
+    dataset_profile: str | None = None,
 ) -> dict[str, Any]:
     require_mcp_capability("export_data")
     require_mcp_exports_enabled()
@@ -3168,12 +3370,15 @@ def export_ml_dataset(
                     year_min=year_min,
                     year_max=year_max,
                     paper_id=UUID(paper_id) if paper_id else None,
+                    limit=max(1, min(limit, 5000)),
+                    dataset_profile=dataset_profile,
                 )
                 dft_data = {
                     "metadata": {
                         "target_type": "dft_results",
                         "format": "csv",
                         "gate_summary": gate_summary,
+                        "dataset_profile": gate_summary.get("dataset_profile"),
                     },
                     "csv": csv_text,
                 }
@@ -3185,6 +3390,7 @@ def export_ml_dataset(
                     year_max=year_max,
                     paper_id=UUID(paper_id) if paper_id else None,
                     limit=max(1, min(limit, 5000)),
+                    dataset_profile=dataset_profile,
                 )
 
         # Electrochemical performance — MCP-only feature (no REST equivalent yet)
@@ -3224,6 +3430,20 @@ def export_ml_dataset(
                     "validation_status": row.validation_status,
                 })
 
+        reported_dataset_profile = dft_data.get("metadata", {}).get("dataset_profile") if dft_data else None
+        if format.lower() == "csv":
+            gate_sum = dft_data.get("metadata", {}).get("gate_summary", {}) if dft_data else {}
+            dft_record_count = int(gate_sum.get("exported_rows", 0))
+            base_eligible_count = int(gate_sum.get("base_eligible_count", gate_sum.get("eligible", 0)))
+            profile_excluded_count = int(gate_sum.get("profile_excluded_count", 0))
+        else:
+            dft_meta = dft_data.get("metadata", {}) if dft_data else {}
+            dft_record_count = len(dft_data.get("records", [])) if dft_data else 0
+            base_eligible_count = int(dft_meta.get("base_eligible_count", dft_meta.get("eligible_count", 0)))
+            profile_excluded_count = int(dft_meta.get("profile_excluded_count", 0))
+
+        exported_count = dft_record_count + len(ec_records)
+
         # Record export in audit log
         audit = AuditLog(
             action="export_ml_dataset",
@@ -3236,7 +3456,11 @@ def export_ml_dataset(
                 "year_max": year_max,
                 "target_types": targets,
                 "format": format,
-                "dft_record_count": len(dft_data.get("records", [])) if dft_data else 0,
+                "dataset_profile": reported_dataset_profile,
+                "base_eligible_count": base_eligible_count,
+                "profile_excluded_count": profile_excluded_count,
+                "exported_count": exported_count,
+                "dft_record_count": dft_record_count,
                 "ec_record_count": len(ec_records),
             },
         )
@@ -3252,7 +3476,9 @@ def export_ml_dataset(
                 "normalized_library_name": normalized_library_name,
                 "year_min": year_min,
                 "year_max": year_max,
+                "dataset_profile": reported_dataset_profile,
             },
+            "dataset_profile": reported_dataset_profile,
         }
 
         if dft_data is not None:

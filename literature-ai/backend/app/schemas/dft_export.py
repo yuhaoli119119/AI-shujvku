@@ -23,6 +23,15 @@ class DFTExportMetadataV2(BaseModel):
     lm_record_count: int
     history_backfill_mode: str
     ml_setting_field: Literal["linked_dft_setting"]
+    dataset_profile: str | None = None
+    base_eligible_count: int | None = None
+    profile_candidate_count: int | None = None
+    profile_included_count: int | None = None
+    profile_included_count_before_limit: int | None = None
+    profile_excluded_count: int | None = None
+    profile_excluded_reasons: dict[str, int] | None = None
+    exported_count_after_limit: int | None = None
+    limit: int | None = None
 
 
 class DFTPaperPayloadV2(BaseModel):
@@ -47,6 +56,8 @@ class DFTCatalystPayloadV2(BaseModel):
     support: str | None = None
     synthesis_method: str | None = None
     evidence_strength: str | None = None
+
+
 
 
 class DFTSettingPayloadV2(BaseModel):
@@ -83,6 +94,7 @@ class DFTTargetPayloadV2(BaseModel):
     value_kind: str | None = None
     unit: str | None = None
     reaction_step: str | None = None
+    configuration_index: int | None = Field(default=None, gt=0, strict=True)
     normalized_value: float | None = None
     normalized_unit: str | None = None
     normalization_status: str
@@ -107,6 +119,7 @@ class DFTLMClaimPayloadV2(BaseModel):
     value_kind: str | None = None
     unit: str | None = None
     reaction_step: str | None = None
+    configuration_index: int | None = Field(default=None, gt=0, strict=True)
     normalized_value: float | None = None
     normalized_unit: str | None = None
     normalization_status: str

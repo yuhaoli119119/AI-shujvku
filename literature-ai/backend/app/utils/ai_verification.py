@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.utils.artifact_paths import resolve_paper_pdf_path
 from app.db.models import (
     DFTResult,
     ElectrochemicalPerformance,
@@ -20,9 +22,11 @@ from app.db.models import (
     ExtractionFieldReview,
     MechanismClaim,
     Paper,
+    PaperRelationship,
     PaperSection,
     WritingCard,
 )
+from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.review_target_resolver import ReviewTargetResolver
 from app.services.evidence_page_recovery import PaperPageTextProvider
 
@@ -115,12 +119,55 @@ def ai_field_snapshot(target_type: str, target: Any, field_name: str) -> dict[st
             "mechanism_direction": {"value": None, "unit": None, "evidence_text": target.evidence_text or ""},
         }
     elif canonical == "dft_results":
+        from app.services.review_target_resolver import get_dft_catalyst_identity
+        from app.utils.configuration_index import extract_configuration_index
+        payload = getattr(target, "evidence_payload", None) if not isinstance(target, dict) else target.get("evidence_payload")
+        payload = payload if isinstance(payload, dict) else {}
+        catalyst_id = getattr(target, "catalyst_sample_id", None) if not isinstance(target, dict) else target.get("catalyst_sample_id")
+        catalyst_sample = getattr(target, "catalyst_sample", None) if not isinstance(target, dict) else target.get("catalyst_sample")
+        active_site_rows = []
+        if catalyst_id and not isinstance(target, dict):
+            try:
+                from sqlalchemy.orm import object_session
+                sess = object_session(target)
+                if sess is not None:
+                    cached_catalyst, active_site_rows = get_dft_catalyst_identity(sess, catalyst_id)
+                    if catalyst_sample is None:
+                        catalyst_sample = cached_catalyst
+            except Exception:
+                pass
+
+        c_name = getattr(catalyst_sample, "name", None) if catalyst_sample else payload.get("material_identity") or payload.get("catalyst_name")
+        c_type = getattr(catalyst_sample, "catalyst_type", None) if catalyst_sample else payload.get("catalyst_type")
+        c_metals = getattr(catalyst_sample, "metal_centers", None) if catalyst_sample else payload.get("metal_centers") or []
+        c_coord = getattr(catalyst_sample, "coordination", None) if catalyst_sample else payload.get("coordination")
+        c_supp = getattr(catalyst_sample, "support", None) if catalyst_sample else payload.get("support")
+        c_site = payload.get("active_site") or payload.get("active_site_context")
+        if active_site_rows:
+            c_site = [row.active_site_key for row in active_site_rows]
+        cfg_idx = extract_configuration_index(payload)
+
         fields = {
-            "catalyst": {"value": str(target.catalyst_sample_id) if target.catalyst_sample_id else None, "unit": None, "evidence_text": target.evidence_text or ""},
-            "adsorbate": {"value": target.adsorbate, "unit": None, "evidence_text": target.evidence_text or ""},
-            "energy_type": {"value": target.property_type, "unit": None, "evidence_text": target.evidence_text or ""},
-            "value": {"value": target.value, "unit": target.unit, "evidence_text": target.evidence_text or ""},
-            "reaction_step": {"value": target.reaction_step, "unit": None, "evidence_text": target.evidence_text or ""},
+            "catalyst": {
+                "value": str(catalyst_id) if catalyst_id else None,
+                "unit": None,
+                "evidence_text": (getattr(target, "evidence_text", None) if not isinstance(target, dict) else target.get("evidence_text")) or "",
+                "name": c_name,
+                "catalyst_type": c_type,
+                "metal_centers": c_metals if isinstance(c_metals, list) else ([c_metals] if c_metals else []),
+                "coordination": c_coord,
+                "support": c_supp,
+                "active_site": c_site,
+            },
+            "adsorbate": {"value": getattr(target, "adsorbate", None) if not isinstance(target, dict) else target.get("adsorbate"), "unit": None, "evidence_text": (getattr(target, "evidence_text", None) if not isinstance(target, dict) else target.get("evidence_text")) or ""},
+            "energy_type": {"value": getattr(target, "property_type", None) if not isinstance(target, dict) else target.get("property_type"), "unit": None, "evidence_text": (getattr(target, "evidence_text", None) if not isinstance(target, dict) else target.get("evidence_text")) or ""},
+            "value": {
+                "value": getattr(target, "value", None) if not isinstance(target, dict) else target.get("value"),
+                "unit": getattr(target, "unit", None) if not isinstance(target, dict) else target.get("unit"),
+                "evidence_text": (getattr(target, "evidence_text", None) if not isinstance(target, dict) else target.get("evidence_text")) or "",
+                "configuration_index": cfg_idx,
+            },
+            "reaction_step": {"value": getattr(target, "reaction_step", None) if not isinstance(target, dict) else target.get("reaction_step"), "unit": None, "evidence_text": (getattr(target, "evidence_text", None) if not isinstance(target, dict) else target.get("evidence_text")) or ""},
         }
     elif canonical == "electrochemical_performance":
         fields = {
@@ -255,6 +302,54 @@ def read_pdf_page_text(paper: Paper, page: int) -> tuple[str | None, str | None,
     return None, record.status, pdf_path
 
 
+def cached_read_pdf_page_text(session: Session, paper: Paper, page: int) -> tuple[str | None, str | None, Path | None]:
+    """Read each unchanged PDF page once per request/session, including failures."""
+    cache = session.info.setdefault("authoritative_pdf_page_cache", {})
+    resolved_path = resolve_paper_pdf_path(paper.pdf_path, get_settings().storage_root)
+    revision = None
+    if resolved_path is not None:
+        try:
+            stat = resolved_path.stat()
+            revision = (
+                str(resolved_path),
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_mtime_ns,
+                stat.st_ctime_ns,
+                stat.st_size,
+            )
+        except OSError:
+            revision = (str(resolved_path), None, None, None, None, None)
+    key = (str(paper.id), int(page), revision)
+    if key not in cache:
+        cache[key] = read_pdf_page_text(paper, page)
+    return cache[key]
+
+
+def exact_locator_geometry_is_valid(locator: EvidenceLocator, pdf_path: Path | None) -> bool:
+    """Validate that exact_bbox is real page geometry, not an untrusted label."""
+    status = str(locator.locator_status or "").casefold()
+    if locator.page is None or locator.page < 1 or status not in {"exact_page", "exact_bbox"}:
+        return False
+    if status == "exact_page":
+        return True
+    bbox = locator.bbox
+    if not isinstance(bbox, dict) or pdf_path is None or not pdf_path.is_file():
+        return False
+    try:
+        x0, y0, x1, y1 = (float(bbox[key]) for key in ("x0", "y0", "x1", "y1"))
+        if not all(math.isfinite(value) for value in (x0, y0, x1, y1)) or x1 <= x0 or y1 <= y0:
+            return False
+        import fitz
+        with fitz.open(pdf_path) as document:
+            if locator.page > document.page_count:
+                return False
+            rect = document.load_page(locator.page - 1).rect
+        return x0 >= rect.x0 and y0 >= rect.y0 and x1 <= rect.x1 and y1 <= rect.y1
+    except (KeyError, TypeError, ValueError, RuntimeError):
+        return False
+
+
 def ai_review_payload_structurally_valid(review: ExtractionFieldReview | dict[str, Any]) -> bool:
     if isinstance(review, dict):
         status = str(review.get("reviewer_status") or review.get("review_status") or review.get("status") or "").casefold()
@@ -304,9 +399,36 @@ def authoritative_ai_review_valid(session: Session, review: ExtractionFieldRevie
         page = int(verification.get("page"))
     except (TypeError, ValueError):
         return False
+
+    target_paper_id = review.paper_id
+    evidence_paper_str = verification.get("evidence_paper_id") or verification.get("source_paper_id") or str(target_paper_id)
+    try:
+        evidence_paper_uuid = UUID(str(evidence_paper_str).strip())
+    except (ValueError, AttributeError):
+        return False
+
+    if evidence_paper_uuid != target_paper_id:
+        rel = session.scalar(
+            select(PaperRelationship.id).where(
+                PaperRelationship.relationship_type.in_(SUPPLEMENTARY_RELATIONSHIP_TYPES),
+                or_(
+                    and_(
+                        PaperRelationship.source_paper_id == target_paper_id,
+                        PaperRelationship.target_paper_id == evidence_paper_uuid,
+                    ),
+                    and_(
+                        PaperRelationship.target_paper_id == target_paper_id,
+                        PaperRelationship.source_paper_id == evidence_paper_uuid,
+                    ),
+                ),
+            ).limit(1)
+        )
+        if rel is None:
+            return False
+
     locator = matching_locator(
         session,
-        paper_id=review.paper_id,
+        paper_id=evidence_paper_uuid,
         target_type=canonical,
         target_id=review.target_id,
         field_name=review.field_name,
@@ -315,8 +437,12 @@ def authoritative_ai_review_valid(session: Session, review: ExtractionFieldRevie
     )
     if locator is None or locator_fingerprint(locator) != verification.get("locator_fingerprint"):
         return False
-    paper = session.get(Paper, review.paper_id)
+    paper = session.get(Paper, evidence_paper_uuid)
     if paper is None:
         return False
-    page_text, error, _path = read_pdf_page_text(paper, page)
-    return error is None and normalize_evidence_text(review.evidence_text) in normalize_evidence_text(page_text)
+    page_text, error, pdf_path = cached_read_pdf_page_text(session, paper, page)
+    return (
+        error is None
+        and exact_locator_geometry_is_valid(locator, pdf_path)
+        and normalize_evidence_text(review.evidence_text) in normalize_evidence_text(page_text)
+    )

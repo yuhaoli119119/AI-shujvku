@@ -326,7 +326,7 @@ def get_dft_ml_dataset_v3(
     library_name: str | None = Query(default=None),
     min_confidence: float | None = Query(default=None),
     paper_id: UUID | None = Query(default=None),
-    limit: int | None = Query(default=None, ge=0, le=10000),
+    limit: int | None = Query(default=None, ge=0, le=5000),
     session: Session = Depends(get_db_session),
 ) -> dict:
     try:
@@ -362,7 +362,7 @@ def get_dft_ml_dataset_v3_csv(
     library_name: str | None = Query(default=None),
     min_confidence: float | None = Query(default=None),
     paper_id: UUID | None = Query(default=None),
-    limit: int | None = Query(default=None, ge=0, le=10000),
+    limit: int | None = Query(default=None, ge=0, le=5000),
     session: Session = Depends(get_db_session),
 ) -> Response:
     try:

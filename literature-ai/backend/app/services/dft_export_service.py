@@ -31,6 +31,7 @@ from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.catalyst_sample_identity import resolve_sample_identity
 from app.services.dft_completeness_service import DFTCompletenessService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
+from app.utils.configuration_index import extract_configuration_index
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
 
 logger = logging.getLogger(__name__)
@@ -835,6 +836,126 @@ def _dft_quality_row_payload(row: DR, paper: P, gate) -> dict:
     }
 
 
+TARGET_ML_DATASET_PROFILES = frozenset({"dac_lis_ml", "bimetallic_lis_ml", "dac_lis", "sac_lis_ml"})
+_SOLVENT_BENCHMARK_KEYWORDS = frozenset({
+    "dme", "dol", "2dol", "dme+dol", "dme-dol", "dme/dol", "electrolyte", "solvent",
+    "tegdme", "ether", "ec", "dec", "emc", "pc", "pp13tfsi", "pure_solvent",
+})
+_REGRESSION_STATISTICAL_PROPERTIES = frozenset({
+    "slope", "intercept", "r_squared", "r2", "correlation_coefficient",
+    "linear_fitting_slope", "linear_regression_slope", "linear_fitting_intercept",
+    "determination_coefficient",
+})
+_REGRESSION_PROPERTY_PREFIXES = ("slope", "intercept", "r_squared", "r2", "correlation")
+
+
+def _catalyst_scope(value: Any) -> str:
+    token = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if token in {"sac", "single_atom", "single_atom_catalyst"}:
+        return "single_atom"
+    if token in {"dac", "dual_atom", "dual_atom_catalyst", "double_atom", "bimetallic"}:
+        return "dual_atom"
+    if token in {"screening_set", "screening_collection", "multi_metal_screening_set"}:
+        return "screening_set"
+    if token in {"multi_atom_cluster", "cluster"}:
+        return "multi_atom_cluster"
+    return "unknown"
+
+
+def _evaluate_dataset_profile_inclusion(
+    *,
+    dr: DR,
+    effective_catalyst: CS | None,
+    taxonomy: dict[str, Any],
+    evidence_context: dict[str, Any],
+    profile: str | None,
+) -> tuple[bool, str | None]:
+    """Explicit, auditable target dataset scope filter for domain ML exports.
+
+    Decouples raw scientific veracity from ML training set applicability.
+    Preserves raw scientific values while excluding solvent baselines and regression statistics.
+    """
+    if profile is None or not str(profile).strip():
+        return True, None
+
+    normalized_profile = str(profile).strip().lower()
+    if normalized_profile not in TARGET_ML_DATASET_PROFILES:
+        raise ValueError(
+            f"Unsupported dataset_profile: {profile!r}. Supported profiles: {sorted(TARGET_ML_DATASET_PROFILES)}"
+        )
+
+    # 1. Exclude regression parameters and statistical fitting metrics
+    prop = str(dr.property_type or "").strip().lower()
+    canon_prop = str(taxonomy.get("canonical_property_type") or "").strip().lower()
+    ml_role = str(taxonomy.get("ml_role") or "").strip().lower()
+
+    if (
+        prop in _REGRESSION_STATISTICAL_PROPERTIES
+        or canon_prop in _REGRESSION_STATISTICAL_PROPERTIES
+        or ml_role in {"statistical_parameter", "regression_parameter", "unknown"}
+        or any(prop.startswith(prefix) for prefix in _REGRESSION_PROPERTY_PREFIXES)
+        or any(canon_prop.startswith(prefix) for prefix in _REGRESSION_PROPERTY_PREFIXES)
+    ):
+        return False, "excluded_regression_or_statistical_parameter"
+
+    # 2. Exclude electrolyte/solvent benchmarks
+    cat_name = str(
+        getattr(effective_catalyst, "name", "")
+        or getattr(dr, "catalyst_name", "")
+        or ""
+    ).strip().lower()
+    cat_type = str(
+        getattr(effective_catalyst, "catalyst_type", "")
+        or getattr(dr, "catalyst_type", "")
+        or ""
+    ).strip().lower()
+    mat_type = str(
+        evidence_context.get("material_type")
+        or (dr.evidence_payload or {}).get("material_type")
+        or ""
+    ).strip().lower()
+
+    clean_name = re.sub(r"[\s\+\-/]+", "", cat_name)
+    is_solvent_name = (
+        cat_name in _SOLVENT_BENCHMARK_KEYWORDS
+        or clean_name in {"dmedol", "dme", "dol", "tegdme", "ether", "pure_solvent"}
+        or any(kw in cat_name for kw in ("dme+dol", "dme-dol", "dme/dol", "electrolyte", "solvent"))
+    )
+
+    if (
+        cat_type in {"solvent", "electrolyte", "reference_solvent", "liquid_electrolyte", "pure_solvent"}
+        or mat_type in {"solvent", "electrolyte"}
+        or is_solvent_name
+    ):
+        return False, "excluded_solvent_or_electrolyte_benchmark"
+
+    # 3. Catalyst presence and catalyst_type requirement (never guess DAC from material_identity alone)
+    if effective_catalyst is None or dr.catalyst_sample_id is None:
+        return False, "excluded_insufficient_catalyst_scope"
+
+    eff_type = str(getattr(effective_catalyst, "catalyst_type", "") or "").strip().lower()
+    if not eff_type:
+        return False, "excluded_insufficient_catalyst_scope"
+
+    scope = _catalyst_scope(eff_type)
+    if scope == "unknown":
+        return False, "excluded_insufficient_catalyst_scope"
+
+    # 4. Target profile catalyst scope enforcement
+    if normalized_profile in {"dac_lis_ml", "bimetallic_lis_ml", "dac_lis"}:
+        if scope != "dual_atom":
+            return False, "excluded_non_target_catalyst_scope"
+    elif normalized_profile == "sac_lis_ml":
+        if scope != "single_atom":
+            return False, "excluded_non_target_catalyst_scope"
+
+    # 5. Allowed property taxonomy / ml_role for target ML dataset
+    if ml_role not in {"target", "descriptor"}:
+        return False, "excluded_non_target_descriptor_ml_role"
+
+    return True, None
+
+
 def build_dft_ml_dataset(
     session: Session,
     *,
@@ -848,6 +969,7 @@ def build_dft_ml_dataset(
     min_confidence: float | None = None,
     paper_id: UUID | None = None,
     limit: int | None = None,
+    dataset_profile: str | None = None,
     _source_rows: list[tuple[DR, P]] | None = None,
     _gate_by_id: dict[str, Any] | None = None,
     _catalysts: list[CS] | None = None,
@@ -858,6 +980,14 @@ def build_dft_ml_dataset(
     Shared core logic used by both the REST API (/export/dft-dataset) and MCP (export_ml_dataset).
     `limit` caps the number of eligible (gated) records returned.
     """
+    dataset_profile = _optional_text_filter(dataset_profile)
+    limit = _optional_int_filter(limit)
+    normalized_profile = dataset_profile.lower() if dataset_profile else None
+    if normalized_profile is not None and normalized_profile not in TARGET_ML_DATASET_PROFILES:
+        raise ValueError(
+            f"Unsupported dataset_profile: {dataset_profile!r}. Supported profiles: {sorted(TARGET_ML_DATASET_PROFILES)}"
+        )
+
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
     catalyst_name = _optional_text_filter(catalyst_name)
@@ -899,8 +1029,6 @@ def build_dft_ml_dataset(
         paper_ids.add(paper.id)
         if dr.catalyst_sample_id:
             catalyst_sample_ids.add(dr.catalyst_sample_id)
-        if limit is not None and len(eligible_rows) >= limit:
-            break
 
     catalyst_by_id: dict[str, CS] = {}
     catalysts_by_paper: dict[str, list[CS]] = defaultdict(list)
@@ -931,6 +1059,11 @@ def build_dft_ml_dataset(
 
     records: list[dict[str, Any]] = []
     lm_records: list[dict[str, Any]] = []
+
+    profile_candidate_count = len(eligible_rows) if dataset_profile else None
+    profile_included_count = 0 if dataset_profile else None
+    profile_excluded_count = 0 if dataset_profile else None
+    profile_excluded_reasons: Counter[str] = Counter()
 
     for dr, paper, gate in eligible_rows:
         paper_id_str = str(paper.id)
@@ -965,6 +1098,24 @@ def build_dft_ml_dataset(
             evidence_context=evidence_context,
         )
 
+        if dataset_profile:
+            included, reason = _evaluate_dataset_profile_inclusion(
+                dr=dr,
+                effective_catalyst=effective_catalyst,
+                taxonomy=taxonomy,
+                evidence_context=evidence_context,
+                profile=dataset_profile,
+            )
+            if not included:
+                profile_excluded_count += 1
+                if reason:
+                    profile_excluded_reasons[reason] += 1
+                continue
+            profile_included_count += 1
+
+        if limit is not None and len(records) >= limit:
+            continue
+
         common_payload = {
             "record_id": str(dr.id),
             "paper": _paper_payload(paper),
@@ -996,6 +1147,7 @@ def build_dft_ml_dataset(
                 "catalyst_binding_source": catalyst_binding_source,
             },
         }
+        config_idx = extract_configuration_index(dr.evidence_payload)
         target_payload = {
             "property_type": dr.property_type,
             "normalized_property_type": normalized_property_type,
@@ -1011,6 +1163,7 @@ def build_dft_ml_dataset(
             "value_kind": dr.value_kind or ("range" if dr.value_upper is not None else "point"),
             "unit": dr.unit,
             "reaction_step": dr.reaction_step,
+            "configuration_index": config_idx,
             "normalized_value": normalized_value,
             "normalized_unit": normalized_unit,
             "normalization_status": normalization_status,
@@ -1098,11 +1251,13 @@ def build_dft_ml_dataset(
 
     gate_summary = summarize_gate_results(gate_results)
     logger.info("DFT ML dataset export safety gate summary: %s", gate_summary)
+    normalized_profile = dataset_profile.strip().lower() if dataset_profile else None
     return {
         "metadata": {
             "dataset_version": "dft-ml-dataset-v0.2",
             "schema_version": "dft_results_ml_v2",
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "dataset_profile": normalized_profile,
             "filters": {
                 "property_type": property_type,
                 "adsorbate": adsorbate,
@@ -1112,9 +1267,18 @@ def build_dft_ml_dataset(
                 "library_name": normalize_library_name(library_name) if library_name is not None else None,
                 "min_confidence": min_confidence,
                 "paper_id": str(paper_id) if paper_id else None,
+                "dataset_profile": normalized_profile,
             },
             "safety_gate": "safe_verified_with_required_evidence",
-            "eligible_count": gate_summary["eligible"],
+            "eligible_count": len(records),
+            "base_eligible_count": gate_summary["eligible"],
+            "profile_candidate_count": profile_candidate_count,
+            "profile_included_count": profile_included_count,
+            "profile_included_count_before_limit": profile_included_count,
+            "profile_excluded_count": profile_excluded_count,
+            "profile_excluded_reasons": dict(sorted(profile_excluded_reasons.items())) if dataset_profile else None,
+            "exported_count_after_limit": len(records),
+            "limit": limit,
             "blocked_count": gate_summary["blocked"],
             "blocked_reasons": gate_summary["blocked_reasons"],
             "total_candidates": gate_summary["total_candidates"],
@@ -1532,11 +1696,21 @@ def build_dft_csv_rows(
     library_name: str | None = None,
     min_confidence: float | None = None,
     paper_id: UUID | None = None,
+    limit: int | None = None,
+    dataset_profile: str | None = None,
 ) -> tuple[str, dict]:
     """Build DFT CSV export as a UTF-8 encoded string, plus gate summary.
 
     Returns (csv_string, gate_summary_dict).
     """
+    dataset_profile = _optional_text_filter(dataset_profile)
+    limit = _optional_int_filter(limit)
+    normalized_profile = dataset_profile.lower() if dataset_profile else None
+    if normalized_profile is not None and normalized_profile not in TARGET_ML_DATASET_PROFILES:
+        raise ValueError(
+            f"Unsupported dataset_profile: {dataset_profile!r}. Supported profiles: {sorted(TARGET_ML_DATASET_PROFILES)}"
+        )
+
     property_type = _optional_text_filter(property_type)
     adsorbate = _optional_text_filter(adsorbate)
     catalyst_name = _optional_text_filter(catalyst_name)
@@ -1560,6 +1734,7 @@ def build_dft_csv_rows(
     writer = csv.writer(output)
     writer.writerow(
         [
+            "record_id",
             "paper_id",
             "title",
             "doi",
@@ -1578,6 +1753,7 @@ def build_dft_csv_rows(
             "raw_value",
             "raw_unit",
             "reaction_step",
+            "configuration_index",
             "source_section",
             "source_figure",
             "confidence",
@@ -1590,6 +1766,24 @@ def build_dft_csv_rows(
     )
     gate_by_id = bulk_export_gate_results(session, [dr for dr, _paper in rows], target_type="dft_results")
     gate_results = []
+    paper_ids = {paper.id for _dr, paper in rows}
+    catalyst_sample_ids = {dr.catalyst_sample_id for dr, _paper in rows if dr.catalyst_sample_id}
+    catalyst_by_id: dict[str, CS] = {}
+    catalysts_by_paper: dict[str, list[CS]] = defaultdict(list)
+    if paper_ids:
+        for catalyst in session.scalars(select(CS).where(CS.paper_id.in_(paper_ids))).all():
+            catalyst_by_id[str(catalyst.id)] = catalyst
+            catalysts_by_paper[str(catalyst.paper_id)].append(catalyst)
+    if catalyst_sample_ids:
+        for catalyst in session.scalars(select(CS).where(CS.id.in_(catalyst_sample_ids))).all():
+            catalyst_by_id[str(catalyst.id)] = catalyst
+
+    written_rows = 0
+    profile_candidate_count = 0 if dataset_profile else None
+    profile_included_count = 0 if dataset_profile else None
+    profile_excluded_count = 0 if dataset_profile else None
+    profile_excluded_reasons: Counter[str] = Counter()
+
     for dr, paper in rows:
         gate = gate_by_id.get(str(dr.id))
         if gate is None:
@@ -1599,10 +1793,40 @@ def build_dft_csv_rows(
             continue
         normalized_property_type = _normalized_property_type(dr.property_type)
         taxonomy = get_property_taxonomy(dr.property_type)
+        evidence_context = _extract_evidence_context(dr.evidence_payload)
+        paper_catalysts = catalysts_by_paper.get(str(paper.id), [])
+        effective_catalyst, _ = _effective_export_catalyst(
+            session,
+            row=dr,
+            paper_catalysts=paper_catalysts,
+            catalyst_by_id=catalyst_by_id,
+            evidence_context=evidence_context,
+        )
+        if dataset_profile:
+            profile_candidate_count += 1
+            included, reason = _evaluate_dataset_profile_inclusion(
+                dr=dr,
+                effective_catalyst=effective_catalyst,
+                taxonomy=taxonomy,
+                evidence_context=evidence_context,
+                profile=dataset_profile,
+            )
+            if not included:
+                profile_excluded_count += 1
+                if reason:
+                    profile_excluded_reasons[reason] += 1
+                continue
+            profile_included_count += 1
+
+        if limit is not None and written_rows >= limit:
+            continue
+
         display_value, display_unit = normalize_dft_display_value(dr.value, dr.unit)
         authors_str = ", ".join(paper.authors) if isinstance(paper.authors, list) else (paper.authors or "")
+        config_idx = extract_configuration_index(dr.evidence_payload)
         writer.writerow(
             [
+                str(dr.id),
                 str(paper.id),
                 paper.title or "",
                 paper.doi or "",
@@ -1621,6 +1845,7 @@ def build_dft_csv_rows(
                 dr.value if dr.value is not None else "",
                 dr.unit or "",
                 dr.reaction_step or "",
+                config_idx if config_idx is not None else "",
                 dr.source_section or "",
                 dr.source_figure or "",
                 dr.confidence if dr.confidence is not None else "",
@@ -1631,7 +1856,23 @@ def build_dft_csv_rows(
                 gate.locator_status,
             ]
         )
+        written_rows += 1
 
     gate_summary = summarize_gate_results(gate_results)
+    normalized_profile = dataset_profile.strip().lower() if dataset_profile else None
+    gate_summary["dataset_profile"] = normalized_profile
+    gate_summary["base_eligible_count"] = gate_summary["eligible"]
+    gate_summary["blocked_count"] = gate_summary["blocked"]
+    if dataset_profile:
+        gate_summary["profile_candidate_count"] = profile_candidate_count
+        gate_summary["profile_included_count"] = profile_included_count
+        gate_summary["profile_included_count_before_limit"] = profile_included_count
+        gate_summary["profile_excluded_count"] = profile_excluded_count
+        gate_summary["profile_excluded_reasons"] = dict(sorted(profile_excluded_reasons.items()))
+        gate_summary["exported_rows"] = written_rows
+    else:
+        gate_summary["exported_rows"] = written_rows
+    gate_summary["exported_count_after_limit"] = written_rows
+    gate_summary["limit"] = limit
     logger.info("DFT CSV export safety gate summary: %s", gate_summary)
     return output.getvalue(), gate_summary

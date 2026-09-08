@@ -26,15 +26,25 @@ def pytest_collection_modifyitems(items):
             item.add_marker(pytest.mark.postgres)
 
 
+def validated_test_root_database_url(value: str | None) -> str:
+    """Reject missing and production-like URLs before creating an engine."""
+    if not value:
+        raise RuntimeError("LITAI_TEST_ROOT_DATABASE_URL is required before any test database connection")
+    parsed = make_url(value)
+    if not parsed.drivername.startswith("postgresql"):
+        raise RuntimeError("Tests require PostgreSQL")
+    if parsed.database != "literature_ai_test":
+        raise RuntimeError("LITAI_TEST_ROOT_DATABASE_URL must target the isolated literature_ai_test database")
+    return value
+
+
 @pytest.fixture(scope="session")
 def shared_test_database():
     """Create one isolated schema per pytest process, not one full schema per test."""
-    from app.config import get_settings
-
-    base_url = os.getenv("LITAI_TEST_ROOT_DATABASE_URL") or get_settings().database_url
+    base_url = validated_test_root_database_url(os.getenv("LITAI_TEST_ROOT_DATABASE_URL"))
     parsed = make_url(base_url)
-    if not parsed.drivername.startswith("postgresql"):
-        raise RuntimeError("Tests require PostgreSQL")
+
+    from app.config import get_settings
 
     schema = f"pytest_{uuid4().hex}"
     admin_engine = create_engine(base_url, future=True)

@@ -4,7 +4,10 @@ import copy
 import csv
 import io
 import os
+from pathlib import Path
+import tempfile
 
+import fitz
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,6 +17,7 @@ from app.db.models import (
     CatalystSample,
     DFTResult,
     DFTSetting,
+    EvidenceLocator,
     EvidenceSpan,
     ExternalAnalysisCandidate,
     ExternalAnalysisRun,
@@ -21,6 +25,8 @@ from app.db.models import (
     Paper,
 )
 from app.services.dft_export_service import build_dft_ml_dataset, build_dft_ml_dataset_v3, build_dft_ml_dataset_v3_csv
+from app.utils.ai_verification import ai_target_fingerprint
+from app.utils.review_safety import required_review_fields
 
 
 def _session():
@@ -44,11 +50,13 @@ def _row(
     evidence_text=None,
     value=-1.23,
     unit="eV",
+    adsorbate="Li2S4",
 ):
+    pdf_path = Path(tempfile.mkdtemp(prefix="litai-v3-")) / "paper.pdf"
     paper = Paper(
         title=title or f"Paper {property_type} {reaction_type} {status}",
         year=year,
-        pdf_path="paper.pdf",
+        pdf_path=str(pdf_path),
         authors=["A"],
     )
     session.add(paper)
@@ -63,39 +71,84 @@ def _row(
     )
     session.add(catalyst)
     session.flush()
+    property_phrase = str(property_type or "").replace("_", " ")
+    if "barrier" in property_phrase.casefold():
+        property_phrase = f"reaction barrier ({property_phrase})"
+    full_evidence = "\n".join(filter(None, [
+        "Single-atom SAC Fe-N-C catalyst contains Fe"
+        + (" in Fe-N4 coordination" if complete else "")
+        + " on carbon support.",
+        evidence_text,
+        f"Calculated {property_phrase} of {adsorbate or 'reaction pathway'} on Fe-N-C: {value} {unit}.",
+        f"Reaction step {reaction_step}." if reaction_step else None,
+    ]))
+    evidence_payload = {}
+    if "barrier" in str(property_type).casefold() or "free_energy" in str(property_type).casefold():
+        evidence_payload["state_context"] = "transition_state"
     row = DFTResult(
         paper_id=paper.id,
         catalyst_sample_id=catalyst.id,
-        adsorbate="Li2S4",
+        adsorbate=adsorbate,
         property_type=property_type,
         value=value,
         unit=unit,
         reaction_step=reaction_step,
-        evidence_text=evidence_text or "Li2S4 adsorption is -1.23 eV.",
+        evidence_text=full_evidence,
+        evidence_payload=evidence_payload,
         reaction_type=reaction_type,
         reaction_profile_version="reaction_profiles_v1",
         reaction_validation_status=status,
     )
     session.add(row)
     session.flush()
-    related = [
+    document = fitz.open()
+    for page_number in range(1, 8):
+        page = document.new_page()
+        if page_number == 7:
+            page.insert_textbox(fitz.Rect(20, 40, 575, 800), row.evidence_text, fontsize=8)
+    document.save(pdf_path)
+    document.close()
+
+    related = []
+    for field_name in required_review_fields("dft_results", row):
+        related.extend([
             ExtractionFieldReview(
                 paper_id=paper.id,
                 target_type="dft_results",
                 target_id=str(row.id),
-                field_name="value",
+                field_name=field_name,
                 reviewer_status="verified",
                 target_resolution_status="active",
+                reviewer="human_verifier",
+                target_fingerprint=ai_target_fingerprint("dft_results", row),
                 evidence_text=row.evidence_text,
+                review_payload={"human_verification": {
+                    "verification_actor_type": "human",
+                    "identity_verified": True,
+                    "writes_final_truth": True,
+                    "decision": "verified",
+                    "reviewer": "human_verifier",
+                }},
             ),
+            EvidenceLocator(
+                paper_id=paper.id,
+                target_type="dft_results",
+                target_id=str(row.id),
+                field_name=field_name,
+                evidence_text=row.evidence_text,
+                page=7,
+                locator_status="exact_page",
+            ),
+        ])
+    related.append(
             EvidenceSpan(
                 paper_id=paper.id,
                 object_type=evidence_object_type,
                 object_id=str(row.id),
                 text=row.evidence_text,
                 page=7,
-            ),
-        ]
+            )
+    )
     if with_setting:
         related.append(DFTSetting(paper_id=paper.id, software="VASP", functional="PBE"))
     session.add_all(related)
@@ -329,7 +382,7 @@ def test_v3_csv_defaults_to_training_ready_records_and_manifest_filter():
             assert rows[0]["reaction_step"] == "Li2S4 adsorption"
             assert rows[0]["dft_software"] == "VASP"
             assert rows[0]["dft_functional"] == "PBE"
-            assert rows[0]["evidence_text"] == "Li2S4 adsorption is -1.23 eV."
+            assert "Calculated adsorption energy of Li2S4 on Fe-N-C: -1.23 eV." in rows[0]["evidence_text"]
             assert rows[0]["page_locators"] == "[7]"
             assert rows[0]["label_ready"] == "true"
             assert rows[0]["tabular_ml_ready"] == "true"
@@ -496,11 +549,11 @@ def test_v3_rds_gibbs_free_energy_with_null_adsorbate_and_complete_catalyst_is_t
             rds, _paper = _row(
                 session,
                 property_type="gibbs_free_energy_change",
+                adsorbate=None,
                 reaction_step="rate-determining step of SRR",
                 evidence_text="The Gibbs free energies corresponding to the rate-determining steps of the SRR are 0.42 eV.",
                 value=0.42,
             )
-            rds.adsorbate = None
             session.commit()
 
             payload = build_dft_ml_dataset_v3(session, task="rds_gibbs_free_energy", ready_only=False)

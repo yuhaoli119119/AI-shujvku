@@ -21,6 +21,8 @@ class AIVerificationSubmission(BaseModel):
     reasoning_summary: str = Field(default="", max_length=2000)
     expected_target_fingerprint: str
     expected_write_version: int | None = Field(default=None, ge=1)
+    source_paper_id: str | None = None
+    evidence_paper_id: str | None = None
 
 
 class AIVerificationBatchRequest(BaseModel):

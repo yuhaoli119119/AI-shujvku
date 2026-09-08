@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import (
+    ActiveSiteMetal,
     CatalystSample,
     DFTResult,
     DFTSetting,
@@ -18,6 +19,7 @@ from app.db.models import (
     ExtractionFieldReview,
     MechanismClaim,
 )
+from app.utils.configuration_index import extract_configuration_index
 
 
 TARGET_TYPE_ALIASES = {
@@ -48,6 +50,52 @@ TARGET_TYPE_MODELS = {
     "mechanism_claims": MechanismClaim,
     "electrochemical_performance": ElectrochemicalPerformance,
 }
+
+_CATALYST_IDENTITY_CACHE_KEY = "authoritative_dft_catalyst_identity"
+
+
+def get_dft_catalyst_identity(
+    session: Session,
+    catalyst_id: Any,
+) -> tuple[CatalystSample | None, list[ActiveSiteMetal]]:
+    """Read catalyst/site identity through the request-scoped authority cache."""
+    if catalyst_id is None:
+        return None, []
+    cache = session.info.get(_CATALYST_IDENTITY_CACHE_KEY)
+    cache_key = str(catalyst_id)
+    if isinstance(cache, dict) and cache_key in cache:
+        catalyst, sites = cache[cache_key]
+        return catalyst, list(sites)
+
+    catalyst = session.get(CatalystSample, catalyst_id)
+    sites = list(session.scalars(
+        select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id == catalyst_id)
+    ).all())
+    sites.sort(key=lambda site: (site.active_site_key, site.site_role, str(site.id)))
+    if isinstance(cache, dict):
+        cache[cache_key] = (catalyst, sites)
+    return catalyst, sites
+
+
+def preload_dft_catalyst_identity(session: Session, rows: list[DFTResult]) -> None:
+    """Preload catalyst/site identity for one authority-gate scope only."""
+    cache = session.info.get(_CATALYST_IDENTITY_CACHE_KEY)
+    if not isinstance(cache, dict):
+        return
+    catalyst_ids = {row.catalyst_sample_id for row in rows if row.catalyst_sample_id is not None}
+    if not catalyst_ids:
+        return
+    catalysts = session.scalars(select(CatalystSample).where(CatalystSample.id.in_(catalyst_ids))).all()
+    sites_by_catalyst: dict[Any, list[ActiveSiteMetal]] = {}
+    for site in session.scalars(
+        select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id.in_(catalyst_ids))
+    ).all():
+        sites_by_catalyst.setdefault(site.catalyst_sample_id, []).append(site)
+    for catalyst in catalysts:
+        cache[str(catalyst.id)] = (catalyst, sorted(
+            sites_by_catalyst.get(catalyst.id, []),
+            key=lambda site: (site.active_site_key, site.site_role, str(site.id)),
+        ))
 
 FIELD_PATHS = {
     "catalyst_samples": {
@@ -344,12 +392,70 @@ class ReviewTargetResolver:
                 "vacuum_thickness_a": entity.vacuum_thickness_a,
             }
         if target_type == "dft_results":
+            payload_dict = entity.evidence_payload if hasattr(entity, "evidence_payload") else (entity.get("evidence_payload") if isinstance(entity, dict) else None)
+            cfg_idx = extract_configuration_index(payload_dict)
+            payload_dict = payload_dict if isinstance(payload_dict, dict) else {}
+            catalyst_id = entity.catalyst_sample_id if not isinstance(entity, dict) else entity.get("catalyst_sample_id")
+            catalyst = None if not isinstance(entity, dict) else entity.get("catalyst_sample")
+            active_sites: list[dict[str, Any]] = []
+            if catalyst_id and not isinstance(entity, dict):
+                from sqlalchemy.orm import object_session
+
+                session = object_session(entity)
+                if session is not None:
+                    cached_identity = session.info.get(_CATALYST_IDENTITY_CACHE_KEY)
+                    cached_pair = cached_identity.get(str(catalyst_id)) if isinstance(cached_identity, dict) else None
+                    if cached_pair is not None:
+                        catalyst, site_rows = cached_pair
+                    else:
+                        catalyst = session.get(CatalystSample, catalyst_id)
+                        site_rows = session.scalars(
+                            select(ActiveSiteMetal).where(ActiveSiteMetal.catalyst_sample_id == catalyst_id)
+                        ).all()
+                    active_sites = [
+                        {
+                            "id": str(site.id),
+                            "active_site_key": site.active_site_key,
+                            "site_type": site.site_type,
+                            "site_role": site.site_role,
+                            "element_symbol": site.element_symbol,
+                            "element_order": site.element_order,
+                            "normalized_pair_key": site.normalized_pair_key,
+                        }
+                        for site in site_rows
+                    ]
+                    active_sites.sort(key=lambda site: (
+                        str(site["active_site_key"]), str(site["site_role"]), str(site["id"])
+                    ))
+            catalyst_identity = None
+            if catalyst is not None:
+                catalyst_identity = {
+                    "id": str(catalyst.id),
+                    "name": catalyst.name,
+                    "catalyst_type": catalyst.catalyst_type,
+                    "metal_centers": sorted(str(metal) for metal in (catalyst.metal_centers or [])),
+                    "coordination": catalyst.coordination,
+                    "support": catalyst.support,
+                    "active_sites": active_sites,
+                }
             return {
-                "adsorbate": entity.adsorbate,
-                "property_type": entity.property_type,
-                "value": entity.value,
-                "unit": entity.unit,
-                "reaction_step": entity.reaction_step,
+                "catalyst_sample_id": str(catalyst_id) if catalyst_id else None,
+                "catalyst_identity": catalyst_identity,
+                "adsorbate": entity.adsorbate if not isinstance(entity, dict) else entity.get("adsorbate"),
+                "property_type": entity.property_type if not isinstance(entity, dict) else entity.get("property_type"),
+                "value": entity.value if not isinstance(entity, dict) else entity.get("value"),
+                "value_upper": entity.value_upper if not isinstance(entity, dict) else entity.get("value_upper"),
+                "value_kind": entity.value_kind if not isinstance(entity, dict) else entity.get("value_kind"),
+                "unit": entity.unit if not isinstance(entity, dict) else entity.get("unit"),
+                "reaction_step": entity.reaction_step if not isinstance(entity, dict) else entity.get("reaction_step"),
+                "configuration_index": cfg_idx,
+                "source_section": entity.source_section if not isinstance(entity, dict) else entity.get("source_section"),
+                "source_figure": entity.source_figure if not isinstance(entity, dict) else entity.get("source_figure"),
+                "evidence_source_identity": {
+                    key: payload_dict.get(key)
+                    for key in ("source_paper_id", "evidence_paper_id", "source_document_id", "source_document_type")
+                    if payload_dict.get(key) is not None
+                },
             }
         if target_type == "mechanism_claims":
             return {

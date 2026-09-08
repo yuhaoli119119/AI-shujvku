@@ -7,10 +7,10 @@ import logging
 import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from app.db.session import get_db_session
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.dft_export_service import (
+    TARGET_ML_DATASET_PROFILES,
     _extract_evidence_context,
     _dft_quality_row_payload,
     _dft_rows_statement,
@@ -45,6 +46,21 @@ logger = logging.getLogger(__name__)
 # Note: export helpers (_authors_text, _paper_payload, _catalyst_payload, _dft_setting_payload,
 # _dft_rows_statement, _dft_quality_row_payload) have been moved to app.services.dft_export_service.
 
+DatasetProfileParam = Literal["dac_lis_ml", "bimetallic_lis_ml", "dac_lis", "sac_lis_ml"]
+
+
+def _validate_dataset_profile(dataset_profile: Any) -> str | None:
+    norm = _optional_text_filter(dataset_profile)
+    if not norm:
+        return None
+    lowered = norm.lower()
+    if lowered not in TARGET_ML_DATASET_PROFILES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unsupported dataset_profile '{norm}'. Supported profiles: {sorted(TARGET_ML_DATASET_PROFILES)}",
+        )
+    return lowered
+
 
 @router.get("/export/csv")
 async def export_dft_results_csv(
@@ -56,8 +72,11 @@ async def export_dft_results_csv(
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     min_confidence: float | None = Query(default=None, ge=0.0, le=1.0),
+    limit: int | None = Query(default=None, ge=1, le=5000, description="Optional limit"),
+    dataset_profile: DatasetProfileParam | None = Query(default=None, description="Target dataset profile, e.g. dac_lis_ml"),
     session: Session = Depends(get_db_session),
 ):
+    dataset_profile = _validate_dataset_profile(dataset_profile)
     csv_text, gate_summary = build_dft_csv_rows(
         session,
         property_type=property_type,
@@ -68,19 +87,33 @@ async def export_dft_results_csv(
         year_max=year_max,
         library_name=library_name,
         min_confidence=min_confidence,
+        limit=limit,
+        dataset_profile=dataset_profile,
     )
     csv_bytes = csv_text.encode("utf-8-sig")
+    exported_count = gate_summary.get("exported_rows", gate_summary["eligible"])
+    base_eligible_count = gate_summary.get("base_eligible_count", gate_summary.get("eligible", 0))
+    profile_included = gate_summary.get("profile_included_count_before_limit")
+    if profile_included is None:
+        profile_included = gate_summary.get("profile_included_count")
+    profile_excluded = gate_summary.get("profile_excluded_count")
+    norm_profile = gate_summary.get("dataset_profile") or ""
+
     return StreamingResponse(
         io.BytesIO(csv_bytes),
         media_type="text/csv; charset=utf-8",
         headers={
             "Content-Disposition": "attachment; filename=dft_results_export.csv",
             "X-D3-Export-Safety-Gate": "safe_verified_with_required_evidence",
-            "X-D3-Export-Count": str(gate_summary["eligible"]),
+            "X-D3-Export-Count": str(exported_count),
             "X-D3-Block-Count": str(gate_summary["blocked"]),
-            "X-D1-Exported-Count": str(gate_summary["eligible"]),
+            "X-D1-Exported-Count": str(exported_count),
             "X-D1-Blocked-Count": str(gate_summary["blocked"]),
             "X-D1-Blocked-Reasons": json.dumps(gate_summary["blocked_reasons"], sort_keys=True),
+            "X-D3-Base-Eligible-Count": str(base_eligible_count),
+            "X-D3-Profile-Included-Count": str(profile_included) if profile_included is not None else "",
+            "X-D3-Profile-Excluded-Count": str(profile_excluded) if profile_excluded is not None else "",
+            "X-D3-Dataset-Profile": norm_profile,
         },
     )
 
@@ -95,8 +128,11 @@ async def export_dft_dataset(
     year_max: int | None = Query(default=None, description="Maximum publication year"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
     min_confidence: float | None = Query(default=None, ge=0.0, le=1.0),
+    limit: int | None = Query(default=None, ge=1, le=5000, description="Optional limit"),
+    dataset_profile: DatasetProfileParam | None = Query(default=None, description="Target dataset profile, e.g. dac_lis_ml"),
     session: Session = Depends(get_db_session),
 ):
+    dataset_profile = _validate_dataset_profile(dataset_profile)
     return build_dft_ml_dataset(
         session,
         property_type=property_type,
@@ -107,6 +143,8 @@ async def export_dft_dataset(
         year_max=year_max,
         library_name=library_name,
         min_confidence=min_confidence,
+        limit=limit,
+        dataset_profile=dataset_profile,
     )
 
 

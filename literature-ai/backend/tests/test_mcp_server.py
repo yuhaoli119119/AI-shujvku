@@ -58,6 +58,7 @@ from app.mcp.server import (
     get_review_coverage,
     get_paper_knowledge,
     get_content_web_review_local_verification_plan,
+    get_figure_image,
     get_parse_status,
     ingest_pdf_batch,
     import_analysis,
@@ -68,6 +69,7 @@ from app.mcp.server import (
     release_module_write_lock,
     review_figure,
     read_content_web_review_page_asset,
+    render_paper_page,
     query_papers,
     reject_correction,
     scan_local_pdfs,
@@ -386,6 +388,144 @@ def _content_read_snapshot(engine, bundle_id: str) -> dict:
             "result_count": session.scalar(select(func.count()).select_from(ContentWebReviewLocalVerificationResult)),
             "audit_count": session.scalar(select(func.count()).select_from(AuditLog)),
         }
+
+
+def _mcp_image_fixture(engine, root: Path) -> dict:
+    """Build one stored figure + two deliberately distinct PDF pages."""
+    storage_root = root / "storage"
+    pdf_dir = storage_root / "pdf"
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = pdf_dir / "image-read-fixture.pdf"
+    document = fitz.open()
+    first_page = document.new_page(width=100, height=200)
+    first_page.insert_text((12, 24), "first page")
+    second_page = document.new_page(width=210, height=130)
+    second_page.insert_text((12, 24), "second page")
+    document.save(str(pdf_path))
+    document.close()
+
+    with Session(engine) as session:
+        paper = Paper(title="MCP image read", paper_code="MCP-IMAGE", pdf_path="pdf/image-read-fixture.pdf", authors=[])
+        other_paper = Paper(title="other paper", paper_code="MCP-OTHER", pdf_path="pdf/image-read-fixture.pdf", authors=[])
+        missing_pdf_paper = Paper(title="missing PDF", paper_code="MCP-MISSING", pdf_path="pdf/does-not-exist.pdf", authors=[])
+        session.add_all([paper, other_paper, missing_pdf_paper])
+        session.flush()
+
+        figure_dir = storage_root / "figures" / str(paper.id)
+        figure_dir.mkdir(parents=True, exist_ok=True)
+        source = fitz.open(str(pdf_path))
+        pix = source[0].get_pixmap(matrix=fitz.Matrix(1, 1), alpha=False)
+        image_path = figure_dir / "current-crop.png"
+        pix.save(str(image_path))
+        source.close()
+        image_bytes = image_path.read_bytes()
+
+        figure = PaperFigure(
+            paper_id=paper.id,
+            image_path=f"{paper.id}/current-crop.png",
+            page=1,
+            figure_label="Figure 1",
+            caption="Current crop",
+            crop_status="candidate_crop",
+            crop_source="fixture",
+        )
+        foreign_figure = PaperFigure(
+            paper_id=other_paper.id,
+            image_path=None,
+            page=1,
+            figure_label="Figure foreign",
+        )
+        unsafe_figure = PaperFigure(
+            paper_id=paper.id,
+            image_path="../../not-a-figure.png",
+            page=1,
+            figure_label="Figure unsafe",
+        )
+        session.add_all([figure, foreign_figure, unsafe_figure])
+        session.commit()
+        return {
+            "paper_id": str(paper.id),
+            "other_paper_id": str(other_paper.id),
+            "missing_pdf_paper_id": str(missing_pdf_paper.id),
+            "figure_id": str(figure.id),
+            "foreign_figure_id": str(foreign_figure.id),
+            "unsafe_figure_id": str(unsafe_figure.id),
+            "image_bytes": image_bytes,
+        }
+
+
+def _mcp_image_read_snapshot(engine) -> dict:
+    with Session(engine) as session:
+        return {
+            "figures": [
+                (str(row.id), str(row.paper_id), row.image_path, row.page, row.crop_status, row.crop_source, row.write_version)
+                for row in session.scalars(select(PaperFigure).order_by(PaperFigure.id))
+            ],
+            "audit_count": session.scalar(select(func.count()).select_from(AuditLog)),
+        }
+
+
+def test_mcp_figure_and_pdf_image_tools_return_real_content_without_mutation(mcp_test_env):
+    fixture = _mcp_image_fixture(mcp_test_env["engine"], mcp_test_env["tmpdir"])
+    before = _mcp_image_read_snapshot(mcp_test_env["engine"])
+
+    with mcp_auth_context(_auth()):
+        figure_metadata, figure_image = get_figure_image(
+            paper_id=fixture["paper_id"], figure_id=fixture["figure_id"],
+        )
+        page_metadata, page_image = render_paper_page(
+            paper_id=fixture["paper_id"], page=2, dpi=72,
+        )
+        figure_content = asyncio.run(mcp_server.call_tool(
+            "get_figure_image", {"paper_id": fixture["paper_id"], "figure_id": fixture["figure_id"]},
+        ))
+        page_content = asyncio.run(mcp_server.call_tool(
+            "render_paper_page", {"paper_id": fixture["paper_id"], "page": 2, "dpi": 72},
+        ))
+
+    assert figure_metadata["mime_type"] == "image/png"
+    assert figure_metadata["sha256"] == hashlib.sha256(fixture["image_bytes"]).hexdigest()
+    assert figure_image.data == fixture["image_bytes"]
+    assert figure_metadata["database_writes"] is False
+    assert page_metadata["page"] == 2
+    assert page_metadata["dpi"] == 72
+    assert page_metadata["mime_type"] == "image/png"
+    assert page_metadata["pixel_size"] == {"width": 210, "height": 130}
+    assert page_image.data.startswith(b"\x89PNG\r\n\x1a\n")
+
+    figure_blocks = [block for block in figure_content if getattr(block, "type", None) == "image"]
+    page_blocks = [block for block in page_content if getattr(block, "type", None) == "image"]
+    assert len(figure_blocks) == 1
+    assert len(page_blocks) == 1
+    assert base64.b64decode(figure_blocks[0].data) == fixture["image_bytes"]
+    rendered_page = base64.b64decode(page_blocks[0].data)
+    assert hashlib.sha256(rendered_page).hexdigest() == page_metadata["sha256"]
+    rendered_pix = fitz.Pixmap(rendered_page)
+    assert (rendered_pix.width, rendered_pix.height) == (210, 130)
+    for content in (figure_content, page_content):
+        for block in content:
+            assert "/data/" not in str(getattr(block, "text", ""))
+            assert "/opt/" not in str(getattr(block, "text", ""))
+    assert _mcp_image_read_snapshot(mcp_test_env["engine"]) == before
+
+
+def test_mcp_figure_and_pdf_image_tools_reject_cross_paper_missing_unsafe_and_out_of_range_reads(mcp_test_env):
+    fixture = _mcp_image_fixture(mcp_test_env["engine"], mcp_test_env["tmpdir"])
+    before = _mcp_image_read_snapshot(mcp_test_env["engine"])
+    with mcp_auth_context(_auth()):
+        with pytest.raises(LookupError, match="figure_not_found_for_paper"):
+            get_figure_image(paper_id=fixture["paper_id"], figure_id=fixture["foreign_figure_id"])
+        with pytest.raises(ValueError, match="figure_image_missing_or_unsafe"):
+            get_figure_image(paper_id=fixture["paper_id"], figure_id=fixture["unsafe_figure_id"])
+        with pytest.raises(ValueError, match="paper_pdf_missing_or_unsafe"):
+            render_paper_page(paper_id=fixture["missing_pdf_paper_id"], page=1)
+        with pytest.raises(ValueError, match="paper_page_out_of_bounds"):
+            render_paper_page(paper_id=fixture["paper_id"], page=3)
+        with pytest.raises(ValueError, match="page_must_be_at_least_1"):
+            render_paper_page(paper_id=fixture["paper_id"], page=0)
+        with pytest.raises(ValueError, match="dpi_must_be_between"):
+            render_paper_page(paper_id=fixture["paper_id"], page=1, dpi=300)
+    assert _mcp_image_read_snapshot(mcp_test_env["engine"]) == before
 
 
 def test_example_mcp_key_split_reserves_repair_for_primary_repair_key(mcp_test_env):
