@@ -102,7 +102,8 @@ def _validate_authorize_params(params: dict[str, Any]) -> tuple[str, str]:
     settings = get_settings()
     if str(params.get("client_id", "")).strip() != settings.oauth_client_id:
         raise HTTPException(status_code=400, detail="invalid_client_id")
-    if str(params.get("redirect_uri", "")).strip() != settings.oauth_redirect_uri:
+    allowed_redirects = [u.strip() for u in (settings.oauth_redirect_uri or "").split(",") if u.strip()]
+    if str(params.get("redirect_uri", "")).strip() not in allowed_redirects:
         raise HTTPException(status_code=400, detail="invalid_redirect_uri")
     if params.get("response_type") != "code":
         raise HTTPException(status_code=400, detail="unsupported_response_type")
