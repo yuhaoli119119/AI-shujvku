@@ -17,14 +17,20 @@ server {
     client_max_body_size 32m;
 
     # MCP 端点：不走 Basic，由后端校验 Bearer MCP key（无 key 返回 401）
+    # 2026-09-08 修复：后端有效路由是 /mcp/，访问无斜杠 /mcp 会 307 到 /mcp/，
+    #   且 location 因缺少 X-Forwarded-Proto 被写成 http，导致客户端跟随重定向时
+    #   丢失 Authorization 头（401 Missing MCP API key）。此处内部 rewrite 消除
+    #   外部重定向，并补 X-Forwarded-Proto 保证后端生成的绝对 URL 使用 https。
     location ^~ /mcp {
         auth_basic off;
+        if ($uri = "/mcp") { rewrite ^ /mcp/ break; }
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_read_timeout 3600s;
     }
