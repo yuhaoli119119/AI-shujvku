@@ -41,7 +41,6 @@ REFRESH_TOKEN_TTL = 30 * 24 * 3600  # refresh token lifetime (seconds)
 # In-memory single-instance stores. A backend restart invalidates outstanding
 # codes/tokens, which simply prompts ChatGPT to re-authorize.
 _auth_codes: dict[str, dict[str, Any]] = {}
-_refresh_tokens: dict[str, dict[str, Any]] = {}
 
 
 # --------------------------------------------------------------------------
@@ -169,14 +168,22 @@ def _issue_tokens(scope: str, resource: str) -> tuple[str, str]:
         "iat": now,
         "exp": now + ACCESS_TOKEN_TTL,
         "jti": secrets.token_hex(8),
+        "token_type": "access",
     }
     access_token = _jwt_sign(payload, settings.oauth_jwt_secret)
-    refresh_token = secrets.token_urlsafe(48)
-    _refresh_tokens[refresh_token] = {
+    # Stateless refresh token: a self-contained JWT so that backend restarts
+    # (docker compose up --force-recreate) never invalidate live clients.
+    refresh_payload = {
+        "iss": settings.oauth_issuer,
+        "aud": resource or settings.oauth_resource,
+        "sub": "user:liyuhao",
         "scope": scope,
-        "resource": resource or settings.oauth_resource,
+        "iat": now,
         "exp": now + REFRESH_TOKEN_TTL,
+        "jti": secrets.token_hex(8),
+        "token_type": "refresh",
     }
+    refresh_token = _jwt_sign(refresh_payload, settings.oauth_jwt_secret)
     return access_token, refresh_token
 
 
@@ -359,16 +366,23 @@ async def oauth_token(request: Request):
 
     if grant_type == "refresh_token":
         refresh_token = form_values.get("refresh_token", "")
-        record = _refresh_tokens.pop(refresh_token, None)
-        if record is None or time.time() > record["exp"]:
+        settings = get_settings()
+        payload = _jwt_verify(refresh_token, settings.oauth_jwt_secret)
+        if payload is None or payload.get("token_type") != "refresh":
             raise HTTPException(status_code=400, detail="invalid_grant")
-        access_token, new_refresh_token = _issue_tokens(record["scope"], record["resource"])
+        if payload.get("iss") != settings.oauth_issuer:
+            raise HTTPException(status_code=400, detail="invalid_grant")
+        if time.time() > int(payload.get("exp", 0)):
+            raise HTTPException(status_code=400, detail="invalid_grant")
+        scope = str(payload.get("scope", "")).strip()
+        resource = str(payload.get("aud", "")).strip() or settings.oauth_resource
+        access_token, new_refresh_token = _issue_tokens(scope, resource)
         return {
             "access_token": access_token,
             "token_type": "Bearer",
             "expires_in": ACCESS_TOKEN_TTL,
             "refresh_token": new_refresh_token,
-            "scope": record["scope"],
+            "scope": scope,
         }
 
     raise HTTPException(status_code=400, detail="unsupported_grant_type")
