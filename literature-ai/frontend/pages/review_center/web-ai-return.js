@@ -28,7 +28,6 @@
     function syncWebAiReturnModeButtons() {
       const isEvidenceMode = webAiReturnState.mode === "evidence";
       const applyButton = document.getElementById("webAiApplyEvidenceBtn");
-      const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
       const copyButton = document.getElementById("webAiCopyInstructionBtn");
       if (applyButton) {
         applyButton.style.display = isEvidenceMode ? "" : "none";
@@ -38,10 +37,6 @@
         copyButton.style.display = "";
         copyButton.textContent = isEvidenceMode ? "复制本地 AI 全量图片复核指令" : "复制本地 AI 处理指令";
         copyButton.disabled = true;
-      }
-      if (finalizeButton) {
-        finalizeButton.style.display = isEvidenceMode ? "" : "none";
-        finalizeButton.disabled = true;
       }
     }
 
@@ -90,7 +85,13 @@
       const normalizedMode = mode === "evidence" ? "evidence" : "dft";
       const target = selectedWebAiReturnTarget();
       if (!target) return;
-      if (normalizedMode === "evidence" && !requireSelectedMainEvidenceScope(target)) return;
+      if (normalizedMode === "evidence") {
+        if (!requireSelectedMainEvidenceScope(target)) return;
+        if (!manualReviewContext.bundleId || !manualReviewContext.bundleFingerprint) {
+          showToast("请先导出当前固定范围的图表证据包，再回传 JSON。");
+          return;
+        }
+      }
       const targetId = String(target.paper_id || "");
       if (
         (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) ||
@@ -101,10 +102,6 @@
       webAiReturnState.mode = normalizedMode;
       webAiReturnState.paperId = targetId;
       webAiReturnState.paperCode = String(target.paper_code || "");
-      if (normalizedMode === "evidence" && (!manualReviewContext.bundleId || !manualReviewContext.bundleFingerprint)) {
-        showToast("请先导出当前固定范围的图表证据包，再回传 JSON。");
-        return;
-      }
       document.getElementById("webAiReturnTitle").textContent =
         "回传网页 AI " + webAiModeLabel(normalizedMode) + " JSON";
       document.getElementById("webAiReturnSubtitle").textContent =
@@ -263,7 +260,9 @@
       if (String(value.run_id || "") !== manualReviewContext.runId) {
         issues.push({ code: "run_scope_mismatch", message: "run_id 与当前固定审核范围不一致" });
       }
-      if (manualReviewContext.bundleFingerprint && String(value.bundle_fingerprint || "") !== manualReviewContext.bundleFingerprint) {
+      if (!manualReviewContext.bundleFingerprint) {
+        issues.push({ code: "missing_bundle_fingerprint", message: "未检测到导出的证据包指纹，请先导出图表证据包" });
+      } else if (String(value.bundle_fingerprint || "") !== manualReviewContext.bundleFingerprint) {
         issues.push({ code: "stale_or_mismatched_bundle", message: "bundle_fingerprint 与已导出的当前审核包不一致" });
       }
       return issues;
@@ -739,14 +738,15 @@
           "执行要求：",
           "1. 只使用当前会话已认证的 Literature AI MCP；不要改 MCP 配置，不要发不带认证头的裸请求。",
           "2. 调用 get_chart_review_task(paper_id, run_id) 读取当前 run 任务和 PDF/页面信息；run_id=" + (new URLSearchParams(window.location.search).get("run_id") || "-") + "。",
-          "3. 对 get_chart_review_task 返回的每一张 figure 调用 get_codex_item，并用 read_paper_page 对照其来源 PDF 页；不得只处理 unresolved_actions。",
-          "4. 每张图片都要独立判断 KEEP、RECROP、CREATE、REJECT 或 NEEDS_HUMAN；表格沿用网页 AI 已应用结果，除非表格本身仍有 unresolved_actions。",
-          "5. 每一个非 NEEDS_HUMAN 的 figure_action 都必须附 local_ai_verification={verified_against_pdf:true,used_tools:['get_codex_item','read_paper_page'],verification_note:'逐图核验说明'}。",
-          "6. 使用当前 get_chart_review_task 返回的 bundle_fingerprint 构造完整 review_result；review_source_type 必须为 local_ai，并填写当前本地 AI 身份；不要沿用旧网页 JSON 的 bundle_fingerprint。",
-          "7. 构造完整 review_result 后调用 resolve_chart_review_actions(paper_id, review_result, run_id)。",
-          "8. 只有服务器返回所有范围内图片均已本地核验且 unresolved_count=0，才调用 finalize_chart_review(paper_id, review_result, run_id)。",
+          "3. 遍历 figures 的全部真实对象（不得只处理 unresolved_actions）。对每项严格使用其 source_paper_id 和 source_record_id：先 get_figure_image(source_paper_id, source_record_id) 实际查看当前裁剪图的 image content，再 render_paper_page(source_paper_id, page) 实际查看对应 PDF 整页的 image content，随后 get_codex_item(source_paper_id, 'figure', source_record_id) 读取图注、页码和现有字段。主文和 SI 均只能使用任务返回的真实 source_paper_id，禁止跨论文取图。",
+          "4. 不能只看图注、摘要、image_path、asset_url 或 read_paper_page 的文字；每张图必须真的读到上述两个 image content。任一图片内容看不到、缺失或工具报错时，标记 NEEDS_HUMAN/blocked，禁止声称已核验，也禁止从曲线或柱状图目测精确数值。",
+          "5. 每张图片独立判断 KEEP、RECROP、CREATE、REJECT 或 NEEDS_HUMAN。必要时只用 direct MCP recrop_figure 或 create_figure_from_bbox；裁剪/创建后必须再次调用 get_figure_image(source_paper_id, figure_id) 实际查看新的裁剪 image content，并调用 get_codex_item 回读 image_path、crop_status、crop_source、page 等真实状态。",
+          "6. 每一个非 NEEDS_HUMAN 的 figure_action 都必须附 local_ai_verification={verified_against_pdf:true,used_tools:['get_figure_image','render_paper_page','get_codex_item'],verification_note:'已实际查看当前裁剪图和对应 PDF 整页；逐图核验说明'}。",
+          "7. 使用当前 get_chart_review_task 返回的 bundle_fingerprint 构造完整 review_result；review_source_type 必须为 local_ai，并填写当前本地 AI 身份；不要沿用旧网页 JSON 的 bundle_fingerprint。",
+          "8. 构造完整 review_result 后调用 resolve_chart_review_actions(paper_id, review_result, run_id)。",
+          "9. 只有服务器返回所有范围内图片均已本地核验且 unresolved_count=0，才调用 finalize_chart_review(paper_id, review_result, run_id)。",
           "兼容协议名称：resolve_chart_review_actions(paper_id, review_result)；finalize_chart_review(paper_id, review_result)；run-scoped 时必须附带 run_id。",
-          "9. 最后只报告 stage_status、completed_snapshot_fingerprint、unresolved_count。"
+          "10. 页面不自动创建任务、不自动轮询、不自动裁决；只有用户把这条命令交给 AI 后才执行。最后只报告 stage_status、completed_snapshot_fingerprint、unresolved_count。"
         ].join("\n");
       }
       if (webAiReturnState.mode !== "dft") {
@@ -795,9 +795,16 @@
     }
 
     async function copyLocalAiChartReviewInstructionFromMenu() {
-      if (webAiReturnState.mode !== "evidence") {
-        openWebAiReturnDialog("evidence");
+      const target = selectedWebAiReturnTarget();
+      if (!target || !requireSelectedMainEvidenceScope(target)) return;
+      const targetId = String(target.paper_id || "");
+      if (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) {
+        clearWebAiReturnTransientState("已切换文献，先前临时内容已清除。");
       }
+      webAiReturnState.mode = "evidence";
+      webAiReturnState.paperId = targetId;
+      webAiReturnState.paperCode = String(target.paper_code || "");
+      webAiReturnState.validationResponse = null;
       await copyLocalAiImportInstruction();
     }
 
@@ -808,6 +815,15 @@
       }
       const target = selectedWebAiReturnTarget();
       if (!requireSelectedMainEvidenceScope(target)) return;
+      if (
+        !manualReviewContext.bundleId ||
+        !manualReviewContext.bundleFingerprint ||
+        manualReviewContext.figureCount == null ||
+        manualReviewContext.tableCount == null
+      ) {
+        showToast("未检测到完整的图表证据范围（图/表数量未确定或未导出证据包），已阻止应用。");
+        return;
+      }
       const textarea = document.getElementById("webAiReturnJson");
       const rawText = String(textarea && textarea.value || "").trim();
       if (!target || String(target.paper_id || "") !== webAiReturnState.paperId) {
@@ -862,9 +878,7 @@
         const applied = Array.isArray(data.applied) ? data.applied.length : Number(data.applied_count || 0);
         const completed = Boolean(data && data.chart_review_completed);
         const copyButton = document.getElementById("webAiCopyInstructionBtn");
-        const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
         if (copyButton) copyButton.disabled = false;
-        if (finalizeButton) finalizeButton.disabled = true;
         setWebAiValidationBox(
           "<strong>" + (completed ? "图表两级审核已完成。" : "网页 AI 图表结果已应用，等待本地 AI 逐图复核。") + "</strong>" +
           '<div class="web-ai-validation-summary">' +
@@ -886,36 +900,6 @@
       } finally {
         applyButton.textContent = "应用图表结果";
         applyButton.disabled = true;
-      }
-    }
-
-    async function finalizeWebAiEvidenceReview() {
-      if (!activeEvidenceScope() || webAiReturnState.mode !== "evidence" || !webAiReturnState.validationResponse) {
-        showToast("没有可 finalize 的当前固定图表审核范围。");
-        return;
-      }
-      const button = document.getElementById("webAiFinalizeEvidenceBtn");
-      if (!window.confirm("确认完成图表审核？\n" + evidenceScopeLabel() + "\n这一步只 finalize 已应用的当前范围，不会重新 apply JSON。")) return;
-      button.disabled = true;
-      button.textContent = "完成中...";
-      try {
-        const data = await fetchJSON(
-          "/api/papers/" + encodeURIComponent(manualReviewContext.paperId) + "/chart-review-result/finalize" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : ""),
-          { method: "POST" }
-        );
-        const scopeIssues = evidenceScopeMismatchIssues(data);
-        if (scopeIssues.length || !data.chart_review_completed) {
-          renderWebAiValidationFailure(scopeIssues.length ? scopeIssues : (data.finalize_blocking_errors || data.unresolved_actions || []), []);
-          return;
-        }
-        setWebAiValidationBox("<strong>图表审核已 finalize。</strong><div style=\"margin-top:8px;\">" + esc(evidenceScopeLabel()) + "</div>", "is-success");
-        showToast("图表审核已完成；现在可以继续 DFT 终审。");
-        await loadReviewCenter();
-      } catch (error) {
-        renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
-      } finally {
-        button.textContent = "完成图表审核";
-        button.disabled = false;
       }
     }
     // WEB_AI_RETURN_FEATURE_END
