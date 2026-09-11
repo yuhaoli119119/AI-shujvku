@@ -35,6 +35,11 @@
     };
     let dftReviewPreview = null;
     let dftReviewPreviewPaperId = "";
+    // Task-level "already gated, downloadable" subset shown on the ML exit card.
+    // The task key is a backend-defined constant; the COUNT always comes from the server.
+    const ML_SUBSET_TASK = "SRR_LiS:adsorption_energy";
+    const ML_SUBSET_LABEL = "吸附能";
+    let mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
     let manualScopeMismatchMessage = "";
     const PROMPT_COPY_ACTIONS = {
       figure_table: {
@@ -869,6 +874,44 @@
       }
     }
 
+    function mlSubsetDownloadHref(paperId) {
+      return "/api/dft/ml-dataset-v3.csv?task=" + encodeURIComponent(ML_SUBSET_TASK) +
+        "&ready_only=true&paper_id=" + encodeURIComponent(paperId);
+    }
+
+    // Reads the REAL task-level "already gated, downloadable" subset count for the focused paper.
+    // One lightweight manifest request per paper; the number is never hardcoded.
+    async function refreshMlSubset() {
+      const target = selectedWebAiReturnTarget();
+      if (!target || !target.paper_id) {
+        mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
+        renderSinglePaperWorkbench();
+        return;
+      }
+      const paperId = String(target.paper_id);
+      if (mlSubsetState.paperId === paperId && mlSubsetState.status !== "idle") {
+        return;
+      }
+      mlSubsetState = { paperId: paperId, status: "loading", count: null, blockers: [], error: null };
+      renderSinglePaperWorkbench();
+      try {
+        const manifest = await fetchJSON(
+          "/api/dft/ml-dataset-v3/manifest?task=" + encodeURIComponent(ML_SUBSET_TASK) +
+          "&ready_only=true&paper_id=" + encodeURIComponent(paperId)
+        );
+        mlSubsetState = {
+          paperId: paperId,
+          status: "ready",
+          count: Number(manifest && manifest.returned_count != null ? manifest.returned_count : 0),
+          blockers: (manifest && manifest.review_scope_blockers) || [],
+          error: null
+        };
+      } catch (error) {
+        mlSubsetState = { paperId: paperId, status: "failed", count: null, blockers: [], error: error.message };
+      }
+      renderSinglePaperWorkbench();
+    }
+
     function setSinglePaperStage(cardId, statusId, detailId, status, detail, stateClass) {
       const card = document.getElementById(cardId);
       const statusNode = document.getElementById(statusId);
@@ -986,14 +1029,59 @@
       );
 
       const mlReady = String(target.workflow_status || "") === "ML_Ready";
-      setSinglePaperStage(
-        "mlStageCard", "mlStageStatus", "mlStageDetail",
-        mlReady ? "服务器已标记可用于机器学习" : "尚未满足条件",
-        mlReady
-          ? "当前论文的服务器权威状态为 ML_Ready。"
-          : "服务器当前流程状态为 " + String(target.workflow_status || "unknown") + "；需先完成图表和 DFT 证据核验。",
-        mlReady ? "complete" : "blocked"
-      );
+      const mlSubset = mlSubsetState && mlSubsetState.paperId === paperId
+        ? mlSubsetState
+        : { status: "idle", count: null, blockers: [], error: null };
+      const mlSubsetLink = document.getElementById("mlSubsetDownloadLink");
+      if (mlSubset.status === "loading") {
+        if (mlSubsetLink) mlSubsetLink.hidden = true;
+        setSinglePaperStage(
+          "mlStageCard", "mlStageStatus", "mlStageDetail",
+          "正在读取子集状态",
+          "正在向服务器查询当前论文已通过门槛、可下载的" + ML_SUBSET_LABEL + "子集条目数。",
+          ""
+        );
+      } else if (mlSubset.status === "failed") {
+        if (mlSubsetLink) mlSubsetLink.hidden = true;
+        setSinglePaperStage(
+          "mlStageCard", "mlStageStatus", "mlStageDetail",
+          "子集状态读取失败",
+          "服务器子集状态读取失败：" + String(mlSubset.error || "未知错误") +
+            "。这不代表没有合格数据；请刷新后重试。",
+          "blocked"
+        );
+      } else if (mlSubset.status === "ready") {
+        const subsetCount = Math.max(0, Number(mlSubset.count || 0));
+        if (mlSubsetLink) {
+          mlSubsetLink.href = mlSubsetDownloadHref(paperId);
+          mlSubsetLink.textContent = "下载" + ML_SUBSET_LABEL + "子集 CSV（" + subsetCount + " 条）";
+          mlSubsetLink.hidden = subsetCount <= 0;
+        }
+        setSinglePaperStage(
+          "mlStageCard", "mlStageStatus", "mlStageDetail",
+          mlReady
+            ? "服务器已标记可用于机器学习"
+            : (subsetCount > 0
+              ? ML_SUBSET_LABEL + "子集已就绪：" + subsetCount + " 条可下载"
+              : "暂无已就绪子集"),
+          subsetCount > 0
+            ? "整篇：尚未完成（仍有未解决项，本页不宣称整篇完成）。当前任务子集：" + ML_SUBSET_LABEL +
+              " " + subsetCount + " 条合格记录可下载；下载子集不等于整篇完成。"
+            : "整篇：尚未完成。当前任务子集：" + ML_SUBSET_LABEL + " 暂无可导出的合格记录。",
+          mlReady ? "complete" : "blocked"
+        );
+      } else {
+        if (mlSubsetLink) mlSubsetLink.hidden = true;
+        setSinglePaperStage(
+          "mlStageCard", "mlStageStatus", "mlStageDetail",
+          mlReady ? "服务器已标记可用于机器学习" : "尚未满足条件",
+          mlReady
+            ? "当前论文的服务器权威状态为 ML_Ready。"
+            : "服务器当前流程状态为 " + String(target.workflow_status || "unknown") +
+              "；正在读取当前论文可下载的任务子集状态。",
+          mlReady ? "complete" : "blocked"
+        );
+      }
     }
 
     async function focusPaperForReview(paperId) {
@@ -1010,12 +1098,14 @@
       selectedPaperIds.add(String(row.paper_id));
       dftReviewPreview = null;
       dftReviewPreviewPaperId = "";
+      mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
       replaceReviewCenterTargetUrl(row.paper_id);
       renderRows();
       updateManualReviewContextFromRows();
       await refreshManualReviewScope();
       await loadReviewScopeCandidates();
       await refreshDftReviewPreview();
+      await refreshMlSubset();
       const workbench = document.getElementById("singlePaperWorkbench");
       if (workbench) workbench.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -3958,6 +4048,7 @@
         await refreshManualReviewScope();
         await loadReviewScopeCandidates();
         await refreshDftReviewPreview();
+        await refreshMlSubset();
       } catch (error) {
         document.getElementById("queueMeta").textContent = "读取失败";
         document.getElementById("rows").innerHTML = '<tr><td colspan="6"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';

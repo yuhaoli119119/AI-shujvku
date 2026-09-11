@@ -304,6 +304,51 @@
       .layout { grid-template-columns: 1fr; }
       .pd-evidence-aside { position: static; max-height: none; }
     }
+
+    /* ---- DFT 催化剂分组（按 CatalystSample 身份聚合，复用原分组模块口径） ---- */
+    .dft-catalyst-overview { align-items: flex-start; }
+    .dft-overview-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .dft-overview-count { font-size: 19px; font-weight: 800; line-height: 1.3; }
+    .dft-overview-count em { font-style: normal; color: var(--color-primary); }
+    .dft-overview-sub { color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
+    .dft-catalyst-section { margin-bottom: 14px; }
+    .dft-catalyst-section-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+    .dft-catalyst-section-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+    .dft-catalyst-section-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+    .dft-unconfirmed-note { margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-warning-bg); color: var(--color-warning); font-size: 12px; line-height: 1.6; }
+    .dft-catalyst-group { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); margin-bottom: 10px; overflow: hidden; }
+    .dft-catalyst-group > summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px; cursor: pointer; list-style: none; background: var(--color-surface-alt); }
+    .dft-catalyst-group > summary::-webkit-details-marker { display: none; }
+    .dft-catalyst-group > summary::after { content: "\25BC"; color: var(--color-text-muted); font-size: 10px; line-height: 1.6; transition: transform 0.2s ease; }
+    .dft-catalyst-group:not([open]) > summary::after { transform: rotate(-90deg); }
+    .dft-catalyst-group-heading { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 240px; }
+    .dft-catalyst-group-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .dft-catalyst-group-title h3 { margin: 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+    .dft-catalyst-group-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .dft-catalyst-group-metrics { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .dft-catalyst-group-body { padding: 0 12px 12px; }
+    .dft-catalyst-base { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt); }
+    .dft-catalyst-base-item { min-width: 0; }
+    .dft-catalyst-base-item dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 600; }
+    .dft-catalyst-base-item dd { margin: 2px 0 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .dft-catalyst-base-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .dft-sample-id-value { color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+    .dft-prop-section { margin-bottom: 12px; }
+    .dft-prop-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1px dashed var(--color-border); }
+    .dft-prop-head h4 { margin: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+    .dft-prop-count { color: var(--color-text-secondary); font-size: 12px; }
+    .dft-catalyst-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; align-items: start; }
+    @media (max-width: 720px) {
+      .dft-catalyst-grid { grid-template-columns: 1fr; }
+      .dft-catalyst-group > summary { padding: 10px; }
+      .dft-catalyst-group-body { padding: 0 10px 10px; }
+      .dft-catalyst-base { grid-template-columns: 1fr; padding: 10px; }
+      /* 窄屏下让记录编号独占一行，避免被操作按钮挤到截断 */
+      .dft-catalyst-group-body .dft-compact-head { flex-wrap: wrap; }
+      .dft-catalyst-group-body .dft-compact-head .dft-record-locator { flex: 1 1 100%; }
+      .dft-catalyst-group-body .dft-compact-head .dft-card-actions { width: 100%; }
+      .dft-catalyst-group-body .dft-card-actions .btn { flex: 1 1 auto; }
+    }
   </style>
 
 </head>
@@ -1119,25 +1164,301 @@
       return page.has_more !== true && loaded >= total;
     }
 
+    /* ============================================================
+       DFT 催化剂分组展示（恢复「以催化剂为单位」的展示口径）
+
+       分组身份逻辑沿用 literature_library/dft-sample-groups.js 的既有口径
+       （sample ID 优先，绝不按名称合并）；渲染层针对本详情页适配：向
+       renderDftCompactCard 传入记录在 state.paper.dft_results_items 中的
+       原始索引，保证「复制 ID / 修改数据 / 更多操作」仍指向同一条记录。
+       本层只读展示，不提供任何写入入口。
+       ============================================================ */
+    const DFT_CATALYST_UNCONFIRMED_KEY = "__catalyst_unconfirmed__";
+    const DFT_CATALYST_CATEGORY_META = {
+      target: { label: "目标催化剂", note: "catalyst_type = single_atom" },
+      reference: { label: "对照 / 参考材料（非目标催化剂）", note: "已绑定样本，但未归类为单原子催化剂" },
+      unconfirmed: { label: "催化剂归属待确认", note: "未绑定样本，或标签跨多个材料、无法唯一归属" }
+    };
+
+    function escAttr(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function shortCatalystSampleId(value) {
+      const text = String(value || "").trim();
+      return text ? text.slice(0, 8) : "";
+    }
+
+    function renderCatalystSampleShortId(sampleId) {
+      const value = String(sampleId || "").trim();
+      if (!value) return "";
+      return '<code class="dft-sample-id-value" data-role="catalyst-sample-id" data-catalyst-sample-id="' + escAttr(value) + '" title="catalyst_sample_id：' + escAttr(value) + '">' + esc(shortCatalystSampleId(value)) + '</code>';
+    }
+
+    async function copyCatalystSampleId(event, sampleId) {
+      if (event) { event.preventDefault(); event.stopPropagation(); }
+      const value = String(sampleId || "").trim();
+      if (!value) { showToast("当前催化剂样本没有系统 ID。"); return; }
+      try {
+        await navigator.clipboard.writeText(value);
+        showToast("催化剂样本完整 UUID 已复制。");
+      } catch (error) {
+        showToast("复制催化剂样本 UUID 失败：" + error.message);
+      }
+    }
+
+    /* 与 dft-sample-groups.js 的 dftSampleGroupMeta 保持同一身份口径：
+       catalyst_sample_id 为唯一分组身份；缺失时归入待确认，不做名称推断。 */
+    function dftCatalystGroupIdentity(item) {
+      item = item || {};
+      const readPath = paths => {
+        for (let p = 0; p < paths.length; p += 1) {
+          let cur = item;
+          let hit = true;
+          const parts = String(paths[p]).split(".");
+          for (let s = 0; s < parts.length; s += 1) {
+            if (cur && typeof cur === "object" && cur[parts[s]] !== undefined && cur[parts[s]] !== null && cur[parts[s]] !== "") {
+              cur = cur[parts[s]];
+            } else { hit = false; break; }
+          }
+          if (!hit) continue;
+          if (cur && typeof cur === "object" && !Array.isArray(cur) && cur.value !== undefined) cur = cur.value;
+          if (typeof cur === "string" || typeof cur === "number") return String(cur);
+        }
+        return "";
+      };
+      const catalystSampleId = readPath([
+        "catalyst_sample_id",
+        "active_site_ref.catalyst_sample_id",
+        "evidence_payload.catalyst_sample_id",
+        "evidence_payload.active_site_ref.catalyst_sample_id"
+      ]);
+      const activeSiteKey = readPath([
+        "active_site_instance_key",
+        "active_site_ref.active_site_instance_key",
+        "active_site_ref.instance_key",
+        "evidence_payload.active_site_instance_key",
+        "evidence_payload.active_site_ref.active_site_instance_key",
+        "evidence_payload.active_site_ref.instance_key"
+      ]);
+      return {
+        catalystSampleId: catalystSampleId,
+        activeSiteLabel: activeSiteKey || ""
+      };
+    }
+
+    /* 可导出口径只认导出闸门的权威字段 export_safety / is_exportable。
+       特别注意：candidate_status = "ai_verified_ml_ready" 并不等于可导出
+       （生产中存在同时被 unsafe_review / unsafe_required_locator:value /
+       non_authoritative_review 等阻断的记录），因此不得用它计数。 */
+    function isDftItemExportable(item) {
+      const safety = (item && item.export_safety) || {};
+      return safety.is_exportable === true || safety.eligible === true || (item && item.is_exportable === true);
+    }
+
+    /* 分类只用已有字段 + 名称形态，不做猜测性归属：
+       single_atom -> 目标催化剂；名称跨多材料/系列 -> 待确认；其余已绑定 -> 对照/参考。 */
+    function dftCatalystCategory(sample) {
+      if (!sample || !String(sample.id || "").trim()) return "unconfirmed";
+      const type = String(sample.catalyst_type || "").trim().toLowerCase();
+      const name = String(sample.name || "").trim();
+      if (type === "single_atom") return "target";
+      if (/\band\b/i.test(name) || /series/i.test(name)) return "unconfirmed";
+      return "reference";
+    }
+
+    function dftPropertyTypeRank(propertyType) {
+      const key = String(propertyType || "").trim().toLowerCase();
+      const order = [
+        "adsorption_energy", "adsorption_energy_solvated", "adsorption_configuration_energy",
+        "gibbs_free_energy_change", "reaction_barrier", "bader_charge_transfer",
+        "bond_length", "magnetic_moment", "zero_point_energy_correction", "entropy_correction_ts"
+      ];
+      return order.indexOf(key) === -1 ? order.length : order.indexOf(key);
+    }
+
+    function renderDftCatalystBaseInfo(sample, records) {
+      const s = sample || {};
+      const sampleId = String(s.id || "").trim();
+      const first = records[0] || {};
+      const rows = [
+        ["催化剂 / 材料", s.name || (records.length ? dftCatalystLabel(first) : "")],
+        ["催化剂类型", s.catalyst_type],
+        ["金属中心", Array.isArray(s.metal_centers) ? s.metal_centers.join(", ") : s.metal_centers],
+        ["配位环境", s.coordination],
+        ["载体 / 基底", s.support && s.support !== "UNKNOWN" ? s.support : ""],
+        ["合成 / 构型说明", s.synthesis_method]
+      ].filter(function (row) {
+        return row[1] !== null && row[1] !== undefined && String(row[1]).trim() !== "" && String(row[1]).trim() !== "-";
+      });
+      const body = rows.length
+        ? rows.map(function (row) {
+            return '<div class="dft-catalyst-base-item"><dt>' + esc(row[0]) + '</dt><dd>' + esc(String(row[1])) + '</dd></div>';
+          }).join("")
+        : '<div class="dft-catalyst-base-item"><dt>基础信息</dt><dd>暂无可展示的组成 / 配位 / 载体信息</dd></div>';
+      const actions = sampleId
+        ? '<div class="dft-catalyst-base-actions">' + renderCatalystSampleShortId(sampleId) +
+          '<button class="btn ghost small" type="button" data-role="copy-catalyst-sample-id" data-catalyst-sample-id="' + escAttr(sampleId) + '" onclick="copyCatalystSampleId(event, ' + escAttr(JSON.stringify(sampleId)) + ')">复制样本 ID</button>' +
+          '<span class="subtle">本组 ' + records.length + ' 条记录均绑定该样本 ID</span></div>'
+        : '<div class="dft-catalyst-base-actions"><span class="subtle">本组记录没有可用的 catalyst_sample_id，未做任何自动绑定</span></div>';
+      return '<dl class="dft-catalyst-base">' + body + actions + '</dl>';
+    }
+
+    function renderDftCatalystGroup(group, indexById) {
+      const records = group.records;
+      const sample = group.sample || {};
+      const exportable = records.filter(function (entry) { return isDftItemExportable(entry.item); }).length;
+      const conflicts = records.filter(function (entry) { return Number(entry.item && entry.item.conflict_count || 0) > 0; }).length;
+
+      const buckets = new Map();
+      records.forEach(function (entry) {
+        const prop = String(entry.item && (entry.item.property_type || entry.item.energy_type) || "").trim() || "__unset__";
+        if (!buckets.has(prop)) buckets.set(prop, []);
+        buckets.get(prop).push(entry);
+      });
+      const propKeys = Array.from(buckets.keys()).sort(function (a, b) {
+        const diff = dftPropertyTypeRank(a) - dftPropertyTypeRank(b);
+        return diff !== 0 ? diff : String(a).localeCompare(String(b));
+      });
+      const body = propKeys.map(function (prop) {
+        const entries = buckets.get(prop);
+        const isUnset = prop === "__unset__";
+        const headLabel = isUnset ? "性能类型未记录" : propertyTypeLabel(prop);
+        return '<div class="dft-prop-section">' +
+            '<div class="dft-prop-head"><h4' + (isUnset ? "" : ' title="' + escAttr(prop) + '"') + '>' + esc(headLabel) + '</h4>' +
+              '<span class="dft-prop-count">' + entries.length + ' 条</span>' +
+            '</div>' +
+            '<div class="dft-catalyst-grid">' +
+              entries.map(function (entry) {
+                const id = String(entry.item && entry.item.id || "");
+                const originalIndex = indexById.has(id) ? indexById.get(id) : entry.index;
+                return renderDftCompactCard(entry.item, originalIndex);
+              }).join("") +
+            '</div>' +
+          '</div>';
+      }).join("");
+
+      const title = sample.name || "未绑定催化剂";
+      const chips = [
+        sample.catalyst_type ? String(sample.catalyst_type) : "",
+        Array.isArray(sample.metal_centers) && sample.metal_centers.length ? sample.metal_centers.join(", ") : "",
+        sample.coordination || "",
+        sample.support && sample.support !== "UNKNOWN" ? sample.support : "",
+        group.activeSites.size ? Array.from(group.activeSites).join(" / ") : ""
+      ].filter(Boolean);
+      return '<details class="dft-catalyst-group" data-role="dft-catalyst-group"' +
+          (group.catalystSampleId ? ' data-catalyst-sample-id="' + escAttr(group.catalystSampleId) + '"' : "") +
+          '>' +
+            '<summary><div class="dft-catalyst-group-heading">' +
+                '<div class="dft-catalyst-group-title"><h3>' + esc(prettyChemicalFormula(title)) + '</h3>' +
+                  renderCatalystSampleShortId(group.catalystSampleId) + '</div>' +
+                (chips.length
+                  ? '<div class="dft-catalyst-group-chips">' + chips.map(function (c) { return '<span class="dft-status-chip">' + esc(c) + '</span>'; }).join("") + '</div>'
+                  : "") +
+              '</div>' +
+              '<div class="dft-catalyst-group-metrics">' +
+                '<span class="dft-status-chip">' + records.length + ' 条数据</span>' +
+                '<span class="dft-status-chip ' + (exportable ? "ok" : "meta") + '">可导出 ' + exportable + '</span>' +
+                (conflicts ? '<span class="dft-status-chip danger">冲突 ' + conflicts + '</span>' : "") +
+              '</div></summary>' +
+            '<div class="dft-catalyst-group-body">' +
+              renderDftCatalystBaseInfo(sample, records) +
+              body +
+            '</div>' +
+          '</details>';
+    }
+
+    function renderDftCatalystGroupedCollection(items) {
+      const samplesById = {};
+      const sampleList = (state.paper && state.paper.catalyst_samples_items) || [];
+      sampleList.forEach(function (s) {
+        const id = String((s && s.id) || "").trim();
+        if (id) samplesById[id] = s;
+      });
+      const indexById = new Map();
+      items.forEach(function (item, index) {
+        indexById.set(String(item && item.id || ""), index);
+      });
+
+      const groups = new Map();
+      items.forEach(function (item, index) {
+        const identity = dftCatalystGroupIdentity(item);
+        const key = identity.catalystSampleId || DFT_CATALYST_UNCONFIRMED_KEY;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            catalystSampleId: identity.catalystSampleId,
+            sample: samplesById[key] || null,
+            records: [],
+            activeSites: new Set()
+          });
+        }
+        const group = groups.get(key);
+        group.records.push({ item: item, index: index });
+        if (identity.activeSiteLabel) group.activeSites.add(identity.activeSiteLabel);
+      });
+
+      const buckets = { target: [], reference: [], unconfirmed: [] };
+      Array.from(groups.values()).forEach(function (group) {
+        buckets[dftCatalystCategory(group.sample)].push(group);
+      });
+      ["target", "reference", "unconfirmed"].forEach(function (k) {
+        buckets[k].sort(function (a, b) {
+          if (b.records.length !== a.records.length) return b.records.length - a.records.length;
+          return String((a.sample && a.sample.name) || "").localeCompare(String((b.sample && b.sample.name) || ""));
+        });
+      });
+
+      const sum = list => list.reduce(function (n, g) { return n + g.records.length; }, 0);
+      const targetRecords = sum(buckets.target);
+      const referenceRecords = sum(buckets.reference);
+      const unconfirmedRecords = sum(buckets.unconfirmed);
+      const exportableAll = items.filter(isDftItemExportable).length;
+      const conflictAll = items.filter(function (item) { return Number(item && item.conflict_count || 0) > 0; }).length;
+
+      const summary = '<div class="dft-collection-summary dft-catalyst-overview">' +
+          '<div class="dft-overview-head">' +
+            '<div class="dft-overview-count"><em>' + buckets.target.length + '</em> 个目标催化剂 · 共 ' + targetRecords + ' 条数据</div>' +
+            '<div class="dft-overview-sub">按 CatalystSample 身份归组：同一个 sample ID 只展示一个主体，不同 sample ID 不按名称相近合并。</div>' +
+          '</div>' +
+          '<div class="dft-collection-metrics">' +
+            renderDftStatusChip("对照 / 参考 " + buckets.reference.length + " 个 · " + referenceRecords + " 条", "meta") +
+            renderDftStatusChip("归属待确认 " + unconfirmedRecords + " 条", unconfirmedRecords ? "warn" : "meta") +
+            renderDftStatusChip("本篇共 " + items.length + " 条", "meta") +
+            renderDftStatusChip("可导出 " + exportableAll, exportableAll ? "ok" : "meta") +
+            renderDftStatusChip("冲突 " + conflictAll, conflictAll ? "danger" : "meta") +
+          '</div>' +
+        '</div>';
+
+      const renderSection = function (key, groups, recordCount, extraNote) {
+        if (!groups.length) return "";
+        const meta = DFT_CATALYST_CATEGORY_META[key];
+        return '<div class="dft-catalyst-section dft-catalyst-section-' + key + '">' +
+            '<div class="dft-catalyst-section-head"><h3>' + esc(meta.label) + '</h3>' +
+              '<span class="dft-catalyst-section-note">' + recordCount + ' 条 · ' + esc(meta.note) + '</span></div>' +
+            (extraNote ? '<div class="dft-unconfirmed-note">' + esc(extraNote) + '</div>' : "") +
+            groups.map(function (group) { return renderDftCatalystGroup(group, indexById); }).join("") +
+          '</div>';
+      };
+
+      return summary +
+        renderSection("target", buckets.target, targetRecords, "") +
+        renderSection("reference", buckets.reference, referenceRecords, "") +
+        renderSection("unconfirmed", buckets.unconfirmed, unconfirmedRecords,
+          "以下记录未计入已确认催化剂数，系统未做任何自动绑定；原始记录、证据与审核状态保持原样。") +
+        renderDftPagination();
+    }
+
     function renderDftCompactCollection(items) {
+      // 未完整加载时保留原分页闸门：不宣称整篇统计
       if (!hasCompleteDftResultCollection()) {
         return renderDftPagination();
       }
-      const readyCount = items.filter(isDftItemReady).length;
-      const reviewedCount = items.filter(item => Number(item && item.object_review_audit_count || 0) > 0).length;
-      const conflictCount = items.filter(item => Number(item && item.conflict_count || 0) > 0).length;
-      return `
-        <div class="dft-collection-summary">
-          <div class="dft-collection-title">${items.length} 条候选 DFT 数据</div>
-          <div class="dft-collection-metrics">
-            ${renderDftStatusChip("ML Ready " + readyCount, readyCount ? "ok" : "meta")}
-            ${renderDftStatusChip("已审核 " + reviewedCount, reviewedCount ? "ok" : "meta")}
-            ${renderDftStatusChip("冲突 " + conflictCount, conflictCount ? "danger" : "meta")}
-          </div>
-        </div>
-        <div class="dft-results-grid">${items.map(renderDftCompactCard).join("")}</div>
-        ${renderDftPagination()}
-      `;
+      return renderDftCatalystGroupedCollection(items);
     }
 
     function renderDftPagination() {
@@ -1498,6 +1819,12 @@
       if (dftDetails) dftDetails.open = true;
       const details = card.querySelector("details.raw-data-toggle");
       if (details) details.open = true;
+      // 记录位于催化剂分组内：先逐级展开所有祖先 details，再定位
+      let ancestorDetails = card.parentElement;
+      while (ancestorDetails) {
+        if (ancestorDetails.tagName === "DETAILS") ancestorDetails.open = true;
+        ancestorDetails = ancestorDetails.parentElement;
+      }
       card.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
