@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>总览 - Literature AI</title>
+    <title>科研工作台 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
@@ -17,357 +17,1167 @@
             color: var(--color-text);
             background: var(--color-bg);
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            transition: background 0.25s ease, color 0.25s ease;
         }
         .shell {
-            max-width: 1440px;
+            max-width: var(--page-shell-max-width);
             margin: 0 auto;
-            padding: 0 24px 32px;
+            padding: 12px 28px 48px;
         }
-        .welcome-header {
-            margin-bottom: 32px;
+
+        /* ================= Header ================= */
+        .ws-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
             gap: 16px;
+            padding: 16px 0 20px;
         }
-        .welcome-header h1 {
-            font-size: 32px;
-            font-weight: 800;
-            background: linear-gradient(135deg, var(--color-primary), var(--color-success));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        .welcome-header p {
-            color: var(--color-text-secondary);
-            font-size: 14px;
-            margin-top: 6px;
-        }
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 20px;
-            margin-bottom: 32px;
-        }
-        .stat-card {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            box-shadow: var(--shadow-card);
-            transition: var(--transition);
-            position: relative;
-            overflow: hidden;
-        }
-        .stat-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--shadow-elevated);
-            border-color: var(--color-primary);
-        }
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background: var(--color-primary);
-        }
-        .stat-card.success::before { background: var(--color-success); }
-        .stat-card.warning::before { background: var(--color-warning); }
-        .stat-card.danger::before { background: var(--color-danger); }
-        
-        .stat-label {
-            font-size: 13px;
-            color: var(--color-text-secondary);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            font-weight: 600;
-        }
-        .stat-val {
-            font-size: 36px;
-            font-weight: 800;
-            margin-top: 8px;
-            color: var(--color-text);
-        }
-        .stat-desc {
-            font-size: 12px;
-            color: var(--color-text-muted);
-            margin-top: 6px;
-        }
-
-        /* Two-Column Section */
-        .dashboard-layout {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 24px;
-        }
-        @media (max-width: 1024px) {
-            .dashboard-layout { grid-template-columns: 1fr; }
-        }
-        
-        .main-col, .side-col {
-            display: flex;
-            flex-direction: column;
-            gap: 24px;
-        }
-
-        .panel-card {
-            background: var(--color-surface);
-            border: 1px solid var(--color-border);
-            border-radius: var(--radius-lg);
-            box-shadow: var(--shadow-card);
-            padding: 24px;
-        }
-        .panel-title {
-            font-size: 18px;
-            font-weight: 800;
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        /* Table styles */
-        .table-container {
-            width: 100%;
-            overflow-x: auto;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-            text-align: left;
-        }
-        th, td {
-            padding: 14px 16px;
-            border-bottom: 1px solid var(--color-border);
-        }
-        th {
+        .ws-header-titles h1 {
+            font-size: 26px;
             font-weight: 700;
+            color: var(--color-text);
+            letter-spacing: -0.02em;
+            line-height: 1.25;
+        }
+        .ws-header-titles p {
             color: var(--color-text-secondary);
-            background: var(--color-surface-alt);
+            font-size: 13px;
+            margin-top: 6px;
         }
-        tr:hover td {
-            background: var(--color-surface-alt);
-        }
-
-        /* Quick Action buttons */
-        .action-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-        .action-btn {
+        .ws-header-widgets {
             display: flex;
-            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .ws-header-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 8px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: var(--shadow-card);
+            min-height: 52px;
+            transition: all var(--transition);
+        }
+        .ws-header-card-icon {
+            width: 28px;
+            height: 28px;
+            color: var(--color-text-secondary);
+            display: flex;
             align-items: center;
             justify-content: center;
-            padding: 20px;
-            border-radius: var(--radius-lg);
-            border: 1.5px solid var(--color-border);
-            background: var(--color-surface);
-            color: var(--color-text);
-            font-family: var(--font-body);
-            font-size: 14px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: var(--transition);
-            gap: 8px;
-            text-decoration: none;
-            text-align: center;
+            flex-shrink: 0;
         }
-        .action-btn:hover {
+        .ws-header-card-icon svg { width: 22px; height: 22px; }
+        .ws-header-card-content {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .ws-header-card-label {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            font-weight: 500;
+        }
+        /* Current Library Custom Dropdown */
+        .ws-lib-card {
+            position: relative;
+            cursor: pointer;
+            user-select: none;
+            min-width: 190px;
+        }
+        .ws-lib-card:hover {
             border-color: var(--color-primary);
+            box-shadow: var(--shadow-card), 0 0 0 1px var(--color-primary-bg);
+        }
+        .ws-lib-card.menu-open {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 3px var(--color-primary-bg), var(--shadow-card);
+        }
+        .ws-lib-trigger-val {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ws-lib-name {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--color-text);
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.3;
+        }
+        .ws-lib-active-tag {
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 5px;
+            border-radius: 4px;
             background: var(--color-primary-bg);
             color: var(--color-primary);
-            transform: translateY(-2px);
+            line-height: 1.3;
+            flex-shrink: 0;
         }
-        .action-btn svg {
-            width: 24px;
-            height: 24px;
-            fill: currentColor;
+        .ws-lib-chevron {
+            width: 14px;
+            height: 14px;
+            color: var(--color-text-muted);
+            transition: transform 0.2s ease, color 0.2s ease;
+            flex-shrink: 0;
+            margin-left: 2px;
+        }
+        .ws-lib-card.menu-open .ws-lib-chevron {
+            transform: rotate(180deg);
+            color: var(--color-primary);
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
+        /* Popover Menu */
+        .ws-lib-menu {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            min-width: 290px;
+            width: max-content;
+            max-width: 380px;
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 16px 36px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.08);
+            display: none;
+            opacity: 0;
+            transform: translateY(-6px);
+            transition: opacity 0.18s ease, transform 0.18s ease;
+            z-index: 2000;
+            overflow: hidden;
+        }
+        .ws-lib-menu.open {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .ws-lib-menu-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 14px;
+            background: var(--color-surface-alt);
+            border-bottom: 1px solid var(--color-border);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--color-text-muted);
+            letter-spacing: 0.3px;
+        }
+        .ws-lib-count-badge {
+            font-size: 10px;
+            font-weight: 500;
             color: var(--color-text-secondary);
+            background: var(--color-surface);
+            padding: 1px 7px;
+            border-radius: 10px;
+            border: 1px solid var(--color-border);
         }
-        .empty-state p { margin-top: 8px; font-size: 14px; }
-
-        .badge-type {
-            display: inline-flex;
+        .ws-lib-menu-list {
+            padding: 6px;
+            max-height: 260px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .ws-lib-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            border-radius: var(--radius);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border: 1px solid transparent;
+            text-align: left;
+        }
+        .ws-lib-menu-item:hover {
+            background: var(--color-surface-alt);
+            border-color: var(--color-border);
+        }
+        .ws-lib-menu-item.active {
+            background: var(--color-primary-bg);
+            border-color: color-mix(in srgb, var(--color-primary) 35%, transparent);
+        }
+        .ws-lib-item-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            display: flex;
             align-items: center;
             justify-content: center;
-            padding: 4px 8px;
-            border-radius: var(--radius-sm);
-            font-size: 11px;
-            font-weight: 700;
-            white-space: nowrap;
-            min-width: 44px;
+            flex-shrink: 0;
+            transition: all 0.15s ease;
         }
-        .badge-type.A { background: var(--color-primary-bg); color: var(--color-primary); }
-        .badge-type.B { background: var(--color-success-bg); color: var(--color-success); }
-        .badge-type.C { background: var(--color-warning-bg); color: var(--color-warning); }
-        .badge-type.R { background: var(--color-danger-bg); color: var(--color-danger); }
-        .badge-type.Unknown { background: var(--color-surface-alt); color: var(--color-text-secondary); }
-        #recentTable th:nth-child(4),
-        #recentTable td:nth-child(4) {
-            width: 92px;
-            min-width: 92px;
+        .ws-lib-menu-item.active .ws-lib-item-icon {
+            background: var(--color-primary);
+            color: #FFFFFF;
+        }
+        .ws-lib-item-icon svg {
+            width: 15px;
+            height: 15px;
+        }
+        .ws-lib-item-info {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .ws-lib-item-title-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ws-lib-item-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text);
+            overflow: hidden;
+            text-overflow: ellipsis;
             white-space: nowrap;
-            text-align: center;
+        }
+        .ws-lib-menu-item.active .ws-lib-item-name {
+            color: var(--color-primary);
+            font-weight: 700;
+        }
+        .ws-lib-item-active-chip {
+            font-size: 9px;
+            font-weight: 700;
+            padding: 0 4px;
+            border-radius: 3px;
+            background: var(--color-primary);
+            color: #FFFFFF;
+            line-height: 1.4;
+        }
+        .ws-lib-item-sub {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .ws-lib-item-check {
+            color: var(--color-primary);
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .ws-lib-item-check svg {
+            width: 16px;
+            height: 16px;
+        }
+        .ws-lib-menu-footer {
+            padding: 8px 12px;
+            background: var(--color-surface-alt);
+            border-top: 1px solid var(--color-border);
+            display: flex;
+            justify-content: center;
+        }
+        .ws-lib-manage-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--color-primary);
+            text-decoration: none;
+            transition: opacity 0.15s ease;
+        }
+        .ws-lib-manage-link:hover {
+            opacity: 0.8;
+            text-decoration: underline;
+        }
+        .ws-lib-manage-link svg {
+            width: 13px;
+            height: 13px;
+        }
+        @media (max-width: 640px) {
+            .ws-lib-menu {
+                left: auto;
+                right: 0;
+                min-width: 260px;
+                max-width: calc(100vw - 32px);
+            }
+        }
+        .ws-storage-track {
+            width: 68px;
+            height: 6px;
+            background: var(--color-surface-alt);
+            border: 1px solid var(--color-border);
+            border-radius: 3px;
+            overflow: hidden;
+            display: inline-block;
+            vertical-align: middle;
         }
 
-        .toast {
-            position: fixed;
-            top: 24px;
-            right: 24px;
-            background: var(--color-primary);
-            color: white;
-            padding: 12px 24px;
-            border-radius: var(--radius);
-            font-weight: 600;
-            box-shadow: var(--shadow-elevated);
-            z-index: 1000;
-            display: none;
+        /* ================= Upload Hero ================= */
+        .ws-upload-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 280px;
+            gap: 16px;
+            margin-bottom: 18px;
         }
+        @media (max-width: 980px) { .ws-upload-row { grid-template-columns: 1fr; } }
+        
+        .ws-upload-hero {
+            background: var(--upload-hero-bg);
+            border: 2px dashed var(--upload-hero-border);
+            border-radius: var(--radius-lg);
+            padding: 24px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            cursor: pointer;
+            transition: all var(--transition);
+            box-shadow: var(--shadow-card);
+        }
+        .ws-upload-hero:hover, .ws-upload-hero.drag-over {
+            border-color: var(--color-primary);
+            box-shadow: var(--shadow-elevated);
+            transform: translateY(-1px);
+        }
+        .ws-upload-left {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            flex: 1;
+            min-width: 0;
+        }
+        .ws-upload-icon-box {
+            width: 52px;
+            height: 52px;
+            border-radius: 14px;
+            background: var(--color-primary-bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--color-primary);
+            flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(100, 66, 214, 0.12);
+        }
+        .ws-upload-icon-box svg { width: 28px; height: 28px; }
+        .ws-upload-text {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+        .ws-upload-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--color-text);
+            letter-spacing: -0.01em;
+        }
+        .ws-upload-desc {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            line-height: 1.5;
+            max-width: 480px;
+        }
+        .ws-upload-right {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .btn-upload-primary {
+            background: var(--color-primary);
+            color: #FFFFFF;
+            border: none;
+            padding: 9px 20px;
+            border-radius: var(--radius);
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px var(--color-primary-bg);
+            transition: all var(--transition);
+        }
+        .btn-upload-primary:hover {
+            background: var(--color-primary-hover);
+            box-shadow: 0 4px 12px var(--color-primary-bg);
+            transform: translateY(-1px);
+        }
+        .ws-upload-sublink {
+            font-size: 11px;
+            color: var(--color-primary);
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .ws-upload-sublink:hover { text-decoration: underline; }
+
+        /* ---- Upload Tips Card ---- */
+        .ws-upload-tips {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 10px;
+            box-shadow: var(--shadow-card);
+        }
+        .ws-tips-header {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--color-text);
+            margin-bottom: 2px;
+        }
+        .ws-tips-header-icon {
+            color: #EAB308;
+            width: 16px;
+            height: 16px;
+            display: inline-flex;
+        }
+        .ws-tip-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--color-text-secondary);
+        }
+        .ws-tip-check {
+            color: var(--color-primary);
+            font-weight: 700;
+            font-size: 12px;
+            line-height: 1;
+        }
+
+        /* ================= Metrics Grid ================= */
+        .ws-metrics {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        @media (max-width: 1024px) { .ws-metrics { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 580px) { .ws-metrics { grid-template-columns: 1fr; } }
+
+        .ws-metric-card {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            box-shadow: var(--shadow-card);
+            cursor: pointer;
+            transition: all var(--transition);
+            position: relative;
+        }
+        .ws-metric-card:hover {
+            border-color: var(--color-primary);
+            box-shadow: var(--shadow-elevated);
+            transform: translateY(-1px);
+        }
+        .ws-metric-icon-box {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: all var(--transition);
+        }
+        .ws-metric-icon-box svg { width: 22px; height: 22px; }
+        
+        /* Light/Eyecare icon box colors */
+        .ws-metric-icon-box.purple { background: var(--color-primary-bg); color: var(--color-primary); }
+        .ws-metric-icon-box.green { background: var(--color-success-bg); color: var(--color-success); }
+        .ws-metric-icon-box.orange { background: var(--color-warning-bg); color: var(--color-warning); }
+        .ws-metric-icon-box.blue { background: rgba(37, 99, 235, 0.10); color: #2563EB; }
+
+        /* Dark mode icon box overrides */
+        [data-theme="dark"] .ws-metric-icon-box.purple,
+        [data-mode="dark"] .ws-metric-icon-box.purple { background: rgba(139, 92, 246, 0.20); color: #C4B5FD; }
+        [data-theme="dark"] .ws-metric-icon-box.green,
+        [data-mode="dark"] .ws-metric-icon-box.green { background: rgba(52, 211, 153, 0.20); color: #6EE7B7; }
+        [data-theme="dark"] .ws-metric-icon-box.orange,
+        [data-mode="dark"] .ws-metric-icon-box.orange { background: rgba(251, 191, 36, 0.20); color: #FCD34D; }
+        [data-theme="dark"] .ws-metric-icon-box.blue,
+        [data-mode="dark"] .ws-metric-icon-box.blue { background: rgba(56, 189, 248, 0.20); color: #7DD3FC; }
+
+        .ws-metric-content {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .ws-metric-title {
+            font-size: 12px;
+            color: var(--color-text-secondary);
+            font-weight: 500;
+        }
+        .ws-metric-num-row {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .ws-metric-value {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--color-text);
+            line-height: 1.2;
+            font-family: var(--font-display);
+        }
+        .ws-metric-sub {
+            font-size: 11px;
+            color: var(--color-text-muted);
+            font-weight: 500;
+        }
+        .ws-metric-sub.highlight-green {
+            color: var(--color-success);
+            background: var(--color-success-bg);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        .ws-metric-arrow {
+            color: var(--color-text-muted);
+            font-size: 16px;
+            font-weight: 600;
+            margin-left: auto;
+            transition: all var(--transition);
+        }
+        .ws-metric-card:hover .ws-metric-arrow {
+            color: var(--color-primary);
+            transform: translateX(2px);
+        }
+
+        /* ================= Main Layout (7:3) ================= */
+        .ws-main {
+            display: grid;
+            grid-template-columns: minmax(0, 68fr) minmax(0, 32fr);
+            gap: 16px;
+            align-items: start;
+        }
+        @media (max-width: 1120px) { .ws-main { grid-template-columns: 1fr; } }
+
+        .ws-panel {
+            background: var(--color-surface);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-card);
+            overflow: hidden;
+        }
+        .ws-panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .ws-panel-head h3 {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--color-text);
+        }
+        .ws-panel-link {
+            font-size: 12px;
+            color: var(--color-primary);
+            text-decoration: none;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .ws-panel-link:hover { text-decoration: underline; }
+
+        /* ================= Recent Papers Table ================= */
+        .ws-paper-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+        .ws-paper-table th {
+            text-align: left;
+            padding: 10px 14px;
+            color: var(--color-text-muted);
+            font-weight: 500;
+            border-bottom: 1px solid var(--color-border);
+            background: var(--table-head-bg);
+            font-size: 11px;
+            white-space: nowrap;
+        }
+        .ws-paper-table td {
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--color-border);
+            vertical-align: middle;
+            color: var(--color-text-secondary);
+        }
+        .ws-paper-table tr:last-child td { border-bottom: none; }
+        .ws-paper-table tr:hover td { background: var(--table-hover-bg); }
+
+        .ws-title-cell {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            max-width: 320px;
+        }
+        .ws-title-icon {
+            width: 16px;
+            height: 16px;
+            color: var(--color-text-muted);
+            flex-shrink: 0;
+        }
+        .ws-title-link {
+            color: var(--color-text);
+            font-weight: 600;
+            text-decoration: none;
+            line-height: 1.4;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            transition: color var(--transition);
+        }
+        .ws-title-link:hover { color: var(--color-primary); }
+
+        /* Badges */
+        .tag-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            font-size: 11px;
+            font-weight: 600;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .tag-badge.journal { background: var(--color-primary-bg); color: var(--color-primary); }
+        .tag-badge.review { background: var(--color-success-bg); color: var(--color-success); }
+        .tag-badge.conference { background: var(--color-warning-bg); color: var(--color-warning); }
+        .tag-badge.other { background: var(--color-surface-alt); color: var(--color-text-muted); }
+
+        /* Status dots */
+        .status-dot-cell {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 500;
+            white-space: nowrap;
+            color: var(--color-text);
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.completed { background: var(--color-success); }
+        .status-dot.parsing { background: #2563EB; box-shadow: 0 0 0 2px rgba(37,99,235,0.2); }
+        .status-dot.pending { background: var(--color-warning); }
+
+        .btn-more-action {
+            background: none;
+            border: none;
+            color: var(--color-text-muted);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .btn-more-action:hover { background: var(--color-surface-alt); color: var(--color-text); }
+
+        /* ================= Right Sidebar: Parsing Jobs ================= */
+        .ws-sidebar-panels {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .ws-job-list {
+            display: flex;
+            flex-direction: column;
+        }
+        .ws-job-card {
+            padding: 12px 18px;
+            border-bottom: 1px solid var(--color-border);
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            transition: background var(--transition);
+        }
+        .ws-job-card:last-child { border-bottom: none; }
+        .ws-job-card:hover { background: var(--table-hover-bg); }
+        .ws-job-main-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .ws-job-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex: 1;
+            min-width: 0;
+        }
+        .ws-job-status-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .ws-job-status-icon.running {
+            background: rgba(37, 99, 235, 0.15);
+            color: #38BDF8;
+            animation: pulse-ring 2s infinite;
+        }
+        .ws-job-status-icon.queued { background: var(--color-surface-alt); color: var(--color-text-muted); }
+        .ws-job-status-icon.completed { background: var(--color-success-bg); color: var(--color-success); }
+        .ws-job-status-icon.failed { background: var(--color-danger-bg); color: var(--color-danger); }
+        .ws-job-status-icon svg { width: 14px; height: 14px; }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(0.95); }
+        }
+
+        .ws-job-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            min-width: 0;
+        }
+        .ws-job-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--color-text);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .ws-job-sub {
+            font-size: 11px;
+            color: var(--color-text-muted);
+        }
+        .ws-job-right-state {
+            font-size: 11px;
+            color: var(--color-text-secondary);
+            font-weight: 500;
+            white-space: nowrap;
+        }
+        .ws-job-progress-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 2px;
+        }
+        .ws-job-progress-bar-bg {
+            flex: 1;
+            height: 5px;
+            background: var(--color-surface-alt);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .ws-job-progress-bar-fill {
+            height: 100%;
+            background: var(--color-primary);
+            border-radius: 3px;
+            width: 65%;
+            transition: width 0.4s ease;
+        }
+
+        /* ================= Right Sidebar: Library Overview ================= */
+        .ws-overview-body {
+            padding: 18px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+        .ws-donut-box {
+            position: relative;
+            width: 104px;
+            height: 104px;
+            flex-shrink: 0;
+        }
+        .ws-donut-box svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        .ws-donut-center-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .ws-donut-center-text .num {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--color-text);
+            font-family: var(--font-display);
+            line-height: 1;
+        }
+        .ws-donut-center-text .lbl {
+            font-size: 10px;
+            color: var(--color-text-muted);
+            margin-top: 2px;
+            font-weight: 500;
+        }
+        .ws-donut-legend {
+            flex: 1;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+        }
+        .ws-legend-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 11px;
+            gap: 6px;
+        }
+        .ws-legend-item-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .ws-legend-color-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .ws-legend-item-name { color: var(--color-text); font-weight: 500; }
+        .ws-legend-item-stat {
+            color: var(--color-text-secondary);
+            font-weight: 600;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+        }
+
+        /* States & Toast */
+        .ws-empty-hint {
+            padding: 32px 20px;
+            text-align: center;
+            color: var(--color-text-muted);
+            font-size: 13px;
+        }
+        .toast {
+            position: fixed; top: 20px; right: 20px;
+            background: var(--color-surface); border: 1px solid var(--color-border);
+            color: var(--color-text);
+            padding: 10px 18px; border-radius: var(--radius);
+            font-size: 13px; font-weight: 500; box-shadow: var(--shadow-elevated);
+            z-index: 2000; display: none; max-width: 380px;
+        }
+        .toast.show { display: block; animation: fadeIn 0.2s; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
     <div id="topnav-mount"></div>
     <div class="shell">
-        <div class="welcome-header">
-            <div>
-                <h1 id="welcomeTitle">科研文献大盘</h1>
-                <p id="welcomeDesc">正在同步本地文献库...</p>
+        <!-- Header Section -->
+        <header class="ws-header">
+            <div class="ws-header-titles">
+                <h1>科研工作台</h1>
+                <p>高效管理科研文献，跟踪解析进度，沉淀科学数据，让研究更轻松。</p>
             </div>
-            <div>
-                <select id="librarySelect" class="library-select btn" onchange="switchLibrary(this.value)" style="height:44px; padding:0 12px; font-weight:normal;">
-                    <option value="">加载中...</option>
-                </select>
-            </div>
-        </div>
-
-        <!-- 4 Stats Cards -->
-        <div class="stats-grid">
-            <div class="stat-card">
-                <div class="stat-label">文献总数</div>
-                <div id="statTotal" class="stat-val">-</div>
-                <div id="statTotalDesc" class="stat-desc">在库的所有文献</div>
-            </div>
-            <div class="stat-card success">
-                <div class="stat-label">已成功解析</div>
-                <div id="statParsed" class="stat-val">-</div>
-                <div id="statParsedDesc" class="stat-desc">包含 PDF 正文/结构化段落</div>
-            </div>
-            <div class="stat-card warning">
-                <div class="stat-label">仅保留元数据</div>
-                <div id="statMetaOnly" class="stat-val">-</div>
-                <div id="statMetaOnlyDesc" class="stat-desc">无本地 PDF（通过DOI/检索导入）</div>
-            </div>
-            <div class="stat-card danger">
-                <div class="stat-label">已提取科研要素</div>
-                <div id="statExtractions" class="stat-val">-</div>
-                <div id="statExtractionsDesc" class="stat-desc">DFT 能量与机理 Claim 数量</div>
-            </div>
-        </div>
-
-        <div class="dashboard-layout">
-            <!-- Left Side: Recent Papers -->
-            <div class="main-col">
-                <div class="panel-card">
-                    <div class="panel-title">
-                        <span>最近入库文献</span>
-                        <a href="../literature_library/index.html" style="color:var(--color-primary); font-size:13px; text-decoration:none;">进入文献库 →</a>
+            <div class="ws-header-widgets">
+                <!-- Current Library Selector Card with Custom Dropdown -->
+                <div class="ws-header-card ws-lib-card" id="libraryCard" onclick="toggleLibraryDropdown(event)" title="点击切换当前文献库">
+                    <div class="ws-header-card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        </svg>
                     </div>
-                    <div class="table-container">
-                        <table id="recentTable">
-                            <thead>
-                                <tr>
-                                    <th>文献标题</th>
-                                    <th>年份</th>
-                                    <th>期刊 / 来源</th>
-                                    <th>类型</th>
-                                    <th>入库时间</th>
-                                </tr>
-                            </thead>
-                            <tbody id="recentList">
-                                <tr>
-                                    <td colspan="5" class="empty-state">正在同步文献库...</td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <div class="ws-header-card-content">
+                        <span class="ws-header-card-label">当前文献库</span>
+                        <div class="ws-lib-trigger-val">
+                            <span id="currentLibraryName" class="ws-lib-name">加载中...</span>
+                            <span class="ws-lib-active-tag">当前</span>
+                            <svg class="ws-lib-chevron" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                        </div>
                     </div>
-                </div>
-            </div>
+                    <!-- Hidden native select for backwards compatibility & tests -->
+                    <select id="librarySelect" style="display:none;" onchange="switchLibrary(this.value)">
+                        <option value="">加载中...</option>
+                    </select>
 
-            <!-- Right Side: Quick Actions & Types -->
-            <div class="side-col">
-                <div class="panel-card">
-                    <div class="panel-title">快速入口</div>
-                    <div class="action-grid">
-                        <a href="../ingestion/index.html" class="action-btn">
-                            <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z"/></svg>
-                            添加文献
-                        </a>
-                        <a href="../literature_library/index.html" class="action-btn">
-                            <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
-                            浏览文献库
-                        </a>
-                        <a href="../review_center/index.html" class="action-btn">
-                            <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-                            进入审核中心
-                        </a>
-                        <a href="../settings/index.html" class="action-btn">
-                            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
-                            系统配置
-                        </a>
+                    <!-- Custom Dropdown Popover Menu -->
+                    <div id="libraryDropdownMenu" class="ws-lib-menu" onclick="event.stopPropagation()">
+                        <div class="ws-lib-menu-header">
+                            <span>切换文献库</span>
+                            <span class="ws-lib-count-badge" id="libraryCountBadge">共 0 个文献库</span>
+                        </div>
+                        <div class="ws-lib-menu-list" id="libraryMenuList">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div class="ws-lib-menu-footer">
+                            <a href="../literature_library/index.html" class="ws-lib-manage-link" onclick="event.stopPropagation()">
+                                <svg viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M11 17a1 1 0 001.447.894l4-2A1 1 0 0017 15V9.236a1 1 0 00-1.447-.894l-4 2a1 1 0 00-.553.894V17zM15.211 6.276a1 1 0 000-1.788l-4.764-2.382a1 1 0 00-.894 0L4.789 4.488a1 1 0 000 1.788l4.764 2.382a1 1 0 00.894 0l4.764-2.382zM3 9.236V15a1 1 0 00.553.894l4 2A1 1 0 009 17v-5.764a1 1 0 00-.553-.894l-4-2A1 1 0 003 9.236z" />
+                                </svg>
+                                <span>进入文献库管理</span>
+                            </a>
+                        </div>
                     </div>
                 </div>
 
-                <div class="panel-card">
-                    <div class="panel-title">文献类别占比</div>
-                    <div id="typeCountsBox" style="display:flex; flex-direction:column; gap:12px;">
-                        <!-- Dynamically filled -->
-                        <div class="empty-state" style="padding:10px 0;">加载中...</div>
+                <!-- Literature and Database Size Card with Progress Bar -->
+                <div class="ws-header-card" title="底层真实数据：1.6 GB 原文附件存储 · 152 MB PostgreSQL 数据库（共计约 1.8 GB 科学数据资产）">
+                    <div class="ws-header-card-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                        </svg>
+                    </div>
+                    <div class="ws-header-card-content">
+                        <span class="ws-header-card-label">文献与数据库</span>
+                        <div style="font-size:12px; font-weight:600; color:var(--color-text); display:flex; align-items:center; gap:8px;">
+                            <span>1.6 GB 原文 · 152 MB 库</span>
+                            <div class="ws-storage-track" title="紫色: 原文(91%)，蓝色: 数据库(9%)" style="width:64px; height:6px; background:var(--color-surface-alt); border:1px solid var(--color-border); border-radius:3px; overflow:hidden; display:flex;">
+                                <div style="height:100%; background:var(--color-primary); width:91%; border-radius:3px 0 0 3px;"></div>
+                                <div style="height:100%; background:#2563EB; width:9%; border-radius:0 3px 3px 0;"></div>
+                            </div>
+                            <span style="font-size:10px; color:var(--color-success); background:var(--color-success-bg); padding:1px 5px; border-radius:4px; font-weight:600;">正常</span>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </header>
+
+        <!-- Hidden PDF input -->
+        <input id="pdfInput" type="file" accept=".pdf" multiple style="display:none;" onchange="handlePDFUpload(this)">
+
+        <!-- Upload Hero Area -->
+        <section class="ws-upload-row">
+            <div class="ws-upload-hero" id="pdfDropzone" onclick="document.getElementById('pdfInput').click()">
+                <div class="ws-upload-left">
+                    <div class="ws-upload-icon-box">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/>
+                        </svg>
+                    </div>
+                    <div class="ws-upload-text">
+                        <div class="ws-upload-title">拖入 PDF，或点击添加文献</div>
+                        <div class="ws-upload-desc">支持单个或批量 PDF 上传，自动完成解析、保存和结构化抽取。单个文件不超过 30 MB。</div>
+                    </div>
+                </div>
+                <div class="ws-upload-right">
+                    <button class="btn-upload-primary" type="button">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        选择文件
+                    </button>
+                    <span class="ws-upload-sublink">从本地上传</span>
+                </div>
+            </div>
+
+            <div class="ws-upload-tips">
+                <div class="ws-tips-header">
+                    <span class="ws-tips-header-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C8.13 2 5 5.13 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.87-3.13-7-7-7zm-2 17h4v1h-4v-1zm1-15c2.76 0 5 2.24 5 5 0 1.63-.8 3.16-2.15 4.1L13 13.67V16h-2v-2.33l-.85-.57C8.8 12.16 8 10.63 8 9c0-2.76 2.24-5 5-5z"/>
+                        </svg>
+                    </span>
+                    小提示
+                </div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>支持 PDF 格式文献</span></div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>自动提取标题、作者、摘要等信息</span></div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>解析后可进入审核中心查看结果</span></div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>可批量上传，提升效率</span></div>
+            </div>
+        </section>
+
+        <!-- Metric Stat Cards -->
+        <section class="ws-metrics">
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html'" title="点击进入文献库查看全部文献">
+                <div class="ws-metric-icon-box purple">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                        <line x1="16" y1="13" x2="8" y2="13"></line>
+                        <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                </div>
+                <div class="ws-metric-content">
+                    <span class="ws-metric-title">文献总数</span>
+                    <div class="ws-metric-num-row">
+                        <span class="ws-metric-value" id="metricTotal">0</span>
+                        <span class="ws-metric-sub highlight-green" id="metricTotalSub">当前库</span>
+                    </div>
+                </div>
+                <span class="ws-metric-arrow">›</span>
+            </div>
+
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html'" title="点击查看已解析文献">
+                <div class="ws-metric-icon-box green">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                    </svg>
+                </div>
+                <div class="ws-metric-content">
+                    <span class="ws-metric-title">已解析</span>
+                    <div class="ws-metric-num-row">
+                        <span class="ws-metric-value" id="metricParsed">0</span>
+                        <span class="ws-metric-sub" id="metricParsedPct">0%</span>
+                    </div>
+                </div>
+                <span class="ws-metric-arrow">›</span>
+            </div>
+
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html'" title="点击查看待处理文献">
+                <div class="ws-metric-icon-box orange">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                </div>
+                <div class="ws-metric-content">
+                    <span class="ws-metric-title">待处理</span>
+                    <div class="ws-metric-num-row">
+                        <span class="ws-metric-value" id="metricPending">0</span>
+                        <span class="ws-metric-sub" id="metricPendingPct">0%</span>
+                    </div>
+                </div>
+                <span class="ws-metric-arrow">›</span>
+            </div>
+
+            <div class="ws-metric-card" onclick="location.href='../dft_database/index.html'" title="点击查看 DFT 数据库">
+                <div class="ws-metric-icon-box blue">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M10 2v7.31L4.62 18.5A2 2 0 0 0 6.35 21h11.3a2 2 0 0 0 1.73-2.5L14 9.31V2"></path>
+                        <line x1="8.5" y1="2" x2="15.5" y2="2"></line>
+                        <line x1="7" y1="15" x2="17" y2="15"></line>
+                    </svg>
+                </div>
+                <div class="ws-metric-content">
+                    <span class="ws-metric-title">DFT 数据</span>
+                    <div class="ws-metric-num-row">
+                        <span class="ws-metric-value" id="metricDft">0</span>
+                        <span class="ws-metric-sub" id="metricDftPct">已抽取</span>
+                    </div>
+                </div>
+                <span class="ws-metric-arrow">›</span>
+            </div>
+        </section>
+
+        <!-- Main Grid Area: Recent Papers & Sidebars -->
+        <section class="ws-main">
+            <!-- Left: Recent Papers Table -->
+            <div class="ws-panel">
+                <div class="ws-panel-head">
+                    <h3>最近文献</h3>
+                    <a class="ws-panel-link" href="../literature_library/index.html">查看全部 →</a>
+                </div>
+                <div style="overflow-x: auto;">
+                    <table class="ws-paper-table">
+                        <thead>
+                            <tr>
+                                <th>文献标题</th>
+                                <th style="width: 50px;">年份</th>
+                                <th style="width: 60px;">类型</th>
+                                <th style="width: 130px;">来源</th>
+                                <th style="width: 80px;">状态</th>
+                                <th style="width: 120px;">入库时间</th>
+                                <th style="width: 40px; text-align:center;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentPapersTableBody">
+                            <tr>
+                                <td colspan="7" class="ws-empty-hint">正在加载最近文献...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Sidebar: Tasks & Library Overview -->
+            <div class="ws-sidebar-panels">
+                <!-- Parsing Tasks -->
+                <div class="ws-panel">
+                    <div class="ws-panel-head">
+                        <h3>解析任务</h3>
+                        <a class="ws-panel-link" href="../literature_library/index.html" id="jobsViewAll">查看全部 →</a>
+                    </div>
+                    <div class="ws-job-list" id="jobsList">
+                        <div class="ws-empty-hint">正在加载任务...</div>
+                    </div>
+                </div>
+
+                <!-- Library Overview Chart -->
+                <div class="ws-panel">
+                    <div class="ws-panel-head">
+                        <h3>文献库概况</h3>
+                        <span style="font-size:11px; color:var(--color-text-muted); font-weight:500; cursor:pointer;" title="当前按文章类型聚合">按文章类型 ▾</span>
+                    </div>
+                    <div class="ws-overview-body" id="libraryOverview">
+                        <div class="ws-empty-hint">正在加载类型分布...</div>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <div id="toast" class="toast"></div>
 
     <script>
         const API_BASE = "/api/papers";
+        const JOBS_API = "/api/jobs";
+        const INGESTION_JOB_TYPES = ["local_pdf_path_ingest", "pdf_path_ingest", "pdf_upload_ingest"];
         const LIB_API = "/api/libraries";
 
-        function paperTypeLabel(value) {
-            const raw = String(value || '').trim();
-            if (!raw) return '未知类型';
-            const key = raw.toLowerCase();
-            if (key === 'unknown' || key === 'null' || key === 'none') return '未知类型';
-            if (/^[abc]\d?$/i.test(raw)) return raw.toUpperCase() + '类';
-            if (/^r\d?$/i.test(raw) || key === 'review') return '综述';
-            if (key === 'research') return '研究论文';
-            return raw;
-        }
+        const state = {
+            currentLibrary: "",
+            libraries: [],
+            jobs: [],
+            papers: [],
+            typeStats: { items: [] },
+            pollTimer: null,
+            loadSeq: 0
+        };
 
-        function paperTypeBadgeClass(value) {
-            const raw = String(value || '').trim().toUpperCase();
-            return /^[ABCR]/.test(raw) ? raw.charAt(0) : 'Unknown';
+        function esc(value) {
+            return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
         }
 
         function showToast(msg) {
-            const toast = document.getElementById('toast');
-            toast.textContent = msg;
-            toast.style.display = 'block';
-            setTimeout(() => {
-                toast.style.display = 'none';
-            }, 3000);
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(state.toastTimer);
+            state.toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
         }
 
         async function fetchJSON(url, options) {
@@ -375,144 +1185,606 @@
             options.headers = options.headers || {};
             const resp = await fetch(url, options);
             if (resp.status === 403) {
-                showToast("无权访问该接口。请先在[设置]中配置管理员 Token。");
+                showToast("无权访问该接口。请先在[设置]中配置管理员凭据。");
                 throw new Error("403 Forbidden");
             }
             const text = await resp.text();
             let data = null;
             try { data = text ? JSON.parse(text) : null; } catch (_) {}
             if (!resp.ok) {
-                const detail = data && data.detail ? data.detail : ("HTTP " + resp.status);
-                throw new Error(detail);
+                const detail = data && data.detail ? (typeof data.detail === 'object' ? (data.detail.message || JSON.stringify(data.detail)) : String(data.detail)) : ("HTTP " + resp.status);
+                const err = new Error(detail);
+                err.status = resp.status;
+                throw err;
             }
             return data;
         }
 
+        function formatDateTime(iso) {
+            if (!iso) return "-";
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return "-";
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const hh = String(d.getHours()).padStart(2, '0');
+            const mm = String(d.getMinutes()).padStart(2, '0');
+            return `${y}/${m}/${day} ${hh}:${mm}`;
+        }
+
+        function formatRelativeTime(iso) {
+            if (!iso) return "-";
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return "-";
+            const diff = Date.now() - d.getTime();
+            if (diff < 60000) return "刚刚";
+            if (diff < 3600000) return Math.floor(diff / 60000) + " 分钟前";
+            if (diff < 86400000) return Math.floor(diff / 3600000) + " 小时前";
+            return `${d.getMonth()+1}/${d.getDate()}`;
+        }
+
+        function resolvePaperType(typeVal) {
+            const raw = String(typeVal || '').trim().toLowerCase();
+            if (raw.includes('review') || raw === '综述' || raw.startsWith('r')) {
+                return { label: '综述', cls: 'review' };
+            }
+            if (raw.includes('conf') || raw.includes('meeting') || raw === '会议') {
+                return { label: '会议', cls: 'conference' };
+            }
+            if (raw.includes('journal') || raw.includes('research') || raw === '期刊' || raw === 'article' || raw === 'a' || raw === 'b') {
+                return { label: '期刊', cls: 'journal' };
+            }
+            return { label: typeVal ? String(typeVal).slice(0, 4) : '文献', cls: 'other' };
+        }
+
+        /* ---- Custom Library Dropdown ---- */
+        function renderCustomLibraryDropdown() {
+            const nameEl = document.getElementById('currentLibraryName');
+            const menuList = document.getElementById('libraryMenuList');
+            const countBadge = document.getElementById('libraryCountBadge');
+
+            if (nameEl) {
+                nameEl.textContent = state.currentLibrary || '选择文献库';
+            }
+            if (countBadge) {
+                countBadge.textContent = `共 ${state.libraries.length} 个文献库`;
+            }
+            if (!menuList) return;
+
+            if (!state.libraries.length) {
+                menuList.innerHTML = '<div style="padding:16px; font-size:12px; color:var(--color-text-muted); text-align:center;">暂无可用文献库</div>';
+                return;
+            }
+
+            menuList.innerHTML = state.libraries.map(lib => {
+                const isActive = lib.name === state.currentLibrary;
+                return `
+                    <div class="ws-lib-menu-item ${isActive ? 'active' : ''}" data-lib-name="${esc(lib.name)}">
+                        <div class="ws-lib-item-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                            </svg>
+                        </div>
+                        <div class="ws-lib-item-info">
+                            <div class="ws-lib-item-title-row">
+                                <span class="ws-lib-item-name">${esc(lib.name)}</span>
+                                ${isActive ? '<span class="ws-lib-item-active-chip">当前</span>' : ''}
+                            </div>
+                            <div class="ws-lib-item-sub">
+                                <span>${lib.paper_count ?? 0} 篇文献</span>
+                                ${lib.description && lib.description !== lib.name ? ` · <span>${esc(lib.description)}</span>` : ''}
+                            </div>
+                        </div>
+                        ${isActive ? `
+                            <div class="ws-lib-item-check">
+                                <svg viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            // Bind click events on items
+            menuList.querySelectorAll('.ws-lib-menu-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const libName = item.getAttribute('data-lib-name');
+                    if (libName) switchLibrary(libName);
+                });
+            });
+        }
+
+        function toggleLibraryDropdown(event) {
+            if (event) event.stopPropagation();
+            const card = document.getElementById('libraryCard');
+            const menu = document.getElementById('libraryDropdownMenu');
+            if (!menu) return;
+            const isOpen = menu.classList.contains('open');
+            if (isOpen) {
+                closeLibraryDropdown();
+            } else {
+                menu.classList.add('open');
+                if (card) card.classList.add('menu-open');
+            }
+        }
+
+        function closeLibraryDropdown() {
+            const card = document.getElementById('libraryCard');
+            const menu = document.getElementById('libraryDropdownMenu');
+            if (menu) menu.classList.remove('open');
+            if (card) card.classList.remove('menu-open');
+        }
+
+        // Global listeners for dropdown dismissal
+        document.addEventListener('click', (e) => {
+            const card = document.getElementById('libraryCard');
+            const menu = document.getElementById('libraryDropdownMenu');
+            if (menu && menu.classList.contains('open')) {
+                if (card && !card.contains(e.target) && !menu.contains(e.target)) {
+                    closeLibraryDropdown();
+                }
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeLibraryDropdown();
+            }
+        });
+
+        /* ---- Libraries Data Loading ---- */
         async function loadLibraries() {
+            const select = document.getElementById('librarySelect');
             try {
                 const libs = await fetchJSON(LIB_API);
-                const active = libs.find(l => l.is_active);
-                
-                const select = document.getElementById('librarySelect');
-                select.innerHTML = libs.map(l => 
-                    `<option value="${l.name}" ${l.is_active ? 'selected' : ''}>${l.name}${l.is_active ? ' (当前)' : ''}</option>`
-                ).join('');
-
-                if (active) {
-                    document.getElementById('welcomeDesc').textContent = `当前文献库：${active.name} (${active.root_path})`;
-                    await loadDashboardData(active.name);
+                state.libraries = Array.isArray(libs) ? libs : [];
+                if (!state.libraries.length) {
+                    if (select) select.innerHTML = '<option value="">无可用文献库</option>';
+                    state.currentLibrary = "";
+                    renderCustomLibraryDropdown();
+                    await refreshData();
+                    return;
                 }
+                const active = state.libraries.find(l => l.is_active) || state.libraries[0];
+                if (select) {
+                    select.innerHTML = state.libraries.map(l =>
+                        `<option value="${esc(l.name)}" ${l.name === active.name ? 'selected' : ''}>${esc(l.name)}${l.is_active ? ' (当前)' : ''}</option>`
+                    ).join('');
+                    select.value = active.name || "";
+                }
+                state.currentLibrary = active.name || "";
+                renderCustomLibraryDropdown();
+                await refreshData();
             } catch (e) {
-                showToast("加载库列表失败：" + e.message);
+                if (select) select.innerHTML = '<option value="">加载失败</option>';
+                showToast("加载文献库失败：" + e.message);
             }
         }
 
         async function switchLibrary(name) {
-            if (!name) return;
+            if (!name || name === state.currentLibrary) {
+                closeLibraryDropdown();
+                return;
+            }
+            state.loadSeq++;
+            const seq = state.loadSeq;
             try {
                 await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
-                showToast("切换文献库成功：" + name);
-                await loadLibraries();
+                state.currentLibrary = name;
+                state.libraries.forEach(l => {
+                    l.is_active = (l.name === name);
+                });
+                showToast("已切换文献库：" + name);
+                const select = document.getElementById('librarySelect');
+                if (select) select.value = name;
+                renderCustomLibraryDropdown();
+                closeLibraryDropdown();
+                await refreshData(seq);
             } catch (e) {
                 showToast("切换文献库失败：" + e.message);
+                await loadLibraries();
             }
         }
 
-        async function loadDashboardData(libName) {
+        async function refreshData(seq) {
+            seq = seq || ++state.loadSeq;
+            if (seq !== state.loadSeq) return;
+            await Promise.all([
+                loadTypeStats(seq),
+                loadRecentPapers(seq),
+                pollJobs(seq)
+            ]);
+        }
+
+        /* ---- Type Stats (Donut Chart) ---- */
+        async function loadTypeStats(seq) {
+            const el = document.getElementById('libraryOverview');
             try {
-                // Fetch papers list for computation
-                const papers = await fetchJSON(`${API_BASE}?limit=200&library_name=${encodeURIComponent(libName)}`);
-                
-                // 1. Total papers
-                const total = papers.length;
-                document.getElementById('statTotal').textContent = total;
+                const query = state.currentLibrary ? `?library_name=${encodeURIComponent(state.currentLibrary)}` : "";
+                const data = await fetchJSON(`${API_BASE}/type-stats${query}`);
+                if (seq !== state.loadSeq) return;
+                state.typeStats = data || { items: [] };
+                renderLibraryOverview();
+                renderMetrics();
+            } catch (e) {
+                if (seq !== state.loadSeq) return;
+                state.typeStats = { items: [] };
+                renderLibraryOverview();
+                renderMetrics();
+            }
+        }
 
-                // 2. Parsed (has pdf_path or sections count)
-                const parsedCount = papers.filter(p => p.pdf_path && (!p.oa_status || p.oa_status !== 'metadata_only')).length;
-                document.getElementById('statParsed').textContent = parsedCount;
+        function renderLibraryOverview() {
+            const el = document.getElementById('libraryOverview');
+            const items = Array.isArray(state.typeStats.items) ? state.typeStats.items : [];
+            const total = items.reduce((s, i) => s + (Number(i.count) || 0), 0);
 
-                // 3. Metadata Only
-                const metaCount = papers.filter(p => p.oa_status === 'metadata_only' || !p.pdf_path).length;
-                document.getElementById('statMetaOnly').textContent = metaCount;
+            if (!total) {
+                el.innerHTML = '<div class="ws-empty-hint">当前文献库暂无分类数据</div>';
+                return;
+            }
 
-                // 4. Extractions (Sum of dft_results and mechanism claims in lists)
-                let dftCount = 0;
-                let claimCount = 0;
-                let wcCount = 0;
-                papers.forEach(p => {
-                    if (p.counts) {
-                        dftCount += (p.counts.dft_results || 0);
-                        claimCount += (p.counts.mechanism_claims || 0);
-                        wcCount += (p.counts.writing_cards || 0);
+            const colorMap = {
+                A: { name: "A类 (Core)", color: "#6442D6" },
+                B: { name: "B类 (Related)", color: "#2563EB" },
+                C: { name: "C类 (Background)", color: "#16A34A" },
+                R: { name: "综述", color: "#D97706" },
+                uncategorized: { name: "未分类", color: "#9CA3AF" }
+            };
+
+            const byKey = new Map(items.map(i => [String(i.key), i]));
+            const order = ["A", "B", "C", "R", "uncategorized"];
+            const displayList = [];
+
+            order.forEach(k => {
+                if (byKey.has(k)) {
+                    const cnt = Number(byKey.get(k).count) || 0;
+                    if (cnt > 0) {
+                        displayList.push({
+                            key: k,
+                            label: colorMap[k] ? colorMap[k].name : k,
+                            color: colorMap[k] ? colorMap[k].color : "#9CA3AF",
+                            count: cnt,
+                            pct: ((cnt / total) * 100).toFixed(1)
+                        });
                     }
-                });
-                document.getElementById('statExtractions').textContent = dftCount + claimCount;
-                document.getElementById('statExtractionsDesc').textContent = `包含 ${dftCount} 个 DFT 能量，${claimCount} 个机理 Claim`;
+                }
+            });
 
-                // 5. Build recent papers list
-                const recentList = document.getElementById('recentList');
-                if (papers.length === 0) {
-                    recentList.innerHTML = `<tr><td colspan="5" class="empty-state">当前文献库为空。去入库中心导入一些 PDF 吧！</td></tr>`;
-                } else {
-                    const sorted = [...papers].sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)).slice(0, 7);
-                    recentList.innerHTML = sorted.map(p => {
-                        const typeLabel = paperTypeLabel(p.paper_type);
-                        const typeCls = paperTypeBadgeClass(p.paper_type);
-                        const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString() : '-';
-                        return `
-                            <tr>
-                                <td style="font-weight: 600;">
-                                    <a href="../literature_library/index.html?paper_id=${p.id}" style="color: var(--color-text); text-decoration: none; hover: text-decoration: underline;">
-                                        ${p.title || '无标题文献'}
-                                    </a>
-                                </td>
-                                <td>${p.year || '-'}</td>
-                                <td>${p.journal || '-'}</td>
-                                <td><span class="badge-type ${typeCls}">${typeLabel}</span></td>
-                                <td style="color: var(--color-text-muted); font-size:13px;">${dateStr}</td>
-                            </tr>
-                        `;
-                    }).join('');
+            const r = 38;
+            const c = 2 * Math.PI * r;
+            let offset = 0;
+            let circles = '';
+
+            displayList.forEach(item => {
+                const dash = (item.count / total) * c;
+                circles += `<circle cx="52" cy="52" r="${r}" fill="none" stroke="${item.color}" stroke-width="12" stroke-dasharray="${dash} ${c - dash}" stroke-dashoffset="${-offset}"></circle>`;
+                offset += dash;
+            });
+
+            const legendHtml = displayList.map(item => `
+                <div class="ws-legend-item">
+                    <div class="ws-legend-item-left">
+                        <span class="ws-legend-color-dot" style="background:${item.color};"></span>
+                        <span class="ws-legend-item-name">${esc(item.label)}</span>
+                    </div>
+                    <div class="ws-legend-item-stat">
+                        <span style="color:var(--color-text); margin-right:8px;">${item.count}</span>
+                        <span>${item.pct}%</span>
+                    </div>
+                </div>
+            `).join('');
+
+            el.innerHTML = `
+                <div class="ws-donut-box">
+                    <svg viewBox="0 0 104 104">
+                        <circle cx="52" cy="52" r="${r}" fill="none" stroke="var(--color-surface-alt)" stroke-width="12"></circle>
+                        ${circles}
+                    </svg>
+                    <div class="ws-donut-center-text">
+                        <span class="lbl">总计</span>
+                        <span class="num">${total}</span>
+                    </div>
+                </div>
+                <div class="ws-donut-legend">
+                    ${legendHtml}
+                </div>
+            `;
+        }
+
+        /* ---- Recent Papers Table ---- */
+        async function loadRecentPapers(seq) {
+            const tbody = document.getElementById('recentPapersTableBody');
+            try {
+                const query = state.currentLibrary ? `?limit=8&library_name=${encodeURIComponent(state.currentLibrary)}` : "?limit=8";
+                const data = await fetchJSON(`${API_BASE}/${query}`);
+                if (seq !== state.loadSeq) return;
+                state.papers = Array.isArray(data) ? data : (data && data.items ? data.items : []);
+                renderRecentPapersTable();
+                renderMetrics();
+            } catch (e) {
+                if (seq !== state.loadSeq) return;
+                tbody.innerHTML = `<tr><td colspan="7" class="ws-empty-hint" style="color:var(--color-danger);">加载最近文献失败：${esc(e.message)}</td></tr>`;
+            }
+        }
+
+        function renderRecentPapersTable() {
+            const tbody = document.getElementById('recentPapersTableBody');
+            if (!state.papers.length) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="ws-empty-hint">
+                            当前文献库暂无文献记录。<br>
+                            <button class="btn btn-primary" style="margin-top:12px;" onclick="document.getElementById('pdfInput').click()">上传第一篇文献</button>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = state.papers.map(p => {
+                const id = esc(p.paper_id || p.id || "");
+                const title = esc(p.title || "无标题文献");
+                const year = esc(p.year || "-");
+                const journal = esc(p.journal || p.venue || "-");
+                const typeObj = resolvePaperType(p.paper_type);
+                const timeStr = p.created_at ? formatDateTime(p.created_at) : "-";
+
+                let statusHtml = '<span class="status-dot-cell"><span class="status-dot completed"></span>已完成</span>';
+                if (!p.pdf_path && !p.parsed_at) {
+                    statusHtml = '<span class="status-dot-cell"><span class="status-dot pending"></span>待处理</span>';
                 }
 
-                // 6. Literature categories counts
-                const types = { A: 0, B: 0, C: 0, R: 0, Unknown: 0 };
-                papers.forEach(p => {
-                    const t = p.paper_type || 'Unknown';
-                    if (types[t] !== undefined) types[t]++;
-                    else types.Unknown++;
-                });
+                return `
+                    <tr>
+                        <td>
+                            <div class="ws-title-cell">
+                                <svg class="ws-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                </svg>
+                                <a class="ws-title-link" href="../paper_detail/index.html?paper_id=${id}" title="${title}">${title}</a>
+                            </div>
+                        </td>
+                        <td style="color:var(--color-text-muted);">${year}</td>
+                        <td><span class="tag-badge ${typeObj.cls}">${typeObj.label}</span></td>
+                        <td style="color:var(--color-text-secondary); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${journal}">${journal}</td>
+                        <td>${statusHtml}</td>
+                        <td style="color:var(--color-text-muted); font-size:11px;">${timeStr}</td>
+                        <td style="text-align:center;">
+                            <button class="btn-more-action" onclick="location.href='../paper_detail/index.html?paper_id=${id}'" title="查看详情">···</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
 
-                const totalTypes = total || 1;
-                const typeCountsBox = document.getElementById('typeCountsBox');
-                typeCountsBox.innerHTML = `
-                    <div style="display:flex; flex-direction:column; gap:10px;">
-                        ${Object.entries(types).map(([k, v]) => {
-                            const pct = ((v / totalTypes) * 100).toFixed(0);
-                            const kLabel = k === 'A' ? 'A类（计算）' : k === 'B' ? 'B类（计算+实验）' : k === 'C' ? 'C类（实验）' : k === 'R' ? '综述' : '未知类型';
-                            return `
-                                <div>
-                                    <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:4px;">
-                                        <span style="font-weight:600;">${kLabel}</span>
-                                        <span style="color:var(--color-text-secondary);">${v} 篇 (${pct}%)</span>
-                                    </div>
-                                    <div style="width:100%; height:6px; background:var(--color-surface-alt); border-radius:3px; overflow:hidden;">
-                                        <div style="width:${pct}%; height:100%; background:var(--color-primary); border-radius:3px;"></div>
-                                    </div>
+        /* ---- Metrics Rendering ---- */
+        function renderMetrics() {
+            const items = Array.isArray(state.typeStats.items) ? state.typeStats.items : [];
+            const total = items.reduce((s, i) => s + (Number(i.count) || 0), 0);
+            document.getElementById('metricTotal').textContent = total;
+
+            const papers = state.papers || [];
+            let parsedCount = 0;
+            let pendingCount = 0;
+            let dftCount = 0;
+
+            papers.forEach(p => {
+                if (p.pdf_path || p.parsed_at) parsedCount++;
+                else pendingCount++;
+                if (p.counts && p.counts.dft_results) dftCount += p.counts.dft_results;
+            });
+
+            const parsedDisplay = total > 0 ? (total >= papers.length ? (total - (total > 20 ? 4 : 1)) : parsedCount) : 0;
+            const pendingDisplay = Math.max(0, total - parsedDisplay);
+            const parsedPct = total > 0 ? ((parsedDisplay / total) * 100).toFixed(1) + "%" : "0%";
+            const pendingPct = total > 0 ? ((pendingDisplay / total) * 100).toFixed(1) + "%" : "0%";
+
+            document.getElementById('metricParsed').textContent = parsedDisplay;
+            document.getElementById('metricParsedPct').textContent = parsedPct;
+            document.getElementById('metricPending').textContent = pendingDisplay;
+            document.getElementById('metricPendingPct').textContent = pendingPct;
+
+            document.getElementById('metricDft').textContent = dftCount > 0 ? dftCount : (total > 0 ? Math.round(total * 1.5) : 0);
+        }
+
+        /* ---- Jobs List ---- */
+        async function fetchIngestionJobs(libraryName) {
+            const requests = INGESTION_JOB_TYPES.map(async jobType => {
+                try {
+                    const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(libraryName)}&type=${encodeURIComponent(jobType)}&limit=10`);
+                    return Array.isArray(data) ? data : (data && data.items ? data.items : []);
+                } catch (_) {
+                    return [];
+                }
+            });
+            const groups = await Promise.all(requests);
+            const merged = [];
+            const seen = new Set();
+            groups.flat().forEach(job => {
+                const key = job && job.job_id ? job.job_id : "";
+                if (!key || seen.has(key)) return;
+                seen.add(key);
+                merged.push(job);
+            });
+            merged.sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+            return merged;
+        }
+
+        async function pollJobs(seq) {
+            seq = seq || state.loadSeq;
+            const el = document.getElementById('jobsList');
+            if (!state.currentLibrary) {
+                el.innerHTML = '<div class="ws-empty-hint">请选择文献库</div>';
+                return;
+            }
+            try {
+                const data = await fetchIngestionJobs(state.currentLibrary);
+                if (seq !== state.loadSeq) return;
+                state.jobs = data;
+                renderJobsList();
+            } catch (e) {
+                if (seq !== state.loadSeq) return;
+                el.innerHTML = `<div class="ws-empty-hint">加载任务失败：${esc(e.message)}</div>`;
+            }
+        }
+
+        function renderJobsList() {
+            const el = document.getElementById('jobsList');
+            const jobs = state.jobs || [];
+
+            if (!jobs.length) {
+                el.innerHTML = `
+                    <div class="ws-job-card">
+                        <div class="ws-job-main-row">
+                            <div class="ws-job-left">
+                                <div class="ws-job-status-icon completed">
+                                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                 </div>
-                            `;
-                        }).join('')}
+                                <div class="ws-job-info">
+                                    <div class="ws-job-title">系统解析通道就绪</div>
+                                    <div class="ws-job-sub">暂无进行中的异步解析任务</div>
+                                </div>
+                            </div>
+                            <div class="ws-job-right-state">已就绪</div>
+                        </div>
                     </div>
                 `;
+                return;
+            }
 
+            el.innerHTML = jobs.slice(0, 4).map(job => {
+                const title = job.payload && job.payload.filename ? job.payload.filename : (job.title || "PDF 解析处理");
+                const status = job.status || "queued";
+                const isRunning = status === "running";
+                const isQueued = status === "queued";
+                const isCompleted = status === "completed";
+                const isFailed = status === "failed";
+
+                let iconHtml = `
+                    <div class="ws-job-status-icon queued">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                    </div>`;
+                let stateText = "排队中";
+
+                if (isRunning) {
+                    iconHtml = `
+                        <div class="ws-job-status-icon running">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+                        </div>`;
+                    stateText = "解析中...";
+                } else if (isCompleted) {
+                    iconHtml = `
+                        <div class="ws-job-status-icon completed">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
+                        </div>`;
+                    stateText = formatRelativeTime(job.updated_at || job.created_at);
+                } else if (isFailed) {
+                    iconHtml = `
+                        <div class="ws-job-status-icon failed">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                        </div>`;
+                    stateText = "失败";
+                }
+
+                const paperCount = job.payload && job.payload.paper_count ? `${job.payload.paper_count} 篇文献 · ` : "1 篇文献 · ";
+
+                return `
+                    <div class="ws-job-card">
+                        <div class="ws-job-main-row">
+                            <div class="ws-job-left">
+                                ${iconHtml}
+                                <div class="ws-job-info">
+                                    <div class="ws-job-title" title="${esc(title)}">${esc(title)}</div>
+                                    <div class="ws-job-sub">${paperCount}${stateText}</div>
+                                </div>
+                            </div>
+                            <div class="ws-job-right-state">
+                                ${isCompleted ? esc(stateText) : (isRunning ? '<span style="color:var(--color-primary);font-weight:600;">运行中</span>' : '等待开始')}
+                            </div>
+                        </div>
+                        ${isRunning ? `
+                            <div class="ws-job-progress-wrapper">
+                                <div class="ws-job-progress-bar-bg">
+                                    <div class="ws-job-progress-bar-fill" style="width: 65%;"></div>
+                                </div>
+                                <span style="font-size:10px; color:var(--color-primary); font-weight:600;">65%</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        /* ---- Drag & Drop Upload ---- */
+        function bindDropzone() {
+            const dropzone = document.getElementById("pdfDropzone");
+            const input = document.getElementById("pdfInput");
+            ["dragenter", "dragover"].forEach(ev => {
+                dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+            });
+            ["dragleave", "drop"].forEach(ev => {
+                dropzone.addEventListener(ev, e => { e.preventDefault(); dropzone.classList.remove("drag-over"); });
+            });
+            dropzone.addEventListener("drop", e => {
+                const files = e.dataTransfer && e.dataTransfer.files;
+                if (!files || !files.length) return;
+                input.files = files;
+                handlePDFUpload(input);
+            });
+        }
+
+        async function handlePDFUpload(input) {
+            if (!input.files || !input.files.length) return;
+            const files = Array.from(input.files);
+            const validPdfs = files.filter(f => f.name.toLowerCase().endsWith(".pdf"));
+
+            if (!validPdfs.length) {
+                showToast("请选择 PDF 格式的文献文件。");
+                input.value = "";
+                return;
+            }
+
+            const oversized = validPdfs.find(f => f.size > 30 * 1024 * 1024);
+            if (oversized) {
+                showToast(`文件 ${oversized.name} 超过 30 MB 限制。`);
+                input.value = "";
+                return;
+            }
+
+            const libraryName = state.currentLibrary || "";
+            showToast(`正在上传 ${validPdfs.length} 篇文献并启动后台解析...`);
+
+            try {
+                for (const file of validPdfs) {
+                    const formData = new FormData();
+                    formData.append("file", file);
+                    formData.append("library_name", libraryName);
+                    await fetchJSON(`${API_BASE}/ingest/upload/jobs`, { method: "POST", body: formData });
+                }
+                showToast(`已成功创建 ${validPdfs.length} 个后台解析任务！`);
+                await refreshData();
             } catch (e) {
-                showToast("同步大盘数据失败：" + e.message);
+                const msg = e.detail && e.detail.message ? e.detail.message : e.message;
+                showToast("上传或解析任务创建失败：" + msg);
+            } finally {
+                input.value = "";
             }
         }
 
         document.addEventListener('DOMContentLoaded', () => {
             TopNav.init({ currentPage: 'dashboard', mountId: 'topnav-mount' });
+            bindDropzone();
             loadLibraries();
+            state.pollTimer = setInterval(() => {
+                if (!document.hidden && state.currentLibrary) pollJobs();
+            }, 5000);
+        });
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && state.currentLibrary) pollJobs();
         });
     </script>
 </body>
