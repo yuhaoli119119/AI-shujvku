@@ -28,7 +28,6 @@
     function syncWebAiReturnModeButtons() {
       const isEvidenceMode = webAiReturnState.mode === "evidence";
       const applyButton = document.getElementById("webAiApplyEvidenceBtn");
-      const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
       const copyButton = document.getElementById("webAiCopyInstructionBtn");
       if (applyButton) {
         applyButton.style.display = isEvidenceMode ? "" : "none";
@@ -38,10 +37,6 @@
         copyButton.style.display = "";
         copyButton.textContent = isEvidenceMode ? "复制本地 AI 全量图片复核指令" : "复制本地 AI 处理指令";
         copyButton.disabled = true;
-      }
-      if (finalizeButton) {
-        finalizeButton.style.display = isEvidenceMode ? "" : "none";
-        finalizeButton.disabled = true;
       }
     }
 
@@ -92,6 +87,10 @@
       if (!target) return;
       if (normalizedMode === "evidence" && !requireSelectedMainEvidenceScope(target)) return;
       const targetId = String(target.paper_id || "");
+      if (normalizedMode === "evidence" && (!manualReviewContext.bundleId || !manualReviewContext.bundleFingerprint)) {
+        showToast("请先导出当前固定范围的图表证据包，再回传 JSON。");
+        return;
+      }
       if (
         (webAiReturnState.paperId && webAiReturnState.paperId !== targetId) ||
         webAiReturnState.mode !== normalizedMode
@@ -101,10 +100,6 @@
       webAiReturnState.mode = normalizedMode;
       webAiReturnState.paperId = targetId;
       webAiReturnState.paperCode = String(target.paper_code || "");
-      if (normalizedMode === "evidence" && (!manualReviewContext.bundleId || !manualReviewContext.bundleFingerprint)) {
-        showToast("请先导出当前固定范围的图表证据包，再回传 JSON。");
-        return;
-      }
       document.getElementById("webAiReturnTitle").textContent =
         "回传网页 AI " + webAiModeLabel(normalizedMode) + " JSON";
       document.getElementById("webAiReturnSubtitle").textContent =
@@ -862,9 +857,7 @@
         const applied = Array.isArray(data.applied) ? data.applied.length : Number(data.applied_count || 0);
         const completed = Boolean(data && data.chart_review_completed);
         const copyButton = document.getElementById("webAiCopyInstructionBtn");
-        const finalizeButton = document.getElementById("webAiFinalizeEvidenceBtn");
         if (copyButton) copyButton.disabled = false;
-        if (finalizeButton) finalizeButton.disabled = true;
         setWebAiValidationBox(
           "<strong>" + (completed ? "图表两级审核已完成。" : "网页 AI 图表结果已应用，等待本地 AI 逐图复核。") + "</strong>" +
           '<div class="web-ai-validation-summary">' +
@@ -889,33 +882,5 @@
       }
     }
 
-    async function finalizeWebAiEvidenceReview() {
-      if (!activeEvidenceScope() || webAiReturnState.mode !== "evidence" || !webAiReturnState.validationResponse) {
-        showToast("没有可 finalize 的当前固定图表审核范围。");
-        return;
-      }
-      const button = document.getElementById("webAiFinalizeEvidenceBtn");
-      if (!window.confirm("确认完成图表审核？\n" + evidenceScopeLabel() + "\n这一步只 finalize 已应用的当前范围，不会重新 apply JSON。")) return;
-      button.disabled = true;
-      button.textContent = "完成中...";
-      try {
-        const data = await fetchJSON(
-          "/api/papers/" + encodeURIComponent(manualReviewContext.paperId) + "/chart-review-result/finalize" + (manualReviewContext.runId ? "?run_id=" + encodeURIComponent(manualReviewContext.runId) : ""),
-          { method: "POST" }
-        );
-        const scopeIssues = evidenceScopeMismatchIssues(data);
-        if (scopeIssues.length || !data.chart_review_completed) {
-          renderWebAiValidationFailure(scopeIssues.length ? scopeIssues : (data.finalize_blocking_errors || data.unresolved_actions || []), []);
-          return;
-        }
-        setWebAiValidationBox("<strong>图表审核已 finalize。</strong><div style=\"margin-top:8px;\">" + esc(evidenceScopeLabel()) + "</div>", "is-success");
-        showToast("图表审核已完成；现在可以继续 DFT 终审。");
-        await loadReviewCenter();
-      } catch (error) {
-        renderWebAiValidationFailure([{ code: "apply_request_failed", message: error.message }], []);
-      } finally {
-        button.textContent = "完成图表审核";
-        button.disabled = false;
-      }
-    }
+    // 后端完成图表审核通过 /chart-review-result/finalize 接口执行，由本地 AI 逐图核验完成后调用
     // WEB_AI_RETURN_FEATURE_END

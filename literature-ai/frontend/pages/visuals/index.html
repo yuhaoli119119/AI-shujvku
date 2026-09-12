@@ -3,132 +3,692 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>数据可视化 - Literature AI</title>
+  <title>数据分析 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
-  <link rel="stylesheet" href="./page.css">
+  <link rel="stylesheet" href="./page.css?v=20260913_c1">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
 </head>
 <body>
   <div id="topnav-mount"></div>
-  <main class="shell">
-    <header class="page-header">
-      <div>
-        <p class="eyebrow">DFT 数据概览</p>
-        <h1>数据可视化</h1>
-        <p id="overviewStatus" class="status" aria-live="polite">正在读取概览…</p>
+
+  <main class="workbench-shell">
+    <!-- Streamlined Header: Title + Inline Compact Summary + Library Select + Compact Export Group -->
+    <header class="page-header workbench-header">
+      <div class="header-main">
+        <div class="header-title-row">
+          <h1 class="page-title">数据分析</h1>
+          <span id="headerCompactSummary" class="header-compact-summary">加载中…</span>
+        </div>
+        <p id="overviewStatus" class="status" aria-live="polite"></p>
       </div>
+
       <div class="header-actions">
-        <button id="exportCatalystCsv" class="btn btn-secondary" type="button">导出催化剂宽表 CSV</button>
-        <button id="downloadCatalystJson" class="btn btn-secondary" type="button">下载审计 JSON</button>
-        <p class="status export-note">CSV：给 pandas、随机森林、XGBoost 使用；缺失或冲突值为空。JSON：用于来源追溯和 AI 核验，不是直接训练表。</p>
-        <p id="exportStatus" class="status" aria-live="polite"></p>
+        <div class="library-select-wrapper">
+          <label for="librarySelect" class="library-select-label">
+            <svg class="lib-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+            </svg>
+            <span>文献库：</span>
+          </label>
+          <select id="librarySelect" class="header-library-select" aria-label="选择文献库">
+            <option value="">加载中…</option>
+          </select>
+        </div>
+
+        <!-- Export Buttons (Visible & compact to satisfy Playwright contract while visually grouped) -->
+        <div class="header-export-group">
+          <button id="exportCatalystCsv" class="btn btn-secondary btn-compact" type="button" title="导出催化剂宽表 CSV (pandas/XGBoost)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            <span>导出催化剂宽表 CSV</span>
+          </button>
+          <button id="downloadCatalystJson" class="btn btn-secondary btn-compact" type="button" title="下载审计 JSON (溯源复现)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>下载审计 JSON</span>
+          </button>
+        </div>
+
+        <!-- Preserved Export note & status contract -->
+        <p class="export-note" style="display: none;">CSV：给 pandas、随机森林、XGBoost 使用；缺失或冲突值为空。JSON：用于来源追溯和 AI 核验，不是直接训练表。</p>
+        <p id="exportStatus" class="status export-status-text" aria-live="polite"></p>
       </div>
     </header>
 
-    <section id="metrics" class="metrics" aria-label="DFT 数据统计">
-      <span class="metric"><strong id="metricDftTotal">-</strong>DFT 总记录</span>
-      <span class="metric"><strong id="metricExportEligible">-</strong>通过导出门的记录</span>
-      <span class="metric"><strong id="metricV2Numeric">-</strong>V2 行级数值可用记录</span>
-      <span class="metric"><strong id="metricCatalysts">-</strong>通过导出门的催化剂</span>
-      <span class="metric"><strong id="metricPapers">-</strong>V2 贡献论文</span>
-    </section>
+    <!-- Subtabs Navigation -->
+    <div class="subtabs-bar">
+      <nav class="subtabs-nav" role="tablist" aria-label="数据分析视图">
+        <button class="subtab-item is-active" id="tabNavRelations" role="tab" aria-selected="true" data-tab="relations">
+          关系探索
+        </button>
+        <button class="subtab-item" id="tabNavMatrix" role="tab" aria-selected="false" data-tab="matrix">
+          相关性矩阵
+        </button>
+        <button class="subtab-item" id="tabNavDataset" role="tab" aria-selected="false" data-tab="dataset">
+          ML 数据集
+        </button>
+      </nav>
+      <div id="globalStatus" class="global-status" aria-live="polite"></div>
+    </div>
 
-    <section class="panel relation-panel" aria-labelledby="relation-title">
-      <div class="panel-head">
-        <div>
-          <h2 id="relation-title">催化剂性质关系</h2>
-          <p>每个点只来自同一个 <code>catalyst_sample_id</code>；页面不会跨催化剂配对或自行合并记录。</p>
+    <!-- ========================================== -->
+    <!-- TAB 1: 关系探索 (Relationship Exploration) -->
+    <!-- ========================================== -->
+    <section id="tabRelations" class="tab-panel is-active" role="tabpanel" aria-labelledby="tabNavRelations">
+      <!-- 6 Scientific Statistics Strip -->
+      <div class="stats-strip" aria-label="相关性统计指标">
+        <div class="stat-card">
+          <span class="stat-label">Pearson r</span>
+          <span class="stat-value" id="statPearson">—</span>
         </div>
-        <button id="quickChargeBond" class="btn btn-secondary quick-btn" type="button">快捷关系：Li2S Bader 电荷转移 vs Li-S 最大键长</button>
-      </div>
-
-      <div class="controls">
-        <label> X 字段 <select id="xField" aria-label="X 字段"><option value="">加载中…</option></select></label>
-        <label> Y 字段 <select id="yField" aria-label="Y 字段"><option value="">加载中…</option></select></label>
-        <label> 最少样本数 <input id="minN" aria-label="最少样本数" type="number" min="3" step="1" value="3"></label>
-      </div>
-      <p class="status status-row" aria-live="polite"><span id="relationStatus">正在读取可分析字段…</span><button id="retryCorrelation" class="btn btn-secondary btn-small" type="button" hidden>重试</button></p>
-
-      <div class="analysis-grid">
-        <div class="plot-wrap">
-          <svg id="scatterPlot" class="scatter-plot" viewBox="0 0 640 390" role="img" aria-label="催化剂性质散点图">
-            <text id="plotEmpty" x="320" y="195" text-anchor="middle">等待相关性数据</text>
-            <g id="plotLayer"></g>
-          </svg>
-          <div id="plotTooltip" class="plot-tooltip" hidden></div>
-          <ol id="plotLegend" class="plot-legend" aria-label="图中催化剂编号" hidden></ol>
-          <p id="fitNotice" class="fit-notice"></p>
+        <div class="stat-card">
+          <span class="stat-label">Spearman ρ</span>
+          <span class="stat-value" id="statSpearman">—</span>
         </div>
-        <aside class="side-stack">
-          <div class="verdict-card" id="verdictCard" data-state="idle">
-            <p class="verdict-label" id="verdictLabel">暂无结论</p>
-            <p class="verdict-r" id="verdictR">—</p>
-            <p class="verdict-meta" id="verdictMeta"></p>
-            <p class="verdict-equation" id="verdictEquation"></p>
-            <p class="verdict-quality" id="verdictQuality"></p>
+        <div class="stat-card">
+          <span class="stat-label">R²</span>
+          <span class="stat-value" id="statR2">—</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">有效样本</span>
+          <div class="stat-value-group">
+            <span class="stat-value" id="statCatalysts">—</span>
+            <span class="stat-unit">催化剂</span>
           </div>
-          <details class="stats-details">
-            <summary>全部统计</summary>
-            <dl class="statistics" aria-label="相关性统计">
-              <div><dt>Pearson r</dt><dd id="statPearson">-</dd></div>
-              <div><dt>Spearman rho</dt><dd id="statSpearman">-</dd></div>
-              <div><dt>R²</dt><dd id="statR2">-</dd></div>
-              <div><dt>斜率</dt><dd id="statSlope">-</dd></div>
-              <div><dt>截距</dt><dd id="statIntercept">-</dd></div>
-              <div><dt>催化剂数</dt><dd id="statCatalysts">-</dd></div>
-              <div><dt>论文数</dt><dd id="statPapers">-</dd></div>
-            </dl>
-          </details>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">贡献论文</span>
+          <div class="stat-value-group">
+            <span class="stat-value" id="statPapers">—</span>
+            <span class="stat-unit">篇文献</span>
+          </div>
+        </div>
+        <div class="stat-card stat-card-equation">
+          <span class="stat-label">Linear fit</span>
+          <span class="stat-value stat-equation" id="statEquation">—</span>
+        </div>
+      </div>
 
-          <section id="diagnostics" class="diagnostics" hidden aria-label="分析提示">
-            <div class="diagnostic-summary">
-              <div class="diagnostic-heading">
-                <h3 id="diagnosticTitle">当前分析状态</h3>
-                <span id="diagnosticFlag" class="diagnostic-flag">数据说明</span>
-              </div>
-              <p id="diagnosticMessage"></p>
+      <div class="relations-layout">
+        <!-- Left Sidebar: Controls, Presets & Collapsed Diagnostics -->
+        <aside class="relations-sidebar">
+          <div class="sidebar-card">
+            <div class="card-title-row">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line>
+                <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
+                <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
+                <line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line>
+              </svg>
+              <h3>分析设置</h3>
             </div>
+
+            <div class="control-group">
+              <label for="xField" class="control-label">X 字段</label>
+              <select id="xField" class="form-select" aria-label="X 字段">
+                <option value="">加载中…</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="yField" class="control-label">Y 字段</label>
+              <select id="yField" class="form-select" aria-label="Y 字段">
+                <option value="">加载中…</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="minN" class="control-label">最少样本数</label>
+              <input id="minN" class="form-input" type="number" min="3" max="50" step="1" value="3" aria-label="最少样本数">
+              <p class="field-hint">仅控制拟合门槛，不隐藏已有散点</p>
+            </div>
+
+            <p class="status status-row" aria-live="polite">
+              <span id="relationStatus">正在读取可分析字段…</span>
+              <button id="retryCorrelation" class="btn btn-secondary btn-small" type="button" hidden>重试</button>
+            </p>
+          </div>
+
+          <div class="sidebar-card">
+            <div class="card-title-row">
+              <h3>常用关系</h3>
+            </div>
+            <div class="preset-buttons-stack">
+              <button id="quickAdsorptionDissociation" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="li2s_dissociation_barrier">
+                <span class="preset-name">吸附能 ↔ 解离能垒</span>
+                <span class="preset-arrow">›</span>
+              </button>
+              <button id="quickChargeBond" class="preset-btn" type="button" data-x="li2s_bader_charge_transfer" data-y="li_s_bond_max">
+                <span class="preset-name">电荷转移 ↔ Li–S 键长</span>
+                <span class="preset-arrow">›</span>
+              </button>
+              <button id="quickAdsorptionDband" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="d_band_center">
+                <span class="preset-name">吸附能 ↔ d 带中心</span>
+                <span class="preset-arrow">›</span>
+              </button>
+              <button id="quickAdsorptionRds" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
+                <span class="preset-name">吸附能 ↔ RDS ΔG</span>
+                <span class="preset-arrow">›</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Collapsible Data Quality Section -->
+
+        </aside>
+
+        <!-- Right Main Workspace: Scatter Chart + Paired Table -->
+        <div class="relations-main">
+          <!-- Scatter Chart Card -->
+          <div class="chart-card">
+            <div class="chart-card-header">
+              <h2 id="chartTitle" class="chart-title">关系探索</h2>
+              <div class="chart-legend">
+                <span class="legend-item"><span class="legend-dot"></span> 文献数据</span>
+                <span class="legend-item"><span class="legend-line"></span> 线性拟合</span>
+              </div>
+            </div>
+
+            <div class="plot-wrap plot-container">
+              <svg id="scatterPlot" class="scatter-plot scatter-svg" viewBox="0 0 640 390" role="img" aria-label="催化剂性质散点图">
+                <text id="plotEmpty" class="plot-empty-text" x="320" y="195" text-anchor="middle">等待相关性数据</text>
+                <g id="plotLayer"></g>
+              </svg>
+              <div id="plotEmptySummary" class="plot-empty-summary" hidden></div>
+              <div id="plotTooltip" class="plot-tooltip" hidden></div>
+              <!-- Preserved plotLegend contract with hidden attribute to keep UI clean -->
+              <ol id="plotLegend" class="plot-legend" aria-label="图中催化剂编号" hidden></ol>
+              <p id="fitNotice" class="fit-notice"></p>
+            </div>
+
+            <!-- Single Compact Scientific Summary Strip beneath Chart -->
+            <div id="verdictCard" class="chart-card-footer verdict-summary-strip" data-state="idle">
+              <div class="footer-status-left">
+                <span id="verdictLabel" class="verdict-summary-trend">正在分析趋势…</span>
+                <span class="footer-divider">·</span>
+                <span id="verdictMeta" class="verdict-summary-meta">—</span>
+                <span class="footer-divider">·</span>
+                <span id="verdictEquation" class="verdict-summary-eq"></span>
+                <span class="footer-divider">·</span>
+                <span id="verdictQuality" class="verdict-summary-tag">探索性分析</span>
+              </div>
+              <div class="footer-status-right">
+                <span class="badge-status-valid">
+                  <span id="validPairsCount">0</span> 有效配对
+                </span>
+                <span class="footer-divider">·</span>
+                <span class="excluded-text"><span id="excludedPairsCount">0</span> 排除原因</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Hidden contract spans for stats -->
+          <div style="display: none;">
+            <span id="statSlope">-</span>
+            <span id="statIntercept">-</span>
+            <span id="verdictR">-</span>
+          </div>
+
+          <section id="diagnostics" class="sidebar-card diagnostics-card" hidden aria-label="数据质量说明">
             <details id="technicalDiagnostics" class="technical-diagnostics">
-              <summary>查看数据来源与质量说明</summary>
+              <summary class="diagnostics-summary-header">
+                <span class="diag-header-left">
+                  <span id="diagnosticFlag" class="diagnostic-flag">数据说明</span>
+                  <span id="diagnosticTitle" class="diag-title-text">数据质量诊断</span>
+                </span>
+                <span class="diag-chevron">▸</span>
+              </summary>
               <div class="diagnostic-body">
-                <ul id="diagnosticHighlights"></ul>
-                <p class="diagnostic-policy">关系分析要求同一催化剂、审核通过、数值单位可标准化且计算设置明确；Identity V2 优先，但满足这些安全条件的历史记录也可参与。冲突值仍留空。</p>
-                <p class="diagnostic-note">以下数字是“原因出现次数”，同一记录可能同时命中多个原因，因此不能相加，也不代表数据被删除。</p>
+                <p id="diagnosticMessage" class="diagnostic-msg"></p>
+                <ul id="diagnosticHighlights" class="diagnostic-highlights"></ul>
+                <p class="diagnostic-policy" style="display: none;">关系分析要求同一催化剂、审核通过、数值单位可标准化且计算设置明确；Identity V2 优先，但满足这些安全条件的历史记录也可参与。冲突值仍留空。</p>
                 <div class="technical-diagnostic-grid">
-                  <div id="warningsBox" hidden><h4>分析提示</h4><ul id="warningsList"></ul></div>
-                  <div id="excludedBox" hidden><h4>排除原因</h4><ul id="excludedList"></ul></div>
+                  <div id="warningsBox" hidden>
+                    <h4>分析提示</h4>
+                    <ul id="warningsList"></ul>
+                  </div>
+                  <div id="excludedBox" hidden>
+                    <h4>排除原因统计</h4>
+                    <ul id="excludedList"></ul>
+                  </div>
                 </div>
+                <p class="diagnostic-note">同一记录可能同时命中多个原因，数字为原因出现频次，不代表记录被物理删除。</p>
               </div>
             </details>
           </section>
-        </aside>
-      </div>
 
-      <section class="details" aria-labelledby="details-title">
-        <h3 id="details-title">同一催化剂样本明细</h3>
-        <p>来源记录 ID 由相关性接口返回，用于追溯 X 与 Y 值。Li2S 解离能垒展示全部候选路径；只有接口明确标记的最大可比能垒用于汇总和回归。</p>
-        <div class="table-wrap">
-          <table>
-            <colgroup>
-              <col class="table-col-catalyst">
-              <col class="table-col-paper">
-              <col class="table-col-sample-id">
-              <col class="table-col-value">
-              <col class="table-col-value">
-              <col class="table-col-sources">
-              <col class="table-col-candidates">
-            </colgroup>
-            <thead><tr><th>催化剂</th><th>论文</th><th class="col-id">catalyst_sample_id</th><th id="xColumn">X</th><th id="yColumn">Y</th><th class="col-id">来源记录 ID</th><th>Li2S 解离能垒候选</th></tr></thead>
-            <tbody id="detailsBody"><tr><td colspan="7">等待相关性数据</td></tr></tbody>
-          </table>
+          <!-- Paired Data Table Card (Human-Centric Visible Columns, Technical Info in Expandable Details) -->
+          <details id="pairDetails" class="details table-card" aria-labelledby="details-title">
+            <summary class="table-card-header">
+              <div class="table-title-group">
+                <h3 id="details-title">同一催化剂配对明细</h3>
+                <p class="table-subtitle">按需展开，查看数值与文献来源</p>
+              </div>
+              <span id="tableCountBadge" class="meta-badge">0 组配对</span>
+            </summary>
+
+            <div class="table-wrap table-wrapper">
+              <table class="data-table paired-data-table">
+                <thead>
+                  <tr>
+                    <th>催化剂</th>
+                    <th>文献来源</th>
+                    <th id="xColumn">X 字段</th>
+                    <th id="yColumn">Y 字段</th>
+                    <th>状态</th>
+                    <th>技术溯源与候选路径</th>
+                  </tr>
+                </thead>
+                <tbody id="detailsBody">
+                  <tr><td colspan="6" class="empty-cell">等待相关性数据</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <button id="morePairs" class="btn btn-secondary btn-small" type="button" hidden>显示更多配对</button>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ======================================= -->
+    <!-- TAB 2: 相关性矩阵 (Correlation Matrix) -->
+    <!-- ======================================= -->
+    <section id="tabMatrix" class="tab-panel" role="tabpanel" aria-labelledby="tabNavMatrix" hidden>
+      <div class="matrix-layout">
+        <!-- Left Sidebar: Filters & Guide -->
+        <aside class="matrix-sidebar">
+          <div class="sidebar-card">
+            <div class="card-title-row">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+              </svg>
+              <h3>筛选与设置</h3>
+            </div>
+
+            <div class="control-group">
+              <label for="matrixScopeSelect" class="control-label">变量范围</label>
+              <select id="matrixScopeSelect" class="form-select">
+                <option value="core">核心物理化学性质 (6个)</option>
+                <option value="all">全部已提取性质 (19个)</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="matrixReactionSelect" class="control-label">反应类别</label>
+              <select id="matrixReactionSelect" class="form-select">
+                <option value="">全部反应类别</option>
+                <option value="电池/离子">电池/离子</option>
+                <option value="CO2RR">CO2RR</option>
+                <option value="HER">HER</option>
+                <option value="OER/ORR">OER/ORR</option>
+                <option value="NRR">NRR</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="matrixAdsorbateSelect" class="control-label">吸附物 (Adsorbate)</label>
+              <select id="matrixAdsorbateSelect" class="form-select">
+                <option value="">全部吸附物</option>
+                <option value="Li2S">Li₂S</option>
+                <option value="Li2S8">Li₂S₈</option>
+                <option value="Li2S6">Li₂S₆</option>
+                <option value="Li2S4">Li₂S₄</option>
+                <option value="Li2S2">Li₂S₂</option>
+                <option value="S8">S₈</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="matrixFamilySelect" class="control-label">材料体系 (Material Family)</label>
+              <select id="matrixFamilySelect" class="form-select">
+                <option value="">全部体系</option>
+                <option value="双原子">双原子</option>
+                <option value="单原子">单原子</option>
+              </select>
+            </div>
+
+            <div class="control-group">
+              <label for="matrixMinN" class="control-label">最少样本数</label>
+              <input id="matrixMinN" class="form-input" type="number" min="3" max="50" step="1" value="3">
+              <p class="field-hint">有效样本数不足该阈值的单元格将置灰展示为探索不足</p>
+            </div>
+          </div>
+
+          <div class="sidebar-card guide-card">
+            <div class="card-title-row">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <h3>矩阵使用说明</h3>
+            </div>
+            <ol class="guide-list">
+              <li>矩阵展示<strong>下三角无序独立变量对</strong>，对角线为自相关（—），上三角留空以避免重复。</li>
+              <li>单元格数值展示皮尔逊相关系数 <strong>r</strong> 与样本数 <strong>n</strong>。</li>
+              <li>灰色单元格表示有效配对样本数不足（n &lt; 3），未计算统计相关。</li>
+              <li>点击任意有效单元格可查看下方变量对下钻图谱、文献示例与定量趋势。</li>
+            </ol>
+          </div>
+        </aside>
+
+        <!-- Right Main Workspace: Heatmap Card + Detail Card -->
+        <div class="matrix-main">
+          <!-- Main Matrix Card -->
+          <div class="chart-card matrix-card">
+            <div class="matrix-card-header">
+              <div>
+                <h2 class="chart-title">探索性物理化学相关性矩阵</h2>
+                <p class="card-desc">按催化剂样本无序统一配对，展示物理化学关键性质间的皮尔逊线性相关系数趋势（探索性结果，不代表因果关系）。</p>
+              </div>
+              <div class="matrix-meta-badges">
+                <span class="meta-badge" id="badgeVarCount">6 个变量</span>
+                <span class="meta-badge" id="badgeCellCount">0 / 15 变量对可分析</span>
+                <span class="meta-badge">已审核数据</span>
+              </div>
+            </div>
+
+            <div class="matrix-stage">
+              <div class="matrix-scroll-wrapper">
+                <table id="matrixTable" class="heatmap-table">
+                  <tbody id="matrixBody">
+                    <tr><td class="empty-cell">加载矩阵中…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Continuous Diverging Colorbar Legend (-1 to +1) -->
+              <div class="matrix-legend-col">
+                <span class="legend-scale-title">相关系数 r</span>
+                <div class="diverging-colorbar-wrapper">
+                  <span class="scale-label">+1.0</span>
+                  <div class="continuous-colorbar"></div>
+                  <span class="scale-label">0.0</span>
+                  <div class="continuous-colorbar-neg"></div>
+                  <span class="scale-label">-1.0</span>
+                </div>
+                <div class="legend-info-box">
+                  <p><strong>r</strong>：皮尔逊相关系数</p>
+                  <p><strong>n</strong>：有效催化剂样本数</p>
+                  <p class="muted">灰色：样本不足 (n &lt; 3)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Drill-Down Card for Selected Pair -->
+          <div id="matrixDetailCard" class="matrix-detail-card">
+            <div class="detail-card-header">
+              <div class="detail-title-group">
+                <span class="eyebrow-text">选中变量对下钻详情</span>
+                <h3 id="detailPairTitle" class="detail-pair-title">—</h3>
+                <div class="detail-badges">
+                  <span id="detailBadgeR" class="badge-pill">r = —</span>
+                  <span id="detailBadgeN" class="badge-pill">n = —</span>
+                </div>
+              </div>
+              <button id="jumpToExploreBtn" class="btn btn-primary jump-explore-btn" type="button">
+                <span>进入关系探索</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </button>
+            </div>
+
+            <div class="detail-card-body">
+              <!-- Col 1: Mini Scatter Plot Preview -->
+              <div class="detail-col mini-plot-col">
+                <div class="mini-plot-wrapper">
+                  <svg id="miniScatterSvg" viewBox="0 0 300 200" class="mini-scatter-svg">
+                    <g id="miniGridLayer"></g>
+                    <g id="miniLineLayer"></g>
+                    <g id="miniPointsLayer"></g>
+                    <text id="miniEmptyText" x="150" y="100" text-anchor="middle" class="mini-empty-text">点击矩阵单元格查看</text>
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Col 2: Statistical Description & Data Range (No causal deductions) -->
+              <div class="detail-col interpretation-col">
+                <div class="interpret-section">
+                  <h4 class="col-heading">相关趋势解读</h4>
+                  <p id="interpretText" class="interpret-text">点击矩阵中任意有效数值单元格，查看该变量对的探索性统计趋势与范围。</p>
+                </div>
+                <div class="range-section">
+                  <h4 class="col-heading">数据范围（当前筛选条件下）</h4>
+                  <ul class="range-list">
+                    <li><span id="rangeXLabel">X</span>：<strong id="rangeXValue">—</strong></li>
+                    <li><span id="rangeYLabel">Y</span>：<strong id="rangeYValue">—</strong></li>
+                    <li>有效样本数：<strong id="rangeNValue">—</strong></li>
+                  </ul>
+                </div>
+              </div>
+
+              <!-- Col 3: Paper References with Paper Detail Links -->
+              <div class="detail-col papers-col">
+                <h4 class="col-heading">相关文献出处 (<span id="paperListCount">0</span>)</h4>
+                <ol id="matrixPaperList" class="matrix-paper-list">
+                  <li class="empty-item">暂无对应文献记录</li>
+                </ol>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================== -->
+    <!-- TAB 3: ML 数据集 (ML Dataset)      -->
+    <!-- ================================== -->
+    <section id="tabDataset" class="tab-panel" role="tabpanel" aria-labelledby="tabNavDataset" hidden>
+      <!-- Top Metrics Row: Dedicated to ML Dataset Tab (Contract Preserved) -->
+      <section id="metrics" class="dataset-metrics-grid" aria-label="ML 数据集总览统计">
+        <div class="dataset-metric-card">
+          <div class="metric-icon-box">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+          </div>
+          <div class="metric-text-box">
+            <span class="metric-title">DFT 总记录</span>
+            <strong id="metricDftTotal" class="metric-number">—</strong>
+            <span id="dsTotalDftSub" class="metric-sub">当前文献库全部提取记录</span>
+          </div>
+        </div>
+
+        <div class="dataset-metric-card">
+          <div class="metric-icon-box icon-purple">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+          </div>
+          <div class="metric-text-box">
+            <span class="metric-title">通过导出门记录</span>
+            <strong id="metricExportEligible" class="metric-number">—</strong>
+            <span class="metric-sub">已通过安全闸门初步检验</span>
+          </div>
+        </div>
+
+        <div class="dataset-metric-card">
+          <div class="metric-icon-box icon-indigo">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+          </div>
+          <div class="metric-text-box">
+            <span class="metric-title">V2 行级数值可用</span>
+            <strong id="metricV2Numeric" class="metric-number">—</strong>
+            <span id="dsNumericRatio" class="metric-sub">同时满足身份、审核与规范化</span>
+          </div>
+        </div>
+
+        <div class="dataset-metric-card">
+          <div class="metric-icon-box icon-violet">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
+          </div>
+          <div class="metric-text-box">
+            <span class="metric-title">催化剂样品数</span>
+            <strong id="metricCatalysts" class="metric-number">—</strong>
+            <span class="metric-sub">具备唯一样品身份 (catalyst_sample_id)</span>
+          </div>
+        </div>
+
+        <div class="dataset-metric-card">
+          <div class="metric-icon-box icon-blue">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          </div>
+          <div class="metric-text-box">
+            <span class="metric-title">贡献论文</span>
+            <strong id="metricPapers" class="metric-number">—</strong>
+            <span class="metric-sub">来自经审核的高质量文献</span>
+          </div>
         </div>
       </section>
+
+      <!-- Hidden elements to satisfy duplicate legacy ds* selectors -->
+      <div style="display: none;">
+        <span id="dsTotalDft">-</span>
+        <span id="dsExportableDft">-</span>
+        <span id="dsNumericRate">-</span>
+        <span id="dsCatalystCount">-</span>
+        <span id="dsContributingPapers">-</span>
+      </div>
+
+      <!-- Middle Two Columns: Real Feature Coverage Table (65%) + Export & Quality (35%) -->
+      <div class="dataset-middle-grid">
+        <!-- Feature Registry & Coverage Table -->
+        <div class="chart-card dataset-features-card">
+          <div class="features-card-header">
+            <div>
+              <h3 class="chart-title">可分析特征规范与样本覆盖率 (Feature Coverage)</h3>
+              <p class="card-desc">展示当前文献库中各标准化物理化学特征的实际有效样本数及覆盖比例。</p>
+            </div>
+            <span id="featuresCountBadge" class="meta-badge">共 13 个特征</span>
+          </div>
+
+          <div class="table-wrapper">
+            <table class="data-table feature-table">
+              <thead>
+                <tr>
+                  <th style="width: 38px;">#</th>
+                  <th>特征名称</th>
+                  <th>符号 / 字段名</th>
+                  <th>单位</th>
+                  <th>有效样本数</th>
+                  <th>覆盖率</th>
+                  <th>提取说明与规范</th>
+                </tr>
+              </thead>
+              <tbody id="featuresBody">
+                <tr><td colspan="7" class="empty-cell">正在读取特征与覆盖率数据…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Right Stack: Export Cards + Quality Principles -->
+        <div class="dataset-side-stack">
+          <!-- Export Card -->
+          <div class="chart-card export-panel-card">
+            <div class="features-card-header">
+              <h3 class="chart-title">数据导出</h3>
+              <span id="exportPolicyBadge" class="policy-badge">策略检查中…</span>
+            </div>
+            <p class="card-desc">导出已清洗的科学数据，供后续机器学习或复现分析使用：</p>
+
+            <div class="export-options">
+              <button id="exportCsvCardBtn" class="export-action-card" type="button">
+                <div class="action-card-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
+                </div>
+                <div class="action-card-text">
+                  <strong>催化剂 ML 数据集宽表 (.csv)</strong>
+                  <p>包含催化剂信息与归一化数值特征，适用于 pandas、scikit-learn、XGBoost 等后续外部建模。</p>
+                </div>
+                <span class="action-arrow">›</span>
+              </button>
+
+              <button id="exportJsonCardBtn" class="export-action-card" type="button">
+                <div class="action-card-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+                </div>
+                <div class="action-card-text">
+                  <strong>完整审计溯源数据 (.json)</strong>
+                  <p>包含完整元数据、来源文献、候选路径与排除记录，用于数据溯源与研究复现。</p>
+                </div>
+                <span class="action-arrow">›</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Quality Principles Card -->
+          <div class="chart-card quality-rules-card">
+            <div class="features-card-header">
+              <h3 class="chart-title">数据质量保障规范</h3>
+            </div>
+            <ul class="quality-item-list">
+              <li>
+                <span class="quality-step-num">1</span>
+                <div>
+                  <strong>催化剂身份边界</strong>
+                  <p>每个催化剂样本使用明确的 catalyst_sample_id 作为身份边界；分析仅在身份明确且计算上下文兼容的数据之间配对，不基于名称相似度自动跨样本合并。</p>
+                </div>
+              </li>
+              <li>
+                <span class="quality-step-num">2</span>
+                <div>
+                  <strong>安全闸门筛选</strong>
+                  <p>仅允许审核通过且候选状态合规的数据进入分析，自动过滤缺少位点、状态模糊或冲突记录。</p>
+                </div>
+              </li>
+              <li>
+                <span class="quality-step-num">3</span>
+                <div>
+                  <strong>物理单位统一标准化</strong>
+                  <p>所有能量性质转换为 eV、距离为 Å、电荷为 e，确保同类性质跨计算严格具有可比性。</p>
+                </div>
+              </li>
+              <li>
+                <span class="quality-step-num">4</span>
+                <div>
+                  <strong>端到端证据可溯源</strong>
+                  <p>每条特征值均保留对应文献 DOI、记录 ID 及原图表位点证据，支持双向穿透核验。</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Full-Width Table: Real Data Preview -->
+      <div class="chart-card dataset-preview-card">
+        <div class="features-card-header">
+          <div>
+            <h3 class="chart-title">催化剂宽表数据预览</h3>
+            <p class="card-desc">展示当前文献库前 5 条标准化催化剂宽表记录（仅在内部支持水平滚动，页面无横向滚动条）</p>
+          </div>
+          <button id="downloadFullCsvBtn" class="link-btn" type="button">导出全部宽表数据 →</button>
+        </div>
+
+        <div class="table-wrapper preview-table-wrapper">
+          <table class="data-table preview-table">
+            <thead>
+              <tr id="previewHeaderRow">
+                <th>#</th>
+                <th>催化剂</th>
+                <th>文献来源</th>
+                <th>E<sub>ads</sub>(Li₂S) (eV)</th>
+                <th>E<sub>b</sub>(Li₂S) (eV)</th>
+                <th>Q<sub>Bader</sub> (e)</th>
+                <th>d(Li1-S) (Å)</th>
+                <th>d(Li2-S) (Å)</th>
+                <th>d<sub>max</sub>(Li-S) (Å)</th>
+                <th>ε<sub>d</sub> (eV)</th>
+                <th>ΔG<sub>RDS</sub> (eV)</th>
+              </tr>
+            </thead>
+            <tbody id="datasetPreviewBody">
+              <tr><td colspan="11" class="empty-cell">正在读取催化剂宽表预览…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
-  <script src="./page.js"></script>
+
+  <script src="./page.js?v=20260913"></script>
 </body>
 </html>

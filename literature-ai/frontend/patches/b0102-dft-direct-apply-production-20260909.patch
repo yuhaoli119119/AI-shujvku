@@ -1,0 +1,93 @@
+diff --git a/frontend/pages/review_center/index.html b/frontend/pages/review_center/index.html
+--- a/frontend/pages/review_center/index.html
++++ b/frontend/pages/review_center/index.html
+@@ -74,6 +74,7 @@
+               <p id="dftStageDetail">图表阶段完成后才能导出 DFT 审核包。</p>
+               <div class="paper-stage-actions">
+                 <button class="btn btn-primary btn-sm" id="directDftExportBtn" type="button" onclick="downloadWebAiBundle('dft')" disabled>导出 DFT 审核包</button>
++                <button class="btn btn-ghost btn-sm" id="directDftApplyExportBtn" type="button" onclick="downloadWebAiBundle('dft_direct_apply')" disabled>下载 DFT 字段核验 ZIP</button>
+                 <button class="btn btn-ghost btn-sm" id="directDftPromptBtn" type="button" onclick="copyWebAiBundlePrompt('dft')">复制 DFT 提示词</button>
+                 <button class="btn btn-ghost btn-sm" id="directDftReturnBtn" type="button" onclick="openWebAiReturnDialog('dft')">回传 DFT JSON</button>
+               </div>
+@@ -112,6 +113,7 @@
+           <option id="exportDftWorkflowOption" value="export_dft">导出 DFT 审核包</option>
+           <option value="copy_dft_prompt">复制 DFT 提示词</option>
+           <option id="returnDftWorkflowOption" value="return_dft">回传 DFT JSON</option>
++          <option id="exportDftDirectApplyWorkflowOption" value="export_dft_direct_apply">下载 DFT 字段核验 ZIP（直接 MCP，不回传 JSON）</option>
+         </select>
+         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
+           <option value="">材料操作</option>
+diff --git a/frontend/pages/review_center/page.js b/frontend/pages/review_center/page.js
+--- a/frontend/pages/review_center/page.js
++++ b/frontend/pages/review_center/page.js
+@@ -810,6 +810,7 @@
+ 
+     function webAiModeLabel(mode) {
+       if (mode === "evidence") return "图表证据整理";
++      if (mode === "dft_direct_apply") return "DFT 字段核验（直接 MCP）";
+       const reviewMode = String(
+         (webAiReturnState.validationResponse && webAiReturnState.validationResponse.review_mode) ||
+         (dftReviewPreview && dftReviewPreview.review_mode) || ""
+@@ -836,8 +837,10 @@
+         const modeLabel = dftReviewPreview.review_mode === "comprehensive_review" ? "DFT 全量核验（已有+查漏）" :
+           (dftReviewPreview.review_mode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审");
+         const exportOption = document.getElementById("exportDftWorkflowOption");
++        const directApplyOption = document.getElementById("exportDftDirectApplyWorkflowOption");
+         const returnOption = document.getElementById("returnDftWorkflowOption");
+         if (exportOption) exportOption.textContent = "4 导出 " + modeLabel + "包（仅已完成两级审核图片）";
++        if (directApplyOption) directApplyOption.textContent = "6 下载 DFT 字段核验 ZIP（直接 MCP，不回传 JSON）";
+         if (returnOption) returnOption.textContent = "5 回传 " + modeLabel + " JSON";
+         const mainFigures = Number(summary.reviewed_main_figures || 0);
+         const mainTables = Number(summary.reviewed_main_tables || 0);
+@@ -963,6 +966,11 @@
+         dftExportButton.disabled = !chartComplete;
+         dftExportButton.title = chartComplete ? "导出当前论文的 DFT 审核包" : chartDetail;
+       }
++      const dftDirectApplyExportButton = document.getElementById("directDftApplyExportBtn");
++      if (dftDirectApplyExportButton) {
++        dftDirectApplyExportButton.disabled = !chartComplete;
++        dftDirectApplyExportButton.title = chartComplete ? "下载当前论文的 DFT 字段核验 ZIP" : chartDetail;
++      }
+       setSinglePaperStage(
+         "dftStageCard", "dftStageStatus", "dftStageDetail",
+         chartComplete ? "可以进入 DFT 处理" : "尚未开放",
+@@ -1127,6 +1135,8 @@
+         await copyLocalAiChartReviewInstructionFromMenu();
+       } else if (action === "export_dft") {
+         await downloadWebAiBundle("dft");
++      } else if (action === "export_dft_direct_apply") {
++        await downloadWebAiBundle("dft_direct_apply");
+       } else if (action === "copy_dft_prompt") {
+         await copyWebAiBundlePrompt("dft");
+       } else if (action === "return_dft") {
+@@ -1158,7 +1168,7 @@
+     }
+ 
+     async function downloadWebAiBundle(mode) {
+-      const normalizedMode = mode === "evidence" ? "evidence" : "dft";
++      const normalizedMode = mode === "evidence" ? "evidence" : (mode === "dft_direct_apply" ? "dft_direct_apply" : "dft");
+       const target = selectedWebAiSingleMainPaper();
+       if (!target) return;
+       const paperId = String(target.paper_id || "");
+@@ -1167,7 +1177,9 @@
+       const paperCode = String(target.paper_code || paperId.slice(0, 8) || "paper");
+       const endpoint = normalizedMode === "evidence"
+         ? "/api/papers/" + encodeURIComponent(paperId) + "/evidence-review-bundle?include_pdf_files=true&include_figure_files=true" + (runId ? "&run_id=" + encodeURIComponent(runId) : "")
+-        : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true&chart_scope=paper";
++        : (normalizedMode === "dft_direct_apply"
++          ? "/api/papers/" + encodeURIComponent(paperId) + "/dft-direct-apply-bundle?include_figure_files=true"
++          : "/api/papers/" + encodeURIComponent(paperId) + "/dft-review-bundle?include_figure_files=true&chart_scope=paper");
+       const selector = document.getElementById("webAiWorkflowSelect");
+       const previousTitle = selector ? selector.title : "";
+       if (selector) {
+@@ -1213,7 +1225,9 @@
+           renderManualReviewScope();
+         }
+         const blob = await response.blob();
+-        const fallback = paperCode + (normalizedMode === "evidence" ? "_figure_table_evidence_review_bundle.zip" : "_dft_review_bundle.zip");
++        const fallback = paperCode + (normalizedMode === "evidence"
++          ? "_figure_table_evidence_review_bundle.zip"
++          : (normalizedMode === "dft_direct_apply" ? "_dft_direct_apply_bundle.zip" : "_dft_review_bundle.zip"));
+         const filename = contentDispositionFilename(response.headers.get("Content-Disposition"), fallback);
+         const url = URL.createObjectURL(blob);
+         const link = document.createElement("a");

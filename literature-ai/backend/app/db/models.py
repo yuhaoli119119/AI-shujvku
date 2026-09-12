@@ -1146,6 +1146,33 @@ class ExtractionFieldReview(Base):
     __mapper_args__ = {"version_id_col": write_version}
 
 
+class AIVerificationBatchReceipt(Base):
+    """Durable, request-scoped receipt for one authenticated AI submission."""
+
+    __tablename__ = "ai_verification_batch_receipts"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    source_identity: Mapped[str] = mapped_column(sa.String(160), nullable=False, index=True)
+    request_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False, default="committed")
+    receipt_payload: Mapped[dict | list | None] = mapped_column(json_type(), nullable=True)
+    committed_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=False), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "paper_id", "source_identity", "request_id",
+            name="uq_ai_verification_batch_receipt_request",
+        ),
+        sa.Index("ix_ai_verification_batch_receipt_paper_created", "paper_id", "created_at"),
+    )
+
+
 class ShareToken(Base):
     __tablename__ = "share_tokens"
 

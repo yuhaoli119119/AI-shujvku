@@ -49,6 +49,7 @@ from app.utils.ai_verification import (
     cached_read_pdf_page_text,
     exact_locator_geometry_is_valid,
     normalize_evidence_text,
+    structured_table_cell_evidence_valid,
 )
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.dft_identity_service import (
@@ -76,6 +77,7 @@ UNSAFE_REVIEWER_STATUSES = {
     "failed",
     "needs_human",
     "blocked",
+    "ai_blocked",
     "exception",
     "",
 }
@@ -351,11 +353,28 @@ def authoritative_human_review_locator_pair_valid(
     if paper is None:
         return False
     page_text, error, pdf_path = cached_read_pdf_page_text(session, paper, locator.page)
+    payload = review.review_payload if isinstance(review.review_payload, dict) else {}
+    human_verification = payload.get("human_verification") if isinstance(payload, dict) else None
+    table_reference = (
+        human_verification.get("table_evidence")
+        if isinstance(human_verification, dict)
+        else None
+    )
     locator_is_real_and_current = bool(
         error is None
         and exact_locator_geometry_is_valid(locator, pdf_path)
         and page_text
-        and normalized_review_evidence in normalize_evidence_text(page_text)
+        and (
+            structured_table_cell_evidence_valid(
+                session,
+                locator=locator,
+                reference=table_reference,
+                page_text=page_text,
+            )
+            if locator.table_id is not None
+            else table_reference is None
+            and normalized_review_evidence in normalize_evidence_text(page_text)
+        )
     )
     if not locator_is_real_and_current:
         return False

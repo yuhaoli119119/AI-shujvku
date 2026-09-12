@@ -24,6 +24,7 @@ from app.db.models import (
     Paper,
     PaperRelationship,
     PaperSection,
+    PaperTable,
     WritingCard,
 )
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
@@ -243,19 +244,22 @@ def ai_target_fingerprint(target_type: str, target: Any) -> str:
 
 
 def locator_fingerprint(locator: EvidenceLocator) -> str:
-    return stable_hash(
-        {
-            "id": str(locator.id),
-            "paper_id": str(locator.paper_id),
-            "target_type": canonical_ai_target_type(str(locator.target_type or "")),
-            "target_id": str(locator.target_id or ""),
-            "field_name": str(locator.field_name or ""),
-            "page": locator.page,
-            "bbox": locator.bbox,
-            "evidence_text": normalize_evidence_text(locator.evidence_text),
-            "locator_status": str(locator.locator_status or "").casefold(),
-        }
-    )
+    payload = {
+        "id": str(locator.id),
+        "paper_id": str(locator.paper_id),
+        "target_type": canonical_ai_target_type(str(locator.target_type or "")),
+        "target_id": str(locator.target_id or ""),
+        "field_name": str(locator.field_name or ""),
+        "page": locator.page,
+        "bbox": locator.bbox,
+        "evidence_text": normalize_evidence_text(locator.evidence_text),
+        "locator_status": str(locator.locator_status or "").casefold(),
+    }
+    # Preserve historical PDF-locator fingerprints exactly.  Structured table
+    # locators add source identity without invalidating existing AI reviews.
+    if locator.table_id is not None:
+        payload["table_id"] = str(locator.table_id)
+    return stable_hash(payload)
 
 
 def matching_locator(
@@ -267,6 +271,7 @@ def matching_locator(
     field_name: str,
     page: int,
     evidence_text: str,
+    table_id: UUID | None = None,
 ) -> EvidenceLocator | None:
     canonical = canonical_ai_target_type(target_type)
     rows = session.scalars(
@@ -275,6 +280,7 @@ def matching_locator(
             EvidenceLocator.target_id == str(target_id),
             EvidenceLocator.field_name == field_name,
             EvidenceLocator.page == page,
+            EvidenceLocator.table_id == table_id,
         )
     ).all()
     wanted = normalize_evidence_text(evidence_text)
@@ -290,6 +296,181 @@ def matching_locator(
         ):
             return locator
     return None
+
+
+def _parse_markdown_table(content: str) -> tuple[list[str], list[list[str]]]:
+    lines = [
+        line.strip()
+        for line in str(content or "").splitlines()
+        if line.strip().startswith("|") and line.strip().endswith("|")
+    ]
+    if len(lines) < 2:
+        return [], []
+    headers = [cell.strip() for cell in lines[0].strip("|").split("|")]
+    rows: list[list[str]] = []
+    for line in lines[1:]:
+        if re.fullmatch(r"\|?[\s:\-|+]+\|?", line):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) == len(headers):
+            rows.append(cells)
+    return headers, rows
+
+
+def build_structured_table_cell_evidence(
+    session: Session,
+    *,
+    paper_id: UUID,
+    table_id: UUID,
+    page: int,
+    source_row_index: int,
+    source_column_index: int,
+) -> dict[str, Any] | None:
+    """Build server-owned evidence for one exact parsed-table cell.
+
+    Row and column indexes are zero-based indexes into the normalized Markdown
+    body and header.  The generated text deliberately keeps the cell context in
+    one semicolon-delimited item so a unit from a header may support that cell,
+    while a value or unit from another row cannot be spliced into it.
+    """
+    table = session.get(PaperTable, table_id)
+    if table is None or table.paper_id != paper_id or table.page != page:
+        return None
+    return build_structured_table_cell_evidence_from_table(
+        table,
+        paper_id=paper_id,
+        page=page,
+        source_row_index=source_row_index,
+        source_column_index=source_column_index,
+    )
+
+
+def build_structured_table_cell_evidence_from_table(
+    table: PaperTable,
+    *,
+    paper_id: UUID,
+    page: int,
+    source_row_index: int,
+    source_column_index: int,
+) -> dict[str, Any] | None:
+    """Build one cell's canonical evidence from an already-loaded table."""
+    if table.paper_id != paper_id or table.page != page:
+        return None
+    headers, rows = _parse_markdown_table(table.markdown_content or "")
+    if (
+        source_row_index < 0
+        or source_row_index >= len(rows)
+        or source_column_index < 0
+        or source_column_index >= len(headers)
+    ):
+        return None
+    row = rows[source_row_index]
+    if source_column_index >= len(row):
+        return None
+    header = headers[source_column_index].strip()
+    cell = row[source_column_index].strip()
+    row_label = row[0].strip() if row else ""
+    descriptor = ""
+    if source_column_index > 1 and len(row) > 1:
+        candidate = row[1].strip()
+        if re.search(r"[A-Za-z]", candidate) and not re.search(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?", candidate):
+            descriptor = candidate
+    cell_context = " ".join(
+        part for part in (str(table.caption or "").strip(), descriptor, header, cell) if part
+    ).strip()
+    if not cell or not cell_context:
+        return None
+    canonical = "; ".join(
+        part
+        for part in (
+            f"caption={str(table.caption or '').strip()}",
+            f"row={row_label}",
+            f"column={header}",
+            f"cell_context={cell_context}",
+        )
+        if part.split("=", 1)[1]
+    )
+    return {
+        "kind": "paper_table_cell.v1",
+        "table_id": str(table.id),
+        "source_row_index": source_row_index,
+        "source_column_index": source_column_index,
+        "canonical_evidence_text": canonical,
+        "table_caption": str(table.caption or "").strip(),
+        "row_label": row_label,
+        "column_header": header,
+        "cell_value": cell,
+    }
+
+
+def build_structured_table_cell_evidence_index(table: PaperTable) -> dict[str, list[dict[str, Any]]]:
+    """Index every normalized canonical cell value in an already-loaded table.
+
+    Callers must treat an index value with more than one item as ambiguous.  A
+    table may legitimately contain repeated values, and selecting the first
+    one would silently weaken the evidence contract.
+    """
+    headers, rows = _parse_markdown_table(table.markdown_content or "")
+    index: dict[str, list[dict[str, Any]]] = {}
+    for row_index, row in enumerate(rows):
+        for column_index in range(min(len(row), len(headers))):
+            built = build_structured_table_cell_evidence_from_table(
+                table,
+                paper_id=table.paper_id,
+                page=int(table.page or 0),
+                source_row_index=row_index,
+                source_column_index=column_index,
+            )
+            if built is not None:
+                index.setdefault(normalize_evidence_text(built["canonical_evidence_text"]), []).append(built)
+    return index
+
+
+def structured_table_cell_evidence_valid(
+    session: Session,
+    *,
+    locator: EvidenceLocator,
+    reference: dict[str, Any],
+    page_text: str | None,
+) -> bool:
+    if locator.table_id is None or not isinstance(reference, dict) or not page_text:
+        return False
+    try:
+        table_id = UUID(str(reference.get("table_id") or ""))
+        row_index = int(reference["source_row_index"])
+        column_index = int(reference["source_column_index"])
+        page = int(locator.page)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return False
+    if table_id != locator.table_id or row_index < 0 or column_index < 0:
+        return False
+    built = build_structured_table_cell_evidence(
+        session,
+        paper_id=locator.paper_id,
+        table_id=table_id,
+        page=page,
+        source_row_index=row_index,
+        source_column_index=column_index,
+    )
+    if built is None or reference.get("kind") != built["kind"]:
+        return False
+    if normalize_evidence_text(locator.evidence_text) != normalize_evidence_text(built["canonical_evidence_text"]):
+        return False
+
+    normalized_page = normalize_evidence_text(page_text)
+    label_match = re.search(r"\btable\s+s?\d+\b", built["table_caption"], re.I)
+    label_ok = bool(label_match and normalize_evidence_text(label_match.group(0)) in normalized_page)
+    row_ok = bool(built["row_label"] and normalize_evidence_text(built["row_label"]) in normalized_page)
+    cell_value = str(built["cell_value"] or "")
+    cell_ok = bool(cell_value and normalize_evidence_text(cell_value) in normalized_page)
+    if not cell_ok:
+        page_numeric = normalize_evidence_text(page_text).replace("−", "-").replace("–", "-").replace("—", "-")
+        cell_numbers = re.findall(r"(?<![A-Za-z])[-+]?\d+(?:\.\d+)?", cell_value.replace("−", "-"))
+        cell_ok = bool(cell_numbers) and all(
+            re.search(rf"(?<![\d.]){re.escape(number)}(?![\d.])", page_numeric) is not None
+            for number in cell_numbers
+        )
+    return label_ok and row_ok and cell_ok
 
 
 def read_pdf_page_text(paper: Paper, page: int) -> tuple[str | None, str | None, Path | None]:
@@ -426,6 +607,16 @@ def authoritative_ai_review_valid(session: Session, review: ExtractionFieldRevie
         if rel is None:
             return False
 
+    table_reference = verification.get("table_evidence")
+    table_id: UUID | None = None
+    if table_reference is not None:
+        if not isinstance(table_reference, dict):
+            return False
+        try:
+            table_id = UUID(str(table_reference.get("table_id") or ""))
+        except (ValueError, AttributeError):
+            return False
+
     locator = matching_locator(
         session,
         paper_id=evidence_paper_uuid,
@@ -434,6 +625,7 @@ def authoritative_ai_review_valid(session: Session, review: ExtractionFieldRevie
         field_name=review.field_name,
         page=page,
         evidence_text=str(review.evidence_text or ""),
+        table_id=table_id,
     )
     if locator is None or locator_fingerprint(locator) != verification.get("locator_fingerprint"):
         return False
@@ -441,8 +633,13 @@ def authoritative_ai_review_valid(session: Session, review: ExtractionFieldRevie
     if paper is None:
         return False
     page_text, error, pdf_path = cached_read_pdf_page_text(session, paper, page)
-    return (
-        error is None
-        and exact_locator_geometry_is_valid(locator, pdf_path)
-        and normalize_evidence_text(review.evidence_text) in normalize_evidence_text(page_text)
-    )
+    if error is not None or not exact_locator_geometry_is_valid(locator, pdf_path):
+        return False
+    if table_reference is not None:
+        return structured_table_cell_evidence_valid(
+            session,
+            locator=locator,
+            reference=table_reference,
+            page_text=page_text,
+        )
+    return normalize_evidence_text(review.evidence_text) in normalize_evidence_text(page_text)

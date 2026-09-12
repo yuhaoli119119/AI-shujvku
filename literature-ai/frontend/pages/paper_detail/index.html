@@ -13,130 +13,344 @@
   <link rel="stylesheet" href="../../shared/topnav.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
-  <style>
-    .dft-pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin:16px 0; color:var(--color-text-secondary); }
-    * { box-sizing: border-box; }
+<style>
+    /* ============================================================
+       Paper Detail — scientific workbench, clean visual language
+       (light gray bg, white cards, purple primary, thin borders)
+       ============================================================ */
+    *, *::before, *::after { box-sizing: border-box; }
     body { margin: 0; font-family: var(--font-body); color: var(--color-text); background: var(--color-bg); }
-    .shell { max-width: 1360px; margin: 0 auto; padding: 20px 24px 36px; }
-    .paper-header { border-bottom: 1px solid var(--color-border); padding-bottom: 18px; margin-bottom: 18px; }
-    .paper-title { margin: 0; font-size: 26px; line-height: 1.35; }
-    .paper-meta { margin-top: 8px; color: var(--color-text-secondary); font-size: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start; }
-    .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 20px; box-shadow: var(--shadow-card); margin-bottom: 18px; }
-    .panel-title { font-size: 16px; font-weight: 800; margin-bottom: 12px; border-left: 4px solid var(--color-primary); padding-left: 10px; }
-    .cards-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 18px; }
-    .mini-card { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 14px; }
-    .mini-card .k { font-size: 12px; color: var(--color-text-secondary); }
-    .mini-card .v { font-size: 22px; font-weight: 800; margin-top: 4px; }
-    .tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--color-border); margin-bottom: 16px; }
-    .tab-btn { border: 0; background: transparent; padding: 10px 12px; color: var(--color-text-secondary); font-weight: 800; cursor: pointer; }
-    .tab-btn.active { color: var(--color-primary); border-bottom: 2px solid var(--color-primary); }
+    .shell { max-width: 1440px; margin: 0 auto; padding: 14px 24px 36px; }
+    a { color: var(--color-primary); }
+    .muted { color: var(--color-text-secondary); }
+    .empty-state { text-align: center; color: var(--color-text-secondary); padding: 40px 16px; font-size: 13px; }
+    .empty-state.is-small { padding: 16px 12px; }
+    .warning { color: var(--color-warning); }
+    .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18); z-index: 2000; }
+
+    /* ---- Page intro / Breadcrumb ---- */
+    .pd-page-intro { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; min-height: 36px; }
+    .pd-breadcrumb { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-secondary); }
+    .pd-breadcrumb a { color: var(--color-text-secondary); text-decoration: none; }
+    .pd-breadcrumb a:hover { color: var(--color-primary); }
+    .pd-breadcrumb-sep { color: var(--color-text-muted); }
+    .pd-breadcrumb-current { color: var(--color-text); font-weight: 500; }
+
+    /* ---- Paper Header Card (180–220px) ---- */
+    .pd-header { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); padding: 18px 22px; margin-bottom: 14px; }
+    .pd-header-top { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: start; }
+    @media (max-width: 880px) { .pd-header-top { grid-template-columns: 1fr; } }
+    .pd-title { font-size: 23px; font-weight: 700; line-height: 1.4; color: var(--color-text); margin: 0; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+    .pd-title-zh { font-size: 14px; color: var(--color-text-secondary); margin-top: 6px; line-height: 1.5; }
+    .pd-authors { font-size: 13px; color: var(--color-text-secondary); margin-top: 8px; line-height: 1.5; }
+    .pd-meta-line { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 10px; font-size: 13px; color: var(--color-text-secondary); }
+    .pd-meta-line .pd-meta-sep { color: var(--color-text-muted); }
+    .pd-meta-line .pd-doi { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
+    .pd-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .pd-badge { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid rgba(100, 66, 214, 0.18); }
+    .pd-badge.neutral { background: var(--color-surface-alt); color: var(--color-text-secondary); border-color: var(--color-border); }
+    .pd-badge.success { background: rgba(22, 163, 74, 0.10); color: #16A34A; border-color: rgba(22, 163, 74, 0.22); }
+    .pd-badge.warning { background: var(--color-warning-bg); color: var(--color-warning); border-color: rgba(217, 119, 6, 0.22); }
+    .pd-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: flex-end; }
+    @media (max-width: 880px) { .pd-actions { justify-content: flex-start; } }
+    .pd-actions .btn-primary,
+    #pdViewPdfBtn {
+      height: 38px;
+      padding: 0 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    .pd-actions .btn-ghost,
+    .pd-actions .btn-secondary {
+      height: 38px;
+      padding: 0 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 8px;
+    }
+    .pd-summary { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-secondary); line-height: 1.65; }
+    .pd-summary:empty { display: none; }
+
+    /* ---- Compact Metric Cards (90–105px) ---- */
+    .pd-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+    @media (max-width: 880px) { .pd-metrics { grid-template-columns: repeat(2, 1fr); } }
+    .pd-metric { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; padding: 12px 14px; min-height: 82px; }
+    .pd-metric-label { font-size: 12px; color: var(--color-text-secondary); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+    .pd-metric-icon { width: 14px; height: 14px; color: var(--color-text-muted); }
+    .pd-metric-value { font-size: 26px; font-weight: 700; color: var(--color-text); line-height: 1.1; margin-top: 4px; font-family: var(--font-display); letter-spacing: -0.01em; }
+    .pd-metric-desc { font-size: 11.5px; color: var(--color-text-muted); margin-top: 4px; line-height: 1.4; }
+
+    /* ---- Keyword Pills ---- */
+    .pd-keywords { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .pd-keyword { font-size: 12px; padding: 3px 10px; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); border: 1px solid rgba(100, 66, 214, 0.15); }
+
+    /* ---- Tabs (44–48px) ---- */
+    .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--color-border); margin-bottom: 14px; }
+    .tab-btn { border: 0; background: transparent; padding: 10px 14px; height: 44px; color: var(--color-text-secondary); font-weight: 600; cursor: pointer; transition: color var(--transition); border-bottom: 2px solid transparent; font-size: 13px; }
+    .tab-btn:hover { color: var(--color-text); }
+    .tab-btn.active { color: var(--color-primary); border-bottom-color: var(--color-primary); font-weight: 700; }
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
-    .prewrap { white-space: pre-wrap; line-height: 1.75; font-size: 14px; }
+
+    /* ---- Main layout: left tabs+content / right sticky evidence ---- */
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+
+    /* ---- Panel cards (lighter, no heavy left border) ---- */
+    .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); margin-bottom: 14px; }
+    .panel-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; color: var(--color-text); letter-spacing: -0.005em; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .panel-title .panel-title-meta { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
+    .panel-title .panel-title-actions { display: flex; gap: 6px; align-items: center; }
+
+    .prewrap { white-space: pre-wrap; line-height: 1.8; font-size: 14.5px; color: var(--color-text); }
     .mono { white-space: pre-wrap; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; background: var(--color-surface-alt); border-radius: var(--radius); padding: 14px; overflow: auto; }
-    .md-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-    .md-table th, .md-table td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; vertical-align: top; }
-    .md-table th { background: var(--color-surface-alt); font-weight: 800; white-space: nowrap; }
-    .md-table td { background: var(--color-surface); line-height: 1.5; }
-    .section-item, .evidence-card, .structured-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); padding: 12px; margin-bottom: 10px; }
-    .section-title { font-weight: 800; margin-bottom: 8px; }
-    .evidence-card button { width: 100%; border: 0; background: transparent; color: var(--color-text); text-align: left; cursor: pointer; font-weight: 800; padding: 0; }
-    .muted { color: var(--color-text-secondary); font-size: 12px; }
-    .warning { color: var(--color-warning); font-weight: 800; }
-    .empty-state { text-align: center; color: var(--color-text-secondary); padding: 40px 12px; }
-    .tag { display: inline-flex; align-items: center; border-radius: var(--radius-pill); background: var(--color-primary-bg); color: var(--color-primary); padding: 4px 9px; font-size: 12px; font-weight: 800; margin-right: 6px; margin-top: 10px; }
-    .toast { position: fixed; top: 24px; right: 24px; display: none; background: var(--color-primary); color: #fff; padding: 12px 18px; border-radius: var(--radius); box-shadow: var(--shadow-elevated); z-index: 2000; }
-    .structured-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 800; margin-bottom: 10px; }
-    .dft-collection-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
-    .dft-collection-title { font-weight: 850; }
-    .dft-collection-metrics { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .dft-results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; align-items: start; }
-    .dft-compact-card { padding: 0; margin-bottom: 0; overflow: hidden; background: var(--color-surface); }
+
+    /* ---- Comprehensive analysis 2x2 (research notes style) ---- */
+    .pd-analysis-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 720px) { .pd-analysis-grid { grid-template-columns: 1fr; } }
+    .pd-analysis-item { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); padding: 12px 14px; }
+    .pd-analysis-item .pd-analysis-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-right: 6px; background: var(--color-primary); color: #fff; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .pd-analysis-item .pd-analysis-label { font-size: 12px; font-weight: 700; color: var(--color-text); margin-bottom: 4px; }
+    .pd-analysis-item .pd-analysis-text { font-size: 13px; color: var(--color-text); line-height: 1.65; }
+
+    /* ---- Section items (light, reader-friendly) ---- */
+    .section-item { border-top: 1px solid var(--color-border); background: transparent; padding: 14px 0; margin-bottom: 0; }
+    .section-item:first-child { border-top: 0; padding-top: 4px; }
+    .section-title { font-weight: 700; font-size: 15px; color: var(--color-text); margin-bottom: 6px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+    .section-title .section-page { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
+    .section-content { font-size: 14px; color: var(--color-text); line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    /* ---- Structured cards (general) ---- */
+    .structured-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 12px 14px; margin-bottom: 10px; }
+    .structured-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
+    .tag { display: inline-flex; align-items: center; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); padding: 3px 9px; font-size: 11.5px; font-weight: 600; margin-right: 6px; margin-top: 6px; }
+
+    /* ---- Evidence Panel: sticky + own scroll ---- */
+    .pd-evidence-aside { position: sticky; top: calc(var(--nav-height, 50px) + 12px); max-height: calc(100vh - var(--nav-height, 50px) - 24px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
+    .pd-evidence-aside::-webkit-scrollbar { width: 5px; }
+    .pd-evidence-aside::-webkit-scrollbar-track { background: transparent; }
+    .pd-evidence-aside::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
+
+    .pd-evidence-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); padding: 12px 14px; margin-bottom: 8px; cursor: pointer; transition: all var(--transition); }
+    .pd-evidence-card:hover { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-bg); }
+    .pd-evidence-card.is-active { border-color: var(--color-primary); background: var(--color-primary-bg); }
+    .pd-evidence-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+    .pd-evidence-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); white-space: nowrap; }
+    .pd-evidence-status.confirmed { background: rgba(22, 163, 74, 0.10); color: #16A34A; }
+    .pd-evidence-status.pending, .pd-evidence-status.needs_review { background: var(--color-warning-bg); color: var(--color-warning); }
+    .pd-evidence-status.conflict { background: rgba(220, 38, 38, 0.10); color: #DC2626; }
+    .pd-evidence-confidence { font-size: 11px; color: var(--color-text-muted); font-weight: 600; }
+    .pd-evidence-claim { font-size: 13px; color: var(--color-text); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .pd-evidence-source { font-size: 11px; color: var(--color-text-muted); margin-top: 4px; }
+    .pd-evidence-detail { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); padding: 14px 16px; margin-bottom: 14px; }
+    .pd-evidence-detail-row { font-size: 13px; line-height: 1.7; margin-bottom: 6px; color: var(--color-text); }
+    .pd-evidence-detail-row strong { color: var(--color-text); font-weight: 600; }
+    .pd-evidence-detail-text { white-space: pre-wrap; font-size: 13px; line-height: 1.75; color: var(--color-text); margin-top: 8px; padding: 10px 12px; background: var(--color-surface-alt); border-radius: var(--radius); border-left: 3px solid var(--color-primary); }
+
+    /* ---- Figure Gallery ---- */
+    .pd-figure-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+    @media (min-width: 1700px) { .pd-figure-gallery { grid-template-columns: repeat(3, 1fr); } }
+    .pd-figure-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); overflow: hidden; }
+    .pd-figure-img-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 340px; display: flex; align-items: center; justify-content: center; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); cursor: zoom-in; overflow: hidden; }
+    .pd-figure-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .pd-figure-img-wrap.is-failed .pd-figure-img { display: none; }
+    .pd-figure-img-wrap.is-failed::after { content: "图像暂不可用"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
+    .pd-figure-img-fallback { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
+    .pd-figure-body { padding: 12px 14px; }
+    .pd-figure-label { font-size: 13px; font-weight: 700; color: var(--color-text); }
+    .pd-figure-caption { font-size: 12.5px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    .pd-figure-meta { font-size: 11px; color: var(--color-text-muted); margin-top: 6px; }
+    .pd-figure-tech { margin-top: 10px; border-top: 1px dashed var(--color-border); padding-top: 8px; }
+    .pd-figure-tech summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-primary); }
+    .pd-figure-tech summary::marker { color: var(--color-text-muted); }
+
+    /* ---- Mechanism Claim Card ---- */
+    .pd-mechanism-card { padding: 14px 16px; }
+    .pd-mechanism-claim { font-size: 14px; color: var(--color-text); line-height: 1.7; margin: 8px 0; }
+    .pd-mechanism-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-secondary); }
+    .pd-mechanism-conf { font-weight: 600; }
+    .pd-mechanism-source { color: var(--color-text-muted); }
+    .pd-mechanism-evidence { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
+    .pd-mechanism-evidence-label { font-size: 12px; color: var(--color-text-secondary); font-weight: 600; margin-bottom: 4px; }
+    .pd-mechanism-evidence-text { font-size: 13px; color: var(--color-text); line-height: 1.7; padding: 8px 12px; background: var(--color-surface-alt); border-radius: 6px; border-left: 3px solid var(--color-primary); }
+
+    /* ---- DFT record ---- */
+    .dft-compact-card { padding: 0; margin-bottom: 10px; overflow: hidden; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; }
     .dft-compact-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
     .dft-record-locator { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); }
     .dft-compact-card .dft-record-locator { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
     .dft-record-locator code { min-width: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
     .dft-record-locator .btn { margin-left: auto; }
-    .dft-record-number { font-size: 12px; font-weight: 800; }
+    .dft-record-number { font-size: 12px; font-weight: 700; }
     .dft-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .dft-mainline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px; align-items: center; }
-    .dft-material-name { min-width: 0; font-weight: 850; line-height: 1.35; overflow-wrap: anywhere; }
+    .dft-material-name { min-width: 0; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; font-size: 14px; }
     .dft-property-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; }
-    .dft-reaction-step { margin-top: 7px; color: var(--color-text); font-size: 13px; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .dft-value-block { min-width: 86px; max-width: 128px; padding: 8px 10px; border-left: 3px solid var(--color-primary); border-radius: var(--radius-sm); background: var(--color-primary-bg); text-align: right; }
-    .dft-value-block strong { display: block; color: var(--color-primary); font-size: 20px; line-height: 1.05; overflow-wrap: anywhere; }
+    .dft-reaction-step { margin-top: 7px; color: var(--color-text); font-size: 13px; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .dft-value-block { min-width: 88px; max-width: 128px; padding: 8px 10px; border-left: 3px solid var(--color-primary); border-radius: 6px; background: var(--color-primary-bg); text-align: right; }
+    .dft-value-block strong { display: block; color: var(--color-primary); font-size: 20px; line-height: 1.05; overflow-wrap: anywhere; font-weight: 700; }
     .dft-value-block span { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; }
     .dft-meta-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 12px 12px; color: var(--color-text-secondary); font-size: 12px; }
-    .dft-status-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 7px; border: 1px solid var(--color-border); border-radius: var(--radius-pill); background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11px; font-weight: 750; line-height: 1.35; overflow-wrap: anywhere; }
-    .dft-status-chip.ok { border-color: rgba(22,163,74,0.22); background: var(--color-success-bg); color: var(--color-success); }
+    .dft-status-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 8px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+    .dft-status-chip.ok { border-color: rgba(22,163,74,0.22); background: rgba(22, 163, 74, 0.10); color: #16A34A; }
     .dft-status-chip.warn { border-color: rgba(217,119,6,0.25); background: var(--color-warning-bg); color: var(--color-warning); }
-    .dft-status-chip.danger { border-color: rgba(220,38,38,0.22); background: var(--color-danger-bg); color: var(--color-danger); }
+    .dft-status-chip.danger { border-color: rgba(220,38,38,0.22); background: rgba(220, 38, 38, 0.10); color: #DC2626; }
     .dft-detail-toggle { border-top: 1px dashed var(--color-border); }
-    .dft-detail-toggle > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: var(--color-primary); font-size: 12px; font-weight: 800; list-style: none; }
+    .dft-detail-toggle > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: var(--color-primary); font-size: 12px; font-weight: 600; list-style: none; }
     .dft-detail-toggle > summary::-webkit-details-marker { display: none; }
     .dft-detail-toggle > summary::after { content: "▼"; color: var(--color-text-muted); font-size: 10px; transition: transform 0.2s ease; }
     .dft-detail-toggle:not([open]) > summary::after { transform: rotate(-90deg); }
     .dft-detail-body { display: grid; gap: 10px; padding: 0 12px 12px; }
     .dft-detail-block { border-left: 3px solid var(--color-border-strong); padding-left: 10px; min-width: 0; }
-    .dft-detail-label { margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 800; }
+    .dft-detail-label { margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
     .dft-detail-text { color: var(--color-text); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
     .dft-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 12px; margin: 0; }
     .dft-detail-grid div { min-width: 0; }
-    .dft-detail-grid dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 800; }
+    .dft-detail-grid dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 600; }
     .dft-detail-grid dd { margin: 2px 0 0; color: var(--color-text); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
     .dft-compact-card .raw-data-toggle { margin-top: 0; padding-top: 8px; }
+    .dft-collection-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
+    .dft-collection-title { font-weight: 700; }
+    .dft-collection-metrics { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .dft-results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; align-items: start; }
+    .dft-pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin:14px 0; color:var(--color-text-secondary); font-size: 13px; }
+
+    /* ---- Tables (paper markdown tables) ---- */
+    .md-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+    .md-table th, .md-table td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; vertical-align: top; }
+    .md-table th { background: var(--color-surface-alt); font-weight: 700; white-space: nowrap; }
+    .md-table td { background: var(--color-surface); line-height: 1.5; }
+
+    /* ---- KV grid (research notes style) ---- */
+    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+    .kv-item { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: 8px; padding: 10px 12px; }
+    .kv-label { font-size: 11.5px; color: var(--color-text-secondary); margin-bottom: 4px; font-weight: 600; }
+    .kv-value { font-size: 13.5px; color: var(--color-text); line-height: 1.55; word-break: break-word; }
+
+    /* ---- Raw data / Tech info collapsible (default collapsed) ---- */
+    .raw-data-toggle { margin-top: 12px; border-top: 1px dashed var(--color-border-strong); padding-top: 10px; }
+    .raw-data-toggle summary { cursor: pointer; font-weight: 600; color: var(--color-primary); font-size: 12.5px; padding: 4px 0; user-select: none; }
+    .raw-data-toggle summary::marker { color: var(--color-text-muted); }
+    .raw-data-title { margin: 10px 0 6px; font-size: 12px; color: var(--color-text-secondary); }
+
+    /* ---- Deep link highlight ---- */
+    .deep-link-context { margin: 0 0 10px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-primary-bg); color: var(--color-primary); padding: 10px 12px; font-size: 13px; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+    .deep-link-context a { color: var(--color-primary); font-weight: 700; text-decoration: none; }
+    .deep-link-warning { margin: 0 0 10px; border: 1px solid rgba(217,119,6,0.22); border-radius: 10px; background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+    .structured-card.deep-link-target { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(100,66,214,0.16); background: var(--color-surface); }
+
+    /* ---- Translation tab ---- */
+    .translation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .translation-actions p { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+    .translation-controls { display: grid; gap: 12px; margin-bottom: 14px; }
+    .translation-control-grid { display: grid; grid-template-columns: 1fr 220px; gap: 12px; align-items: start; }
+    @media (max-width: 720px) { .translation-control-grid { grid-template-columns: 1fr; } }
+    .translation-checklist { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 10px; display: grid; gap: 6px; max-height: 170px; overflow: auto; }
+    .translation-checkitem { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; font-size: 13px; }
+    .translation-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .translation-toolbar-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .translation-view-btn.is-active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-bg); }
+    .translation-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-alt); padding: 14px 16px; margin-bottom: 12px; }
+    .translation-card-title { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 14px; }
+    .translation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 720px) { .translation-grid { grid-template-columns: 1fr; } }
+    .translation-grid.translation-only { grid-template-columns: 1fr; }
+    .translation-block { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+    .translation-block h4 { margin: 0 0 8px; font-size: 12px; color: var(--color-text-secondary); font-weight: 600; }
+    .translation-status { border: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface)); border-radius: 8px; color: var(--color-text); padding: 12px 14px; line-height: 1.7; font-size: 13px; }
+
+    /* ---- DFT Edit modal ---- */
     .dft-edit-overlay { position: fixed; inset: 0; z-index: 1800; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(15, 23, 42, 0.48); }
-    .dft-edit-modal { width: min(820px, 96vw); max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-elevated); padding: 20px; }
+    .dft-edit-modal { width: min(820px, 96vw); max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 12px; background: var(--color-surface); box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18); padding: 20px; }
     .dft-edit-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
     .dft-edit-title h3 { margin: 0; font-size: 18px; }
     .dft-edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; min-height: 0; overflow-y: auto; padding-right: 4px; }
     .dft-edit-grid label { min-width: 0; color: var(--color-text-secondary); font-size: 13px; }
     .dft-edit-grid input, .dft-edit-grid select, .dft-edit-grid textarea { width: 100%; margin-top: 6px; }
-    .dft-edit-wide { grid-column: 1 / -1; }
+    .dft-edit-wide { grid-column: auto; }
+    @media (max-width: 720px) { .dft-edit-grid { grid-template-columns: 1fr; } .dft-edit-wide { grid-column: auto; } }
     .dft-edit-note { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--color-warning); border-radius: var(--radius); background: var(--color-warning-bg); font-size: 13px; line-height: 1.6; }
     .dft-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-    .deep-link-context { margin: 0 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-primary-bg); color: var(--color-primary); padding: 10px 12px; font-size: 13px; line-height: 1.5; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .deep-link-context a { color: var(--color-primary); font-weight: 850; text-decoration: none; }
-    .deep-link-warning { margin: 0 0 10px; border: 1px solid rgba(217,119,6,0.22); border-radius: var(--radius); background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
-    .structured-card.deep-link-target { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(100,66,214,0.16); background: var(--color-surface); }
-    .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
-    .kv-item { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 10px; }
-    .kv-label { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 4px; }
-    .kv-value { font-size: 14px; color: var(--color-text); line-height: 1.6; word-break: break-word; }
-    .raw-data-toggle { margin-top: 12px; border-top: 1px dashed var(--color-border-strong); padding-top: 12px; }
-    .raw-data-toggle summary { cursor: pointer; font-weight: 700; color: var(--color-primary); }
-    .raw-data-title { margin: 10px 0 6px; font-size: 12px; color: var(--color-text-secondary); }
-    .translation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-    .translation-actions p { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
-    .translation-controls { display: grid; gap: 12px; margin-bottom: 14px; }
-    .translation-control-grid { display: grid; grid-template-columns: 1fr 220px; gap: 12px; align-items: start; }
-    .translation-checklist { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 12px; display: grid; gap: 8px; max-height: 220px; overflow: auto; }
-    .translation-checkitem { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; font-size: 13px; }
-    .translation-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .translation-toolbar-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .translation-view-btn.is-active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-bg); }
-    .translation-card { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface-alt); padding: 16px; margin-bottom: 14px; }
-    .translation-card-title { font-weight: 800; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-    .translation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .translation-grid.translation-only { grid-template-columns: 1fr; }
-    .translation-block { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: var(--radius); padding: 12px; min-width: 0; }
-    .translation-block h4 { margin: 0 0 8px; font-size: 13px; color: var(--color-text-secondary); }
-    .translation-status { border: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface)); border-radius: var(--radius); color: var(--color-text); padding: 12px; line-height: 1.7; }
-    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+
+    /* ---- Figure Lightbox ---- */
+    .pd-lightbox { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.88); padding: 32px; }
+    .pd-lightbox-content { max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .pd-lightbox-content img { max-width: 90vw; max-height: 75vh; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+    .pd-lightbox-meta { text-align: center; color: #fff; max-width: 600px; }
+    .pd-lightbox-label { font-size: 15px; font-weight: 700; }
+    .pd-lightbox-caption { font-size: 13px; line-height: 1.6; margin-top: 4px; color: rgba(255,255,255,0.85); }
+    .pd-lightbox-page { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px; }
+    .pd-lightbox-close { position: fixed; top: 20px; right: 24px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,255,255,0.15); color: #fff; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+    .pd-lightbox-close:hover { background: rgba(255,255,255,0.3); }
+
+    /* ---- Skeleton (lightweight loading) ---- */
+    @keyframes pdSkelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    .pd-skel { background: linear-gradient(90deg, var(--color-surface-alt) 25%, var(--color-border) 37%, var(--color-surface-alt) 63%); background-size: 400% 100%; animation: pdSkelShimmer 1.4s ease infinite; border-radius: 4px; height: 12px; }
+    .pd-skel.title { width: 70%; height: 22px; }
+    .pd-skel.line { width: 100%; }
+    .pd-skel.line-50 { width: 50%; }
+    .pd-skel.line-30 { width: 30%; }
+    .pd-skel.line-80 { width: 80%; }
+    .pd-skel.block { height: 80px; }
+    .pd-skel-block { padding: 16px 18px; }
+
+    /* ---- Error state ---- */
+    .pd-error-card { background: var(--color-surface); border: 1px solid var(--color-danger); border-radius: 12px; padding: 24px 28px; margin-bottom: 14px; }
+    .pd-error-title { font-size: 16px; font-weight: 700; color: var(--color-danger); margin-bottom: 6px; }
+    .pd-error-msg { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 12px; line-height: 1.6; }
+
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      .pd-evidence-aside { position: static; max-height: none; }
+    }
+
+    /* ---- DFT 催化剂分组（按 CatalystSample 身份聚合，复用原分组模块口径） ---- */
+    .dft-catalyst-overview { align-items: flex-start; }
+    .dft-overview-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .dft-overview-count { font-size: 19px; font-weight: 800; line-height: 1.3; }
+    .dft-overview-count em { font-style: normal; color: var(--color-primary); }
+    .dft-overview-sub { color: var(--color-text-secondary); font-size: 12px; line-height: 1.55; }
+    .dft-catalyst-section { margin-bottom: 14px; }
+    .dft-catalyst-section-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
+    .dft-catalyst-section-head h3 { margin: 0; font-size: 14px; font-weight: 700; }
+    .dft-catalyst-section-note { color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+    .dft-unconfirmed-note { margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-warning-bg); color: var(--color-warning); font-size: 12px; line-height: 1.6; }
+    .dft-catalyst-group { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); margin-bottom: 10px; overflow: hidden; }
+    .dft-catalyst-group > summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 12px; cursor: pointer; list-style: none; background: var(--color-surface-alt); }
+    .dft-catalyst-group > summary::-webkit-details-marker { display: none; }
+    .dft-catalyst-group > summary::after { content: "\25BC"; color: var(--color-text-muted); font-size: 10px; line-height: 1.6; transition: transform 0.2s ease; }
+    .dft-catalyst-group:not([open]) > summary::after { transform: rotate(-90deg); }
+    .dft-catalyst-group-heading { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 240px; }
+    .dft-catalyst-group-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+    .dft-catalyst-group-title h3 { margin: 0; font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+    .dft-catalyst-group-chips { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .dft-catalyst-group-metrics { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .dft-catalyst-group-body { padding: 0 12px 12px; }
+    .dft-catalyst-base { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 12px; margin: 12px 0; padding: 10px 12px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-alt); }
+    .dft-catalyst-base-item { min-width: 0; }
+    .dft-catalyst-base-item dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 600; }
+    .dft-catalyst-base-item dd { margin: 2px 0 0; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .dft-catalyst-base-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .dft-sample-id-value { color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+    .dft-prop-section { margin-bottom: 12px; }
+    .dft-prop-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1px dashed var(--color-border); }
+    .dft-prop-head h4 { margin: 0; font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+    .dft-prop-count { color: var(--color-text-secondary); font-size: 12px; }
+    .dft-catalyst-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; align-items: start; }
     @media (max-width: 720px) {
-      .translation-grid,
-      .translation-control-grid { grid-template-columns: 1fr; }
-      .dft-results-grid { grid-template-columns: minmax(0, 1fr); }
-      .dft-compact-head { flex-direction: column; align-items: stretch; }
-      .dft-card-actions .btn { flex: 0 1 auto; }
-      .dft-mainline { grid-template-columns: 1fr; }
-      .dft-value-block { max-width: none; text-align: left; }
-      .dft-record-locator .btn { width: 100%; margin-left: 0; }
-      .dft-edit-grid { grid-template-columns: 1fr; }
-      .dft-edit-wide { grid-column: auto; }
+      .dft-catalyst-grid { grid-template-columns: 1fr; }
+      .dft-catalyst-group > summary { padding: 10px; }
+      .dft-catalyst-group-body { padding: 0 10px 10px; }
+      .dft-catalyst-base { grid-template-columns: 1fr; padding: 10px; }
+      /* 窄屏下让记录编号独占一行，避免被操作按钮挤到截断 */
+      .dft-catalyst-group-body .dft-compact-head { flex-wrap: wrap; }
+      .dft-catalyst-group-body .dft-compact-head .dft-record-locator { flex: 1 1 100%; }
+      .dft-catalyst-group-body .dft-compact-head .dft-card-actions { width: 100%; }
+      .dft-catalyst-group-body .dft-card-actions .btn { flex: 1 1 auto; }
     }
   </style>
+
 </head>
 <body>
   <div id="topnav-mount"></div>
@@ -148,19 +362,64 @@
     </div>
 
     <div id="paperContent" style="display:none;">
-      <header class="paper-header">
-        <h1 id="paperTitle" class="paper-title"></h1>
-        <div class="paper-meta">
-          <span id="paperYear"></span><span>|</span><span id="paperJournal"></span><span>|</span><span id="paperDoi"></span>
+      <div class="pd-page-intro">
+        <nav class="pd-breadcrumb">
+          <a href="../literature_library/index.html">文献库</a>
+          <span class="pd-breadcrumb-sep">›</span>
+          <span class="pd-breadcrumb-current">文献详情</span>
+        </nav>
+        <a class="btn btn-ghost btn-sm" href="../literature_library/index.html">返回列表</a>
+      </div>
+
+      <header class="pd-header">
+        <div class="pd-header-top">
+          <div style="min-width:0;">
+            <h1 id="paperTitle" class="pd-title"></h1>
+            <div id="paperTitleZh" class="pd-title-zh"></div>
+            <div id="paperAuthors" class="pd-authors"></div>
+            <div class="pd-meta-line">
+              <span id="paperJournal"></span>
+              <span class="pd-meta-sep">·</span>
+              <span id="paperYear"></span>
+              <span id="paperDoiWrap" style="display:none;"><span class="pd-meta-sep">·</span> <span class="pd-doi" id="paperDoi"></span></span>
+            </div>
+            <div id="paperBadges" class="pd-badges"></div>
+          </div>
+          <div class="pd-actions">
+            <button class="btn btn-primary btn-sm" type="button" id="pdViewPdfBtn" onclick="viewPaperPdf()">查看 PDF</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="loadPaperData()">刷新详情</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="pdReparseBtn" onclick="reparsePaperDetail()">重新解析</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="togglePdMoreMenu(event)">更多操作 ▾</button>
+            <div id="pdMoreMenu" style="display:none; position:absolute; background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius); box-shadow:var(--shadow-elevated); padding:6px; z-index:200; flex-direction:column; gap:2px; margin-top:4px;">
+              <button class="btn btn-ghost btn-sm" type="button" onclick="copyPaperMeta()" style="justify-content:flex-start;">复制 DOI / 标题</button>
+              <a class="btn btn-ghost btn-sm" id="pdReviewLink" href="#" target="_blank" rel="noopener" style="justify-content:flex-start;">打开审核中心</a>
+            </div>
+          </div>
         </div>
-        <div id="paperBadges"></div>
+        <div id="paperSummary" class="pd-summary"></div>
       </header>
 
-      <div class="cards-grid">
-        <div class="mini-card"><div class="k">章节</div><div class="v" id="cntSections">0</div></div>
-        <div class="mini-card"><div class="k">图表</div><div class="v" id="cntFigures">0</div></div>
-        <div class="mini-card"><div class="k">DFT 候选</div><div class="v" id="cntDFT">0</div></div>
-        <div class="mini-card"><div class="k">论断</div><div class="v" id="cntMechanism">0</div></div>
+      <div class="pd-metrics">
+        <div class="pd-metric">
+          <div class="pd-metric-label"><svg class="pd-metric-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v2H4zm0 5h16v2H4zm0 5h16v2H4z"/></svg>章节</div>
+          <div class="pd-metric-value" id="cntSections">0</div>
+          <div class="pd-metric-desc" id="cntSectionsDesc">含引言、方法、结论等</div>
+        </div>
+        <div class="pd-metric">
+          <div class="pd-metric-label"><svg class="pd-metric-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>图表</div>
+          <div class="pd-metric-value" id="cntFigures">0</div>
+          <div class="pd-metric-desc" id="cntFiguresDesc">提取的图与表</div>
+        </div>
+        <div class="pd-metric">
+          <div class="pd-metric-label"><svg class="pd-metric-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z"/></svg>DFT 候选</div>
+          <div class="pd-metric-value" id="cntDFT">0</div>
+          <div class="pd-metric-desc" id="cntDftDesc">吸附能、能垒、PDOS 等</div>
+        </div>
+        <div class="pd-metric">
+          <div class="pd-metric-label"><svg class="pd-metric-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7.4-6.3-4.6L5.7 21l2.3-7.4-6-4.6h7.6z"/></svg>机理论断</div>
+          <div class="pd-metric-value" id="cntMechanism">0</div>
+          <div class="pd-metric-desc" id="cntMechanismDesc">关键机理与构效关系</div>
+        </div>
       </div>
 
       <section class="layout">
@@ -176,12 +435,16 @@
 
           <div id="tab-summary" class="tab-pane active">
             <div class="panel-card"><div class="panel-title">摘要</div><div id="paperAbstract" class="prewrap"></div></div>
-            <div class="panel-card"><div class="panel-title">综合分析</div><div id="comprehensiveJSON" class="mono">{}</div></div>
-            
+            <div id="paperKeywordsPanel" class="pd-keywords" style="display:none;"></div>
             <div class="panel-card">
-              <div class="panel-title">引用元数据预览 (Citation Metadata Preview)</div>
+              <div class="panel-title">研究重点 / 综合分析</div>
+              <div id="comprehensiveJSON" class="pd-analysis-grid"></div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-title">更多信息 / 引用信息</div>
               <div class="raw-data-toggle">
-                <summary onclick="toggleCitationPreview(event)">点击展开预览</summary>
+                <summary onclick="toggleCitationPreview(event)">展开引用元数据预览</summary>
                 <div id="citationPreviewContainer" style="display:none; margin-top: 12px;">
                   <div class="empty-state">正在加载...</div>
                 </div>
@@ -224,16 +487,16 @@
                   </div>
                 </div>
               </div>
-              <div id="translationPanel" class="empty-state">点击按钮后将在这里显示中文译文预览。</div>
+              <div id="translationPanel" class="empty-state is-small">暂无译文预览<br><small style="color:var(--color-text-muted);font-size:12px;">选择内容后点击"生成中文译文"</small></div>
             </div>
           </div>
         </div>
 
-        <aside class="panel-card">
-          <div class="panel-title">证据面板</div>
+        <aside class="panel-card pd-evidence-aside">
+          <div class="panel-title">证据面板 <span class="panel-title-meta" id="evidenceCount"></span></div>
           <div id="evidencePanel"><div class="empty-state">正在加载证据...</div></div>
           <div class="panel-title" style="margin-top:18px;">证据详情</div>
-          <div id="evidenceDetail" class="mono">点击论断后，可查看来源论文、chunk、页码/片段、置信度与原始 evidence 文本。</div>
+          <div id="evidenceDetail"><div class="empty-state">点击论断查看证据详情。</div></div>
         </aside>
       </section>
     </div>
@@ -268,6 +531,17 @@
     </div>
   </div>
   <div id="toast" class="toast"></div>
+    <div id="pdLightbox" class="pd-lightbox" onclick="closeFigureLightbox(event)" style="display:none;">
+      <div class="pd-lightbox-content">
+        <img id="pdLightboxImg" src="" alt="">
+        <div class="pd-lightbox-meta">
+          <div id="pdLightboxLabel" class="pd-lightbox-label"></div>
+          <div id="pdLightboxCaption" class="pd-lightbox-caption"></div>
+          <div id="pdLightboxPage" class="pd-lightbox-page"></div>
+        </div>
+      </div>
+      <button class="pd-lightbox-close" onclick="closeFigureLightbox(event)" title="关闭 (ESC)">✕</button>
+    </div>
   <script>
     const API_BASE = "/api/papers";
     const DFT_RESULTS_PAGE_SIZE = 100;
@@ -289,6 +563,143 @@
 
     function esc(value) {
       return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+    }
+
+    /* Safe title HTML formatter: converts sub/sup to real subscript unicode
+       (FeN<sub>4</sub> → FeN₄), escapes any other HTML */
+    function safeTitleHtml(value) {
+        let s = String(value == null ? "" : value);
+        if (!s) return "";
+        // Replace <sub>N</sub> with unicode subscript digit, letter
+        const subMap = { "0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉",
+                         "a":"ₐ","e":"ₑ","h":"ₕ","i":"ᵢ","j":"ⱼ","k":"ₖ","l":"ₗ","m":"ₘ","n":"ₙ","o":"ₒ","p":"ₚ","r":"ᵣ","s":"ₛ","t":"ₜ","u":"ᵤ","v":"ᵥ","x":"ₓ" };
+        const supMap = { "0":"⁰","1":"¹","2":"²","3":"³","4":"⁴","5":"⁵","6":"⁶","7":"⁷","8":"⁸","9":"⁹" };
+        s = s.replace(/<sub>([^<]+)<\/sub>/g, function(_, ch) {
+            return [...ch].map(c => subMap[c] || c).join("");
+        });
+        s = s.replace(/<sup>([^<]+)<\/sup>/g, function(_, ch) {
+            return [...ch].map(c => supMap[c] || c).join("");
+        });
+        return esc(s);
+    }
+
+    /* Journal name: strip duplicate full+abbreviation */
+    function cleanJournalForDisplay(value) {
+        let s = String(value == null ? "" : value).trim();
+        if (!s) return "";
+        // Pattern: "Full Name Abbrev. W. W." — keep first part
+        // Split by space + look for abbreviation pattern (uppercase + period)
+        const parts = s.split(/\s+/);
+        if (parts.length >= 4) {
+            // Find where abbreviation starts (e.g. "Appl." or "Nat.")
+            for (let i = 1; i < parts.length; i++) {
+                const tok = parts[i];
+                // abbreviation token has period like "Appl." or "J." or "Mater."
+                if (/^[A-Z][a-z]+\.$/.test(tok) || /^[A-Z]\.$/.test(tok)) {
+                    return parts.slice(0, i).join(" ");
+                }
+            }
+        }
+        return s;
+    }
+
+    /* Display formatter for technical property_type keys */
+    const PROPERTY_TYPE_DISPLAY = {
+        "adsorption_energy": "Adsorption energy",
+        "adsorption_energy_total": "Total adsorption energy",
+        "reaction_barrier": "Reaction barrier",
+        "activation_energy": "Activation energy",
+        "diffusion_barrier": "Diffusion barrier",
+        "binding_energy": "Binding energy",
+        "cohesive_energy": "Cohesive energy",
+        "formation_energy": "Formation energy",
+        "gibbs_free_energy_change": "Gibbs free-energy change",
+        "gibbs_free_energy": "Gibbs free energy",
+        "zero_point_energy_correction": "Zero-point energy correction",
+        "entropy_correction_ts": "Entropy correction (TS)",
+        "bader_charge_transfer": "Bader charge transfer",
+        "mulliken_charge": "Mulliken charge",
+        "homo_lumo_gap": "HOMO-LUMO gap",
+        "d_band_center": "d-band center",
+        "pdos": "PDOS",
+        "band_gap": "Band gap",
+        "formation_energy_per_atom": "Formation energy per atom",
+        "binding_energy_per_atom": "Binding energy per atom",
+        "magnetic_moment": "Magnetic moment",
+        "work_function": "Work function",
+        "adsorption_site": "Adsorption site",
+        "bond_length": "Bond length",
+        "lattice_constant": "Lattice constant",
+        "vacancy_formation_energy": "Vacancy formation energy",
+        "surface_energy": "Surface energy",
+        "diffusion_coefficient": "Diffusion coefficient",
+        "exchange_current_density": "Exchange current density",
+        "overpotential": "Overpotential",
+        "tafel_slope": "Tafel slope",
+        "charge_transfer": "Charge transfer",
+        "ionic_conductivity": "Ionic conductivity",
+    };
+
+    function propertyTypeLabel(value) {
+        const key = String(value || "").trim();
+        if (!key) return "";
+        if (PROPERTY_TYPE_DISPLAY[key]) return PROPERTY_TYPE_DISPLAY[key];
+        // Default: snake_case to Title Case
+        return key.split(/_\s*/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    }
+
+    /* Reaction step label */
+    function reactionStepLabel(value) {
+        return propertyTypeLabel(value);
+    }
+
+    /* Claim type label */
+    function claimTypeLabel(value) {
+        return propertyTypeLabel(value);
+    }
+
+    /* Pretty chemical formula: Li2S6 → Li₂S₆ (use unicode subscript for digits 0-9) */
+    function prettyChemicalFormula(value) {
+        let s = String(value == null ? "" : value).trim();
+        if (!s) return "";
+        const subMap = { "0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉" };
+        // Pattern: capital letter + optional lowercase letters + digits → convert digits to sub
+        // Also: + - ^ charges → keep as-is
+        s = s.replace(/([A-Z][a-z]*)(\d+)/g, function(_, elt, digits) {
+            return elt + [...digits].map(d => subMap[d] || d).join("");
+        });
+        // Final pass: any remaining trailing digits → sub
+        s = s.replace(/([a-z])(\d+)/g, function(_, c, digits) {
+            return c + [...digits].map(d => subMap[d] || d).join("");
+        });
+        return s;
+    }
+
+    /* Format an arbitrary object to a readable key/value list (for DFT settings etc) */
+    function formatObjectToKeyValue(obj, depth) {
+        depth = depth || 0;
+        if (depth > 2) return JSON.stringify(obj).slice(0, 200);
+        if (obj === null || obj === undefined) return "";
+        if (typeof obj !== "object") return String(obj);
+        if (Array.isArray(obj)) {
+            if (obj.length === 0) return "[]";
+            if (obj.every(v => typeof v !== "object" || v === null)) {
+                return obj.map(v => String(v)).join(", ");
+            }
+            return obj.map((v, i) => "(" + (i+1) + ") " + formatObjectToKeyValue(v, depth+1)).join("\n");
+        }
+        const out = [];
+        for (const k of Object.keys(obj)) {
+            const v = obj[k];
+            if (v === null || v === undefined || v === "") continue;
+            if (typeof v === "object") {
+                const nested = formatObjectToKeyValue(v, depth+1);
+                if (nested) out.push({ key: k, value: nested, isNested: true });
+            } else {
+                out.push({ key: k, value: String(v), isNested: false });
+            }
+        }
+        return out;
     }
 
     function renderPipeTable(md) {
@@ -424,14 +835,14 @@
     }
 
     function formatValue(value) {
-      if (value == null || value === "") return "-";
-      if (Array.isArray(value)) return value.length ? value.map(formatValue).join("、") : "-";
+      if (value === null || value === undefined || value === "") return "-";
       if (typeof value === "object") {
-        return Object.entries(value)
-          .filter(([, v]) => v != null && v !== "" && !(Array.isArray(v) && !v.length))
-          .slice(0, 4)
-          .map(([k, v]) => `${formatFieldLabel(k)}：${Array.isArray(v) ? v.join("、") : String(v)}`)
-          .join("；") || "-";
+        const obj = formatObjectToKeyValue(value);
+        if (Array.isArray(obj)) {
+          // Convert to readable inline list
+          return obj.map(r => r.key + ": " + r.value).join("; ");
+        }
+        return typeof obj === "string" ? obj : JSON.stringify(obj);
       }
       return String(value);
     }
@@ -478,7 +889,8 @@
     function dftCatalystLabel(item) {
       item = item || {};
       const sample = item.bound_catalyst_sample || {};
-      return sample.name || sample.material_identity || item.catalyst || item.material_identity || "未绑定催化剂";
+      const raw = sample.name || sample.material_identity || item.catalyst || item.material_identity || "未绑定催化剂";
+      return prettyChemicalFormula(raw);
     }
 
     function dftConfidenceLabel(value) {
@@ -580,12 +992,93 @@
       ].filter(Boolean).join(" · ");
     }
 
+    function renderDftSettingsList(items) {
+      if (!items.length) return '<div class="empty-state is-small">暂无 DFT 设置数据。</div>';
+      // First-level: scientific keys only (no UUID / no raw object)
+      const SCI_KEYS = [
+        "software", "functional", "dispersion_correction", "pseudopotential",
+        "cutoff_energy", "cutoff_wavefunction", "cutoff_charge",
+        "k_points", "k_point_density", "k_points_scf", "k_points_dos",
+        "vacuum", "vacuum_thickness", "vacuum_z",
+        "convergence", "convergence_energy", "convergence_force",
+        "energy_cutoff", "force_cutoff", "spin_polarization",
+        "smearing", "tetrahedron", "dispersion", "solvent_model",
+        "exchange_correlation", "xc_functional", "basis_set", "relativistic",
+        "van_der_waals", "dft_d3", "dft_d3bj", "dft_d4",
+        "supercell", "kpoint_density", "encut"
+      ];
+      const SETTING_LABELS = {
+        software: "软件", functional: "泛函", dispersion_correction: "色散修正",
+        pseudopotential: "赝势", cutoff_energy: "截断能", cutoff_wavefunction: "波函数截断",
+        cutoff_charge: "电荷截断", k_points: "k 点", k_point_density: "k 点密度",
+        vacuum: "真空层", vacuum_thickness: "真空厚度", vacuum_z: "真空 z",
+        convergence: "收敛准则", convergence_energy: "能量收敛", convergence_force: "力收敛",
+        energy_cutoff: "能量截断", force_cutoff: "力截断", spin_polarization: "自旋极化",
+        smearing: "展宽", tetrahedron: "四面体", dispersion: "色散",
+        solvent_model: "溶剂模型", exchange_correlation: "交换关联", xc_functional: "XC 泛函",
+        basis_set: "基组", relativistic: "相对论效应", van_der_waals: "范德瓦尔斯",
+        dft_d3: "DFT-D3", dft_d3bj: "DFT-D3(BJ)", dft_d4: "DFT-D4",
+        supercell: "超胞", kpoint_density: "k 点密度", k_points_scf: "SCF k 点",
+        k_points_dos: "DOS k 点", encut: "截断能"
+      };
+      const out = [];
+      const extras = [];
+      items.forEach((item, idx) => {
+        if (!item || typeof item !== "object") return;
+        const entries = Object.keys(item);
+        const sciEntries = entries.filter(k => SCI_KEYS.includes(k));
+        const otherEntries = entries.filter(k => !SCI_KEYS.includes(k));
+        if (sciEntries.length) {
+          const cells = sciEntries.map(k => {
+            const v = item[k];
+            let display;
+            if (v !== null && typeof v === "object") {
+              const nested = formatObjectToKeyValue(v);
+              if (Array.isArray(nested) && nested.length) {
+                display = nested.map(r => '<div class="pd-dft-subkv"><span class="pd-dft-subkv-label">' + esc(r.key) + '</span><span>' + esc(r.value) + '</span></div>').join("");
+              } else if (typeof nested === "string" && nested) {
+                display = '<div class="pd-dft-subkv">' + esc(nested) + '</div>';
+              } else {
+                display = "-";
+              }
+            } else if (v === null || v === undefined || v === "") {
+              display = "-";
+            } else {
+              display = String(v);
+            }
+            return '<div class="kv-item"><div class="kv-label">' + esc(SETTING_LABELS[k] || k) + '</div><div class="kv-value">' + display + '</div></div>';
+          }).join("");
+          out.push('<div class="kv-grid">' + cells + '</div>');
+        }
+        if (otherEntries.length) {
+          // Technical info (incl. ID, raw objects) → collapsible
+          const rawKv = otherEntries.map(k => {
+            const v = item[k];
+            let display;
+            if (v !== null && typeof v === "object") {
+              const nested = formatObjectToKeyValue(v);
+              if (Array.isArray(nested)) {
+                display = '<div class="kv-grid" style="margin-top:6px;">' + nested.map(r => '<div class="kv-item"><div class="kv-label">' + esc(r.key) + '</div><div class="kv-value">' + esc(r.value) + '</div></div>').join("") + '</div>';
+              } else {
+                display = esc(typeof nested === "string" ? nested : JSON.stringify(v));
+              }
+            } else {
+              display = String(v);
+            }
+            return '<div class="kv-item"><div class="kv-label">' + esc(k) + '</div><div class="kv-value">' + display + '</div></div>';
+          }).join("");
+          extras.push('<details class="raw-data-toggle"><summary>技术信息</summary>' + rawKv + '</details>');
+        }
+      });
+      return out.join("") + extras.join("");
+    }
+
     function renderDftCompactCard(item, index) {
       item = item || {};
       const resultId = String(item.id || "").trim();
       const catalyst = dftCatalystLabel(item);
-      const adsorbate = dftReadableText(item.adsorbate, "吸附物未记录");
-      const propertyType = dftReadableText(item.property_type || item.energy_type, "性质未记录");
+      const adsorbate = prettyChemicalFormula(dftReadableText(item.adsorbate, "吸附物未记录"));
+      const propertyType = propertyTypeLabel(item.property_type || item.energy_type) || "性质未记录";
       const value = dftReadableText(item.value, "-");
       const unit = dftReadableText(item.unit, "");
       const reactionStep = dftReadableText(item.reaction_step, "反应步骤未记录");
@@ -602,10 +1095,15 @@
       const meta = [
         source ? renderDftStatusChip("来源 " + source, "", source) : "",
         confidence ? renderDftStatusChip("置信度 " + confidence, dftStatusTone(confidence)) : "",
-        bindingLabel ? renderDftStatusChip(bindingLabel, dftStatusTone(bindingLabel), item.material_binding_status) : "",
-        candidateLabel ? renderDftStatusChip(candidateLabel, dftStatusTone(candidateLabel), item.candidate_status) : "",
         item.ai_review_display_label ? renderDftStatusChip(item.ai_review_display_label, item.ai_review_display_class || dftStatusTone(item.ai_review_display_label), item.ai_review_display_reason) : ""
       ].filter(Boolean).join("");
+      // Keep bindingLabel / candidateLabel for the technical-info collapsible only
+      const bindingTechInfo = (bindingLabel || candidateLabel)
+        ? '<div class="kv-grid" style="margin-top:8px;">'
+          + (bindingLabel ? '<div class="kv-item"><div class="kv-label">材料绑定</div><div class="kv-value">' + esc(item.material_binding_status || bindingLabel) + '</div></div>' : "")
+          + (candidateLabel ? '<div class="kv-item"><div class="kv-label">候选状态</div><div class="kv-value">' + esc(item.candidate_status || candidateLabel) + '</div></div>' : "")
+          + '</div>'
+        : "";
       const reviewReason = item.latest_object_review_audit && item.latest_object_review_audit.reason;
       const anchorText = dftAnchorSummary(item.binding_evidence_anchor);
       const rawJson = esc(JSON.stringify(item || {}, null, 2));
@@ -613,7 +1111,10 @@
         <div class="structured-card dft-compact-card" data-collection="dft_results" data-record-id="${esc(resultId)}" data-record-index="${esc(index)}">
           <div class="dft-compact-head">
             ${renderDftRecordLocator(resultId, index)}
-            <div class="dft-card-actions">${copyAction}${editAction}</div>
+            <div class="dft-card-actions">
+              <button class="btn ghost small" type="button" title="更多操作" onclick="openDftCardMenu(event, ${index})">⋯</button>
+              ${copyAction}${editAction}
+            </div>
           </div>
           <div class="dft-mainline">
             <div>
@@ -663,25 +1164,301 @@
       return page.has_more !== true && loaded >= total;
     }
 
+    /* ============================================================
+       DFT 催化剂分组展示（恢复「以催化剂为单位」的展示口径）
+
+       分组身份逻辑沿用 literature_library/dft-sample-groups.js 的既有口径
+       （sample ID 优先，绝不按名称合并）；渲染层针对本详情页适配：向
+       renderDftCompactCard 传入记录在 state.paper.dft_results_items 中的
+       原始索引，保证「复制 ID / 修改数据 / 更多操作」仍指向同一条记录。
+       本层只读展示，不提供任何写入入口。
+       ============================================================ */
+    const DFT_CATALYST_UNCONFIRMED_KEY = "__catalyst_unconfirmed__";
+    const DFT_CATALYST_CATEGORY_META = {
+      target: { label: "目标催化剂", note: "catalyst_type = single_atom" },
+      reference: { label: "对照 / 参考材料（非目标催化剂）", note: "已绑定样本，但未归类为单原子催化剂" },
+      unconfirmed: { label: "催化剂归属待确认", note: "未绑定样本，或标签跨多个材料、无法唯一归属" }
+    };
+
+    function escAttr(value) {
+      return String(value == null ? "" : value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function shortCatalystSampleId(value) {
+      const text = String(value || "").trim();
+      return text ? text.slice(0, 8) : "";
+    }
+
+    function renderCatalystSampleShortId(sampleId) {
+      const value = String(sampleId || "").trim();
+      if (!value) return "";
+      return '<code class="dft-sample-id-value" data-role="catalyst-sample-id" data-catalyst-sample-id="' + escAttr(value) + '" title="catalyst_sample_id：' + escAttr(value) + '">' + esc(shortCatalystSampleId(value)) + '</code>';
+    }
+
+    async function copyCatalystSampleId(event, sampleId) {
+      if (event) { event.preventDefault(); event.stopPropagation(); }
+      const value = String(sampleId || "").trim();
+      if (!value) { showToast("当前催化剂样本没有系统 ID。"); return; }
+      try {
+        await navigator.clipboard.writeText(value);
+        showToast("催化剂样本完整 UUID 已复制。");
+      } catch (error) {
+        showToast("复制催化剂样本 UUID 失败：" + error.message);
+      }
+    }
+
+    /* 与 dft-sample-groups.js 的 dftSampleGroupMeta 保持同一身份口径：
+       catalyst_sample_id 为唯一分组身份；缺失时归入待确认，不做名称推断。 */
+    function dftCatalystGroupIdentity(item) {
+      item = item || {};
+      const readPath = paths => {
+        for (let p = 0; p < paths.length; p += 1) {
+          let cur = item;
+          let hit = true;
+          const parts = String(paths[p]).split(".");
+          for (let s = 0; s < parts.length; s += 1) {
+            if (cur && typeof cur === "object" && cur[parts[s]] !== undefined && cur[parts[s]] !== null && cur[parts[s]] !== "") {
+              cur = cur[parts[s]];
+            } else { hit = false; break; }
+          }
+          if (!hit) continue;
+          if (cur && typeof cur === "object" && !Array.isArray(cur) && cur.value !== undefined) cur = cur.value;
+          if (typeof cur === "string" || typeof cur === "number") return String(cur);
+        }
+        return "";
+      };
+      const catalystSampleId = readPath([
+        "catalyst_sample_id",
+        "active_site_ref.catalyst_sample_id",
+        "evidence_payload.catalyst_sample_id",
+        "evidence_payload.active_site_ref.catalyst_sample_id"
+      ]);
+      const activeSiteKey = readPath([
+        "active_site_instance_key",
+        "active_site_ref.active_site_instance_key",
+        "active_site_ref.instance_key",
+        "evidence_payload.active_site_instance_key",
+        "evidence_payload.active_site_ref.active_site_instance_key",
+        "evidence_payload.active_site_ref.instance_key"
+      ]);
+      return {
+        catalystSampleId: catalystSampleId,
+        activeSiteLabel: activeSiteKey || ""
+      };
+    }
+
+    /* 可导出口径只认导出闸门的权威字段 export_safety / is_exportable。
+       特别注意：candidate_status = "ai_verified_ml_ready" 并不等于可导出
+       （生产中存在同时被 unsafe_review / unsafe_required_locator:value /
+       non_authoritative_review 等阻断的记录），因此不得用它计数。 */
+    function isDftItemExportable(item) {
+      const safety = (item && item.export_safety) || {};
+      return safety.is_exportable === true || safety.eligible === true || (item && item.is_exportable === true);
+    }
+
+    /* 分类只用已有字段 + 名称形态，不做猜测性归属：
+       single_atom -> 目标催化剂；名称跨多材料/系列 -> 待确认；其余已绑定 -> 对照/参考。 */
+    function dftCatalystCategory(sample) {
+      if (!sample || !String(sample.id || "").trim()) return "unconfirmed";
+      const type = String(sample.catalyst_type || "").trim().toLowerCase();
+      const name = String(sample.name || "").trim();
+      if (type === "single_atom") return "target";
+      if (/\band\b/i.test(name) || /series/i.test(name)) return "unconfirmed";
+      return "reference";
+    }
+
+    function dftPropertyTypeRank(propertyType) {
+      const key = String(propertyType || "").trim().toLowerCase();
+      const order = [
+        "adsorption_energy", "adsorption_energy_solvated", "adsorption_configuration_energy",
+        "gibbs_free_energy_change", "reaction_barrier", "bader_charge_transfer",
+        "bond_length", "magnetic_moment", "zero_point_energy_correction", "entropy_correction_ts"
+      ];
+      return order.indexOf(key) === -1 ? order.length : order.indexOf(key);
+    }
+
+    function renderDftCatalystBaseInfo(sample, records) {
+      const s = sample || {};
+      const sampleId = String(s.id || "").trim();
+      const first = records[0] || {};
+      const rows = [
+        ["催化剂 / 材料", s.name || (records.length ? dftCatalystLabel(first) : "")],
+        ["催化剂类型", s.catalyst_type],
+        ["金属中心", Array.isArray(s.metal_centers) ? s.metal_centers.join(", ") : s.metal_centers],
+        ["配位环境", s.coordination],
+        ["载体 / 基底", s.support && s.support !== "UNKNOWN" ? s.support : ""],
+        ["合成 / 构型说明", s.synthesis_method]
+      ].filter(function (row) {
+        return row[1] !== null && row[1] !== undefined && String(row[1]).trim() !== "" && String(row[1]).trim() !== "-";
+      });
+      const body = rows.length
+        ? rows.map(function (row) {
+            return '<div class="dft-catalyst-base-item"><dt>' + esc(row[0]) + '</dt><dd>' + esc(String(row[1])) + '</dd></div>';
+          }).join("")
+        : '<div class="dft-catalyst-base-item"><dt>基础信息</dt><dd>暂无可展示的组成 / 配位 / 载体信息</dd></div>';
+      const actions = sampleId
+        ? '<div class="dft-catalyst-base-actions">' + renderCatalystSampleShortId(sampleId) +
+          '<button class="btn ghost small" type="button" data-role="copy-catalyst-sample-id" data-catalyst-sample-id="' + escAttr(sampleId) + '" onclick="copyCatalystSampleId(event, ' + escAttr(JSON.stringify(sampleId)) + ')">复制样本 ID</button>' +
+          '<span class="subtle">本组 ' + records.length + ' 条记录均绑定该样本 ID</span></div>'
+        : '<div class="dft-catalyst-base-actions"><span class="subtle">本组记录没有可用的 catalyst_sample_id，未做任何自动绑定</span></div>';
+      return '<dl class="dft-catalyst-base">' + body + actions + '</dl>';
+    }
+
+    function renderDftCatalystGroup(group, indexById) {
+      const records = group.records;
+      const sample = group.sample || {};
+      const exportable = records.filter(function (entry) { return isDftItemExportable(entry.item); }).length;
+      const conflicts = records.filter(function (entry) { return Number(entry.item && entry.item.conflict_count || 0) > 0; }).length;
+
+      const buckets = new Map();
+      records.forEach(function (entry) {
+        const prop = String(entry.item && (entry.item.property_type || entry.item.energy_type) || "").trim() || "__unset__";
+        if (!buckets.has(prop)) buckets.set(prop, []);
+        buckets.get(prop).push(entry);
+      });
+      const propKeys = Array.from(buckets.keys()).sort(function (a, b) {
+        const diff = dftPropertyTypeRank(a) - dftPropertyTypeRank(b);
+        return diff !== 0 ? diff : String(a).localeCompare(String(b));
+      });
+      const body = propKeys.map(function (prop) {
+        const entries = buckets.get(prop);
+        const isUnset = prop === "__unset__";
+        const headLabel = isUnset ? "性能类型未记录" : propertyTypeLabel(prop);
+        return '<div class="dft-prop-section">' +
+            '<div class="dft-prop-head"><h4' + (isUnset ? "" : ' title="' + escAttr(prop) + '"') + '>' + esc(headLabel) + '</h4>' +
+              '<span class="dft-prop-count">' + entries.length + ' 条</span>' +
+            '</div>' +
+            '<div class="dft-catalyst-grid">' +
+              entries.map(function (entry) {
+                const id = String(entry.item && entry.item.id || "");
+                const originalIndex = indexById.has(id) ? indexById.get(id) : entry.index;
+                return renderDftCompactCard(entry.item, originalIndex);
+              }).join("") +
+            '</div>' +
+          '</div>';
+      }).join("");
+
+      const title = sample.name || "未绑定催化剂";
+      const chips = [
+        sample.catalyst_type ? String(sample.catalyst_type) : "",
+        Array.isArray(sample.metal_centers) && sample.metal_centers.length ? sample.metal_centers.join(", ") : "",
+        sample.coordination || "",
+        sample.support && sample.support !== "UNKNOWN" ? sample.support : "",
+        group.activeSites.size ? Array.from(group.activeSites).join(" / ") : ""
+      ].filter(Boolean);
+      return '<details class="dft-catalyst-group" data-role="dft-catalyst-group"' +
+          (group.catalystSampleId ? ' data-catalyst-sample-id="' + escAttr(group.catalystSampleId) + '"' : "") +
+          '>' +
+            '<summary><div class="dft-catalyst-group-heading">' +
+                '<div class="dft-catalyst-group-title"><h3>' + esc(prettyChemicalFormula(title)) + '</h3>' +
+                  renderCatalystSampleShortId(group.catalystSampleId) + '</div>' +
+                (chips.length
+                  ? '<div class="dft-catalyst-group-chips">' + chips.map(function (c) { return '<span class="dft-status-chip">' + esc(c) + '</span>'; }).join("") + '</div>'
+                  : "") +
+              '</div>' +
+              '<div class="dft-catalyst-group-metrics">' +
+                '<span class="dft-status-chip">' + records.length + ' 条数据</span>' +
+                '<span class="dft-status-chip ' + (exportable ? "ok" : "meta") + '">可导出 ' + exportable + '</span>' +
+                (conflicts ? '<span class="dft-status-chip danger">冲突 ' + conflicts + '</span>' : "") +
+              '</div></summary>' +
+            '<div class="dft-catalyst-group-body">' +
+              renderDftCatalystBaseInfo(sample, records) +
+              body +
+            '</div>' +
+          '</details>';
+    }
+
+    function renderDftCatalystGroupedCollection(items) {
+      const samplesById = {};
+      const sampleList = (state.paper && state.paper.catalyst_samples_items) || [];
+      sampleList.forEach(function (s) {
+        const id = String((s && s.id) || "").trim();
+        if (id) samplesById[id] = s;
+      });
+      const indexById = new Map();
+      items.forEach(function (item, index) {
+        indexById.set(String(item && item.id || ""), index);
+      });
+
+      const groups = new Map();
+      items.forEach(function (item, index) {
+        const identity = dftCatalystGroupIdentity(item);
+        const key = identity.catalystSampleId || DFT_CATALYST_UNCONFIRMED_KEY;
+        if (!groups.has(key)) {
+          groups.set(key, {
+            catalystSampleId: identity.catalystSampleId,
+            sample: samplesById[key] || null,
+            records: [],
+            activeSites: new Set()
+          });
+        }
+        const group = groups.get(key);
+        group.records.push({ item: item, index: index });
+        if (identity.activeSiteLabel) group.activeSites.add(identity.activeSiteLabel);
+      });
+
+      const buckets = { target: [], reference: [], unconfirmed: [] };
+      Array.from(groups.values()).forEach(function (group) {
+        buckets[dftCatalystCategory(group.sample)].push(group);
+      });
+      ["target", "reference", "unconfirmed"].forEach(function (k) {
+        buckets[k].sort(function (a, b) {
+          if (b.records.length !== a.records.length) return b.records.length - a.records.length;
+          return String((a.sample && a.sample.name) || "").localeCompare(String((b.sample && b.sample.name) || ""));
+        });
+      });
+
+      const sum = list => list.reduce(function (n, g) { return n + g.records.length; }, 0);
+      const targetRecords = sum(buckets.target);
+      const referenceRecords = sum(buckets.reference);
+      const unconfirmedRecords = sum(buckets.unconfirmed);
+      const exportableAll = items.filter(isDftItemExportable).length;
+      const conflictAll = items.filter(function (item) { return Number(item && item.conflict_count || 0) > 0; }).length;
+
+      const summary = '<div class="dft-collection-summary dft-catalyst-overview">' +
+          '<div class="dft-overview-head">' +
+            '<div class="dft-overview-count"><em>' + buckets.target.length + '</em> 个目标催化剂 · 共 ' + targetRecords + ' 条数据</div>' +
+            '<div class="dft-overview-sub">按 CatalystSample 身份归组：同一个 sample ID 只展示一个主体，不同 sample ID 不按名称相近合并。</div>' +
+          '</div>' +
+          '<div class="dft-collection-metrics">' +
+            renderDftStatusChip("对照 / 参考 " + buckets.reference.length + " 个 · " + referenceRecords + " 条", "meta") +
+            renderDftStatusChip("归属待确认 " + unconfirmedRecords + " 条", unconfirmedRecords ? "warn" : "meta") +
+            renderDftStatusChip("本篇共 " + items.length + " 条", "meta") +
+            renderDftStatusChip("可导出 " + exportableAll, exportableAll ? "ok" : "meta") +
+            renderDftStatusChip("冲突 " + conflictAll, conflictAll ? "danger" : "meta") +
+          '</div>' +
+        '</div>';
+
+      const renderSection = function (key, groups, recordCount, extraNote) {
+        if (!groups.length) return "";
+        const meta = DFT_CATALYST_CATEGORY_META[key];
+        return '<div class="dft-catalyst-section dft-catalyst-section-' + key + '">' +
+            '<div class="dft-catalyst-section-head"><h3>' + esc(meta.label) + '</h3>' +
+              '<span class="dft-catalyst-section-note">' + recordCount + ' 条 · ' + esc(meta.note) + '</span></div>' +
+            (extraNote ? '<div class="dft-unconfirmed-note">' + esc(extraNote) + '</div>' : "") +
+            groups.map(function (group) { return renderDftCatalystGroup(group, indexById); }).join("") +
+          '</div>';
+      };
+
+      return summary +
+        renderSection("target", buckets.target, targetRecords, "") +
+        renderSection("reference", buckets.reference, referenceRecords, "") +
+        renderSection("unconfirmed", buckets.unconfirmed, unconfirmedRecords,
+          "以下记录未计入已确认催化剂数，系统未做任何自动绑定；原始记录、证据与审核状态保持原样。") +
+        renderDftPagination();
+    }
+
     function renderDftCompactCollection(items) {
+      // 未完整加载时保留原分页闸门：不宣称整篇统计
       if (!hasCompleteDftResultCollection()) {
         return renderDftPagination();
       }
-      const readyCount = items.filter(isDftItemReady).length;
-      const reviewedCount = items.filter(item => Number(item && item.object_review_audit_count || 0) > 0).length;
-      const conflictCount = items.filter(item => Number(item && item.conflict_count || 0) > 0).length;
-      return `
-        <div class="dft-collection-summary">
-          <div class="dft-collection-title">${items.length} 条候选 DFT 数据</div>
-          <div class="dft-collection-metrics">
-            ${renderDftStatusChip("ML Ready " + readyCount, readyCount ? "ok" : "meta")}
-            ${renderDftStatusChip("已审核 " + reviewedCount, reviewedCount ? "ok" : "meta")}
-            ${renderDftStatusChip("冲突 " + conflictCount, conflictCount ? "danger" : "meta")}
-          </div>
-        </div>
-        <div class="dft-results-grid">${items.map(renderDftCompactCard).join("")}</div>
-        ${renderDftPagination()}
-      `;
+      return renderDftCatalystGroupedCollection(items);
     }
 
     function renderDftPagination() {
@@ -837,6 +1614,20 @@
       const select = document.getElementById("dftEditCatalystSample");
       const output = document.getElementById("dftEditCatalystSampleFullId");
       if (output) output.textContent = "完整 UUID：" + (select && select.value ? select.value : "未关联");
+    }
+
+    function openDftCardMenu(event, index) {
+      if (event && event.stopPropagation) event.stopPropagation();
+      const all = (state.paper && Array.isArray(state.paper.dft_results_items)) ? state.paper.dft_results_items
+                : (state.paper && Array.isArray(state.paper.dft_candidates)) ? state.paper.dft_candidates : [];
+      const item = all[index];
+      if (!item) return;
+      // Simple action: if id exists, copy locator; otherwise show a toast
+      if (item.id && typeof copyDftLocator === "function") {
+        copyDftLocator(event, String(item.id), index);
+      } else if (window.toast && window.toast.show) {
+        window.toast.show("当前记录没有 ID");
+      }
     }
 
     function openDftEditDialog(itemId) {
@@ -1028,6 +1819,12 @@
       if (dftDetails) dftDetails.open = true;
       const details = card.querySelector("details.raw-data-toggle");
       if (details) details.open = true;
+      // 记录位于催化剂分组内：先逐级展开所有祖先 details，再定位
+      let ancestorDetails = card.parentElement;
+      while (ancestorDetails) {
+        if (ancestorDetails.tagName === "DETAILS") ancestorDetails.open = true;
+        ancestorDetails = ancestorDetails.parentElement;
+      }
       card.scrollIntoView({ behavior: "smooth", block: "center" });
     }
 
@@ -1054,46 +1851,51 @@
     }
 
     function renderFigureDetailCard(figure, index) {
-      const keyElements = Array.isArray(figure.key_elements) ? figure.key_elements : [];
-      const approvedFields = Array.isArray(figure.approved_correction_fields) ? figure.approved_correction_fields : [];
       const imageReview = figure.image_review || {};
       const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
-      const rows = [
-        ["Figure label", figure.figure_label || "-"],
-        ["PDF page", figure.page || "-"],
-        ["Role", figure.figure_role || "unclassified"],
-        ["Crop status", figure.crop_status || "-"],
-        ["Crop source", figure.crop_source || "-"],
-        ["Image path", figure.image_path || "-"],
-        ["Content summary", figure.content_summary || "-"],
-        ["Key elements", formatFigureKeyElementsForDisplay(keyElements)],
-        ["Image review flags", Array.isArray(figure.flags) && figure.flags.length ? figure.flags.join(", ") : "none"],
-        ["Full-page snapshot", imageReview.full_page_image_path ? "present" : "missing"],
-        ["Approved correction count", figure.approved_correction_count || 0],
-        ["Approved correction fields", approvedFields.length ? approvedFields.join(", ") : "-"],
-        ["Object audit count", figure.object_review_audit_count || 0],
-        ["Conflict count", figure.conflict_count || 0],
-      ];
+      const label = figure.figure_label || ("Figure " + (index + 1));
+      const caption = figure.caption || figure.figure_role || "暂无说明";
+      const page = figure.page || "";
+      const summary = figure.content_summary || "";
+      // Tech info rows — only kept inside <details>, never shown by default
+      const techRows = [
+        ["图类型", figure.figure_role || ""],
+        ["裁图状态", figure.crop_status || ""],
+        ["裁图来源", figure.crop_source || ""],
+        ["图片路径", figure.image_path || ""],
+        ["关键元素", Array.isArray(figure.key_elements) && figure.key_elements.length ? figure.key_elements.join(", ") : ""],
+        ["图片标记", Array.isArray(figure.flags) && figure.flags.length ? figure.flags.join(", ") : ""],
+        ["整页快照", imageReview.full_page_image_path ? "有" : ""],
+        ["已批准修正数", figure.approved_correction_count ? String(figure.approved_correction_count) : ""],
+        ["已批准修正字段", Array.isArray(figure.approved_correction_fields) && figure.approved_correction_fields.length ? figure.approved_correction_fields.join(", ") : ""],
+        ["对象审核数", figure.object_review_audit_count ? String(figure.object_review_audit_count) : ""],
+        ["冲突数", figure.conflict_count ? String(figure.conflict_count) : ""]
+      ].filter(row => row[1] !== "" && row[1] !== 0);
+      const onerrorAttr = `onerror="this.classList.add('pd-figure-img-failed');this.closest('.pd-figure-img-wrap') && this.closest('.pd-figure-img-wrap').classList.add('is-failed');this.onerror=null;"`;
       const imageHtml = imageSrc
-        ? `<figure style="margin:12px 0 0;border:1px solid var(--color-border);border-radius:var(--radius);background:var(--color-surface);padding:10px;"><img src="${esc(imageSrc)}" loading="lazy" alt="${esc(figure.figure_label || `Figure ${index + 1}`)}" style="display:block;width:100%;max-height:520px;object-fit:contain;"><figcaption class="muted" style="margin-top:8px;">${esc(figure.caption || figure.figure_label || "")}</figcaption></figure>`
-        : '<div class="empty-state warning" style="padding:18px 12px;">No figure image path available.</div>';
+        ? `<img class="pd-figure-img" src="${esc(imageSrc)}" loading="lazy" decoding="async" alt="${esc(label)}" ${onerrorAttr}>`
+        : `<div class="pd-figure-img-fallback"><span>图像暂不可用</span><small>${esc(figure.figure_label || "Figure")} · Page ${esc(page)}</small></div>`;
       return `
-        <div class="section-item">
-          <div class="section-title">Figure ${index + 1}</div>
-          <div class="prewrap">${esc(figure.caption || figure.figure_role || "No caption")}</div>
-          <div class="kv-grid" style="margin-top:10px;">
-            ${rows.map(([label, value]) => `
-              <div class="kv-item">
-                <div class="kv-label">${esc(label)}</div>
-                <div class="kv-value">${esc(value)}</div>
-              </div>
-            `).join("")}
+        <div class="pd-figure-card" data-figure-index="${index}">
+          <div class="pd-figure-img-wrap" onclick="openFigureLightbox(${index})">
+            ${imageHtml}
           </div>
-          ${imageHtml}
+          <div class="pd-figure-body">
+            <div class="pd-figure-label">${esc(label)}</div>
+            ${caption ? `<div class="pd-figure-caption">${esc(caption)}</div>` : ""}
+            <div class="pd-figure-meta">${page ? `Page ${esc(page)}` : ""}${summary ? ` · ${esc(summary.length > 80 ? summary.slice(0, 80) + "…" : summary)}` : ""}</div>
+            ${techRows.length ? `
+              <details class="pd-figure-tech">
+                <summary>技术信息</summary>
+                <div class="kv-grid" style="margin-top:8px;">
+                  ${techRows.map(row => '<div class="kv-item"><div class="kv-label">' + esc(row[0]) + '</div><div class="kv-value">' + esc(row[1]) + '</div></div>').join("")}
+                </div>
+              </details>
+            ` : ""}
+          </div>
         </div>
       `;
     }
-
     function renderTranslationSectionOptions() {
       const container = document.getElementById("translationSections");
       const sections = (state.paper && state.paper.sections) || [];
@@ -1241,6 +2043,62 @@
       }
     }
 
+    function viewPaperPdf() {
+      if (!state.paperId) { showToast("未选择文献。"); return; }
+      const url = `/api/papers/${encodeURIComponent(state.paperId)}/pdf#page=1&toolbar=1`;
+      window.open(url, "_blank", "noopener");
+    }
+
+    async function reparsePaperDetail() {
+      if (!state.paperId) { showToast("未选择文献。"); return; }
+      const btn = document.getElementById("pdReparseBtn");
+      if (btn) { btn.disabled = true; btn.textContent = "解析中..."; }
+      try {
+        await fetchJSON(`${API_BASE}/${encodeURIComponent(state.paperId)}/reparse`, { method: "POST" });
+        showToast("重新解析完成，正在刷新详情。");
+        await loadPaperData();
+      } catch (error) {
+        showToast("重新解析失败：" + error.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "重新解析"; }
+      }
+    }
+
+    async function copyPaperMeta() {
+      if (!state.paper) return;
+      const p = state.paper;
+      const parts = [
+        p.title || "",
+        p.year ? String(p.year) : "",
+        p.journal || "",
+        p.doi ? "DOI: " + p.doi : ""
+      ].filter(Boolean);
+      try {
+        await navigator.clipboard.writeText(parts.join("\n"));
+        showToast("已复制 DOI / 标题。");
+      } catch (e) {
+        showToast("复制失败：" + e.message);
+      }
+      const menu = document.getElementById("pdMoreMenu");
+      if (menu) menu.style.display = "none";
+    }
+
+    function togglePdMoreMenu(event) {
+      event.stopPropagation();
+      const menu = document.getElementById("pdMoreMenu");
+      if (!menu) return;
+      const isOpen = menu.style.display === "flex";
+      menu.style.display = isOpen ? "none" : "flex";
+      if (!isOpen) {
+        setTimeout(() => {
+          const close = (e) => {
+            if (!menu.contains(e.target)) { menu.style.display = "none"; document.removeEventListener("click", close); }
+          };
+          document.addEventListener("click", close);
+        }, 0);
+      }
+    }
+
     async function loadPaperData() {
       if (!state.paperId) {
         showFallback("请先从文献库选择一篇文献查看详情。");
@@ -1308,33 +2166,87 @@
       const paper = state.paper;
       showPaperContent();
 
-      document.getElementById("paperTitle").textContent = paper.title || "未命名文献";
+      document.getElementById("paperTitle").innerHTML = safeTitleHtml(paper.title || "未命名文献");
+
+      const titleZhEl = document.getElementById("paperTitleZh");
+      if (paper.title_zh) { titleZhEl.textContent = paper.title_zh; titleZhEl.style.display = "block"; }
+      else { titleZhEl.textContent = ""; titleZhEl.style.display = "none"; }
+
+      const authorsEl = document.getElementById("paperAuthors");
+      const authors = Array.isArray(paper.authors) && paper.authors.length
+        ? paper.authors.slice(0, 6).join(", ") + (paper.authors.length > 6 ? " 等" : "")
+        : (paper.authors || "");
+      authorsEl.textContent = authors;
+      authorsEl.style.display = authors ? "block" : "none";
+
+      document.getElementById("paperJournal").textContent = cleanJournalForDisplay(paper.journal) || "-";
       document.getElementById("paperYear").textContent = paper.year || "-";
-      document.getElementById("paperJournal").textContent = paper.journal || "-";
-      document.getElementById("paperDoi").textContent = paper.doi ? "DOI: " + paper.doi : "暂无 DOI";
+
+      const doiWrap = document.getElementById("paperDoiWrap");
+      const doiEl = document.getElementById("paperDoi");
+      if (paper.doi) { doiEl.textContent = "DOI: " + paper.doi; doiWrap.style.display = "inline"; }
+      else { doiWrap.style.display = "none"; }
+
       document.getElementById("paperBadges").innerHTML = `
-        <span class="tag">${esc(paperTypeLabel(paper.paper_type))}</span>
-        <span class="tag">${paper.pdf_path ? "已关联 PDF" : "仅元数据"}</span>
-        <a class="tag" href="../review_center/index.html?paper_id=${encodeURIComponent(state.paperId)}">审核中心</a>
+        <span class="pd-badge">${esc(paperTypeLabel(paper.paper_type))}</span>
+        <span class="pd-badge ${paper.pdf_path ? "success" : "neutral"}">${paper.pdf_path ? "已关联 PDF" : "仅元数据"}</span>
       `;
 
+      const reviewLink = document.getElementById("pdReviewLink");
+      if (reviewLink) reviewLink.href = "../review_center/index.html?paper_id=" + encodeURIComponent(state.paperId);
+
+      const summaryEl = document.getElementById("paperSummary");
+      const analysis = paper.comprehensive_analysis || {};
+      const takeaway = analysis.layman_summary && analysis.layman_summary.one_sentence_takeaway;
+      summaryEl.textContent = takeaway ? "一句话结论：" + takeaway : "";
+
       document.getElementById("cntSections").textContent = paper.counts?.sections || (paper.sections || []).length || 0;
-      document.getElementById("cntFigures").textContent = ((paper.figures || []).length + (paper.tables || []).length);
+      const figCount = ((paper.figures || []).length + (paper.tables || []).length);
+      document.getElementById("cntFigures").textContent = figCount;
+      document.getElementById("cntFiguresDesc").textContent = (paper.figures || []).length + " 图 · " + (paper.tables || []).length + " 表";
       document.getElementById("cntDFT").textContent = paper.counts?.dft_results || (paper.dft_results_items || []).length || 0;
       document.getElementById("cntMechanism").textContent = paper.counts?.mechanism_claims || (paper.mechanism_claims_items || []).length || 0;
       renderTranslationSectionOptions();
 
       document.getElementById("paperAbstract").textContent = paper.abstract || "暂无摘要。";
-      const analysis = paper.comprehensive_analysis || {};
+
+      const keywordsPanel = document.getElementById("paperKeywordsPanel");
+      const rawKeywords = Array.isArray(paper.keywords) ? paper.keywords
+        : (paper.keywords ? String(paper.keywords).split(/[;，,]/).map(s => s.trim()).filter(Boolean) : []);
+      if (rawKeywords.length) {
+        keywordsPanel.innerHTML = rawKeywords.map(k => '<span class="pd-keyword">' + esc(k) + '</span>').join("");
+        keywordsPanel.style.display = "flex";
+      } else {
+        keywordsPanel.innerHTML = "";
+        keywordsPanel.style.display = "none";
+      }
+
       const layman = analysis.layman_summary || {};
       const logic = analysis.writing_logic || {};
-      document.getElementById("comprehensiveJSON").innerHTML =
-        '<div class="kv-grid">' +
-          '<div class="kv-item"><div class="kv-label">一句话结论</div><div class="kv-value">' + esc(layman.one_sentence_takeaway || "-") + '</div></div>' +
-          '<div class="kv-item"><div class="kv-label">研究意义</div><div class="kv-value">' + esc(layman.real_world_impact || "-") + '</div></div>' +
-          '<div class="kv-item"><div class="kv-label">研究空白</div><div class="kv-value">' + esc(logic.research_gap_framing || "-") + '</div></div>' +
-          '<div class="kv-item"><div class="kv-label">核心假设</div><div class="kv-value">' + esc(logic.core_hypothesis || "-") + '</div></div>' +
-        '</div>';
+      function isNonEmpty(v) {
+        if (v === null || v === undefined) return false;
+        const s = String(v).trim();
+        if (!s || s === "-" || s === "—") return false;
+        return true;
+      }
+      function pdAnalysisItem(num, label, value) {
+        return '<div class="pd-analysis-item"><span class="pd-analysis-num">' + num + '</span><span class="pd-analysis-label">' + esc(label) + '</span><div class="pd-analysis-text">' + esc(value) + '</div></div>';
+      }
+      const items = [];
+      if (isNonEmpty(layman.one_sentence_takeaway)) items.push(pdAnalysisItem(1, "一句话结论", layman.one_sentence_takeaway));
+      if (isNonEmpty(layman.real_world_impact)) items.push(pdAnalysisItem(2, "研究意义", layman.real_world_impact));
+      if (isNonEmpty(logic.research_gap_framing)) items.push(pdAnalysisItem(3, "研究空白", logic.research_gap_framing));
+      if (isNonEmpty(logic.core_hypothesis)) items.push(pdAnalysisItem(4, "核心假设", logic.core_hypothesis));
+      const panel = document.getElementById("comprehensiveJSON");
+      // Hide entire research highlights card if ALL four items are empty
+      const analysisCard = panel ? panel.closest(".panel-card") : null;
+      if (items.length === 0) {
+        panel.innerHTML = "";
+        if (analysisCard) analysisCard.style.display = "none";
+      } else {
+        if (analysisCard) analysisCard.style.display = "";
+        panel.innerHTML = items.join("");
+      }
 
       document.getElementById("sectionsList").innerHTML = (paper.sections || []).length
         ? (paper.sections || []).map((section, index) => `
@@ -1347,8 +2259,8 @@
         : '<div class="empty-state">暂无解析章节。</div>';
 
       document.getElementById("figuresList").innerHTML = (paper.figures || []).length
-        ? (paper.figures || []).map(renderFigureDetailCard).join("")
-        : '<div class="empty-state">No extracted figures.</div>';
+        ? '<div class="pd-figure-gallery">' + (paper.figures || []).map(renderFigureDetailCard).join("") + '</div>'
+        : '<div class="empty-state">暂无图表</div>';
 
       document.getElementById("tablesList").innerHTML = (paper.tables || []).length
         ? (paper.tables || []).map((table, index) => `
@@ -1360,26 +2272,115 @@
           `).join("")
         : "";
 
-      document.getElementById("dftSettings").innerHTML = renderStructuredCollection(paper.dft_settings_items || [], "暂无 DFT 设置数据。");
+      document.getElementById("dftSettings").innerHTML = renderDftSettingsList(paper.dft_settings_items || []);
       document.getElementById("dftResults").innerHTML = deepLinkIssueContextHtml() + renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
       document.getElementById("electrochemicalPerformance").innerHTML = renderStructuredCollection(paper.electrochemical_performance_items || [], "暂无电化学性能数据。");
-      document.getElementById("mechanismClaims").innerHTML = renderStructuredCollection(paper.mechanism_claims_items || [], "暂无机理论断。");
+      document.getElementById("mechanismClaims").innerHTML = renderMechanismClaims(paper.mechanism_claims_items || []);
       document.getElementById("writingCards").innerHTML = renderStructuredCollection(paper.writing_cards_items || [], "暂无写作卡片。");
       applyDftDeepLink();
     }
 
+    function formatEvidenceText(text) {
+      if (!text) return "";
+      let s = String(text);
+      // Replace known property_type keys with display labels (word-boundary match)
+      const propMap = PROPERTY_TYPE_DISPLAY || {};
+      for (const key of Object.keys(propMap)) {
+        const re = new RegExp("\\b" + key.replace(/_/g, "\\_") + "\\b", "g");
+        s = s.replace(re, propMap[key]);
+      }
+      // Format chemical formulas: Li2S6 → Li₂S₆, FeN4 → FeN₄, S8 → S₈
+      // Pattern: element symbol (capital + optional lowercase) followed by digits
+      s = s.replace(/\b([A-Z][a-z]?)(\d+)\b/g, function(_, elt, digits) {
+        const subMap = { "0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉" };
+        // Only format if it looks like a chemical formula (not a year or random number)
+        // Check: element must be a known chemical element symbol
+        const elements = ["Li","Na","K","Rb","Cs","Be","Mg","Ca","Sr","Ba","B","Al","Ga","In","Tl","C","Si","Ge","Sn","Pb","N","P","As","Sb","Bi","O","S","Se","Te","F","Cl","Br","I","He","Ne","Ar","Kr","Xe","H","Fe","Cu","Zn","Co","Ni","Mn","Cr","V","Ti","Sc","Mo","W","Ru","Rh","Pd","Pt","Au","Ag","Ir","Os"];
+        if (elements.includes(elt)) {
+          return elt + [...digits].map(d => subMap[d] || d).join("");
+        }
+        return _;
+      });
+      return s;
+    }
+
+    function renderMechanismClaims(items) {
+      if (!items || !items.length) return '<div class="empty-state is-small">暂无机理论断。</div>';
+      return items.map((item, idx) => {
+        item = item || {};
+        const claimText = item.claim_text || item.claim || "";
+        const claimType = claimTypeLabel(item.claim_type || item.type || "");
+        const status = item.validation_status || item.review_status || "unknown";
+        const statusLabel = formatValidationStatus(status);
+        const statusCls = ["confirmed", "safe_verified", "supported"].includes(status) ? "confirmed"
+          : (["pending", "needs_review"].includes(status) ? "needs_review" : "");
+        const conf = item.confidence == null ? null : (Number(item.confidence) <= 1 ? Math.round(Number(item.confidence) * 100) + "%" : String(item.confidence));
+        const evidence = (item.evidence || [])[0] || {};
+        const sourceBits = [
+          evidence.figure || evidence.source_figure || "",
+          evidence.page ? "Page " + evidence.page : "",
+          evidence.section || evidence.source_section || ""
+        ].filter(Boolean);
+        const sourceText = sourceBits.join(" · ");
+        const evidenceText = evidence.evidence_text || evidence.text || "";
+        // Tech info: ID, candidate status, review status, can_use_for_writing, evidence types
+        const techRows = [
+          ["ID", item.id || ""],
+          ["候选状态", dftCandidateStatusLabel(item.candidate_status)],
+          ["审核状态", statusLabel],
+          ["可用于写作", item.can_use_for_writing === true ? "是" : (item.can_use_for_writing === false ? "否" : "")],
+          ["证据类型", Array.isArray(item.evidence_types) && item.evidence_types.length ? item.evidence_types.join(", ") : ""]
+        ].filter(r => r[1]);
+        return `
+          <div class="structured-card pd-mechanism-card">
+            <div class="structured-card-title">
+              <span>${esc(claimType || "机理论断")}</span>
+              <span class="dft-status-chip ${esc(statusCls)}">${esc(statusLabel)}</span>
+            </div>
+            <div class="pd-mechanism-claim">${esc(claimText || "暂无论断文本")}</div>
+            <div class="pd-mechanism-meta">
+              ${conf ? '<span class="pd-mechanism-conf">置信度 ' + esc(conf) + '</span>' : ""}
+              ${sourceText ? '<span class="pd-mechanism-source">来源：' + esc(sourceText) + '</span>' : ""}
+            </div>
+            ${evidenceText ? '<div class="pd-mechanism-evidence"><div class="pd-mechanism-evidence-label">证据原文</div><div class="pd-mechanism-evidence-text">' + esc(evidenceText) + '</div></div>' : ""}
+            ${techRows.length ? '<details class="raw-data-toggle"><summary>技术信息</summary><div class="kv-grid" style="margin-top:8px;">' + techRows.map(r => '<div class="kv-item"><div class="kv-label">' + esc(r[0]) + '</div><div class="kv-value">' + esc(r[1]) + '</div></div>').join("") + '</div></details>' : ""}
+          </div>
+        `;
+      }).join("");
+    }
+
     function renderEvidencePanel() {
       const panel = document.getElementById("evidencePanel");
+      const countEl = document.getElementById("evidenceCount");
       if (!state.claims.length) {
-        panel.innerHTML = '<div class="empty-state warning">暂无证据支撑的论断。</div>';
+        if (countEl) countEl.textContent = "";
+        panel.innerHTML = '<div class="empty-state is-small">暂无证据支撑的论断。</div>';
         return;
       }
+      if (countEl) countEl.textContent = state.claims.length + " 条";
       panel.innerHTML = state.claims.map((claim, idx) => {
         const evidence = (claim.evidence || [])[0] || {};
+        const status = claim.validation_status || "unknown";
+        const statusLabel = formatValidationStatus(status);
+        const statusCls = ["confirmed", "safe_verified", "supported"].includes(status) ? "confirmed"
+          : (["pending", "needs_review"].includes(status) ? "needs_review" : "");
+        const claimTextRaw = (claim.claim_text || "").slice(0, 120);
+        const claimText = formatEvidenceText(claimTextRaw);
+        const conf = claim.confidence == null ? null : (Number(claim.confidence) <= 1 ? Math.round(Number(claim.confidence) * 100) + "%" : String(claim.confidence));
+        const sourceBits = [
+          evidence.figure || evidence.source_figure || "",
+          evidence.page ? "Page " + evidence.page : "",
+          evidence.section || evidence.source_section || ""
+        ].filter(Boolean);
+        const sourceText = sourceBits.join(" · ");
         return `
-          <div class="evidence-card">
-            <button onclick="showClaim(${idx})">${esc(formatValidationStatus(claim.validation_status))} · ${esc((claim.claim_text || "").slice(0, 110))}</button>
-            <div class="muted">paper_id ${esc(evidence.paper_id || "-")} · chunk_id ${esc(evidence.chunk_id || "-")} · 置信度 ${esc(claim.confidence == null ? "-" : Number(claim.confidence).toFixed(2))}</div>
+          <div class="pd-evidence-card" onclick="showClaim(${idx})">
+            <div class="pd-evidence-top">
+              <span class="pd-evidence-status ${esc(statusCls)}">${esc(statusLabel)}</span>
+              ${conf ? '<span class="pd-evidence-confidence">置信度 ' + esc(conf) + '</span>' : ""}
+            </div>
+            <div class="pd-evidence-claim">${esc(claimText)}</div>
+            ${sourceText ? '<div class="pd-evidence-source">来源：' + esc(sourceText) + '</div>' : ""}
           </div>
         `;
       }).join("");
@@ -1388,11 +2389,32 @@
     function showClaim(index) {
       const claim = state.claims[index];
       const evidence = (claim && claim.evidence || [])[0] || {};
-      document.getElementById("evidenceDetail").innerHTML =
-        '<div><strong>论断：</strong>' + esc(claim && claim.claim_text || "-") + '</div>' +
-        '<div><strong>状态：</strong>' + esc(formatValidationStatus(claim && claim.validation_status)) + '</div>' +
-        '<div><strong>置信度：</strong>' + esc(claim && claim.confidence == null ? "-" : Number(claim.confidence).toFixed(2)) + '</div>' +
-        '<div style="margin-top:8px;white-space:pre-wrap;">' + esc(evidence.evidence_text || evidence.text || "暂无证据文本") + '</div>';
+      const status = claim && claim.validation_status || "unknown";
+      const statusLabel = formatValidationStatus(status);
+      const conf = claim && claim.confidence == null ? "-" : (Number(claim.confidence) <= 1 ? Math.round(Number(claim.confidence) * 100) + "%" : String(claim.confidence));
+      const sourceBits = [
+        evidence.figure || evidence.source_figure || "",
+        evidence.page ? "Page " + evidence.page : "",
+        evidence.section || evidence.source_section || ""
+      ].filter(Boolean);
+      const sourceText = sourceBits.join(" · ");
+      const evidenceText = evidence.evidence_text || evidence.text || "暂无证据文本";
+      document.getElementById("evidenceDetail").innerHTML = `
+        <div class="pd-evidence-detail">
+          <div class="pd-evidence-detail-row"><strong>论断：</strong>${formatEvidenceText(claim && claim.claim_text || "-")}</div>
+          <div class="pd-evidence-detail-row"><strong>验证状态：</strong>${esc(statusLabel)}</div>
+          <div class="pd-evidence-detail-row"><strong>置信度：</strong>${esc(conf)}</div>
+          ${sourceText ? '<div class="pd-evidence-detail-row"><strong>来源：</strong>' + esc(sourceText) + '</div>' : ""}
+          <div class="pd-evidence-detail-text">${formatEvidenceText(evidenceText)}</div>
+          <details class="raw-data-toggle" style="margin-top:12px;">
+            <summary>技术信息</summary>
+            <div class="kv-grid" style="margin-top:8px;">
+              <div class="kv-item"><div class="kv-label">paper_id</div><div class="kv-value" style="font-family:var(--font-mono);font-size:11px;word-break:break-all;">${esc(evidence.paper_id || "-")}</div></div>
+              <div class="kv-item"><div class="kv-label">chunk_id</div><div class="kv-value" style="font-family:var(--font-mono);font-size:11px;word-break:break-all;">${esc(evidence.chunk_id || "-")}</div></div>
+            </div>
+          </details>
+        </div>
+      `;
     }
 
     function switchDetailTab(tab, event) {
@@ -1456,13 +2478,49 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      TopNav.init({ currentPage: "paper-detail", mountId: "topnav-mount" });
+      TopNav.init({ currentPage: "literature", mountId: "topnav-mount" });
       if (parseParams()) {
         loadPaperData();
       } else {
         showFallback("请先从文献库选择一篇文献查看详情。");
       }
     });
-  </script>
+  
+    function openFigureLightbox(index) {
+      const paper = state.paper;
+      if (!paper || !Array.isArray(paper.figures)) return;
+      const figure = paper.figures[index];
+      if (!figure) return;
+      const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
+      if (!imageSrc) return;
+      const lb = document.getElementById("pdLightbox");
+      const img = document.getElementById("pdLightboxImg");
+      const labelEl = document.getElementById("pdLightboxLabel");
+      const captionEl = document.getElementById("pdLightboxCaption");
+      const pageEl = document.getElementById("pdLightboxPage");
+      img.src = imageSrc;
+      img.alt = figure.figure_label || "";
+      labelEl.textContent = figure.figure_label || ("Figure " + (index + 1));
+      captionEl.textContent = figure.caption || "";
+      pageEl.textContent = figure.page ? "Page " + figure.page : "";
+      lb.style.display = "flex";
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeFigureLightbox(event) {
+      if (event && event.target && event.target.tagName === "IMG") return;
+      const lb = document.getElementById("pdLightbox");
+      lb.style.display = "none";
+      document.getElementById("pdLightboxImg").src = "";
+      document.body.style.overflow = "";
+    }
+
+    document.addEventListener("keydown", function(e) {
+      if (e.key === "Escape") {
+        const lb = document.getElementById("pdLightbox");
+        if (lb && lb.style.display !== "none") closeFigureLightbox(e);
+      }
+    });
+</script>
 </body>
 </html>

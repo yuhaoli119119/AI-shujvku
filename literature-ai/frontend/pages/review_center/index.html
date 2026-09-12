@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>审核中心 - Literature AI</title>
+  <title>AI 问题与复查中心 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css">
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
@@ -15,23 +15,287 @@
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
-    <section class="manual-review-scope-card" aria-live="polite">
-      <span class="manual-review-scope-title">AI 自动验收异常队列</span>
-      <span class="manual-review-scope-details">单一获授权 AI 默认自动核验、修正或拒绝；人工只处理无法定位、原文含糊或关键冲突仍未消除的 exception，不要求逐条点击已通过项目。</span>
+    <header class="review-hero">
+      <div>
+        <div class="review-eyebrow">单篇论文数据闭环</div>
+        <h1>AI 问题与复查中心</h1>
+        <p>选择一篇主文献，先完成主文与 SI 图表核验，再处理 DFT 数据。页面只显示真实状态和阻断原因，问题由你复制命令交给 AI。</p>
+      </div>
+      <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新服务器真实状态">刷新状态</button>
+    </header>
+
+    <section class="stats" id="stats"></section>
+
+    <section class="single-paper-workbench is-empty" id="singlePaperWorkbench" aria-live="polite">
+      <div class="single-paper-empty" id="singlePaperEmpty">
+        <strong>先选择一篇主文献</strong>
+        <span>点击论文行右侧“进入处理”，即可查看该论文从图表到 DFT 的真实处理状态。</span>
+      </div>
+      <div class="single-paper-content" id="singlePaperContent" hidden>
+        <div class="single-paper-head">
+          <div>
+            <div class="single-paper-kicker">当前处理论文</div>
+            <h2 id="singlePaperTitle">—</h2>
+            <div class="single-paper-meta" id="singlePaperMeta"><span id="singlePaperMetaPrimary">—</span><span class="paper-si-inline" id="singlePaperSiMeta"></span></div>
+          </div>
+          <button class="btn btn-ghost btn-sm" type="button" id="singlePaperDetailBtn">查看论文详情</button>
+        </div>
+
+        <ol class="paper-stage-progress" aria-label="单篇论文处理进度">
+          <li class="paper-stage" id="pdfStageCard">
+            <span class="paper-stage-number">1</span>
+            <div class="paper-stage-copy">
+              <span class="paper-stage-label">第一步 · PDF 解析</span>
+              <strong id="pdfStageStatus">待读取</strong>
+              <span id="pdfStageDetail">读取服务器状态后显示。</span>
+            </div>
+          </li>
+          <li class="paper-stage" id="chartStageCard">
+            <span class="paper-stage-number">2</span>
+            <div class="paper-stage-copy">
+              <span class="paper-stage-label">第二步 · 图表审核</span>
+              <strong id="chartStageStatus">待读取</strong>
+              <span id="chartStageDetail">必须先完成图表审核，才能进入 DFT。</span>
+            </div>
+          </li>
+          <li class="paper-stage" id="dftStageCard">
+            <span class="paper-stage-number">3</span>
+            <div class="paper-stage-copy">
+              <span class="paper-stage-label">第三步 · DFT 核验</span>
+              <strong id="dftStageStatus">等待图表阶段</strong>
+              <span id="dftStageDetail">图表阶段完成后才能处理 DFT。</span>
+            </div>
+          </li>
+          <li class="paper-stage" id="mlStageCard">
+            <span class="paper-stage-number">4</span>
+            <div class="paper-stage-copy">
+              <span class="paper-stage-label">第四步 · 数据导出</span>
+              <strong id="mlStageStatus">尚未满足条件</strong>
+              <span id="mlStageDetail">只显示服务器当前可导出的合格子集。</span>
+            </div>
+          </li>
+        </ol>
+
+        <section class="current-stage-panel" id="currentStagePanel" aria-live="polite">
+          <div class="current-stage-header">
+            <div class="current-stage-meta-row">
+              <span class="current-stage-kicker">当前聚焦任务 · Current Stage</span>
+              <div class="current-stage-actions">
+                <button class="btn btn-primary" id="currentStagePrimaryBtn" type="button" onclick="openCurrentProcessingMethods()">选择处理方式</button>
+              </div>
+            </div>
+            <h3 id="currentStageStatus">正在读取服务器状态</h3>
+            <p id="currentStageSummary">正在核对已完成事项、未解决项与下一步。</p>
+          </div>
+
+          <dl class="current-stage-facts">
+            <div class="stage-fact-item fact-done">
+              <dt>已完成门槛</dt>
+              <dd id="currentStageDone">—</dd>
+            </div>
+            <div class="stage-fact-item fact-pending">
+              <dt>待解决事项</dt>
+              <dd id="currentStagePending">—</dd>
+            </div>
+            <div class="stage-fact-item fact-next">
+              <dt>下一步建议</dt>
+              <dd id="currentStageNext">—</dd>
+            </div>
+          </dl>
+
+          <div class="stage-result-strip" aria-label="已完成阶段与结果入口">
+            <div class="stage-result-item">
+              <div class="stage-result-text">
+                <strong>PDF 与来源材料</strong>
+                <span id="pdfResultSummary">读取服务器状态后显示。</span>
+              </div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="openCurrentPaperDetail('content')">查看解析结果</button>
+            </div>
+            <div class="stage-result-item">
+              <div class="stage-result-text">
+                <strong>图表审核结果</strong>
+                <span id="chartResultSummary">读取服务器状态后显示。</span>
+              </div>
+              <div class="stage-result-actions">
+                <button class="btn btn-ghost btn-sm" type="button" onclick="openCurrentPaperDetail('figures')">查看审核结果</button>
+                <button class="btn btn-ghost btn-sm" type="button" onclick="openProcessingMethods('chart')">重新处理图表</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <details class="processing-methods" id="processingMethods" open>
+          <summary>
+            <div class="processing-summary-left">
+              <span class="processing-icon">⚡</span>
+              <div class="processing-summary-text">
+                <strong>选择 AI 处理方式</strong>
+                <small>根据任务选择对应材料、提示词和回传入口；不会自动启动 AI 或写库。</small>
+              </div>
+            </div>
+            <span class="summary-action">
+              <span class="when-closed">展开工具 ▾</span>
+              <span class="when-open">收起工具 ▴</span>
+            </span>
+          </summary>
+          <div class="processing-methods-body">
+            <div class="ai-route-choices" aria-label="选择 AI 处理方式">
+              <button type="button" class="btn btn-ghost" data-ai-route="local" aria-pressed="false" onclick="selectAiRoute('local')">本地 AI 直连 MCP（无需下载）</button>
+              <button type="button" class="btn btn-ghost" data-ai-route="offline" aria-pressed="false" onclick="selectAiRoute('offline')">网页 AI 离线审核（回传 JSON）</button>
+              <button type="button" class="btn btn-ghost" data-ai-route="webmcp" aria-pressed="false" onclick="selectAiRoute('webmcp')">网页 AI 直连 MCP（字段核验 ZIP）</button>
+            </div>
+            <p>三种方式相互独立。先选择使用的 AI，再按下方步骤处理；所有任务仅限当前论文与明确关联 SI。</p>
+            <p id="aiRouteStageNotice" role="status"></p>
+            <section class="method-section" id="localMethodSection" data-ai-panel="local">
+              <h3>本地 AI 直连 MCP（无需下载）</h3>
+              <p>适合当前电脑上已连接 Literature AI MCP 的 Codex 或其他智能体。直接读取最新任务、主文与关联 SI、PDF 页面、裁图、表格和证据，无需 ZIP，也无需先让网页 AI 处理。</p>
+              <div class="ai-local-actions">
+                <button class="btn btn-primary" id="directLocalChartPromptBtn" type="button" onclick="copyDirectLocalInstruction('chart')">复制本地 AI 直接审核图表指令</button>
+                <button class="btn btn-primary" id="directLocalDftPromptBtn" type="button" onclick="copyDirectLocalInstruction('dft')" disabled>复制本地 AI 直接处理 DFT 指令</button>
+              </div>
+              <p>读取不写库。修正、resolve、finalize、导入与批量应用需用户明确授权和现有 MCP 权限；写入后读取真实状态。完成子任务不等于整篇完成。</p>
+            </section>
+            <div data-ai-panel="offline">
+              <p>适合不能连接 MCP 的网页 AI。图表 JSON 在本页明确应用；DFT JSON 校验后按原有本地 AI 受控导入流程处理。</p>
+            <section class="method-section" id="chartMethodSection">
+              <div class="method-section-head">
+                <div class="method-section-title-wrap">
+                  <span class="method-tag method-tag-chart">图表审核</span>
+                  <h3>离线图表审核：下载材料 → 返回 JSON → 页面校验 → 明确应用</h3>
+                </div>
+                <p>使用图表审核包及其配套提示词。校验不写库；明确应用后写入图表建议。若服务器仍要求逐图 PDF 核验，可独立选择本地 MCP 方式继续；应用不代表整篇完成。</p>
+              </div>
+              <ol class="method-steps">
+                <li>
+                  <span class="method-step-badge">1</span>
+                  <div class="method-step-content">
+                    <strong>下载图表审核材料</strong>
+                    <p>下载当前固定审核范围的 PDF、图表与待填写 JSON。</p>
+                    <button class="btn btn-primary btn-sm" id="directEvidenceExportBtn" type="button" onclick="downloadWebAiBundle('evidence')">下载图表审核包</button>
+                  </div>
+                </li>
+                <li>
+                  <span class="method-step-badge">2</span>
+                  <div class="method-step-content">
+                    <strong>交给网页 AI</strong>
+                    <p>复制与审核包配套的填写说明，网页 AI 应返回图表审核 JSON 文件。</p>
+                    <button class="btn btn-ghost btn-sm" id="directEvidencePromptBtn" type="button" onclick="copyWebAiBundlePrompt('evidence')">复制图表审核包提示词</button>
+                  </div>
+                </li>
+                <li>
+                  <span class="method-step-badge">3</span>
+                  <div class="method-step-content">
+                    <strong>校验并决定是否应用</strong>
+                    <p>支持图表审核 JSON。先校验；只有你在弹窗中明确点击“应用图表结果”才会写入当前范围。</p>
+                    <button class="btn btn-ghost btn-sm" id="directEvidenceReturnBtn" type="button" onclick="openWebAiReturnDialog('evidence')">回传并校验图表 JSON</button>
+                  </div>
+                </li>
+              </ol>
+            </section>
+
+            <section class="method-section" id="dftWebMethodSection">
+              <div class="method-section-head">
+                <div class="method-section-title-wrap">
+                  <span class="method-tag method-tag-web">DFT 全量审核包</span>
+                  <h3>全量审核已有 DFT，并扫描漏提数据</h3>
+                </div>
+                <p>适合需要同时覆盖现有 DFT 结果和全部合格证据查漏的场景。审核包产出 DFT JSON；页面只校验，再复制本地 AI 受控导入指令。</p>
+              </div>
+              <ol class="method-steps">
+                <li>
+                  <span class="method-step-badge">1</span>
+                  <div class="method-step-content">
+                    <strong>下载全量 DFT 审核材料</strong>
+                    <p>包含已有 target、已审核图表证据和查漏范围。</p>
+                    <button class="btn btn-primary btn-sm" id="directDftExportBtn" type="button" onclick="downloadWebAiBundle('dft')" disabled>下载 DFT 全量审核包</button>
+                  </div>
+                </li>
+                <li>
+                  <span class="method-step-badge">2</span>
+                  <div class="method-step-content">
+                    <strong>复制配套提示词</strong>
+                    <p>网页 AI 应填写包内模板并返回严格的 DFT 审核 JSON 文件。</p>
+                    <button class="btn btn-ghost btn-sm" id="directDftPromptBtn" type="button" onclick="copyWebAiBundlePrompt('dft')">复制 DFT 全量审核提示词</button>
+                  </div>
+                </li>
+                <li>
+                  <span class="method-step-badge">3</span>
+                  <div class="method-step-content">
+                    <strong>回传并校验结果</strong>
+                    <p>支持 DFT 审核 JSON。校验不写库；校验后仍需复制本地 AI 指令完成证据复核和受控导入。</p>
+                    <button class="btn btn-ghost btn-sm" id="directDftReturnBtn" type="button" onclick="openWebAiReturnDialog('dft')">回传并校验 DFT JSON</button>
+                  </div>
+                </li>
+              </ol>
+            </section>
+
+            </div>
+            <div data-ai-panel="webmcp">
+              <p>此正式入口用于 DFT 字段核验；图表阶段不适用。字段核验 ZIP 冻结当前 pending 必审字段与证据；DFT 全量审核包则覆盖已有数据和漏提扫描，两者不能交换提示词。</p>
+            <section class="method-section" id="dftDirectMethodSection">
+              <div class="method-section-head">
+                <div class="method-section-title-wrap">
+                  <span class="method-tag method-tag-mcp">字段核验 ZIP</span>
+                  <h3>核验当前 pending 的 DFT 必审字段</h3>
+                </div>
+                <p>适合已连接 Literature AI MCP 的网页 AI。ZIP 只列当前 pending 字段，AI 通过 <code>apply_ai_verification_batch</code> 分批提交；返回真实回读，无需回传 JSON。字段任务为 0 时仅表示“当前没有 pending 字段任务”，不表示 DFT 或整篇完成。</p>
+              </div>
+              <ol class="method-steps compact">
+                <li>
+                  <span class="method-step-badge">1</span>
+                  <div class="method-step-content">
+                    <strong>下载字段核验材料</strong>
+                    <p>包含字段任务快照、主文、明确关联 SI 与定位证据。</p>
+                    <button class="btn btn-primary btn-sm" id="directDftApplyExportBtn" type="button" onclick="downloadWebAiBundle('dft_direct_apply')" disabled>下载 DFT 字段核验 ZIP</button>
+                  </div>
+                </li>
+                <li>
+                  <span class="method-step-badge">2</span>
+                  <div class="method-step-content">
+                    <strong>复制直连 MCP 执行说明</strong>
+                    <p>交给已连接 MCP 的 AI；完成后查看批次真实回读，不需要把 JSON 回传本页。</p>
+                    <button class="btn btn-ghost btn-sm" id="directDftApplyPromptBtn" type="button" onclick="copyWebAiBundlePrompt('dft_direct_apply')" disabled>复制直连 MCP 提示词</button>
+                  </div>
+                </li>
+              </ol>
+            </section>
+
+            </div>
+            <section class="manual-review-scope-card compact-summary" id="dftEvidenceSummary" aria-live="polite">
+              <span class="manual-review-scope-title">服务器证据门槛</span>
+              <span class="manual-review-scope-details">正在读取当前论文的 DFT 证据状态。</span>
+            </section>
+          </div>
+        </details>
+
+        <section class="data-export-panel" id="dataExportPanel" aria-live="polite">
+          <div class="data-export-text">
+            <div class="current-stage-kicker">数据导出 · ML Export</div>
+            <h3 id="mlExportTitle">正在读取当前论文可导出数据</h3>
+            <p id="mlExportDescription">仅包含服务器已满足当前导出条件的记录；不会把部分子集就绪显示为整篇完成。</p>
+          </div>
+          <div class="data-export-actions">
+            <a class="btn btn-primary btn-sm" id="mlSubsetDownloadLink" href="#" download hidden>下载吸附能 CSV</a>
+            <a class="btn btn-ghost btn-sm" id="mlSubsetViewLink" href="#">查看当前论文 DFT 数据</a>
+          </div>
+        </section>
+      </div>
     </section>
-    <div class="review-topline">
-      <section class="stats" id="stats"></section>
-      <div class="page-actions">
-        <button class="btn btn-ghost icon-btn" type="button" onclick="loadReviewCenter()" title="刷新审核中心" aria-label="刷新审核中心">↻</button>
-        <select class="btn btn-ghost" id="webAiWorkflowSelect" title="网页 AI 图表/DFT 离线审核流程" onchange="handleWebAiWorkflowSelect()">
-          <option value="">网页 AI 流程</option>
-          <option id="exportEvidenceWorkflowOption" value="export_evidence">1 导出图表证据包</option>
+
+    <details class="secondary-tools" open>
+      <summary><strong>其他工具与历史记录</strong><span>材料重建、旧批次范围和专项提示词</span></summary>
+      <div class="secondary-tools-bar">
+        <select class="btn btn-ghost visually-retained-control" id="webAiWorkflowSelect" title="兼容流程入口" onchange="handleWebAiWorkflowSelect()" aria-label="兼容流程入口">
+          <option value="">兼容流程入口（上方已分类展示）</option>
+          <option id="exportEvidenceWorkflowOption" value="export_evidence">导出图表证据包</option>
           <option value="copy_evidence_prompt">复制整篇图表提示词</option>
-          <option id="returnEvidenceWorkflowOption" value="return_evidence">2 回传图表 JSON</option>
-          <option value="copy_evidence_local_ai">3 复制本地 AI 全量图片复核指令</option>
-          <option id="exportDftWorkflowOption" value="export_dft">4 导出 DFT 审核包</option>
+          <option id="returnEvidenceWorkflowOption" value="return_evidence">回传图表 JSON</option>
+          <option value="copy_evidence_local_ai">复制本地 AI 全量图片复核指令</option>
+          <option id="exportDftWorkflowOption" value="export_dft">导出 DFT 审核包</option>
           <option value="copy_dft_prompt">复制 DFT 提示词</option>
-          <option id="returnDftWorkflowOption" value="return_dft">5 回传 DFT JSON</option>
+          <option id="returnDftWorkflowOption" value="return_dft">回传 DFT JSON</option>
+          <option id="exportDftDirectApplyWorkflowOption" value="export_dft_direct_apply">下载 DFT 字段核验 ZIP（直接 MCP，不回传 JSON）</option>
+          <option value="copy_dft_direct_apply_prompt">复制 DFT 直接 MCP 提示词</option>
         </select>
         <select class="btn btn-tinted" id="materialActionSelect" title="材料操作" onchange="handleMaterialActionSelect()">
           <option value="">材料操作</option>
@@ -40,17 +304,14 @@
           <option value="prepare_library">重建材料</option>
         </select>
         <select class="btn btn-ghost" id="promptCopySelect" title="复制单篇 AI 审核提示词" onchange="handlePromptCopySelect()">
-          <option value="">复制单篇任务提示词</option>
+          <option value="">复制专项任务提示词</option>
           <option value="figure_table">整篇主文+DFT相关SI图表审核提示词</option>
           <option value="dft">DFT 数据审核与入库提示词</option>
           <option value="text_review">论文内容审核提示词</option>
         </select>
       </div>
-    </div>
-    <section class="manual-review-scope-card" id="dftEvidenceSummary" aria-live="polite">
-      <span class="manual-review-scope-title">DFT 论文级证据</span>
-      <span class="manual-review-scope-details">请选择一篇主文献；DFT 导出会自动聚合全部已完成且未过期的图表审核结果。</span>
-    </section>
+    </details>
+
     <details class="review-scope-chooser" id="reviewScopeChooser" aria-live="polite">
       <summary><strong>高级：处理待补充图表或查看审核历史</strong> <span class="muted">DFT 数据查漏不需要选择 AI 批次。</span></summary>
       <section class="manual-review-scope-card is-unconfirmed" id="manualReviewScopeCard">
@@ -166,7 +427,7 @@
             <textarea class="web-ai-return-textarea" id="webAiReturnJson" spellcheck="false" placeholder="优先把网页 AI 回复的 .json 文件拖到这里；仅在无法生成文件时才粘贴 JSON。内容只保留在当前页面内存中。" oninput="handleWebAiReturnInput()" ondragenter="handleWebAiFileDrag(event)" ondragover="handleWebAiFileDrag(event)" ondragleave="handleWebAiFileDragLeave(event)" ondrop="handleWebAiFileDrop(event)"></textarea>
             <span class="web-ai-return-file-hint"><strong>优先文件回复：</strong>网页 AI 应返回一个 .json 文件；拖入后只在当前页面内存中读取，不会上传保存，随后点击“校验结果”。</span>
           </label>
-          <div class="web-ai-validation-box" id="webAiValidationResult">尚未校验。校验成功也不会自动入库。</div>
+          <div class="web-ai-validation-box" id="webAiValidationResult">尚未校验。校验仅在当前页面内存中检查格式，不写数据库；仅在明确点击“应用图表结果”后才会写入，且应用结果不等于整篇论文已完成审核。</div>
         </div>
       </div>
       <div class="modal-footer web-ai-return-footer">
@@ -175,8 +436,7 @@
           <button class="btn btn-tinted btn-sm" id="webAiValidateBtn" type="button" onclick="validateWebAiReturnJson()">校验结果</button>
         </div>
         <div class="web-ai-return-footer-group">
-          <button class="btn btn-tinted btn-sm" id="webAiApplyEvidenceBtn" type="button" onclick="applyWebAiEvidenceResult()" disabled style="display:none;">应用图表结果</button>
-          <button class="btn btn-tinted btn-sm" id="webAiFinalizeEvidenceBtn" type="button" onclick="finalizeWebAiEvidenceReview()" disabled style="display:none;">完成图表审核</button>
+          <button class="btn btn-tinted btn-sm" id="webAiApplyEvidenceBtn" type="button" onclick="applyWebAiEvidenceResult()" disabled style="display:none;" title="仅写入当前图表结果；应用结果不等于整篇论文已完成审核">应用图表结果</button>
           <button class="btn btn-tinted btn-sm" id="webAiCopyInstructionBtn" type="button" onclick="copyLocalAiImportInstruction()" disabled>复制本地 AI 处理指令</button>
           <button class="btn btn-ghost btn-sm" type="button" onclick="closeWebAiReturnDialog()">关闭</button>
         </div>

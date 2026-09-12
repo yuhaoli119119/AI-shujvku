@@ -492,3 +492,16 @@ def test_invalid_analysis_field_is_clear():
 
 def test_stats_returns_no_values_for_insufficient_points():
     assert _stats([]) == {"pearson": None, "spearman": None, "r_squared": None, "slope": None, "intercept": None}
+
+
+def test_correlation_matrix_generates_symmetric_cells():
+    service = CatalystAnalysisService(None)
+    fields = ["s8_adsorption_energy", "li_s_bond_max"]
+    matrix = service.correlation_matrix(library_name=None, fields=fields)
+    assert matrix["schema_version"] == "dft_catalyst_correlation_matrix_v1"
+    assert len(matrix["variables"]) == 2
+    assert len(matrix["cells"]) == 4
+    cells = {(c["x_property"], c["y_property"]): c for c in matrix["cells"]}
+    assert ("s8_adsorption_energy", "li_s_bond_max") in cells
+    assert ("li_s_bond_max", "s8_adsorption_energy") in cells
+

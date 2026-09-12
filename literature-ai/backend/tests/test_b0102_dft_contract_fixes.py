@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import base64
 import copy
 import csv
 import io
+import json
 from pathlib import Path
 from uuid import UUID, uuid4
 
 import fitz
 import pytest
-from sqlalchemy import event, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.orm import Session
 
 from app.db.models import (
@@ -21,9 +23,10 @@ from app.db.models import (
     ExtractionFieldReview,
     Paper,
     PaperRelationship,
+    PaperTable,
 )
 from app.mcp.context import MCPAuthInfo, mcp_auth_context
-from app.mcp.server import export_ml_dataset
+from app.mcp.server import export_ml_dataset, get_ai_verification_record_tasks
 from app.schemas.ai_verification import AIVerificationSubmission
 from app.services.ai_verification_service import (
     AIVerificationService,
@@ -39,8 +42,11 @@ from app.utils.ai_verification import (
     AI_VERIFICATION_CAPABILITY,
     ai_target_fingerprint,
     authoritative_ai_review_valid,
+    build_structured_table_cell_evidence,
     cached_read_pdf_page_text,
+    locator_fingerprint,
     normalize_evidence_text,
+    stable_hash,
 )
 import app.utils.ai_verification as ai_verification_utils
 from app.utils.review_safety import (
@@ -126,6 +132,182 @@ def _identity() -> AuthenticatedAIVerificationIdentity:
         capabilities=frozenset({AI_VERIFICATION_CAPABILITY}),
         identity_verified=True,
     )
+
+
+def test_structured_table_reference_is_all_or_none():
+    base = {
+        "target_type": "dft_results",
+        "target_id": str(uuid4()),
+        "field_name": "value",
+        "decision": "accept",
+        "confidence": 0.99,
+        "page": 1,
+        "expected_target_fingerprint": "fingerprint",
+    }
+    with pytest.raises(ValueError, match="must be supplied together"):
+        AIVerificationSubmission.model_validate({**base, "table_id": str(uuid4())})
+
+
+def test_structured_table_cell_authorizes_without_weakening_plain_text_gate(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "structured-table.pdf"
+    _make_pdf(
+        pdf_path,
+        {
+            1: (
+                "Table S1. Adsorption energy data.\n"
+                "Catalyst Li2S4 adsorption energy (eV)\n"
+                "Fe-N4 -1.23 -0.88"
+            )
+        },
+    )
+    with Session(setup_test_db) as session:
+        paper = Paper(title="Structured table evidence", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper)
+        session.flush()
+        table = PaperTable(
+            paper_id=paper.id,
+            caption="Table S1. Adsorption energy data.",
+            markdown_content=(
+                "| Catalyst | Li2S4 adsorption energy (eV) |\n"
+                "| --- | --- |\n"
+                "| Fe-N4 | -1.23/-0.88 |"
+            ),
+            page=1,
+            extraction_source="pytest",
+        )
+        catalyst = CatalystSample(
+            paper_id=paper.id,
+            name="Fe-N4",
+            catalyst_type="single_atom",
+            metal_centers=["Fe"],
+            coordination="N4",
+        )
+        session.add_all([table, catalyst])
+        session.flush()
+        row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="adsorption_energy",
+            adsorbate="Li2S4",
+            value=-1.23,
+            unit="eV",
+            evidence_payload={"material_identity": "Fe-N4"},
+        )
+        session.add(row)
+        session.commit()
+
+        submission = AIVerificationSubmission(
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name="value",
+            decision="accept",
+            confidence=0.99,
+            evidence_text="",
+            page=1,
+            expected_target_fingerprint=ai_target_fingerprint("dft_results", row),
+            table_id=str(table.id),
+            source_row_index=0,
+            source_column_index=1,
+        )
+        result = AIVerificationService(session).process_batch(
+            paper_id=paper.id,
+            submissions=[submission],
+            identity=_identity(),
+            dry_run=False,
+        )
+        assert result["auto_repaired"] == 1, result["items"]
+        review = session.scalar(select(ExtractionFieldReview).where(
+            ExtractionFieldReview.target_id == str(row.id),
+            ExtractionFieldReview.field_name == "value",
+        ))
+        locator = session.scalar(select(EvidenceLocator).where(
+            EvidenceLocator.target_id == str(row.id),
+            EvidenceLocator.field_name == "value",
+        ))
+        assert review is not None and locator is not None
+        assert locator.table_id == table.id
+        legacy_locator = EvidenceLocator(
+            id=uuid4(),
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            field_name="value",
+            evidence_text="legacy PDF evidence",
+            page=1,
+            locator_status="exact_page",
+        )
+        assert locator_fingerprint(legacy_locator) == stable_hash({
+            "id": str(legacy_locator.id),
+            "paper_id": str(paper.id),
+            "target_type": "dft_results",
+            "target_id": str(row.id),
+            "field_name": "value",
+            "page": 1,
+            "bbox": None,
+            "evidence_text": "legacy pdf evidence",
+            "locator_status": "exact_page",
+        })
+        assert review.review_payload["ai_verification"]["table_evidence"] == {
+            "kind": "paper_table_cell.v1",
+            "table_id": str(table.id),
+            "source_row_index": 0,
+            "source_column_index": 1,
+        }
+        assert authoritative_ai_review_valid(session, review, row) is True
+
+        electron_row = DFTResult(
+            paper_id=paper.id,
+            catalyst_sample_id=catalyst.id,
+            property_type="bader_charge_transfer",
+            adsorbate="Li2S4",
+            value=-0.52,
+            unit="e",
+            evidence_payload={"material_identity": "Fe-N4"},
+        )
+        electron_checks = AIVerificationService(session)._content_checks(
+            "dft_results",
+            electron_row,
+            "value",
+            electron_row.value,
+            electron_row.unit,
+            (
+                "caption=Table S6 charge distribution with positive and negative signs "
+                "indicating electron loss and gain; row=Fe-N4; column=Li2S4; "
+                "cell_context=electron loss and gain Li2S4 -0.52"
+            ),
+        )
+        assert electron_checks["unit_matches"] is True
+        assert electron_checks["value_unit_same_evidence_item"] is True
+        service = AIVerificationService(session)
+        assert service._content_checks(
+            "dft_results", row, "adsorbate", "Li2S4", None,
+            "column=E_a/E_a^sol(Li₂S₄) (eV)",
+        )["adsorbate_consistent"] is True
+        assert service._content_checks(
+            "dft_results", electron_row, "energy_type", "bader_charge_transfer", None,
+            "caption=Table S6 charge distribution with electron loss and gain",
+        )["energy_type_consistent"] is True
+        for property_type, evidence in (
+            ("zero_point_energy_correction", "row=ZPE (eV)"),
+            ("entropy_correction_ts", "row=TS (eV); caption=entropy correction"),
+            ("adsorption_configuration_energy", "adsorption configurations and energies"),
+            ("adsorption_energy_solvated", "adsorption energies under solvation effect"),
+        ):
+            semantic_row = DFTResult(
+                paper_id=paper.id,
+                catalyst_sample_id=catalyst.id,
+                property_type=property_type,
+                value=-0.52,
+                unit="eV",
+                evidence_payload={"material_identity": "Fe-N4"},
+            )
+            assert service._content_checks(
+                "dft_results", semantic_row, "energy_type", property_type, None, evidence,
+            )["energy_type_consistent"] is True
+
+        table.markdown_content = table.markdown_content.replace("-1.23", "-9.99")
+        session.flush()
+        assert authoritative_ai_review_valid(session, review, row) is False
 
 
 def _seed_test_papers(session: Session, tmp_path: Path):
@@ -325,9 +507,9 @@ def test_unrelated_paper_as_source_paper_id_is_rejected(setup_test_db, tmp_path)
         )
 
         assert batch_result["auto_verified"] == 0
-        assert batch_result["exception"] == 1
+        assert batch_result["accept_validation_failed"] == 1
         item = batch_result["items"][0]
-        assert item["outcome"] == "exception"
+        assert item["outcome"] == "accept_validation_failed"
         assert item["evidence_checks"]["evidence_paper_authorized"] is False
         assert "evidence_paper_authorized" in item["blocked_reasons"]
 
@@ -359,7 +541,7 @@ def test_out_of_range_si_page_is_rejected(setup_test_db, tmp_path):
         )
 
         item = batch_result["items"][0]
-        assert item["outcome"] == "exception"
+        assert item["outcome"] == "accept_validation_failed"
         assert item["evidence_checks"]["page_valid"] is False
         assert "page_valid" in item["blocked_reasons"]
 
@@ -392,9 +574,9 @@ def test_conflicting_source_and_evidence_paper_ids_rejected(setup_test_db, tmp_p
         )
 
         assert batch_result["auto_verified"] == 0
-        assert batch_result["exception"] == 1
+        assert batch_result["accept_validation_failed"] == 1
         item = batch_result["items"][0]
-        assert item["outcome"] == "exception"
+        assert item["outcome"] == "accept_validation_failed"
         assert "conflicting_evidence_paper_ids" in item["blocked_reasons"]
 
 
@@ -492,7 +674,7 @@ def test_reaction_step_field_verification_enforces_consistency(setup_test_db, tm
             identity=_identity(),
             dry_run=True,
         )
-        assert result_fail["items"][0]["outcome"] == "exception"
+        assert result_fail["items"][0]["outcome"] == "accept_validation_failed"
         assert "reaction_step_consistent" in result_fail["items"][0]["blocked_reasons"]
 
         # 7b. Evidence containing reaction_step -> passes consistency check
@@ -1732,6 +1914,49 @@ def test_support_c_does_not_match_letters_inside_ordinary_words(setup_test_db, t
         assert checks["catalyst_consistent"] is False
 
 
+def test_b0102_explicit_fen4_ps_dg_family_evidence_supports_only_its_sac_isomers(setup_test_db, tmp_path):
+    """B0102 main-text SAC-family evidence may support a named P/S isomer, not other materials."""
+    with Session(setup_test_db) as session:
+        main, _, _, _, _ = _seed_test_papers(session, tmp_path)
+        family_evidence = (
+            "Initially, an FeN4-G SAC structure was constructed on a graphene monolayer. "
+            "Subsequently, defects were introduced, and heteroatoms (P or S) were doped, "
+            "resulting in the formation of eight edge-type FeN4P2/S2-DG structures. "
+            "The Fe transition metal atom is connected to four N atoms."
+        )
+        valid_catalyst = CatalystSample(
+            paper_id=main.id, name="FeN4P1,2-DG", catalyst_type="single_atom",
+            metal_centers=["Fe"], coordination="FeN4", support="graphene",
+        )
+        invalid_catalyst = CatalystSample(
+            paper_id=main.id, name="FeN3P1,2-DG", catalyst_type="single_atom",
+            metal_centers=["Fe"], coordination="FeN4", support="graphene",
+        )
+        solvent = CatalystSample(
+            paper_id=main.id, name="DME+DOL", catalyst_type="unknown",
+            metal_centers=[], coordination=None, support="UNKNOWN",
+        )
+        graphene_control = CatalystSample(
+            # Deliberately mislabelled to prove name evidence alone can never
+            # convert the paper's graphene baseline into a SAC record.
+            paper_id=main.id, name="Graphene", catalyst_type="single_atom",
+            metal_centers=["Fe"], coordination="FeN4", support="graphene",
+        )
+        session.add_all([valid_catalyst, invalid_catalyst, solvent, graphene_control])
+        session.flush()
+        rows = [
+            DFTResult(paper_id=main.id, catalyst_sample_id=item.id, property_type="adsorption_energy", value=-1.0, unit="eV")
+            for item in (valid_catalyst, invalid_catalyst, solvent, graphene_control)
+        ]
+        session.add_all(rows)
+        session.flush()
+        service = AIVerificationService(session)
+        assert service._content_checks("dft_results", rows[0], "catalyst", valid_catalyst.name, "eV", family_evidence)["catalyst_consistent"] is True
+        assert service._content_checks("dft_results", rows[1], "catalyst", invalid_catalyst.name, "eV", family_evidence)["catalyst_consistent"] is False
+        assert service._content_checks("dft_results", rows[2], "catalyst", solvent.name, "eV", family_evidence)["catalyst_consistent"] is False
+        assert service._content_checks("dft_results", rows[3], "catalyst", graphene_control.name, "eV", family_evidence)["catalyst_consistent"] is False
+
+
 def test_bulk_authority_reuses_one_pdf_page_read_per_paper_page(setup_test_db, tmp_path, monkeypatch):
     with Session(setup_test_db) as session:
         main, si, _, catalyst, first = _seed_test_papers(session, tmp_path)
@@ -1917,3 +2142,574 @@ def test_bulk_gate_preloads_relationship_reviews_locators_and_active_sites(setup
         assert counts["extraction_field_reviews"] <= 2
         assert counts["evidence_locators"] <= 2
         assert counts["active_site_metals"] <= 1
+
+
+def test_dft_record_bundles_use_keyset_cursor_and_preserve_field_contract(setup_test_db, tmp_path):
+    """A completed/deferred first record must never move a later UUID out of a cursor sweep."""
+    pdf_path = tmp_path / "record-bundles.pdf"
+    evidence = "Fe-N4 binds Li2S4 with adsorption energy -1.20 eV in configuration 2."
+    _make_pdf(pdf_path, {1: evidence})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="B0102 record bundles", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        catalyst = CatalystSample(
+            paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom",
+            metal_centers=["Fe"], coordination="FeN4", support="graphene",
+        )
+        session.add(catalyst); session.flush()
+        rows = [
+            DFTResult(
+                paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy",
+                adsorbate="Li2S4", value=-1.2, unit="eV", evidence_text=evidence,
+                evidence_payload={"configuration_index": 2},
+            )
+            for _ in range(3)
+        ]
+        session.add_all(rows); session.commit()
+
+        service = AIVerificationService(session)
+        first_page = service.list_dft_record_tasks(paper_id=paper.id, limit=1)
+        assert first_page["total_pending_records"] is None
+        assert first_page["total_pending_fields"] is None
+        assert first_page["total_records"] == 3
+        assert first_page["page_pending_records"] == 1
+        assert first_page["page_pending_fields"] == 4
+        assert first_page["returned_records"] == 1
+        assert first_page["has_more"] is True and first_page["next_cursor"]
+        first_bundle = first_page["records"][0]
+        required = {item["field_name"] for item in first_bundle["fields"] if item["required"]}
+        assert required == {"catalyst", "energy_type", "value", "adsorbate"}
+        configuration = next(item for item in first_bundle["fields"] if item["field_name"] == "configuration_index")
+        assert configuration["verification_field_name"] == "value"
+        assert configuration["writable"] is False
+        assert all(item["target_snapshot_fingerprint"] == first_bundle["fields"][0]["target_snapshot_fingerprint"] for item in first_bundle["fields"])
+        assert all(item["expected_write_version"] is None for item in first_bundle["fields"] if item["required"])
+
+        submissions = [
+            AIVerificationSubmission(
+                target_type="dft_results",
+                target_id=first_bundle["record_id"],
+                field_name=item["field_name"],
+                decision="defer",
+                confidence=0.0,
+                expected_target_fingerprint=item["target_snapshot_fingerprint"],
+                expected_write_version=item["expected_write_version"],
+                blocked_reasons=["no_supporting_evidence"],
+            )
+            for item in first_bundle["fields"] if item["required"]
+        ]
+        deferred = service.process_batch(
+            paper_id=paper.id, submissions=submissions, identity=_identity(), dry_run=False,
+        )
+        assert deferred["auto_deferred"] == 4
+        assert deferred["auto_rejected"] == 0
+
+        after_cursor = service.list_dft_record_tasks(
+            paper_id=paper.id, limit=10, cursor=first_page["next_cursor"],
+        )
+        assert {bundle["record_id"] for bundle in after_cursor["records"]} == {
+            str(row.id) for row in rows if str(row.id) > first_bundle["record_id"]
+        }
+        default_sweep = service.list_dft_record_tasks(paper_id=paper.id, limit=10)
+        assert first_bundle["record_id"] not in {bundle["record_id"] for bundle in default_sweep["records"]}
+        blocked_sweep = service.list_dft_record_tasks(paper_id=paper.id, limit=10, include_blocked=True)
+        blocked_bundle = next(bundle for bundle in blocked_sweep["records"] if bundle["record_id"] == first_bundle["record_id"])
+        assert all(item["current_status"] == "ai_blocked" for item in blocked_bundle["fields"] if item["required"])
+        assert all(item["blocked_reasons"] == ["no_supporting_evidence"] for item in blocked_bundle["fields"] if item["required"])
+
+        first_row = session.get(DFTResult, UUID(first_bundle["record_id"]))
+        assert first_row is not None
+        blocked_review = session.scalar(select(ExtractionFieldReview).where(
+            ExtractionFieldReview.target_id == first_bundle["record_id"],
+            ExtractionFieldReview.field_name == "value",
+        ))
+        assert blocked_review is not None
+        assert is_authoritative_verified_review(session, blocked_review, first_row) is False
+        assert "unsafe_review" in is_export_eligible_extraction(
+            session, first_row, target_type="dft_results",
+        ).reasons
+
+        # Catalyst identity is part of the target fingerprint, so a material
+        # correction invalidates every old blocked decision and makes it pending.
+        catalyst.support = "defect_graphene"
+        session.commit()
+        invalidated = service.list_dft_record_tasks(paper_id=paper.id, limit=10)
+        invalidated_bundle = next(bundle for bundle in invalidated["records"] if bundle["record_id"] == first_bundle["record_id"])
+        assert all(item["current_status"] == "pending" for item in invalidated_bundle["fields"] if item["required"])
+
+
+def test_dft_record_bundle_preloads_locators_and_reads_shared_pdf_page_once(setup_test_db, tmp_path, monkeypatch):
+    pdf_path = tmp_path / "bundle-shared-page.pdf"
+    evidence = "Fe-N4 adsorption energy for Li2S4 is -1.20 eV."
+    _make_pdf(pdf_path, {1: evidence})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="shared bundle evidence", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add(catalyst); session.flush()
+        rows = [
+            DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV", evidence_text=evidence)
+            for _ in range(3)
+        ]
+        session.add_all(rows); session.flush()
+        for row in rows:
+            for field_name in required_dft_review_fields(row):
+                session.add(EvidenceLocator(
+                    paper_id=paper.id, target_type="dft_results", target_id=str(row.id), field_name=field_name,
+                    evidence_text=evidence, page=1, locator_status="exact_page", parser_source="pytest",
+                ))
+        session.commit()
+
+        from app.services import ai_verification_service as service_module
+        original_reader = service_module.cached_read_pdf_page_text
+        calls = 0
+        def count_reads(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original_reader(*args, **kwargs)
+        monkeypatch.setattr(service_module, "cached_read_pdf_page_text", count_reads)
+        counts = {"dft_results": 0, "extraction_field_reviews": 0, "evidence_locators": 0, "active_site_metals": 0}
+        def count_queries(_conn, _cursor, statement, *_args):
+            lowered = statement.casefold()
+            for table in counts:
+                if table in lowered:
+                    counts[table] += 1
+        event.listen(session.bind, "before_cursor_execute", count_queries)
+        try:
+            result = AIVerificationService(session).list_dft_record_tasks(paper_id=paper.id, limit=10)
+        finally:
+            event.remove(session.bind, "before_cursor_execute", count_queries)
+        assert result["returned_records"] == 3
+        assert calls == 1
+        # One keyset read plus one explicit page-total count is constant; the
+        # assertion is deliberately not an accidental N+1 exact-count proxy.
+        assert counts["dft_results"] <= 2
+        assert counts["extraction_field_reviews"] <= 1
+        assert counts["evidence_locators"] <= 1
+        assert counts["active_site_metals"] <= 1
+
+
+def test_record_bundle_returns_exact_table_triad_reusable_by_dry_run_and_formal_submit(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "record-table.pdf"
+    pdf_text = "Table S1. Adsorption energy. Fe-N4 Li2S4 adsorption energy (eV) -1.20"
+    _make_pdf(pdf_path, {1: pdf_text})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="table bundle", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        table = PaperTable(
+            paper_id=paper.id, page=1, caption="Table S1. Adsorption energy.",
+            markdown_content="| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.20 |",
+        )
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add_all([table, catalyst]); session.flush()
+        row = DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV")
+        session.add(row); session.flush()
+        built = build_structured_table_cell_evidence(session, paper_id=paper.id, table_id=table.id, page=1, source_row_index=0, source_column_index=1)
+        assert built is not None
+        session.add(EvidenceLocator(
+            paper_id=paper.id, source_type="table", target_type="dft_result", target_id=str(row.id), field_name="value",
+            table_id=table.id, page=1, evidence_text=built["canonical_evidence_text"], locator_status="exact_page",
+        ))
+        session.commit()
+
+        bundle = AIVerificationService(session).list_dft_record_tasks(paper_id=paper.id, limit=1)["records"][0]
+        value = next(item for item in bundle["fields"] if item["field_name"] == "value")
+        candidate = value["evidence_candidates"][0]
+        assert candidate["table_reference_status"] == "resolved"
+        assert candidate["table_reference"] == {"table_id": str(table.id), "source_row_index": 0, "source_column_index": 1}
+        assert candidate["table_cell"] == {
+            "cell_value": "-1.20", "column_header": "Li2S4 adsorption energy (eV)",
+            "row_label": "Fe-N4", "canonical_evidence_text": built["canonical_evidence_text"],
+        }
+        submission = AIVerificationSubmission(
+            target_type="dft_results", target_id=str(row.id), field_name="value", decision="accept", confidence=0.99,
+            page=candidate["page"], evidence_paper_id=candidate["evidence_paper_id"], evidence_text="",
+            table_id=candidate["table_reference"]["table_id"], source_row_index=candidate["source_row_index"],
+            source_column_index=candidate["source_column_index"], expected_target_fingerprint=value["target_snapshot_fingerprint"],
+        )
+        service = AIVerificationService(session)
+        dry = service.process_batch(paper_id=paper.id, submissions=[submission], identity=_identity(), dry_run=True)
+        formal = service.process_batch(paper_id=paper.id, submissions=[submission], identity=_identity(), dry_run=False)
+        assert dry["auto_repaired"] + dry["auto_verified"] == 1, dry["items"]
+        assert formal["auto_repaired"] + formal["auto_verified"] == 1, formal["items"]
+
+
+def test_defer_rejects_unsafe_source_fields_and_is_idempotent_with_table_revision_invalidation(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "defer-contract.pdf"
+    _make_pdf(pdf_path, {1: "Table S2. Fe-N4 Li2S4 adsorption energy (eV) -1.20"})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="defer contract", pdf_path=str(pdf_path), authors=["Tester"])
+        unrelated = Paper(title="unrelated", pdf_path=str(pdf_path), authors=["Other"])
+        session.add_all([paper, unrelated]); session.flush()
+        table = PaperTable(
+            paper_id=paper.id, page=1, caption="Table S2.",
+            markdown_content="| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.20 |",
+        )
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add_all([table, catalyst]); session.flush()
+        row = DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV")
+        session.add(row); session.commit()
+        fingerprint = ai_target_fingerprint("dft_results", row)
+        base = dict(target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+                    expected_target_fingerprint=fingerprint, blocked_reasons=["no_supporting_evidence"])
+        service = AIVerificationService(session)
+        for invalid in (
+            {**base, "evidence_paper_id": str(unrelated.id)},
+            {**base, "source_paper_id": str(paper.id), "evidence_paper_id": str(unrelated.id)},
+            {**base, "page": 99},
+            {**base, "field_name": "configuration_index"},
+            {**base, "field_name": "not_a_dft_field"},
+        ):
+            result = service.process_batch(paper_id=paper.id, submissions=[AIVerificationSubmission.model_validate(invalid)], identity=_identity(), dry_run=False)
+            assert result["items"][0]["outcome"] == "exception"
+        assert session.scalars(select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == str(row.id))).all() == []
+
+        valid = AIVerificationSubmission.model_validate({
+            **base, "page": 1, "table_id": str(table.id), "source_row_index": 0, "source_column_index": 1,
+        })
+        first = service.process_batch(paper_id=paper.id, submissions=[valid], identity=_identity(), dry_run=False)
+        review = session.scalar(select(ExtractionFieldReview).where(ExtractionFieldReview.target_id == str(row.id), ExtractionFieldReview.field_name == "value"))
+        audits_before = len(session.scalars(select(AuditLog).where(AuditLog.target_id == str(row.id))).all())
+        version_before = review.write_version
+        second = service.process_batch(paper_id=paper.id, submissions=[valid], identity=_identity(), dry_run=False)
+        session.refresh(review)
+        assert first["auto_deferred"] == 1 and second["items"][0]["idempotent"] is True
+        assert review.write_version == version_before
+        assert len(session.scalars(select(AuditLog).where(AuditLog.target_id == str(row.id))).all()) == audits_before
+        table.markdown_content = "| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.21 |"
+        session.commit()
+        refreshed = service.list_dft_record_tasks(paper_id=paper.id, limit=1)
+        refreshed_value = next(item for item in refreshed["records"][0]["fields"] if item["field_name"] == "value")
+        assert refreshed_value["current_status"] == "pending"
+
+
+def test_record_keyset_aliases_and_evidence_changes_do_not_skip_or_hide_stale_blocks(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "cursor-alias.pdf"
+    evidence = "Fe-N4 binds Li2S4 with adsorption energy -1.20 eV."
+    _make_pdf(pdf_path, {1: evidence})
+    with Session(setup_test_db) as session:
+        main = Paper(title="main", pdf_path=str(pdf_path), authors=["Tester"])
+        si = Paper(title="SI", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add_all([main, si]); session.flush()
+        catalyst = CatalystSample(paper_id=main.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add(catalyst); session.flush()
+        rows = [DFTResult(paper_id=main.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV", evidence_text=evidence) for _ in range(3)]
+        session.add_all(rows); session.flush()
+        legacy = ExtractionFieldReview(
+            paper_id=main.id, target_type="dft_result", target_id=str(rows[0].id), field_name="value",
+            reviewer_status="pending", target_resolution_status="active", write_version=3,
+        )
+        session.add_all([
+            legacy,
+            EvidenceLocator(paper_id=main.id, target_type="dft_result", target_id=str(rows[0].id), field_name="value", evidence_text=evidence, page=1, locator_status="exact_page"),
+        ])
+        session.commit()
+        service = AIVerificationService(session)
+        first = service.list_dft_record_tasks(paper_id=main.id, limit=1)
+        bundle = first["records"][0]
+        value = next(item for item in bundle["fields"] if item["field_name"] == "value")
+        if bundle["record_id"] == str(rows[0].id):
+            assert value["expected_write_version"] == legacy.write_version
+            assert len(value["evidence_candidates"]) == 1
+        statements: list[str] = []
+        def capture_keyset(_conn, _cursor, statement, *_args):
+            if "dft_results" in statement.casefold():
+                statements.append(statement.casefold())
+        event.listen(session.bind, "before_cursor_execute", capture_keyset)
+        try:
+            second = service.list_dft_record_tasks(paper_id=main.id, limit=1, cursor=first["next_cursor"])
+        finally:
+            event.remove(session.bind, "before_cursor_execute", capture_keyset)
+        assert all(item["record_id"] != bundle["record_id"] for item in second["records"])
+        assert any("dft_results.id >" in statement and "limit" in statement for statement in statements)
+
+        # A current block becomes stale as soon as a locator, PDF revision, or
+        # explicit SI relationship changes; each is a fresh evidence package.
+        blocked_submission = AIVerificationSubmission(
+            target_type="dft_results", target_id=bundle["record_id"], field_name="value", decision="defer", confidence=0.1,
+            expected_target_fingerprint=value["target_snapshot_fingerprint"], expected_write_version=value["expected_write_version"],
+            blocked_reasons=["no_supporting_evidence"], page=1,
+        )
+        service.process_batch(paper_id=main.id, submissions=[blocked_submission], identity=_identity(), dry_run=False)
+        row = session.get(DFTResult, UUID(bundle["record_id"]))
+        session.add(EvidenceLocator(paper_id=main.id, target_type="dft_results", target_id=str(row.id), field_name="value", evidence_text=evidence, page=1, locator_status="exact_page"))
+        session.commit()
+        after_locator = service.list_dft_record_tasks(paper_id=main.id, limit=10)
+        assert next(item for item in next(bundle for bundle in after_locator["records"] if bundle["record_id"] == str(row.id))["fields"] if item["field_name"] == "value")["current_status"] == "pending"
+        locator_value = next(item for item in next(bundle for bundle in after_locator["records"] if bundle["record_id"] == str(row.id))["fields"] if item["field_name"] == "value")
+        service.process_batch(paper_id=main.id, submissions=[AIVerificationSubmission(
+            target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+            expected_target_fingerprint=locator_value["target_snapshot_fingerprint"], expected_write_version=locator_value["expected_write_version"],
+            blocked_reasons=["no_supporting_evidence"], page=1,
+        )], identity=_identity(), dry_run=False)
+        pdf_path.touch()
+        after_pdf = service.list_dft_record_tasks(paper_id=main.id, limit=10)
+        pdf_value = next(item for item in next(bundle for bundle in after_pdf["records"] if bundle["record_id"] == str(row.id))["fields"] if item["field_name"] == "value")
+        assert pdf_value["current_status"] == "pending"
+        service.process_batch(paper_id=main.id, submissions=[AIVerificationSubmission(
+            target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+            expected_target_fingerprint=pdf_value["target_snapshot_fingerprint"], expected_write_version=pdf_value["expected_write_version"],
+            blocked_reasons=["no_supporting_evidence"], page=1,
+        )], identity=_identity(), dry_run=False)
+        session.add(PaperRelationship(source_paper_id=main.id, target_paper_id=si.id, relationship_type="supplementary"))
+        session.commit()
+        after_si = service.list_dft_record_tasks(paper_id=main.id, limit=10)
+        si_value = next(item for item in next(bundle for bundle in after_si["records"] if bundle["record_id"] == str(row.id))["fields"] if item["field_name"] == "value")
+        assert si_value["current_status"] == "pending" and after_si["database_writes"] is False
+
+
+def test_table_backed_block_scope_ignores_other_record_table_but_stales_its_own(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "field-scoped-tables.pdf"
+    _make_pdf(pdf_path, {1: "Table S1 Fe-N4 Li2S4 adsorption energy -1.20; Table S2 Fe-N4 -1.30"})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="field scoped table blocks", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        one = PaperTable(paper_id=paper.id, page=1, caption="Table S1.", markdown_content="| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.20 |")
+        two = PaperTable(paper_id=paper.id, page=1, caption="Table S2.", markdown_content="| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.30 |")
+        session.add_all([catalyst, one, two]); session.flush()
+        rows = [
+            DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=value, unit="eV")
+            for value in (-1.2, -1.3)
+        ]
+        session.add_all(rows); session.commit()
+        service = AIVerificationService(session)
+        for row, table in zip(rows, (one, two), strict=True):
+            submission = AIVerificationSubmission(
+                target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+                expected_target_fingerprint=ai_target_fingerprint("dft_results", row), blocked_reasons=["no_supporting_evidence"],
+                page=1, table_id=str(table.id), source_row_index=0, source_column_index=1,
+            )
+            assert service.process_batch(paper_id=paper.id, submissions=[submission], identity=_identity(), dry_run=False)["auto_deferred"] == 1
+
+        two.markdown_content = two.markdown_content.replace("-1.30", "-1.31")
+        session.commit()
+        after_unrelated = service.list_dft_record_tasks(paper_id=paper.id, limit=10, include_blocked=True)
+        one_value = next(field for bundle in after_unrelated["records"] if bundle["record_id"] == str(rows[0].id) for field in bundle["fields"] if field["field_name"] == "value")
+        assert one_value["current_status"] == "ai_blocked"
+        one.markdown_content = one.markdown_content.replace("-1.20", "-1.21")
+        session.commit()
+        after_referenced = service.list_dft_record_tasks(paper_id=paper.id, limit=10)
+        one_value = next(field for bundle in after_referenced["records"] if bundle["record_id"] == str(rows[0].id) for field in bundle["fields"] if field["field_name"] == "value")
+        assert one_value["current_status"] == "pending"
+
+
+def test_table_backed_blocks_preload_constant_queries_and_index_once(setup_test_db, tmp_path, monkeypatch):
+    pdf_path = tmp_path / "table-backed-page.pdf"
+    evidence = "Table S1. Fe-N4 Li2S4 adsorption energy (eV) -1.20"
+    _make_pdf(pdf_path, {1: evidence})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="many table-backed blocks", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        table = PaperTable(paper_id=paper.id, page=1, caption="Table S1.", markdown_content="| Catalyst | Li2S4 adsorption energy (eV) |\n| --- | --- |\n| Fe-N4 | -1.20 |")
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add_all([table, catalyst]); session.flush()
+        rows = [DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV") for _ in range(20)]
+        session.add_all(rows); session.flush()
+        cell = build_structured_table_cell_evidence(session, paper_id=paper.id, table_id=table.id, page=1, source_row_index=0, source_column_index=1)
+        assert cell is not None
+        for row in rows:
+            for field_name in required_dft_review_fields(row):
+                session.add(EvidenceLocator(paper_id=paper.id, target_type="dft_results", target_id=str(row.id), field_name=field_name, evidence_text=cell["canonical_evidence_text"], page=1, table_id=table.id, locator_status="exact_page"))
+        session.commit()
+        service = AIVerificationService(session)
+        for row in rows:
+            assert service.process_batch(paper_id=paper.id, submissions=[AIVerificationSubmission(
+                target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+                expected_target_fingerprint=ai_target_fingerprint("dft_results", row), blocked_reasons=["no_supporting_evidence"],
+                page=1, table_id=str(table.id), source_row_index=0, source_column_index=1,
+            )], identity=_identity(), dry_run=False)["auto_deferred"] == 1
+        from app.services import ai_verification_service as service_module
+        original_index = service_module.build_structured_table_cell_evidence_index
+        original_reader = service_module.cached_read_pdf_page_text
+        index_calls = 0
+        page_reads = 0
+        def count_index(*args, **kwargs):
+            nonlocal index_calls
+            index_calls += 1
+            return original_index(*args, **kwargs)
+        def count_reads(*args, **kwargs):
+            nonlocal page_reads
+            page_reads += 1
+            return original_reader(*args, **kwargs)
+        monkeypatch.setattr(service_module, "build_structured_table_cell_evidence_index", count_index)
+        monkeypatch.setattr(service_module, "cached_read_pdf_page_text", count_reads)
+        counts = {name: 0 for name in ("catalyst_samples", "active_site_metals", "extraction_field_reviews", "evidence_locators", "paper_tables", "paper_relationships")}
+        def count_queries(_conn, _cursor, statement, *_args):
+            lowered = statement.casefold()
+            for name in counts:
+                if name in lowered:
+                    counts[name] += 1
+        event.listen(session.bind, "before_cursor_execute", count_queries)
+        try:
+            result = service.list_dft_record_tasks(paper_id=paper.id, limit=20, include_blocked=True)
+        finally:
+            event.remove(session.bind, "before_cursor_execute", count_queries)
+        assert result["page_blocked_fields"] == 20
+        assert index_calls == 1
+        assert page_reads == 1
+        assert all(value <= 2 for value in counts.values()), counts
+
+
+def test_record_cursor_hides_blocked_by_default_and_never_loses_raw_keyset_progress(setup_test_db, tmp_path):
+    pdf_path = tmp_path / "blocked-keyset.pdf"
+    _make_pdf(pdf_path, {1: "Fe-N4 Li2S4 adsorption energy -1.20 eV"})
+    with Session(setup_test_db) as session:
+        paper = Paper(title="blocked cursor", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(paper); session.flush()
+        catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", catalyst_type="single_atom", metal_centers=["Fe"], coordination="FeN4")
+        session.add(catalyst); session.flush()
+        rows = [DFTResult(paper_id=paper.id, catalyst_sample_id=catalyst.id, property_type="adsorption_energy", adsorbate="Li2S4", value=-1.2, unit="eV") for _ in range(2)]
+        session.add_all(rows); session.commit()
+        service = AIVerificationService(session)
+        for row in rows:
+            first = service.list_dft_record_tasks(paper_id=paper.id, limit=10, include_blocked=True)
+            bundle = next(item for item in first["records"] if item["record_id"] == str(row.id))
+            submissions = [AIVerificationSubmission(
+                target_type="dft_results", target_id=str(row.id), field_name=field["field_name"], decision="defer", confidence=0.1,
+                expected_target_fingerprint=field["target_snapshot_fingerprint"], expected_write_version=field["expected_write_version"],
+                blocked_reasons=["no_supporting_evidence"], page=1,
+            ) for field in bundle["fields"] if field["required"]]
+            assert service.process_batch(paper_id=paper.id, submissions=submissions, identity=_identity(), dry_run=False)["auto_deferred"] == len(submissions)
+        first = service.list_dft_record_tasks(paper_id=paper.id, limit=1)
+        assert first["returned_records"] == 0 and first["has_more"] is True and first["next_cursor"]
+        shown = service.list_dft_record_tasks(paper_id=paper.id, limit=1, include_blocked=True)
+        assert shown["returned_records"] == 1 and all(field["blocked_reasons"] for field in shown["records"][0]["fields"] if field["required"])
+        last = service.list_dft_record_tasks(paper_id=paper.id, limit=1, cursor=first["next_cursor"])
+        assert last["returned_records"] == 0 and last["has_more"] is False and last["next_cursor"] is None
+        other = Paper(title="other", pdf_path=str(pdf_path), authors=["Tester"])
+        session.add(other); session.commit()
+        malformed_uuid = base64.urlsafe_b64encode(json.dumps({"v": 1, "paper_id": str(paper.id), "last_id": "not-a-uuid"}).encode("utf-8")).decode("ascii").rstrip("=")
+        for bad in ("not-base64", service._encode_record_cursor(other.id, rows[0].id), malformed_uuid):
+            with pytest.raises(ValueError, match="Invalid record-task cursor"):
+                service.list_dft_record_tasks(paper_id=paper.id, limit=1, cursor=bad)
+
+
+def test_ai_blocked_alone_blocks_exports_mixed_bundle_and_real_mcp_read_only_transaction(setup_test_db, tmp_path, monkeypatch):
+    with Session(setup_test_db) as session:
+        paper, si_paper, _unrelated, _catalyst, row = _seed_test_papers(session, tmp_path)
+        _authorize_dft_result(session, row, evidence_paper_id=si_paper.id, page=17)
+        session.commit()
+
+        def exported_ids(profile: str | None) -> tuple[set[str], set[str], list[str]]:
+            payload = build_dft_ml_dataset(session, paper_id=paper.id, dataset_profile=profile)
+            json_ids = {item["record_id"] for item in payload["records"]}
+            csv_text, _summary = build_dft_csv_rows(session, paper_id=paper.id, dataset_profile=profile)
+            csv_rows = list(csv.DictReader(io.StringIO(csv_text)))
+            assert csv_rows or csv_text.splitlines()[0].split(",")[0] == "record_id"
+            assert "record_id" in csv_text.splitlines()[0].split(",")
+            return json_ids, {item["record_id"] for item in csv_rows}, list(csv_rows[0]) if csv_rows else ["record_id"]
+
+        baseline = is_export_eligible_extraction(session, row, target_type="dft_results")
+        assert baseline.eligible is True, baseline.reasons
+        for profile in (None, "sac_lis_ml"):
+            json_ids, csv_ids, columns = exported_ids(profile)
+            assert columns[0] == "record_id"
+            assert json_ids == {str(row.id)} == csv_ids
+
+        value_review = session.scalar(select(ExtractionFieldReview).where(
+            ExtractionFieldReview.paper_id == paper.id,
+            ExtractionFieldReview.target_id == str(row.id),
+            ExtractionFieldReview.field_name == "value",
+        ))
+        assert value_review is not None and is_authoritative_verified_review(session, value_review, row)
+        verified_state = {
+            "reviewer_status": value_review.reviewer_status,
+            "reviewer": value_review.reviewer,
+            "review_payload": copy.deepcopy(value_review.review_payload),
+            "target_fingerprint": value_review.target_fingerprint,
+            "evidence_text": value_review.evidence_text,
+            "original_value": value_review.original_value,
+            "reviewed_value": value_review.reviewed_value,
+            "unit": value_review.unit,
+        }
+        # The service intentionally refuses to let AI defer overwrite a human
+        # verification.  Remove only this isolated fixture review so defer is
+        # exercised through its real write path, while all other required
+        # authoritative review/locator pairs remain intact.
+        session.delete(value_review)
+        session.flush()
+        deferred = AIVerificationService(session).process_batch(
+            paper_id=paper.id,
+            submissions=[AIVerificationSubmission(
+                target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+                expected_target_fingerprint=ai_target_fingerprint("dft_results", row),
+                expected_write_version=None, blocked_reasons=["no_supporting_evidence"],
+                evidence_paper_id=str(si_paper.id), page=17,
+            )],
+            identity=_identity(), dry_run=False,
+        )
+        assert deferred["auto_deferred"] == 1
+        value_review = session.scalar(select(ExtractionFieldReview).where(
+            ExtractionFieldReview.paper_id == paper.id,
+            ExtractionFieldReview.target_id == str(row.id),
+            ExtractionFieldReview.field_name == "value",
+        ))
+        assert value_review is not None
+        assert value_review.reviewer_status == "ai_blocked"
+        blocked_gate = is_export_eligible_extraction(session, row, target_type="dft_results")
+        assert blocked_gate.eligible is False
+        assert "non_authoritative_review:value" in blocked_gate.reasons
+        for profile in (None, "sac_lis_ml"):
+            json_ids, csv_ids, columns = exported_ids(profile)
+            assert columns[0] == "record_id"
+            assert str(row.id) not in json_ids
+            assert str(row.id) not in csv_ids
+
+        for name, value in verified_state.items():
+            setattr(value_review, name, value)
+        session.commit()
+        restored_gate = is_export_eligible_extraction(session, row, target_type="dft_results")
+        assert restored_gate.eligible is True, restored_gate.reasons
+        session.delete(value_review)
+        session.flush()
+        assert AIVerificationService(session).process_batch(
+            paper_id=paper.id,
+            submissions=[AIVerificationSubmission(
+                target_type="dft_results", target_id=str(row.id), field_name="value", decision="defer", confidence=0.1,
+                expected_target_fingerprint=ai_target_fingerprint("dft_results", row),
+                expected_write_version=None, blocked_reasons=["no_supporting_evidence"],
+                evidence_paper_id=str(si_paper.id), page=17,
+            )],
+            identity=_identity(), dry_run=False,
+        )["auto_deferred"] == 1
+        assert "non_authoritative_review:value" in is_export_eligible_extraction(
+            session, row, target_type="dft_results",
+        ).reasons
+
+        adsorbate_review = session.scalar(select(ExtractionFieldReview).where(
+            ExtractionFieldReview.paper_id == paper.id,
+            ExtractionFieldReview.target_id == str(row.id),
+            ExtractionFieldReview.field_name == "adsorbate",
+        ))
+        assert adsorbate_review is not None
+        session.delete(adsorbate_review)
+        session.commit()
+        mixed = AIVerificationService(session).list_dft_record_tasks(paper_id=paper.id, limit=1)
+        assert mixed["returned_records"] == 1
+        mixed_fields = {field["field_name"]: field for field in mixed["records"][0]["fields"] if field["required"]}
+        assert mixed_fields["value"]["current_status"] == "ai_blocked"
+        assert mixed_fields["value"]["blocked_reasons"] == ["no_supporting_evidence"]
+        assert mixed_fields["adsorbate"]["current_status"] == "pending"
+
+        from app.config import get_settings
+        from app.services import ai_verification_service as service_module
+        before_targets = session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id))
+        before_audits = session.scalar(select(func.count(AuditLog.id)).where(AuditLog.paper_id == paper.id))
+        observed_read_only: list[str] = []
+        original_list = service_module.AIVerificationService.list_dft_record_tasks
+
+        def observe_real_transaction(self, **kwargs):
+            observed_read_only.append(str(self.session.scalar(text("SELECT current_setting('transaction_read_only')"))))
+            return original_list(self, **kwargs)
+
+        monkeypatch.setenv("LITAI_MCP_API_KEYS", "test_ai|Test AI|litmcp_test_ai|ai_verify_content")
+        get_settings.cache_clear()
+        monkeypatch.setattr(service_module.AIVerificationService, "list_dft_record_tasks", observe_real_transaction)
+        with mcp_auth_context("litmcp_test_ai"):
+            result = get_ai_verification_record_tasks(str(paper.id), limit=1)
+        assert result["postgres_transaction_read_only"] is True
+        assert observed_read_only == ["on"]
+        assert session.scalar(select(func.count(DFTResult.id)).where(DFTResult.paper_id == paper.id)) == before_targets
+        assert session.scalar(select(func.count(AuditLog.id)).where(AuditLog.paper_id == paper.id)) == before_audits
+        get_settings.cache_clear()

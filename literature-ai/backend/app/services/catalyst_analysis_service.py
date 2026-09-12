@@ -5,6 +5,7 @@ import io
 import json
 import math
 import re
+import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -617,6 +618,17 @@ def _stats(points: list[dict[str, Any]]) -> dict[str, float | None]:
     }
 
 
+_LOAD_ROWS_CACHE: dict[
+    tuple[str | None, bool],
+    tuple[float, list[_ReadyRow], Counter[str], dict[str, int]],
+] = {}
+_LOAD_ROWS_CACHE_TTL = 300.0  # 5 minutes
+
+
+def clear_catalyst_analysis_cache() -> None:
+    _LOAD_ROWS_CACHE.clear()
+
+
 class CatalystAnalysisService:
     """Read-only, catalyst-sample keyed analysis built on the export safety gate."""
 
@@ -633,6 +645,14 @@ class CatalystAnalysisService:
         *,
         pair_analysis: bool,
     ) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
+        normalized_lib = normalize_library_name(library_name) if library_name else None
+        cache_key = (normalized_lib, bool(pair_analysis))
+        now = time.monotonic()
+        if cache_key in _LOAD_ROWS_CACHE:
+            cached_time, cached_ready, cached_exclusions, cached_counts = _LOAD_ROWS_CACHE[cache_key]
+            if now - cached_time < _LOAD_ROWS_CACHE_TTL:
+                return list(cached_ready), Counter(cached_exclusions), dict(cached_counts)
+
         stmt = select(DFTResult, Paper).join(Paper, DFTResult.paper_id == Paper.id)
         if library_name:
             stmt = stmt.where(build_library_name_clause(Paper.library_name, normalize_library_name(library_name)))
@@ -710,7 +730,7 @@ class CatalystAnalysisService:
             ready.append(_ReadyRow(row=row, paper=paper, record=record, catalyst=catalyst))
             if pair_analysis and row.identity_version != 2:
                 legacy_pair_analysis_rows += 1
-        return ready, exclusion_reasons, {
+        counts = {
             "total_dft_rows": len(source_rows),
             "exportable_dft_rows": exportable,
             "v2_row_ready_numeric_rows": sum(
@@ -722,6 +742,8 @@ class CatalystAnalysisService:
             "legacy_pair_analysis_rows": legacy_pair_analysis_rows,
             "distinct_exportable_catalysts": len(exportable_catalysts),
         }
+        _LOAD_ROWS_CACHE[cache_key] = (now, list(ready), Counter(exclusion_reasons), dict(counts))
+        return ready, exclusion_reasons, counts
 
     def _load_ready_rows(self, library_name: str | None) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
         return self._load_rows(library_name, pair_analysis=False)
@@ -1120,4 +1142,92 @@ class CatalystAnalysisService:
                 "slope": stats["slope"],
                 "intercept": stats["intercept"],
             },
+        }
+
+    def correlation_matrix(
+        self,
+        library_name: str | None,
+        *,
+        min_n: int = 3,
+        fields: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Generate full pairwise correlation matrix for catalyst-level analysis fields."""
+        if fields is None:
+            fields = [f["key"] for f in self.field_registry() if f["type"] == "number"]
+
+        variables = [
+            {
+                "key": f,
+                "label": FIELD_REGISTRY[f]["label_zh"],
+                "label_zh": FIELD_REGISTRY[f]["label_zh"],
+                "unit": FIELD_REGISTRY[f]["unit"],
+                "type": FIELD_REGISTRY[f]["type"],
+            }
+            for f in fields
+            if f in FIELD_REGISTRY
+        ]
+
+        cells_map: dict[tuple[str, str], dict[str, Any]] = {}
+        for i, f1 in enumerate(fields):
+            for j in range(i, len(fields)):
+                f2 = fields[j]
+                try:
+                    res = self.correlation(
+                        library_name=library_name,
+                        x_field=f1,
+                        y_field=f2,
+                        min_n=min_n,
+                    )
+                    r = res.get("pearson")
+                    n = res.get("n_catalysts", 0)
+                    cell = {
+                        "x_property": f1,
+                        "y_property": f2,
+                        "target_property": f2,
+                        "descriptor": f1,
+                        "n": n,
+                        "pearson_r": r,
+                        "spearman_rho": res.get("spearman"),
+                        "slope": res.get("slope"),
+                        "intercept": res.get("intercept"),
+                        "status": "sufficient" if r is not None else "insufficient_paired_data",
+                        "color": (
+                            "positive"
+                            if r and r > 0
+                            else "negative"
+                            if r and r < 0
+                            else "gray"
+                        ),
+                        "source": "catalyst_analysis_service",
+                    }
+                except Exception:
+                    cell = {
+                        "x_property": f1,
+                        "y_property": f2,
+                        "target_property": f2,
+                        "descriptor": f1,
+                        "n": 0,
+                        "pearson_r": None,
+                        "spearman_rho": None,
+                        "slope": None,
+                        "intercept": None,
+                        "status": "insufficient_paired_data",
+                        "color": "gray",
+                        "source": "catalyst_analysis_service",
+                    }
+                cells_map[(f1, f2)] = cell
+                if f1 != f2:
+                    cells_map[(f2, f1)] = {
+                        **cell,
+                        "x_property": f2,
+                        "y_property": f1,
+                        "target_property": f1,
+                        "descriptor": f2,
+                    }
+
+        return {
+            "schema_version": "dft_catalyst_correlation_matrix_v1",
+            "min_n": min_n,
+            "variables": variables,
+            "cells": list(cells_map.values()),
         }

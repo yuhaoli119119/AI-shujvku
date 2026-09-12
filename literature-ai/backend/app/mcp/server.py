@@ -31,7 +31,11 @@ from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
 from app.rag.retrieval_intent import route_retrieval_intent
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
-from app.schemas.ai_verification import AIVerificationSubmission, SectionPageFragmentCandidateRef
+from app.schemas.ai_verification import (
+    AIVerificationSubmission,
+    AIVerificationSubmissionWire,
+    SectionPageFragmentCandidateRef,
+)
 from app.services.ai_verification_service import (
     AIVerificationService,
     AuthenticatedAIVerificationIdentity,
@@ -49,6 +53,9 @@ from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dat
 from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
+from app.services.ai_verification_batch_receipt_service import (
+    AIVerificationBatchReceiptService,
+)
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.evidence_page_recovery import PaperPageTextProvider
 from app.services.section_page_fragment_materialization_service import (
@@ -556,6 +563,7 @@ def get_ai_verification_tasks(
     offset: int = 0,
     recover_evidence: bool = True,
     target_type: str | None = None,
+    include_blocked: bool = False,
 ) -> dict[str, Any]:
     auth = require_mcp_capability("ai_verify_content")
     _authenticated_ai_verification_identity(auth)
@@ -568,6 +576,60 @@ def get_ai_verification_tasks(
             offset=int(offset),
             recover_evidence=recover_evidence,
             target_type=target_type,
+            include_blocked=include_blocked,
+        )
+        result["postgres_transaction_read_only"] = read_only_enforced
+        return result
+
+
+@mcp_server.tool(
+    name="get_ai_verification_record_tasks",
+    description=(
+        "Get a read-only keyset page of DFT record bundles for one paper. Each bundle groups all required "
+        "field decisions, snapshots, versions, persisted locators and shared PDF/SI page candidates for one "
+        "DFTResult. Use next_cursor rather than offsets: completed fields disappearing cannot skip records. "
+        "A record with pending work remains visible by default and may include ai_blocked fields as non-actionable "
+        "context; callers must not resubmit those fields. include_blocked=true additionally returns records whose "
+        "required fields are all currently ai_blocked."
+    ),
+)
+def get_ai_verification_record_tasks(
+    paper_id: str,
+    limit: int = 20,
+    cursor: str | None = None,
+    include_blocked: bool = False,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        read_only_enforced = _enforce_postgres_read_only_transaction(session)
+        result = AIVerificationService(session, settings).list_dft_record_tasks(
+            paper_id=UUID(paper_id),
+            limit=max(1, min(int(limit), 50)),
+            cursor=cursor,
+            include_blocked=include_blocked,
+        )
+        result["postgres_transaction_read_only"] = read_only_enforced
+        return result
+
+
+@mcp_server.tool(
+    name="get_ai_verification_web_apply_package",
+    description=(
+        "Return the complete current-paper DFT field-verification package for a web AI, including every keyset page, "
+        "real stored locator/table/page context, fingerprints, versions, and direct apply instructions. "
+        "This read-only tool does not download PDFs or require a JSON upload workflow."
+    ),
+)
+def get_ai_verification_web_apply_package(paper_id: str) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        read_only_enforced = _enforce_postgres_read_only_transaction(session)
+        result = AIVerificationService(session, settings).build_dft_direct_apply_package(
+            paper_id=UUID(paper_id),
         )
         result["postgres_transaction_read_only"] = read_only_enforced
         return result
@@ -635,6 +697,77 @@ def submit_ai_verification_batch(
         )
         result["postgres_transaction_read_only"] = read_only_enforced
         return result
+
+
+@mcp_server.tool(
+    name="apply_ai_verification_batch",
+    description=(
+        "Formally apply up to 20 current-paper DFT field decisions in one call. "
+        "Only accept, defer, and reject are allowed: this tool never changes original DFTResult fields. "
+        "The server validates each item independently, persists a request_id receipt in the same transaction as "
+        "the review writes, commits, then reads the actual stored review state from a new session. "
+        "Retry a lost response with the same request_id; use get_ai_verification_batch_receipt before retrying a timeout."
+    ),
+)
+def apply_ai_verification_batch(
+    paper_id: str,
+    request_id: str,
+    submissions: list[AIVerificationSubmissionWire],
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    identity = _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    target_paper_id = UUID(paper_id)
+    with session_scope(settings.database_url) as session:
+        receipt_service = AIVerificationBatchReceiptService(
+            session, AIVerificationService(session, settings),
+        )
+        receipt, replayed = receipt_service.apply(
+            paper_id=target_paper_id,
+            request_id=request_id,
+            submissions=submissions,
+            identity=identity,
+        )
+        if replayed:
+            # A prior response may have been lost after commit.  Re-run only
+            # the readback path; the unique request receipt prevents writes.
+            pass
+        else:
+            # The receipt and all field reviews become durable together before a
+            # separate session is allowed to describe their post-commit state.
+            session.commit()
+    try:
+        with session_scope(settings.database_url) as readback_session:
+            return AIVerificationBatchReceiptService(readback_session).attach_readback(
+                paper_id=target_paper_id,
+                request_id=request_id,
+                identity=identity,
+            )
+    except Exception as exc:
+        receipt["readback"] = {
+            "status": "not_confirmed_after_commit",
+            "reason": type(exc).__name__,
+            "instruction": "The write committed. Query get_ai_verification_batch_receipt with this request_id; do not resubmit it.",
+            "items": [],
+        }
+        return receipt
+
+
+@mcp_server.tool(
+    name="get_ai_verification_batch_receipt",
+    description=(
+        "Read the persistent result receipt for one direct AI verification request. "
+        "The authenticated identity, paper_id, and request_id must match the original apply call."
+    ),
+)
+def get_ai_verification_batch_receipt(paper_id: str, request_id: str) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    identity = _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return AIVerificationBatchReceiptService(session).get(
+            paper_id=UUID(paper_id), request_id=request_id, identity=identity,
+        )
 
 
 @mcp_server.tool(name="verify_dft_result", description="Legacy compatibility endpoint. Use submit_ai_verification_batch with ai_verify_content for deterministic single-AI verification; ordinary MCP identities cannot finalize review state.")

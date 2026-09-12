@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+import copy
 import math
 import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -1748,6 +1750,17 @@ def catalyst_correlation(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+_OVERVIEW_CACHE: dict[
+    tuple[Any, ...],
+    tuple[float, dict[str, Any]],
+] = {}
+_OVERVIEW_CACHE_TTL = 180.0  # 3 minutes
+
+
+def clear_visuals_overview_cache() -> None:
+    _OVERVIEW_CACHE.clear()
+
+
 @router.get("/overview")
 def visualization_overview(
     library_name: str | None = Query(default=None),
@@ -1766,8 +1779,24 @@ def visualization_overview(
     ),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    filters = _paper_filters(library_name)
     requested_sections = _requested_visual_sections(sections)
+    cache_key = (
+        normalize_library_name(library_name) if library_name else None,
+        (matrix_status or "all").strip().lower(),
+        corr_reaction,
+        corr_adsorbate,
+        corr_family,
+        corr_min_n,
+        corr_allow_exploratory,
+        frozenset(requested_sections),
+    )
+    now = time.monotonic()
+    if cache_key in _OVERVIEW_CACHE:
+        cached_time, cached_payload = _OVERVIEW_CACHE[cache_key]
+        if now - cached_time < _OVERVIEW_CACHE_TTL:
+            return copy.deepcopy(cached_payload)
+
+    filters = _paper_filters(library_name)
     dft_rows, gate_by_id = _load_visual_dft_rows(session, filters)
     dft_review_counts = _dft_review_counts_from_rows(dft_rows, gate_by_id)
     reviewed_only = (matrix_status or "all").strip().lower() in {"reviewed", "exportable", "trusted"}
@@ -1911,32 +1940,12 @@ def visualization_overview(
         )
 
     if "correlation" in requested_sections:
-        exploratory_index = (
-            _build_exploratory_descriptor_index(
-                dft_rows,
-                {str(item.id): item for item in catalysts},
-                eligible_result_ids={
-                    result_id
-                    for result_id, gate in gate_by_id.items()
-                    if gate.eligible
-                },
-                reaction_category=corr_reaction,
-                adsorbate=corr_adsorbate,
-                material_family=corr_family,
-            )
-            if corr_allow_exploratory
-            else {}
-        )
-        response["descriptor_correlation"] = _build_descriptor_correlation_summary_v2(
-            dataset or {},
-            exploratory_index,
+        response["descriptor_correlation"] = CatalystAnalysisService(session).correlation_matrix(
+            library_name=library_name,
             min_n=corr_min_n,
-            reaction_category=corr_reaction,
-            adsorbate=corr_adsorbate,
-            material_family=corr_family,
-            allow_exploratory=corr_allow_exploratory,
         )
 
+    _OVERVIEW_CACHE[cache_key] = (now, response)
     return response
 
 
@@ -1961,6 +1970,52 @@ def descriptor_correlation_pairs(
     x_raw = x_property or descriptor
     if not y_raw or not x_raw:
         raise HTTPException(status_code=400, detail="x_property/y_property or descriptor/target_property are required")
+
+    x_key = x_raw.strip().lower()
+    y_key = y_raw.strip().lower()
+    known_fields = {item["field"] for item in CatalystAnalysisService.field_registry()}
+    if x_key in known_fields and y_key in known_fields:
+        svc = CatalystAnalysisService(session)
+        corr_res = svc.correlation(
+            library_name=library_name,
+            x_field=x_key,
+            y_field=y_key,
+            min_n=min_n,
+        )
+        legacy_points = []
+        for p in corr_res.get("points", []):
+            legacy_points.append(
+                {
+                    "x": float(p["x"]["value"]),
+                    "y": float(p["y"]["value"]),
+                    "descriptor_unit": p["x"].get("unit"),
+                    "target_unit": p["y"].get("unit"),
+                    "paper_id": p["paper"].get("paper_id"),
+                    "paper_title": p["paper"].get("title"),
+                    "doi": p["paper"].get("doi"),
+                    "year": p["paper"].get("year"),
+                    "journal": p["paper"].get("journal"),
+                    "catalyst": p.get("catalyst_name"),
+                    "catalyst_sample_id": p.get("catalyst_sample_id"),
+                }
+            )
+        stats = corr_res.get("statistics") or {}
+        return {
+            "target_property": y_raw,
+            "descriptor": x_raw,
+            "y_property": y_raw,
+            "x_property": x_raw,
+            "pearson_r": stats.get("pearson_r"),
+            "spearman_rho": stats.get("spearman_rho"),
+            "slope": stats.get("slope"),
+            "intercept": stats.get("intercept"),
+            "r_squared": stats.get("r_squared"),
+            "n": len(legacy_points),
+            "points": legacy_points,
+            "source": "catalyst_analysis_service",
+            "ready": len(legacy_points) >= min_n,
+        }
+
     target = _canonical_property_type(y_raw)
     descriptor_key = _canonical_property_type(x_raw)
     filters = _paper_filters(library_name)

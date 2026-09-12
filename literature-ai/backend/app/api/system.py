@@ -96,6 +96,12 @@ async def get_agent_guide() -> dict:
                 "purpose": "Manually stream a temporary, compact DFT evidence package for a web AI or human reviewer. The ZIP is generated in memory and is not retained on the server.",
             },
             {
+                "name": "export_dft_direct_apply_bundle",
+                "method": "POST",
+                "path": "/api/papers/{paper_id}/dft-direct-apply-bundle",
+                "purpose": "Stream the main/SI PDF, table locators, and field snapshots for direct MCP DFT verification. It requires no returned JSON and is not retained on the server.",
+            },
+            {
                 "name": "validate_offline_dft_review_result",
                 "method": "POST",
                 "path": "/api/papers/{paper_id}/dft-review-result/validate",

@@ -103,6 +103,37 @@ def export_dft_review_bundle(
     )
 
 
+@router.post("/{paper_id}/dft-direct-apply-bundle")
+def export_dft_direct_apply_bundle(
+    paper_id: UUID,
+    include_figure_files: bool = Query(default=True),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    """Download the web-AI direct-MCP field-verification material ZIP."""
+
+    try:
+        bundle = DFTReviewBundleService(session, settings).build_direct_apply_zip(
+            paper_id, include_figure_files=include_figure_files,
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FigureTableReviewNotCompletedError as exc:
+        raise HTTPException(status_code=409, detail=exc.detail) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    content = bundle["content"]
+    return StreamingResponse(
+        BytesIO(content), media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{bundle["filename"]}"',
+            "Content-Length": str(len(content)), "Cache-Control": "no-store",
+            "X-LitAI-Bundle-Fingerprint": bundle["manifest"]["bundle_fingerprint"],
+            "X-LitAI-Direct-Apply": "true",
+        },
+    )
+
+
 @router.post("/{paper_id}/evidence-review-bundle")
 def export_evidence_review_bundle(
     paper_id: UUID,

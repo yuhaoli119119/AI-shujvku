@@ -620,6 +620,107 @@ class DFTReviewBundleService:
             "manifest": manifest,
         }
 
+    def build_direct_apply_zip(
+        self,
+        paper_id: UUID,
+        *,
+        include_figure_files: bool = True,
+    ) -> dict[str, Any]:
+        """Create an in-memory field-verification ZIP for a web AI.
+
+        The legacy ZIP is retained byte-for-byte in its existing route.  This
+        mode starts from the same production material collector (main paper,
+        explicit SI, tables, figures and source PDFs), removes the old JSON
+        return protocol, and adds only the direct MCP contract.
+        """
+        legacy = self.build_zip(
+            paper_id, explicit_paper_scope=True, include_figure_files=include_figure_files,
+        )
+        from app.services.ai_verification_service import AIVerificationService
+
+        tasks = AIVerificationService(self.session, self.settings).build_dft_direct_apply_package(
+            paper_id=paper_id,
+        )
+        # These files encode the legacy "fill a JSON and return PASS/REVISE"
+        # protocol.  Direct field application has its own task snapshot and
+        # must not ship competing instructions.
+        remove = {
+            "return_template.json", "WEB_AI_FILL_THIS.json", "OUTPUT_RULES.json",
+            "return_schema.json", "format_examples.json", "START_HERE.md", "instructions_for_web_ai.md",
+            "parsed/initial_dft_candidates.json", "parsed/dft_review_checklist.json",
+        }
+        with ZipFile(BytesIO(legacy["content"]), "r") as source:
+            files = {
+                item.filename: source.read(item.filename)
+                for item in source.infolist()
+                if item.filename not in remove and item.filename != "manifest.json"
+            }
+        instructions = """# Literature AI 字段级 DFT 直接核验
+
+这是当前一篇主文献及明确关联 SI 的只读材料包。不要生成、修复或上传审核 JSON。
+
+1. 打开 `direct_apply/field_tasks.json`，只处理 `current_status=pending` 的必审字段。
+2. 使用包中的真实 PDF、表格、页码和表格单元定位核验。`configuration_index` 只作上下文，绝不提交。
+3. 每次最多 20 项，直接调用 `apply_ai_verification_batch`。决定只能为 `accept`、`defer` 或 `reject`。
+4. `reject` 必须有同一真实来源页中的 `counter_evidence_text`、页码和定位；证据不足请用 `defer` 并给出 `blocked_reasons`。
+5. 发生格式错误时，仅以新 request_id 重提失败项；超时或响应丢失时先调用 `get_ai_verification_batch_receipt`，不得重提原 request_id。
+
+该包不要求用户回传文件；原有离线 JSON 审核包仍由旧入口兼容提供。
+"""
+        task_bytes = _json_bytes(tasks)
+        files["direct_apply/field_tasks.json"] = task_bytes
+        files["direct_apply/INSTRUCTIONS.md"] = instructions.encode("utf-8")
+        legacy_manifest = dict(legacy["manifest"])
+        legacy_source_fingerprint = legacy_manifest.get("bundle_fingerprint")
+        # The new manifest describes final direct-package members only.  It
+        # deliberately excludes itself, avoiding a circular hash and making
+        # every listed size/digest independently verifiable after download.
+        inventory = [
+            {"path": path, "size_bytes": len(data), "sha256": _sha256(data)}
+            for path, data in sorted(files.items())
+        ]
+        direct_fingerprint = _sha256(_canonical_json_bytes({
+            "schema_version": "dft_direct_apply_bundle.v1",
+            "task_snapshot_sha256": _sha256(task_bytes),
+            "files": inventory,
+        }))
+        direct_manifest = {
+            key: value
+            for key, value in legacy_manifest.items()
+            if key not in {"bundle_fingerprint", "files", "expected_dft_review_coverage"}
+        }
+        direct_manifest.update({
+            "schema_version": "dft_direct_apply_bundle.v1",
+            "workflow": "direct_mcp_apply",
+            "return_json_required": False,
+            "apply_tool": "apply_ai_verification_batch",
+            "receipt_tool": "get_ai_verification_batch_receipt",
+            "field_task_file": "direct_apply/field_tasks.json",
+            "task_snapshot_sha256": _sha256(task_bytes),
+            "bundle_fingerprint": direct_fingerprint,
+            "legacy_source_bundle_fingerprint": legacy_source_fingerprint,
+            "file_count": len(inventory),
+            "total_file_bytes": sum(item["size_bytes"] for item in inventory),
+            "files": inventory,
+            "direct_apply_contract": {
+                "target_type": "dft_results",
+                "decisions": ["accept", "defer", "reject"],
+                "submission": "direct_mcp_only",
+                "returned_json_required": False,
+            },
+        })
+        files["manifest.json"] = _json_bytes(direct_manifest)
+        buffer = BytesIO()
+        with ZipFile(buffer, "w", compression=ZIP_DEFLATED, compresslevel=6) as archive:
+            for path, data in sorted(files.items()):
+                archive.writestr(path, data)
+        paper_code = _safe_name(str(direct_manifest["paper"]["paper_code"]), "paper")
+        return {
+            "filename": f"{paper_code}_dft_direct_apply_bundle.zip",
+            "content": buffer.getvalue(),
+            "manifest": direct_manifest,
+        }
+
     def validate_result(
         self,
         paper_id: UUID,

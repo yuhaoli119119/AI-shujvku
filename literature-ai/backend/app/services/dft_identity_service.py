@@ -155,6 +155,13 @@ _V2_CONTEXT_ALIASES = {
     "xc_functional": "functional",
     "adsorption_configuration": "configuration",
     "site_configuration": "configuration",
+    # Extractors store the Table S2 configuration ordinal as ``configuration_index``
+    # inside ``evidence_payload.corrected_value``.  Without this alias the three
+    # configurations of one adsorption system collapse onto a single subject and
+    # are reported as a false "same subject, many observations" conflict.  The
+    # value is already present in stored evidence; this only lets the identity
+    # engine read it.  No new scientific value is introduced.
+    "configuration_index": "configuration",
     "surface_facet": "facet",
     "reaction_type": "pathway",
 }
