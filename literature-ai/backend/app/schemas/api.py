@@ -165,6 +165,7 @@ class PaperFigureResponse(BaseModel):
     reviewed_by: str | None = None
     conflict_count: int = 0
     field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
+    reading_explanation: dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -427,6 +428,7 @@ class PaperDetailResponse(PaperListItemResponse):
     sections: list[PaperSectionResponse] = Field(default_factory=list)
     tables: list[PaperTableResponse] = Field(default_factory=list)
     figures: list[PaperFigureResponse] = Field(default_factory=list)
+    reading_guide: dict[str, Any] | None = None
     paper_notes: list[dict[str, Any]] = Field(default_factory=list)
     dft_settings_items: list[DFTSettingResponse] = Field(default_factory=list)
     catalyst_samples_items: list[CatalystSampleResponse] = Field(default_factory=list)

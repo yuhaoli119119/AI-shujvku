@@ -99,6 +99,7 @@ class Paper(Base):
     serial_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
     paper_code: Mapped[str | None] = mapped_column(sa.String(16), nullable=True, unique=True, index=True)
     comprehensive_analysis: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    reading_guide: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     paper_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True, index=True)
     type_confidence: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
     classification_source: Mapped[str | None] = mapped_column(sa.String(20), nullable=True)
@@ -318,6 +319,7 @@ class PaperFigure(Base):
     content_summary: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     key_elements: Mapped[list | None] = mapped_column(json_type(), nullable=True)
     prov: Mapped[list | None] = mapped_column(json_type(), nullable=True)
+    reading_explanation: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     figure_label: Mapped[str | None] = mapped_column(sa.String(64), nullable=True, index=True)
     crop_status: Mapped[str] = mapped_column(
         sa.String(32),

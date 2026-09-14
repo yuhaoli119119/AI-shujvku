@@ -3729,3 +3729,61 @@ def create_share_token(
             "api_base": f"{base_url}/api/share/{token_str}",
             "created_by": auth.source_prefix,
         }
+
+
+# ---------------------------------------------------------------------------
+# Evidence-backed figure reading and server-side reading-guide export
+# ---------------------------------------------------------------------------
+
+@mcp_server.tool(
+    name="get_figure_reading_context",
+    description="Read one figure, its caption, body-text citations, current interpretation, and lightweight linked-SI context.",
+)
+def get_figure_reading_context(paper_id: str, figure_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    from app.services.figure_reading_service import FigureReadingService
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
+        return FigureReadingService(session, settings).get_figure_reading_context(UUID(paper_id), UUID(figure_id))
+
+
+@mcp_server.tool(
+    name="validate_figure_reading",
+    description="Validate a proposed evidence-backed figure interpretation without writing to PostgreSQL.",
+)
+def validate_figure_reading(paper_id: str, figure_id: str, reading_payload: dict[str, Any]) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    from app.services.figure_reading_service import FigureReadingService
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
+        return FigureReadingService(session, settings).validate_figure_reading(
+            UUID(paper_id), UUID(figure_id), reading_payload
+        )
+
+
+@mcp_server.tool(
+    name="apply_figure_reading",
+    description="Apply a figure interpretation only after strict evidence validation; does not change scientific review or DFT gates.",
+)
+def apply_figure_reading(paper_id: str, figure_id: str, reading_payload: dict[str, Any]) -> dict[str, Any]:
+    require_mcp_capability("ai_verify_content")
+    from app.services.figure_reading_service import FigureReadingService
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return FigureReadingService(session, settings).apply_figure_reading(
+            UUID(paper_id), UUID(figure_id), reading_payload
+        )
+
+
+@mcp_server.tool(
+    name="export_paper_reading_guide_html",
+    description="Generate a self-contained paper reading-guide HTML file on the server and return its path, size, and SHA-256.",
+)
+def export_paper_reading_guide_html(paper_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    from app.services.figure_reading_service import FigureReadingService
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        return FigureReadingService(session, settings).export_offline_html(UUID(paper_id))

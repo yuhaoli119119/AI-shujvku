@@ -1794,3 +1794,93 @@ async def create_paper_relationship(
     session.add(rel)
     session.commit()
     return RelationshipCreateResponse(status="created", id=rel.id)
+
+
+# ---------------------------------------------------------------------------
+# Figure Reading & Reading Guide Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{paper_id}/figures/{figure_id}/reading-context")
+async def get_figure_reading_context(
+    paper_id: UUID,
+    figure_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    from app.services.figure_reading_service import FigureReadingService
+    svc = FigureReadingService(session)
+    try:
+        return svc.get_figure_reading_context(paper_id, figure_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/figures/{figure_id}/reading/validate")
+async def validate_figure_reading(
+    paper_id: UUID,
+    figure_id: UUID,
+    payload: dict[str, Any],
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    from app.services.figure_reading_service import FigureReadingService
+    svc = FigureReadingService(session)
+    return svc.validate_figure_reading(paper_id, figure_id, payload)
+
+
+@router.post("/{paper_id}/figures/{figure_id}/reading/apply")
+async def apply_figure_reading(
+    paper_id: UUID,
+    figure_id: UUID,
+    payload: dict[str, Any],
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    from app.services.figure_reading_service import FigureReadingService
+    svc = FigureReadingService(session)
+    try:
+        return svc.apply_figure_reading(paper_id, figure_id, payload)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{paper_id}/reading-guide")
+async def get_paper_reading_guide(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    from app.services.figure_reading_service import FigureReadingService
+    svc = FigureReadingService(session)
+    try:
+        return svc.get_paper_reading_guide_data(paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/reading-guide")
+async def save_paper_reading_guide(
+    paper_id: UUID,
+    payload: dict[str, Any],
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    from app.services.figure_reading_service import FigureReadingService
+    svc = FigureReadingService(session)
+    try:
+        return svc.save_paper_reading_guide(paper_id, payload)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/reading-guide/export-html")
+async def export_paper_reading_guide_html(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Generate the self-contained guide on the server; never trigger a client download."""
+    from app.services.figure_reading_service import FigureReadingService
+    try:
+        return FigureReadingService(session).export_offline_html(paper_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

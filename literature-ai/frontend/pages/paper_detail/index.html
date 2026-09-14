@@ -121,6 +121,38 @@
     .section-title .section-page { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
     .section-content { font-size: 14px; color: var(--color-text); line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
 
+    @keyframes pulseHighlight {
+      0% { background-color: rgba(99, 102, 241, 0.25); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.3); }
+      50% { background-color: rgba(99, 102, 241, 0.15); box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+      100% { background-color: transparent; box-shadow: none; }
+    }
+    .evidence-highlight-pulse {
+      animation: pulseHighlight 2.5s ease-out;
+      border-radius: 6px;
+    }
+    .pd-reading-locator-chip.clickable {
+      cursor: pointer;
+      border: 1px solid rgba(99, 102, 241, 0.25);
+      background: var(--color-surface-alt, #f8fafc);
+      color: var(--color-primary, #6366f1);
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      display: inline-flex;
+      align-items: center;
+      text-decoration: none;
+      transition: all 0.15s ease;
+      font-weight: 500;
+      font-family: inherit;
+      line-height: 1.3;
+    }
+    .pd-reading-locator-chip.clickable:hover {
+      background: var(--color-primary, #6366f1);
+      color: #ffffff !important;
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(99, 102, 241, 0.2);
+    }
+
     /* ---- Structured cards (general) ---- */
     .structured-card { border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); padding: 12px 14px; margin-bottom: 10px; }
     .structured-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-weight: 700; margin-bottom: 8px; font-size: 14px; }
@@ -148,22 +180,40 @@
     .pd-evidence-detail-row strong { color: var(--color-text); font-weight: 600; }
     .pd-evidence-detail-text { white-space: pre-wrap; font-size: 13px; line-height: 1.75; color: var(--color-text); margin-top: 8px; padding: 10px 12px; background: var(--color-surface-alt); border-radius: var(--radius); border-left: 3px solid var(--color-primary); }
 
-    /* ---- Figure Gallery ---- */
-    .pd-figure-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+    /* ---- Figure Gallery & Modern Reading Block ---- */
+    .pd-figure-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
     @media (min-width: 1700px) { .pd-figure-gallery { grid-template-columns: repeat(3, 1fr); } }
-    .pd-figure-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); overflow: hidden; }
+    .pd-figure-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); overflow: hidden; display: flex; flex-direction: column; transition: box-shadow 0.2s; }
+    .pd-figure-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
     .pd-figure-img-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 340px; display: flex; align-items: center; justify-content: center; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); cursor: zoom-in; overflow: hidden; }
     .pd-figure-img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .pd-figure-img-wrap.is-failed .pd-figure-img { display: none; }
     .pd-figure-img-wrap.is-failed::after { content: "图像暂不可用"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
     .pd-figure-img-fallback { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
-    .pd-figure-body { padding: 12px 14px; }
-    .pd-figure-label { font-size: 13px; font-weight: 700; color: var(--color-text); }
-    .pd-figure-caption { font-size: 12.5px; color: var(--color-text-secondary); margin-top: 4px; line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
-    .pd-figure-meta { font-size: 11px; color: var(--color-text-muted); margin-top: 6px; }
-    .pd-figure-tech { margin-top: 10px; border-top: 1px dashed var(--color-border); padding-top: 8px; }
-    .pd-figure-tech summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--color-primary); }
-    .pd-figure-tech summary::marker { color: var(--color-text-muted); }
+    .pd-figure-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
+    .pd-figure-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .pd-figure-label { font-size: 14px; font-weight: 700; color: var(--color-text); }
+    .pd-figure-page-badge { font-size: 11.5px; padding: 2px 8px; border-radius: 4px; background: var(--color-surface-alt); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
+
+    /* 图片解读区块 */
+    .pd-figure-reading-block { background: var(--color-surface-alt); border-radius: 8px; padding: 12px; border-left: 3px solid var(--color-primary); display: flex; flex-direction: column; gap: 8px; }
+    .pd-reading-badge-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; }
+    .pd-reading-title { font-weight: 700; color: var(--color-primary); font-size: 12px; display: flex; align-items: center; gap: 4px; }
+    .pd-reading-summary { font-size: 13px; font-weight: 600; color: var(--color-text); line-height: 1.55; }
+    .pd-reading-core { font-size: 12.5px; color: var(--color-text); line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
+    .pd-reading-details { margin-top: 4px; border-top: 1px dashed var(--color-border); padding-top: 6px; }
+    .pd-reading-details summary { font-size: 12px; font-weight: 600; color: var(--color-primary); cursor: pointer; }
+    .pd-reading-subfig-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .pd-reading-subfig-item { font-size: 12px; background: var(--color-surface); padding: 6px 8px; border-radius: 6px; border: 1px solid var(--color-border); line-height: 1.5; }
+    .pd-reading-subfig-label { font-weight: 700; color: var(--color-primary); margin-right: 4px; }
+    .pd-reading-locators { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .pd-reading-locator-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #e0f2fe; color: #0369a1; border: 1px solid #bae6fd; text-decoration: none; }
+    .pd-reading-uncertainty { font-size: 12px; color: #b45309; background: #fef3c7; border: 1px solid #fde68a; padding: 6px 8px; border-radius: 6px; margin-top: 6px; }
+
+    /* 原文图注与技术信息折叠 */
+    .pd-figure-caption-details, .pd-figure-tech { border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 10px; background: var(--color-surface); font-size: 12px; }
+    .pd-figure-caption-details summary, .pd-figure-tech summary { cursor: pointer; font-weight: 600; color: var(--color-text-secondary); user-select: none; }
+    .pd-figure-caption-text { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--color-text-secondary); white-space: pre-wrap; word-break: break-word; }
 
     /* ---- Mechanism Claim Card ---- */
     .pd-mechanism-card { padding: 14px 16px; }
@@ -176,51 +226,63 @@
     .pd-mechanism-evidence-text { font-size: 13px; color: var(--color-text); line-height: 1.7; padding: 8px 12px; background: var(--color-surface-alt); border-radius: 6px; border-left: 3px solid var(--color-primary); }
 
     /* ---- DFT record ---- */
-    .dft-compact-card { padding: 0; margin-bottom: 10px; overflow: hidden; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; }
-    .dft-compact-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
-    .dft-record-locator { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface); }
-    .dft-compact-card .dft-record-locator { flex: 1; min-width: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
-    .dft-record-locator code { min-width: 0; color: var(--color-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+    .dft-compact-card { padding: 0; margin-bottom: 0; overflow: hidden; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+    .dft-compact-card:hover { border-color: rgba(100, 66, 214, 0.3); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); }
+    .dft-compact-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--color-border); background: var(--color-surface-alt); }
+    .dft-record-locator { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 0; padding: 0; border: 0; background: transparent; }
+    .dft-compact-card .dft-record-locator { flex: 0 0 auto; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
+    .dft-record-locator code { min-width: 0; color: var(--color-text-secondary); font-size: 11.5px; overflow-wrap: anywhere; }
     .dft-record-locator .btn { margin-left: auto; }
-    .dft-record-number { font-size: 12px; font-weight: 700; }
-    .dft-card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .dft-mainline { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 12px; align-items: center; }
-    .dft-material-name { min-width: 0; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; font-size: 14px; }
-    .dft-property-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 6px; color: var(--color-text-secondary); font-size: 12px; }
-    .dft-reaction-step { margin-top: 7px; color: var(--color-text); font-size: 13px; line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .dft-value-block { min-width: 88px; max-width: 128px; padding: 8px 10px; border-left: 3px solid var(--color-primary); border-radius: 6px; background: var(--color-primary-bg); text-align: right; }
-    .dft-value-block strong { display: block; color: var(--color-primary); font-size: 20px; line-height: 1.05; overflow-wrap: anywhere; font-weight: 700; }
-    .dft-value-block span { display: block; margin-top: 4px; color: var(--color-text-secondary); font-size: 12px; }
-    .dft-meta-strip { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 0 12px 12px; color: var(--color-text-secondary); font-size: 12px; }
-    .dft-status-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 3px 8px; border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+    .dft-record-number { font-size: 11.5px; font-weight: 700; font-family: var(--font-mono, monospace); color: var(--color-text-secondary); }
+    .dft-card-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+    .dft-card-actions .btn.small { padding: 2px 7px; font-size: 11.5px; height: 24px; line-height: 1.2; }
+    .dft-mainline { display: flex; flex-direction: column; gap: 5px; padding: 9px 10px 6px; }
+    .dft-card-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .dft-card-identity { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+    .dft-material-name { min-width: 0; font-weight: 700; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; color: var(--color-text); }
+    .dft-adsorbate-chip { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 11.5px; font-weight: 600; color: var(--color-primary); background: var(--color-primary-bg); border: 1px solid rgba(100, 66, 214, 0.2); border-radius: 4px; white-space: nowrap; flex-shrink: 0; line-height: 1.35; }
+    .dft-value-badge, .dft-value-block { display: inline-flex; align-items: baseline; justify-content: flex-end; gap: 3px; padding: 2px 8px; background: var(--color-primary-bg); border: 1px solid rgba(100, 66, 214, 0.25); border-radius: 5px; flex-shrink: 0; white-space: nowrap; line-height: 1; min-width: unset; max-width: unset; text-align: right; }
+    .dft-value-badge strong, .dft-value-block strong { font-family: var(--font-mono, ui-monospace, monospace); font-size: 14.5px; font-weight: 700; color: var(--color-primary); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; line-height: 1.2; display: inline; }
+    .dft-value-badge span, .dft-value-block span { font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; font-weight: 500; color: var(--color-text-secondary); line-height: 1; display: inline; margin-top: 0; }
+    .dft-property-line { display: flex; align-items: center; gap: 5px; color: var(--color-text-secondary); font-size: 11.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 0; }
+    .dft-property-line .dft-prop-type { font-weight: 500; flex-shrink: 0; }
+    .dft-property-line .dft-divider { color: var(--color-text-muted); flex-shrink: 0; }
+    .dft-property-line .dft-step-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-muted); }
+    .dft-property-line .dft-step-text.has-step { color: var(--color-text); font-weight: 500; }
+    .dft-reaction-step { margin-top: 2px; color: var(--color-text-secondary); font-size: 11.5px; line-height: 1.4; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .dft-meta-strip { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; padding: 0 10px 8px; color: var(--color-text-secondary); font-size: 11px; }
+    .dft-status-chip { display: inline-flex; align-items: center; max-width: 100%; padding: 2px 7px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-surface-alt); color: var(--color-text-secondary); font-size: 11px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
     .dft-status-chip.ok { border-color: rgba(22,163,74,0.22); background: rgba(22, 163, 74, 0.10); color: #16A34A; }
     .dft-status-chip.warn { border-color: rgba(217,119,6,0.25); background: var(--color-warning-bg); color: var(--color-warning); }
     .dft-status-chip.danger { border-color: rgba(220,38,38,0.22); background: rgba(220, 38, 38, 0.10); color: #DC2626; }
     .dft-detail-toggle { border-top: 1px dashed var(--color-border); }
-    .dft-detail-toggle > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; color: var(--color-primary); font-size: 12px; font-weight: 600; list-style: none; }
+    .dft-detail-toggle > summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; color: var(--color-primary); font-size: 11.5px; font-weight: 600; list-style: none; }
     .dft-detail-toggle > summary::-webkit-details-marker { display: none; }
-    .dft-detail-toggle > summary::after { content: "▼"; color: var(--color-text-muted); font-size: 10px; transition: transform 0.2s ease; }
+    .dft-detail-toggle > summary::after { content: "▼"; color: var(--color-text-muted); font-size: 9px; transition: transform 0.2s ease; }
     .dft-detail-toggle:not([open]) > summary::after { transform: rotate(-90deg); }
-    .dft-detail-body { display: grid; gap: 10px; padding: 0 12px 12px; }
-    .dft-detail-block { border-left: 3px solid var(--color-border-strong); padding-left: 10px; min-width: 0; }
-    .dft-detail-label { margin-bottom: 4px; color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
-    .dft-detail-text { color: var(--color-text); font-size: 13px; line-height: 1.65; overflow-wrap: anywhere; }
-    .dft-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 12px; margin: 0; }
+    .dft-detail-body { display: grid; gap: 8px; padding: 0 10px 10px; }
+    .dft-detail-block { border-left: 3px solid var(--color-border-strong); padding-left: 8px; min-width: 0; }
+    .dft-detail-label { margin-bottom: 3px; color: var(--color-text-secondary); font-size: 11.5px; font-weight: 600; }
+    .dft-detail-text { color: var(--color-text); font-size: 12.5px; line-height: 1.6; overflow-wrap: anywhere; }
+    .dft-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 6px 10px; margin: 0; }
     .dft-detail-grid div { min-width: 0; }
-    .dft-detail-grid dt { color: var(--color-text-secondary); font-size: 11px; font-weight: 600; }
-    .dft-detail-grid dd { margin: 2px 0 0; color: var(--color-text); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
-    .dft-compact-card .raw-data-toggle { margin-top: 0; padding-top: 8px; }
+    .dft-detail-grid dt { color: var(--color-text-secondary); font-size: 10.5px; font-weight: 600; }
+    .dft-detail-grid dd { margin: 2px 0 0; color: var(--color-text); font-size: 11.5px; line-height: 1.45; overflow-wrap: anywhere; }
+    .dft-compact-card .raw-data-toggle { margin-top: 0; padding-top: 6px; }
     .dft-collection-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius); background: var(--color-surface-alt); }
     .dft-collection-title { font-weight: 700; }
     .dft-collection-metrics { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .dft-results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 10px; align-items: start; }
+    .dft-results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; align-items: start; }
     .dft-pagination { display:flex; align-items:center; justify-content:center; gap:12px; margin:14px 0; color:var(--color-text-secondary); font-size: 13px; }
 
     /* ---- Tables (paper markdown tables) ---- */
-    .md-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-    .md-table th, .md-table td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; vertical-align: top; }
-    .md-table th { background: var(--color-surface-alt); font-weight: 700; white-space: nowrap; }
-    .md-table td { background: var(--color-surface); line-height: 1.5; }
+    .md-table-scroll { max-width: 100%; overflow-x: auto; margin: 6px 0; border: 1px solid var(--color-border); border-radius: 6px; }
+    .md-table-note { margin: 6px 0; font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.5; }
+    .md-table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 0; }
+    .md-table th, .md-table td { border: 1px solid var(--color-border); padding: 6px 10px; text-align: left; vertical-align: middle; }
+    .md-table th { background: var(--color-surface-alt); font-weight: 700; white-space: nowrap; color: var(--color-text); }
+    .md-table td { background: var(--color-surface); line-height: 1.5; color: var(--color-text); }
+    .md-table tr:hover td { background: var(--color-surface-alt); }
 
     /* ---- KV grid (research notes style) ---- */
     .kv-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
@@ -273,16 +335,25 @@
     .dft-edit-note { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--color-warning); border-radius: var(--radius); background: var(--color-warning-bg); font-size: 13px; line-height: 1.6; }
     .dft-edit-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 
-    /* ---- Figure Lightbox ---- */
-    .pd-lightbox { position: fixed; inset: 0; z-index: 3000; display: none; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.88); padding: 32px; }
-    .pd-lightbox-content { max-width: 90vw; max-height: 90vh; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-    .pd-lightbox-content img { max-width: 90vw; max-height: 75vh; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
-    .pd-lightbox-meta { text-align: center; color: #fff; max-width: 600px; }
-    .pd-lightbox-label { font-size: 15px; font-weight: 700; }
-    .pd-lightbox-caption { font-size: 13px; line-height: 1.6; margin-top: 4px; color: rgba(255,255,255,0.85); }
-    .pd-lightbox-page { font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 4px; }
-    .pd-lightbox-close { position: fixed; top: 20px; right: 24px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,255,255,0.15); color: #fff; font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
-    .pd-lightbox-close:hover { background: rgba(255,255,255,0.3); }
+    /* ---- Figure Lightbox (Two-Column Responsive) ---- */
+    .pd-lightbox { position: fixed; inset: 0; z-index: 3000; display: none; align-items: stretch; justify-content: center; background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(4px); padding: 20px; box-sizing: border-box; }
+    .pd-lightbox-container { display: flex; width: 100%; max-width: 1500px; height: 100%; gap: 20px; align-items: stretch; }
+    .pd-lightbox-image-pane { flex: 1 1 65%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; min-width: 0; }
+    .pd-lightbox-image-pane img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; border-radius: 8px; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+    .pd-lightbox-nav-btn { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; border-radius: 50%; border: 0; background: rgba(255,255,255,0.2); color: #fff; font-size: 22px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; z-index: 10; }
+    .pd-lightbox-nav-btn:hover { background: rgba(255,255,255,0.4); }
+    .pd-lightbox-nav-btn.prev { left: 16px; }
+    .pd-lightbox-nav-btn.next { right: 16px; }
+    .pd-lightbox-sidebar { flex: 0 0 420px; max-width: 440px; background: var(--color-surface); border-radius: 12px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 1px solid var(--color-border); }
+    .pd-lightbox-sidebar-head { padding: 14px 18px; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; justify-content: space-between; background: var(--color-surface-alt); }
+    .pd-lightbox-sidebar-body { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+    .pd-lightbox-close { position: fixed; top: 20px; right: 24px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255,255,255,0.25); color: #fff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; z-index: 3010; transition: background 0.2s; }
+    .pd-lightbox-close:hover { background: rgba(255,255,255,0.4); }
+    @media (max-width: 960px) {
+      .pd-lightbox-container { flex-direction: column; overflow-y: auto; }
+      .pd-lightbox-sidebar { flex: 1 1 auto; max-width: 100%; }
+      .pd-lightbox-image-pane img { max-height: 50vh; }
+    }
 
     /* ---- Skeleton (lightweight loading) ---- */
     @keyframes pdSkelShimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
@@ -387,6 +458,7 @@
           </div>
           <div class="pd-actions">
             <button class="btn btn-primary btn-sm" type="button" id="pdViewPdfBtn" onclick="viewPaperPdf()">查看 PDF</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="pdExportGuideBtn" onclick="exportReadingGuideHtml()" title="导出包含全文研究脉络、图片科学解读与已核验DFT分析的离线HTML导读"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出导读 HTML</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="loadPaperData()">刷新详情</button>
             <button class="btn btn-ghost btn-sm" type="button" id="pdReparseBtn" onclick="reparsePaperDetail()">重新解析</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="togglePdMoreMenu(event)">更多操作 ▾</button>
@@ -434,7 +506,7 @@
           </div>
 
           <div id="tab-summary" class="tab-pane active">
-            <div class="panel-card"><div class="panel-title">摘要</div><div id="paperAbstract" class="prewrap"></div></div>
+            <div class="panel-card"><div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">摘要 <button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" style="display:none;">查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div></div>
             <div id="paperKeywordsPanel" class="pd-keywords" style="display:none;"></div>
             <div class="panel-card">
               <div class="panel-title">研究重点 / 综合分析</div>
@@ -532,12 +604,23 @@
   </div>
   <div id="toast" class="toast"></div>
     <div id="pdLightbox" class="pd-lightbox" onclick="closeFigureLightbox(event)" style="display:none;">
-      <div class="pd-lightbox-content">
-        <img id="pdLightboxImg" src="" alt="">
-        <div class="pd-lightbox-meta">
-          <div id="pdLightboxLabel" class="pd-lightbox-label"></div>
-          <div id="pdLightboxCaption" class="pd-lightbox-caption"></div>
-          <div id="pdLightboxPage" class="pd-lightbox-page"></div>
+      <div class="pd-lightbox-container" onclick="event.stopPropagation()">
+        <div class="pd-lightbox-image-pane">
+          <button class="pd-lightbox-nav-btn prev" type="button" onclick="prevFigureInLightbox(event)" title="上一张 (←)">‹</button>
+          <img id="pdLightboxImg" src="" alt="">
+          <button class="pd-lightbox-nav-btn next" type="button" onclick="nextFigureInLightbox(event)" title="下一张 (→)">›</button>
+        </div>
+        <div class="pd-lightbox-sidebar">
+          <div class="pd-lightbox-sidebar-head">
+            <div>
+              <div id="pdLightboxLabel" class="pd-figure-label" style="font-size:16px;"></div>
+              <div id="pdLightboxPage" class="muted" style="font-size:12px;margin-top:2px;"></div>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="closeFigureLightbox(event)">关闭 ✕</button>
+          </div>
+          <div id="pdLightboxReadingContent" class="pd-lightbox-sidebar-body">
+            <!-- 动态渲染图片解读、一句话概括、核心解读、子图、证据与图注 -->
+          </div>
         </div>
       </div>
       <button class="pd-lightbox-close" onclick="closeFigureLightbox(event)" title="关闭 (ESC)">✕</button>
@@ -704,30 +787,73 @@
 
     function renderPipeTable(md) {
       if (!md || typeof md !== "string") return "";
-      var lines = md.trim().split("\n");
-      if (lines.length < 3) return '<pre class="mono">' + esc(md) + '</pre>';
-      var allPipe = true;
-      for (var i = 0; i < Math.min(lines.length, 3); i++) {
-        var t = lines[i].trim();
-        if (!(t.indexOf("|") === 0 && t.lastIndexOf("|") === t.length - 1)) { allPipe = false; break; }
+      var lines = md.replace(/\r\n?/g, "\n").split("\n");
+
+      function splitRow(line) {
+        var value = line.trim();
+        if (value.charAt(0) === "|") value = value.slice(1);
+        if (value.charAt(value.length - 1) === "|" && value.charAt(value.length - 2) !== "\\") value = value.slice(0, -1);
+        var cells = [];
+        var cell = "";
+        for (var i = 0; i < value.length; i++) {
+          if (value.charAt(i) === "\\" && value.charAt(i + 1) === "|") {
+            cell += "|";
+            i += 1;
+          } else if (value.charAt(i) === "|") {
+            cells.push(cell.trim());
+            cell = "";
+          } else {
+            cell += value.charAt(i);
+          }
+        }
+        cells.push(cell.trim());
+        return cells;
       }
-      if (!allPipe) return '<pre class="mono">' + esc(md) + '</pre>';
-      // Too many columns → keep as monospace to avoid layout breakage
-      var colCount = lines[0].split("|").slice(1, -1).length;
-      if (colCount > 6) return '<pre class="mono">' + esc(md) + '</pre>';
-      var html = '<table class="md-table"><thead><tr>';
-      var headers = lines[0].split("|").slice(1, -1);
+
+      function isSeparator(line) {
+        if (line.indexOf("|") < 0) return false;
+        var cells = splitRow(line);
+        return cells.length >= 2 && cells.every(function(cell) {
+          return /^:?-{3,}:?$/.test(cell.replace(/\s/g, ""));
+        });
+      }
+
+      var separatorIndex = -1;
+      for (var lineIndex = 1; lineIndex < lines.length; lineIndex++) {
+        if (lines[lineIndex - 1].indexOf("|") >= 0 && isSeparator(lines[lineIndex])) {
+          separatorIndex = lineIndex;
+          break;
+        }
+      }
+      if (separatorIndex < 0) return '<pre class="mono">' + esc(md) + '</pre>';
+
+      var headers = splitRow(lines[separatorIndex - 1]);
+      var colCount = headers.length;
+      var rowLines = [];
+      var tableEnd = separatorIndex;
+      for (var rowIndex = separatorIndex + 1; rowIndex < lines.length; rowIndex++) {
+        var rowLine = lines[rowIndex].trim();
+        if (!rowLine || rowLine.indexOf("|") < 0) break;
+        rowLines.push(rowLine);
+        tableEnd = rowIndex;
+      }
+
+      var before = lines.slice(0, separatorIndex - 1).join("\n").trim();
+      var after = lines.slice(tableEnd + 1).join("\n").trim();
+      var html = before ? '<div class="md-table-note">' + esc(before) + '</div>' : '';
+      html += '<div class="md-table-scroll"><table class="md-table"><thead><tr>';
       headers.forEach(function(h) { html += '<th>' + esc(h.trim()) + '</th>'; });
       html += '</tr></thead><tbody>';
-      for (var j = 1; j < lines.length; j++) {
-        var line = lines[j].trim();
-        if (/^\|[\s\-:]+\|/.test(line)) continue;
+      rowLines.forEach(function(line) {
         html += '<tr>';
-        var cells = line.split("|").slice(1, -1);
-        cells.forEach(function(c) { html += '<td>' + esc(c.trim()) + '</td>'; });
+        var cells = splitRow(line);
+        for (var cellIndex = 0; cellIndex < colCount; cellIndex++) {
+          html += '<td>' + esc(cells[cellIndex] || '') + '</td>';
+        }
         html += '</tr>';
-      }
-      html += '</tbody></table>';
+      });
+      html += '</tbody></table></div>';
+      if (after) html += '<div class="md-table-note">' + esc(after) + '</div>';
       return html;
     }
 
@@ -1076,12 +1202,17 @@
     function renderDftCompactCard(item, index) {
       item = item || {};
       const resultId = String(item.id || "").trim();
-      const catalyst = dftCatalystLabel(item);
-      const adsorbate = prettyChemicalFormula(dftReadableText(item.adsorbate, "吸附物未记录"));
+      const rawCatalyst = dftCatalystLabel(item);
+      const catalyst = prettyChemicalFormula(rawCatalyst);
+      const rawAdsorbate = String(item.adsorbate || "").trim();
+      const hasRealAdsorbate = rawAdsorbate && rawAdsorbate !== "-" && rawAdsorbate !== "吸附物未记录";
+      const adsorbate = hasRealAdsorbate ? prettyChemicalFormula(rawAdsorbate) : "";
       const propertyType = propertyTypeLabel(item.property_type || item.energy_type) || "性质未记录";
       const value = dftReadableText(item.value, "-");
       const unit = dftReadableText(item.unit, "");
-      const reactionStep = dftReadableText(item.reaction_step, "反应步骤未记录");
+      const rawStep = String(item.reaction_step || "").trim();
+      const hasRealStep = rawStep && rawStep !== "-" && rawStep !== "反应步骤未记录";
+      const reactionStep = hasRealStep ? rawStep : "反应步骤未记录";
       const source = item.source_figure || item.source_section || dftAnchorSummary(item.binding_evidence_anchor);
       const confidence = dftConfidenceLabel(item.confidence);
       const candidateLabel = dftCandidateStatusLabel(item.candidate_status);
@@ -1097,13 +1228,7 @@
         confidence ? renderDftStatusChip("置信度 " + confidence, dftStatusTone(confidence)) : "",
         item.ai_review_display_label ? renderDftStatusChip(item.ai_review_display_label, item.ai_review_display_class || dftStatusTone(item.ai_review_display_label), item.ai_review_display_reason) : ""
       ].filter(Boolean).join("");
-      // Keep bindingLabel / candidateLabel for the technical-info collapsible only
-      const bindingTechInfo = (bindingLabel || candidateLabel)
-        ? '<div class="kv-grid" style="margin-top:8px;">'
-          + (bindingLabel ? '<div class="kv-item"><div class="kv-label">材料绑定</div><div class="kv-value">' + esc(item.material_binding_status || bindingLabel) + '</div></div>' : "")
-          + (candidateLabel ? '<div class="kv-item"><div class="kv-label">候选状态</div><div class="kv-value">' + esc(item.candidate_status || candidateLabel) + '</div></div>' : "")
-          + '</div>'
-        : "";
+
       const reviewReason = item.latest_object_review_audit && item.latest_object_review_audit.reason;
       const anchorText = dftAnchorSummary(item.binding_evidence_anchor);
       const rawJson = esc(JSON.stringify(item || {}, null, 2));
@@ -1117,18 +1242,20 @@
             </div>
           </div>
           <div class="dft-mainline">
-            <div>
-              <div class="dft-material-name">${esc(catalyst)}</div>
-              <div class="dft-property-line">
-                <span>${esc(adsorbate)}</span>
-                <span>·</span>
-                <span>${esc(propertyType)}</span>
+            <div class="dft-card-top-row">
+              <div class="dft-card-identity">
+                <span class="dft-material-name" title="${esc(rawCatalyst)}">${esc(catalyst)}</span>
+                ${adsorbate ? `<span class="dft-adsorbate-chip" title="吸附物 / 中间体">${esc(adsorbate)}</span>` : ''}
               </div>
-              <div class="dft-reaction-step" title="${esc(reactionStep)}">${esc(reactionStep)}</div>
+              <div class="dft-value-badge" data-role="dft-core-value">
+                <strong>${esc(value)}</strong>
+                ${unit ? `<span>${esc(unit)}</span>` : ''}
+              </div>
             </div>
-            <div class="dft-value-block" data-role="dft-core-value">
-              <strong>${esc(value)}</strong>
-              <span>${esc(unit)}</span>
+            <div class="dft-property-line">
+              <span class="dft-prop-type">${esc(propertyType)}</span>
+              <span class="dft-divider">·</span>
+              <span class="dft-step-text ${hasRealStep ? 'has-step' : ''}" title="${esc(reactionStep)}">${esc(reactionStep)}</span>
             </div>
           </div>
           <div class="dft-meta-strip">${meta}</div>
@@ -1420,15 +1547,21 @@
       const exportableAll = items.filter(isDftItemExportable).length;
       const conflictAll = items.filter(function (item) { return Number(item && item.conflict_count || 0) > 0; }).length;
 
+      const isPartial = !hasCompleteDftResultCollection();
+      const page = state.paper && state.paper.dft_results_page || {};
+      const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || items.length);
+
       const summary = '<div class="dft-collection-summary dft-catalyst-overview">' +
           '<div class="dft-overview-head">' +
-            '<div class="dft-overview-count"><em>' + buckets.target.length + '</em> 个目标催化剂 · 共 ' + targetRecords + ' 条数据</div>' +
+            '<div class="dft-overview-count"><em>' + buckets.target.length + '</em> 个目标催化剂 · 共 ' + targetRecords + ' 条数据' +
+            (isPartial ? ' <span class="dft-status-chip warn" style="font-size:11px;font-weight:normal;padding:2px 8px;vertical-align:middle;margin-left:8px;">后台增量同步中 (' + items.length + '/' + total + ')</span>' : '') +
+            '</div>' +
             '<div class="dft-overview-sub">按 CatalystSample 身份归组：同一个 sample ID 只展示一个主体，不同 sample ID 不按名称相近合并。</div>' +
           '</div>' +
           '<div class="dft-collection-metrics">' +
             renderDftStatusChip("对照 / 参考 " + buckets.reference.length + " 个 · " + referenceRecords + " 条", "meta") +
             renderDftStatusChip("归属待确认 " + unconfirmedRecords + " 条", unconfirmedRecords ? "warn" : "meta") +
-            renderDftStatusChip("本篇共 " + items.length + " 条", "meta") +
+            renderDftStatusChip((isPartial ? "已呈现 " : "本篇共 ") + items.length + " 条", "meta") +
             renderDftStatusChip("可导出 " + exportableAll, exportableAll ? "ok" : "meta") +
             renderDftStatusChip("冲突 " + conflictAll, conflictAll ? "danger" : "meta") +
           '</div>' +
@@ -1454,8 +1587,7 @@
     }
 
     function renderDftCompactCollection(items) {
-      // 未完整加载时保留原分页闸门：不宣称整篇统计
-      if (!hasCompleteDftResultCollection()) {
+      if (!items || !items.length) {
         return renderDftPagination();
       }
       return renderDftCatalystGroupedCollection(items);
@@ -1466,8 +1598,9 @@
       const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || 0);
       const loaded = (state.paper && state.paper.dft_results_items || []).length;
       if (hasCompleteDftResultCollection()) return "";
+      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 100;
       return `<div class="dft-pagination" data-role="dft-pagination">
-        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条</span>
+        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条 (${percent}%)</span>
         ${state.dftResultsError
           ? '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">重新加载完整数据</button>'
           : (state.dftResultsPromise ? "" : '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">立即加载完整数据</button>')}
@@ -1485,13 +1618,33 @@
       const page = state.paper && state.paper.dft_results_page || {};
       const total = Number(page.total || (state.paper && state.paper.counts && state.paper.counts.dft_results) || 0);
       const loaded = (state.paper && state.paper.dft_results_items || []).length;
+      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 100;
       control.innerHTML = `
-        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条</span>
+        <span>${state.dftResultsError ? "完整 DFT 数据加载失败" : "正在加载完整 DFT 数据"} ${loaded} / ${total} 条 (${percent}%)</span>
         ${state.dftResultsError
           ? '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">重新加载完整数据</button>'
           : (state.dftResultsPromise ? "" : '<button class="btn primary" type="button" data-role="load-more-dft" onclick="loadMoreDftResults(this)">立即加载完整数据</button>')}
       `;
       return true;
+    }
+
+    function renderDftResultsLive() {
+      const panel = document.getElementById("dftResults");
+      if (!panel) return;
+      const openKeys = new Set();
+      panel.querySelectorAll("details.dft-catalyst-group[open]").forEach(function(el) {
+        const id = el.getAttribute("data-catalyst-sample-id") || "__unconfirmed__";
+        openKeys.add(id);
+      });
+      panel.innerHTML =
+        deepLinkIssueContextHtml() +
+        renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
+      if (openKeys.size) {
+        panel.querySelectorAll("details.dft-catalyst-group").forEach(function(el) {
+          const id = el.getAttribute("data-catalyst-sample-id") || "__unconfirmed__";
+          if (openKeys.has(id)) el.open = true;
+        });
+      }
     }
 
     async function fetchDftResultsPage(offset) {
@@ -1540,7 +1693,7 @@
           };
           state.paper.dft_results_items = existing;
           state.paper.dft_results_page = page;
-          updateDftPagination();
+          renderDftResultsLive();
         }
         state.paper.dft_results_page = {
           ...page,
@@ -1552,9 +1705,7 @@
         return state.paper;
       })();
       state.dftResultsPromise = task;
-      if (!updateDftPagination()) document.getElementById("dftResults").innerHTML =
-        deepLinkIssueContextHtml() +
-        renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
+      renderDftResultsLive();
       try {
         return await task;
       } catch (error) {
@@ -1563,9 +1714,7 @@
         return state.paper;
       } finally {
         state.dftResultsPromise = null;
-        document.getElementById("dftResults").innerHTML =
-          deepLinkIssueContextHtml() +
-          renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
+        renderDftResultsLive();
       }
     }
 
@@ -1850,14 +1999,152 @@
       return text;
     }
 
+    function buildFigureReadingData(figure) {
+      const reading = figure && typeof figure.reading_explanation === "object" && figure.reading_explanation !== null
+        ? figure.reading_explanation
+        : null;
+      if (reading) {
+        return {
+          type: "ai_reading",
+          summary: reading.summary || figure.content_summary || "暂无概括",
+          core: reading.detailed_explanation || reading.core_interpretation || "",
+          subfigures: Array.isArray(reading.subfigures) ? reading.subfigures : [],
+          locators: Array.isArray(reading.evidence_locators) ? reading.evidence_locators : [],
+          uncertainties: Array.isArray(reading.uncertainties) ? reading.uncertainties : [],
+          methods: Array.isArray(reading.methods) ? reading.methods : [],
+          is_stale: Boolean(reading.is_stale),
+          version: reading.version || 1
+        };
+      }
+      if (figure && figure.content_summary && String(figure.content_summary).trim()) {
+        return {
+          type: "legacy_summary",
+          summary: String(figure.content_summary).trim(),
+          core: "",
+          subfigures: [],
+          locators: [],
+          uncertainties: [],
+          methods: [],
+          is_stale: false,
+          version: 0
+        };
+      }
+      return {
+        type: "none",
+        summary: "",
+        core: "",
+        subfigures: [],
+        locators: [],
+        uncertainties: [],
+        methods: [],
+        is_stale: false,
+        version: 0
+      };
+    }
+
+    function renderFigureReadingHtml(readingData, options = {}) {
+      if (!readingData || readingData.type === "none") {
+        return `
+          <div class="pd-figure-reading-block" style="border-left-color: var(--color-border);">
+            <div class="pd-reading-badge-row">
+              <span class="pd-reading-title">图片解读</span>
+              <span class="pd-status-chip meta" style="font-size:11px;padding:2px 8px;">尚未生成图片解读</span>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:2px;">暂未通过 MCP/AI 完成该图的证据核验与科学解读。</div>
+          </div>
+        `;
+      }
+
+      if (readingData.type === "legacy_summary") {
+        return `
+          <div class="pd-figure-reading-block" style="border-left-color: var(--color-border-strong, #94a3b8);">
+            <div class="pd-reading-badge-row">
+              <span class="pd-reading-title">图片解读</span>
+              <span class="pd-status-chip meta" style="font-size:11px;padding:2px 8px;">旧版摘要 · 尚未生成完整科学解读</span>
+            </div>
+            <div class="pd-reading-summary" style="font-weight:normal;color:var(--color-text-secondary);">${esc(readingData.summary)}</div>
+          </div>
+        `;
+      }
+
+      const subfigHtml = readingData.subfigures.length
+        ? `<div style="margin-top:8px;">
+            <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">子图说明：</div>
+            <div class="pd-reading-subfig-list">
+              ${readingData.subfigures.map(sub => `
+                <div class="pd-reading-subfig-item">
+                  <span class="pd-reading-subfig-label">${esc(sub.label || "")}</span>
+                  ${sub.description ? `<span>${esc(sub.description)}</span>` : ""}
+                  ${sub.methods ? `<div class="muted" style="font-size:11px;margin-top:2px;"><strong>方法:</strong> ${esc(sub.methods)}</div>` : ""}
+                  ${sub.findings ? `<div style="color:var(--color-primary-dark, var(--color-primary));font-size:11px;margin-top:2px;"><strong>结论:</strong> ${esc(sub.findings)}</div>` : ""}
+                </div>
+              `).join("")}
+            </div>
+          </div>`
+        : "";
+
+      const locatorsHtml = readingData.locators.length
+        ? `<div style="margin-top:8px;">
+            <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">证据定位（点击跳转原文章节）：</div>
+            <div class="pd-reading-locators">
+              ${readingData.locators.map(loc => `
+                <button type="button" class="pd-reading-locator-chip clickable" onclick="jumpToEvidence('${esc(loc.section || '').replace(/'/g, "\\'")}', ${loc.page ? Number(loc.page) : 'null'}, '${esc(loc.quote || '').replace(/'/g, "\\'")}')" title="${esc(loc.quote || loc.section || '')}">
+                  ${loc.page ? `P.${esc(loc.page)}` : ""}${loc.section ? ` · ${esc(loc.section)}` : ""}${loc.subfigure ? ` (${esc(loc.subfigure)})` : ""}
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:3px;vertical-align:-1px;"><path d="M7 17l9.2-9.2M17 17V8H8"/></svg>
+                </button>
+              `).join("")}
+            </div>
+          </div>`
+        : "";
+
+      const uncertaintiesHtml = readingData.uncertainties.length
+        ? `<div class="pd-reading-uncertainty">
+            <strong>未确定项 / 缺失证据：</strong>
+            <ul style="margin:4px 0 0 16px;padding:0;">
+              ${readingData.uncertainties.map(u => `<li>${esc(u)}</li>`).join("")}
+            </ul>
+          </div>`
+        : "";
+
+      const hasDetails = Boolean(subfigHtml || locatorsHtml || uncertaintiesHtml);
+
+      return `
+        <div class="pd-figure-reading-block">
+          <div class="pd-reading-badge-row">
+            <span class="pd-reading-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-1px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+              图片解读
+            </span>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <span class="pd-status-chip ok" style="font-size:11px;padding:2px 8px;">AI 深度解读</span>
+              ${readingData.is_stale ? '<span class="pd-status-chip warn" style="font-size:11px;padding:2px 8px;">来源变动可能过期</span>' : ''}
+            </div>
+          </div>
+          ${readingData.summary ? `<div class="pd-reading-summary">${esc(readingData.summary)}</div>` : ""}
+          ${readingData.core ? `<div class="pd-reading-core">${esc(readingData.core)}</div>` : ""}
+          ${hasDetails ? `
+            <details class="pd-reading-details"${options.defaultOpen ? " open" : ""}>
+              <summary>查看详细解读 (子图拆解与证据定位)</summary>
+              <div class="pd-reading-details-content">
+                ${subfigHtml}
+                ${locatorsHtml}
+                ${uncertaintiesHtml}
+              </div>
+            </details>
+          ` : ""}
+        </div>
+      `;
+    }
+
     function renderFigureDetailCard(figure, index) {
       const imageReview = figure.image_review || {};
       const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
       const label = figure.figure_label || ("Figure " + (index + 1));
       const caption = figure.caption || figure.figure_role || "暂无说明";
       const page = figure.page || "";
-      const summary = figure.content_summary || "";
-      // Tech info rows — only kept inside <details>, never shown by default
+      const readingData = buildFigureReadingData(figure);
+
+      // Tech info rows — kept only inside diagnostic <details>, fully removed from normal reading
       const techRows = [
         ["图类型", figure.figure_role || ""],
         ["裁图状态", figure.crop_status || ""],
@@ -1871,22 +2158,38 @@
         ["对象审核数", figure.object_review_audit_count ? String(figure.object_review_audit_count) : ""],
         ["冲突数", figure.conflict_count ? String(figure.conflict_count) : ""]
       ].filter(row => row[1] !== "" && row[1] !== 0);
+
       const onerrorAttr = `onerror="this.classList.add('pd-figure-img-failed');this.closest('.pd-figure-img-wrap') && this.closest('.pd-figure-img-wrap').classList.add('is-failed');this.onerror=null;"`;
       const imageHtml = imageSrc
         ? `<img class="pd-figure-img" src="${esc(imageSrc)}" loading="lazy" decoding="async" alt="${esc(label)}" ${onerrorAttr}>`
-        : `<div class="pd-figure-img-fallback"><span>图像暂不可用</span><small>${esc(figure.figure_label || "Figure")} · Page ${esc(page)}</small></div>`;
+        : `<div class="pd-figure-img-fallback"><span>图像暂不可用</span><small>${esc(label)} · Page ${esc(page)}</small></div>`;
+
       return `
         <div class="pd-figure-card" data-figure-index="${index}">
           <div class="pd-figure-img-wrap" onclick="openFigureLightbox(${index})">
             ${imageHtml}
           </div>
           <div class="pd-figure-body">
-            <div class="pd-figure-label">${esc(label)}</div>
-            ${caption ? `<div class="pd-figure-caption">${esc(caption)}</div>` : ""}
-            <div class="pd-figure-meta">${page ? `Page ${esc(page)}` : ""}${summary ? ` · ${esc(summary.length > 80 ? summary.slice(0, 80) + "…" : summary)}` : ""}</div>
+            <div class="pd-figure-header">
+              <div class="pd-figure-label">${esc(label)}</div>
+              ${page ? `<div class="pd-figure-page-badge">Page ${esc(page)}</div>` : ""}
+            </div>
+
+            <!-- 图片解读模块 -->
+            ${renderFigureReadingHtml(readingData)}
+
+            <!-- 原文图注 (折叠保留) -->
+            ${caption ? `
+              <details class="pd-figure-caption-details">
+                <summary>原文图注</summary>
+                <div class="pd-figure-caption-text">${esc(caption)}</div>
+              </details>
+            ` : ""}
+
+            <!-- 技术与诊断信息 (深层管理折叠，彻底从普通阅读区剥离) -->
             ${techRows.length ? `
               <details class="pd-figure-tech">
-                <summary>技术信息</summary>
+                <summary>技术与诊断信息</summary>
                 <div class="kv-grid" style="margin-top:8px;">
                   ${techRows.map(row => '<div class="kv-item"><div class="kv-label">' + esc(row[0]) + '</div><div class="kv-value">' + esc(row[1]) + '</div></div>').join("")}
                 </div>
@@ -2208,7 +2511,20 @@
       document.getElementById("cntMechanism").textContent = paper.counts?.mechanism_claims || (paper.mechanism_claims_items || []).length || 0;
       renderTranslationSectionOptions();
 
-      document.getElementById("paperAbstract").textContent = paper.abstract || "暂无摘要。";
+      const abstractEl = document.getElementById("paperAbstract");
+      const abstractToggle = document.getElementById("abstractLanguageBtn");
+      const abstractZh = String(paper.abstract_zh || "").trim();
+      const abstractEn = String(paper.abstract || "").trim();
+      let showingEnglishAbstract = false;
+      const renderAbstract = function() {
+        abstractEl.textContent = showingEnglishAbstract ? (abstractEn || "暂无英文原摘要") : (abstractZh || abstractEn || "暂无摘要");
+        if (abstractToggle) {
+          abstractToggle.textContent = showingEnglishAbstract ? "查看中文摘要" : "查看英文原摘要";
+          abstractToggle.style.display = abstractZh && abstractEn ? "inline-flex" : "none";
+        }
+      };
+      if (abstractToggle) abstractToggle.onclick = function() { showingEnglishAbstract = !showingEnglishAbstract; renderAbstract(); };
+      renderAbstract();
 
       const keywordsPanel = document.getElementById("paperKeywordsPanel");
       const rawKeywords = Array.isArray(paper.keywords) ? paper.keywords
@@ -2250,7 +2566,7 @@
 
       document.getElementById("sectionsList").innerHTML = (paper.sections || []).length
         ? (paper.sections || []).map((section, index) => `
-            <div class="section-item">
+            <div class="section-item" id="sec-item-${index}" data-section-title="${esc(section.section_title || section.section_type || '')}">
               <div class="section-title">${index + 1}. ${esc(section.section_title || section.section_type || "未命名章节")}</div>
               <div class="prewrap">${esc(section.text || "")}</div>
               <div class="muted">页码：${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</div>
@@ -2430,6 +2746,45 @@
       ensureFullDetail(tab);
     }
 
+    function jumpToEvidence(sectionName, page, quote) {
+      if (typeof closeFigureLightbox === "function") {
+        closeFigureLightbox();
+      }
+      switchDetailTab("sections");
+      setTimeout(() => {
+        const list = document.getElementById("sectionsList");
+        if (!list) return;
+        let target = null;
+        const secItems = list.querySelectorAll(".section-item");
+        const searchName = (sectionName || "").trim().toLowerCase();
+
+        for (const item of secItems) {
+          const title = (item.getAttribute("data-section-title") || "").toLowerCase();
+          if (searchName && (title.includes(searchName) || searchName.includes(title))) {
+            target = item;
+            break;
+          }
+        }
+        if (!target && page) {
+          for (const item of secItems) {
+            const text = item.textContent || "";
+            if (text.includes("页码：" + page) || text.includes(" " + page + " -") || text.includes("- " + page)) {
+              target = item;
+              break;
+            }
+          }
+        }
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add("evidence-highlight-pulse");
+          setTimeout(() => target.classList.remove("evidence-highlight-pulse"), 2500);
+          showToast("已定位至证据章节: " + (sectionName || ("Page " + page)));
+        } else {
+          showToast("已切换至章节列表");
+        }
+      }, 120);
+    }
+
     async function toggleCitationPreview(event) {
       const container = document.getElementById("citationPreviewContainer");
       if (container.style.display === "none") {
@@ -2486,39 +2841,124 @@
       }
     });
   
+    state.lightboxFigureIndex = -1;
+
     function openFigureLightbox(index) {
       const paper = state.paper;
-      if (!paper || !Array.isArray(paper.figures)) return;
+      if (!paper || !Array.isArray(paper.figures) || !paper.figures.length) return;
+      if (index < 0 || index >= paper.figures.length) return;
+      state.lightboxFigureIndex = index;
       const figure = paper.figures[index];
       if (!figure) return;
       const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
       if (!imageSrc) return;
+
       const lb = document.getElementById("pdLightbox");
       const img = document.getElementById("pdLightboxImg");
       const labelEl = document.getElementById("pdLightboxLabel");
-      const captionEl = document.getElementById("pdLightboxCaption");
       const pageEl = document.getElementById("pdLightboxPage");
+      const readingContainer = document.getElementById("pdLightboxReadingContent");
+
       img.src = imageSrc;
-      img.alt = figure.figure_label || "";
-      labelEl.textContent = figure.figure_label || ("Figure " + (index + 1));
-      captionEl.textContent = figure.caption || "";
-      pageEl.textContent = figure.page ? "Page " + figure.page : "";
+      img.alt = figure.figure_label || ("Figure " + (index + 1));
+      labelEl.textContent = (figure.figure_label || ("Figure " + (index + 1))) + ` (${index + 1} / ${paper.figures.length})`;
+      pageEl.textContent = figure.page ? "PDF 页码: Page " + figure.page : "";
+
+      // 渲染与卡片完全一致的图片解读数据
+      const readingData = buildFigureReadingData(figure);
+      const caption = figure.caption || figure.figure_role || "";
+
+      // 技术诊断信息（仅作为折叠诊断）
+      const imageReview = figure.image_review || {};
+      const techRows = [
+        ["图类型", figure.figure_role || ""],
+        ["裁图状态", figure.crop_status || ""],
+        ["裁图来源", figure.crop_source || ""],
+        ["图片路径", figure.image_path || ""],
+        ["关键元素", Array.isArray(figure.key_elements) && figure.key_elements.length ? figure.key_elements.join(", ") : ""],
+        ["图片标记", Array.isArray(figure.flags) && figure.flags.length ? figure.flags.join(", ") : ""],
+        ["已批准修正数", figure.approved_correction_count ? String(figure.approved_correction_count) : ""],
+        ["冲突数", figure.conflict_count ? String(figure.conflict_count) : ""]
+      ].filter(row => row[1] !== "" && row[1] !== 0);
+
+      readingContainer.innerHTML = `
+        ${renderFigureReadingHtml(readingData, { defaultOpen: true })}
+        ${caption ? `
+          <details class="pd-figure-caption-details" open style="margin-top:10px;">
+            <summary>原文图注</summary>
+            <div class="pd-figure-caption-text">${esc(caption)}</div>
+          </details>
+        ` : ""}
+        ${techRows.length ? `
+          <details class="pd-figure-tech" style="margin-top:10px;">
+            <summary>技术与诊断信息</summary>
+            <div class="kv-grid" style="margin-top:8px;">
+              ${techRows.map(row => '<div class="kv-item"><div class="kv-label">' + esc(row[0]) + '</div><div class="kv-value">' + esc(row[1]) + '</div></div>').join("")}
+            </div>
+          </details>
+        ` : ""}
+      `;
+
       lb.style.display = "flex";
       document.body.style.overflow = "hidden";
     }
 
+    function prevFigureInLightbox(event) {
+      if (event) event.stopPropagation();
+      const paper = state.paper;
+      if (!paper || !Array.isArray(paper.figures) || !paper.figures.length) return;
+      let newIdx = state.lightboxFigureIndex - 1;
+      if (newIdx < 0) newIdx = paper.figures.length - 1;
+      openFigureLightbox(newIdx);
+    }
+
+    function nextFigureInLightbox(event) {
+      if (event) event.stopPropagation();
+      const paper = state.paper;
+      if (!paper || !Array.isArray(paper.figures) || !paper.figures.length) return;
+      let newIdx = state.lightboxFigureIndex + 1;
+      if (newIdx >= paper.figures.length) newIdx = 0;
+      openFigureLightbox(newIdx);
+    }
+
     function closeFigureLightbox(event) {
-      if (event && event.target && event.target.tagName === "IMG") return;
       const lb = document.getElementById("pdLightbox");
       lb.style.display = "none";
       document.getElementById("pdLightboxImg").src = "";
+      state.lightboxFigureIndex = -1;
       document.body.style.overflow = "";
     }
 
+    async function exportReadingGuideHtml() {
+      if (!state.paperId) {
+        showToast("未检测到有效文献 ID");
+        return;
+      }
+      showToast("正在准备离线文献导读 HTML...");
+      const exportUrl = `${API_BASE}/${encodeURIComponent(state.paperId)}/reading-guide/export-html`;
+      try {
+        const resp = await fetch(exportUrl, { method: "POST", credentials: "same-origin" });
+        const result = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          showToast("导出失败: " + (result.detail || "网络请求异常"));
+          return;
+        }
+        const sizeKb = Math.max(1, Math.round(Number(result.size_bytes || 0) / 1024));
+        showToast("导读已生成在服务器：" + result.server_path + "（" + sizeKb + " KB）");
+      } catch (err) {
+        showToast("导出失败: " + (err.message || err));
+      }
+    }
+
     document.addEventListener("keydown", function(e) {
+      const lb = document.getElementById("pdLightbox");
+      if (!lb || lb.style.display === "none") return;
       if (e.key === "Escape") {
-        const lb = document.getElementById("pdLightbox");
-        if (lb && lb.style.display !== "none") closeFigureLightbox(e);
+        closeFigureLightbox(e);
+      } else if (e.key === "ArrowLeft") {
+        prevFigureInLightbox(e);
+      } else if (e.key === "ArrowRight") {
+        nextFigureInLightbox(e);
       }
     });
 </script>

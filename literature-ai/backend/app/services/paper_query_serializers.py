@@ -350,6 +350,7 @@ class PaperQuerySerializationMixin:
                 "reviewed_by": direct_review.get("reviewed_by"),
                 "conflict_count": len(conflicts),
                 "field_conflicts": conflicts[:5],
+                "reading_explanation": getattr(item, "reading_explanation", None),
             }
         )
 

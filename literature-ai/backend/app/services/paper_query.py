@@ -955,6 +955,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
             )
         return PaperDetailResponse(
             **base_payload,
+            reading_guide=getattr(paper, "reading_guide", None),
             sections=[self._serialize_section(item) for item in sections],
             tables=[
                 self._serialize_table(
@@ -1133,6 +1134,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         )
         return PaperDetailResponse(
             **base.model_dump(),
+            reading_guide=getattr(paper, "reading_guide", None),
             artifact_status=build_paper_artifact_status(paper),
             abstract_review_status=("raw_only" if paper.abstract else "missing"),
             sections_review_status=("raw_only" if counts.get("sections") else "missing"),

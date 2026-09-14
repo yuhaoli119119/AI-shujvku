@@ -502,6 +502,16 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
             )
             execute_migration_step(
                 "paper_figures",
+                "reading_explanation",
+                "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS reading_explanation JSONB",
+            )
+            execute_migration_step(
+                "papers",
+                "reading_guide",
+                "ALTER TABLE papers ADD COLUMN IF NOT EXISTS reading_guide JSONB",
+            )
+            execute_migration_step(
+                "paper_figures",
                 "figure_label",
                 "ALTER TABLE paper_figures ADD COLUMN IF NOT EXISTS figure_label VARCHAR(64)",
             )

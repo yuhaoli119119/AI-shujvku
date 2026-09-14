@@ -52,4 +52,9 @@ async def get_asset(filename: str):
         )
     if file_path is None:
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(str(file_path))
+    return FileResponse(
+        str(file_path),
+        headers={
+            "Cache-Control": "public, max-age=86400, immutable",
+        },
+    )
