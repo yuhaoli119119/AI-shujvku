@@ -1,0 +1,397 @@
+{
+  "review_paper_identity": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "apply_paper_identity_rematerialization": {
+    "capability": "repair_dft_issues OR propose_corrections OR review_dft",
+    "read_only": false,
+    "effects": "dry_run=true previews; false writes only four derived identity fields and audit. Does not change original scientific fields."
+  },
+  "export_paper_ml_dataset": {
+    "capability": "export_data",
+    "read_only": false,
+    "effects": "Writes CSV/JSON/manifest and sidecar files; prunes same-paper expired/incomplete artifacts. No DB/audit writes. Read existing files with read_ml_export_artifact."
+  },
+  "read_ml_export_artifact": {
+    "capability": "export_data",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "list_ml_export_tasks": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_paper_processing_status": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "query_papers": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "scan_local_pdfs": {
+    "capability": "request_parse",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_paper": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_codex_context": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_codex_item": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_paper_knowledge": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_ai_verification_tasks": {
+    "capability": "ai_verify_content",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_ai_verification_record_tasks": {
+    "capability": "ai_verify_content",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_ai_verification_web_apply_package": {
+    "capability": "ai_verify_content",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "materialize_ai_section_page_fragments": {
+    "capability": "ai_verify_content",
+    "read_only": false,
+    "effects": "dry_run=true: zero writes; false: create pending section fragments/locators and audit."
+  },
+  "submit_ai_verification_batch": {
+    "capability": "ai_verify_content",
+    "read_only": false,
+    "effects": "dry_run=true: zero writes; false: persists reviews WITHOUT request_id receipt protection. Formal use: apply_ai_verification_batch."
+  },
+  "apply_ai_verification_batch": {
+    "capability": "ai_verify_content",
+    "read_only": false,
+    "effects": "Writes field reviews, receipt and audit atomically; may finalize eligible audit issues. Reads committed state separately. Same request_id and same payload prevent duplicate batch writes."
+  },
+  "finalize_ai_verified_dft_records": {
+    "capability": "ai_verify_content",
+    "read_only": false,
+    "effects": "Finalizes eligible DFT audit issues and audit; never substitutes for field evidence gates."
+  },
+  "assign_dft_reaction_label": {
+    "capability": "review_dft",
+    "read_only": false,
+    "effects": "Writes evidence-gated reaction labels and audit; no value/unit change."
+  },
+  "get_ai_verification_batch_receipt": {
+    "capability": "ai_verify_content",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "verify_dft_result": {
+    "capability": "review_corrections OR review_dft",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "reject_dft_result": {
+    "capability": "review_corrections OR review_dft",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "verify_dft_results_batch": {
+    "capability": "review_corrections OR review_dft",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "reject_dft_results_batch": {
+    "capability": "review_corrections OR review_dft",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "propose_dft_result_correction": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Creates pending proposal/audit, does not apply original DFT fields."
+  },
+  "get_dft_review_queue": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_dft_review_task": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_dft_audit_issues": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "repair_dft_audit_issue": {
+    "capability": "repair_dft_issues OR propose_corrections OR review_dft",
+    "read_only": false,
+    "effects": "May create/update DFT candidates, link duplicates or mark blocked issues and audit. Does not verify scientific truth."
+  },
+  "repair_dft_audit_issues_batch": {
+    "capability": "repair_dft_issues OR propose_corrections OR review_dft",
+    "read_only": false,
+    "effects": "May create/update DFT candidates, link duplicates or mark blocked issues and audit. Does not verify scientific truth."
+  },
+  "get_review_conflicts": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "list_notes": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "append_note": {
+    "capability": "append_notes",
+    "read_only": false,
+    "effects": "Appends a note and audit; retries may duplicate notes."
+  },
+  "propose_correction": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "May directly update authorized non-DFT content with a module lock and audit; other targets create pending proposals. Not universally proposal-only."
+  },
+  "apply_content_web_review_local_verification": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Writes local verification acknowledgements, object review state and audit after server dependency checks."
+  },
+  "get_content_web_review_local_verification_plan": {
+    "capability": "propose_corrections (authenticated identity)",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "read_content_web_review_page_asset": {
+    "capability": "propose_corrections (authenticated identity)",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "update_table": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Writes table objects and audit after evidence validation."
+  },
+  "create_table": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Writes table objects and audit after evidence validation."
+  },
+  "delete_table": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Deletes source table and writes audit; merge may update target fields. Conditional evidence-backed operation only."
+  },
+  "merge_table": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Deletes source table and writes audit; merge may update target fields. Conditional evidence-backed operation only."
+  },
+  "get_chart_review_task": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "resolve_chart_review_actions": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "dry_run=true previews; default false may write chart review state/actions and audit. Requires actual source PDF review; unresolved evidence stays blocked."
+  },
+  "finalize_chart_review": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "dry_run=true previews; default false may write chart review state/actions and audit. Requires actual source PDF review; unresolved evidence stays blocked."
+  },
+  "get_parse_status": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_correction_queue": {
+    "capability": "review_corrections",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_correction_detail": {
+    "capability": "review_corrections",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "approve_correction": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Applies eligible pending proposals to stored fields/objects and audit, potentially including deletion/recrop; non-DFT writes may require module lock."
+  },
+  "reject_correction": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Updates pending proposal state and audit; does not apply proposed data."
+  },
+  "approve_corrections_batch": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Applies eligible pending proposals to stored fields/objects and audit, potentially including deletion/recrop; non-DFT writes may require module lock."
+  },
+  "reject_corrections_batch": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "Updates pending proposal state and audit; does not apply proposed data."
+  },
+  "acquire_module_write_lock": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Writes module lease state. Does not grant capabilities or scientific acceptance."
+  },
+  "release_module_write_lock": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Writes module lease state. Does not grant capabilities or scientific acceptance."
+  },
+  "ingest_pdf_batch": {
+    "capability": "request_parse",
+    "read_only": false,
+    "effects": "Copies PDFs, creates parse jobs, parsed objects and audit; may invoke configured parsers. Synchronous folder ingestion; retries can repeat work."
+  },
+  "retrieve_evidence": {
+    "capability": "read_papers",
+    "read_only": false,
+    "effects": "Reads database; semantic query may call configured embedding provider. No scientific data writes."
+  },
+  "plan_multi_paper_evidence": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "review_paper": {
+    "capability": "propose_corrections",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "import_analysis": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Writes import run/candidates, task log and audit; auto_apply_review_rules=true may materialize unverified DFT records. Input normalization may use configured LLM. NOT request-idempotent."
+  },
+  "apply_analysis_review_rules": {
+    "capability": "propose_corrections",
+    "read_only": false,
+    "effects": "Materializes eligible candidates and writes review-rule outcomes/audit using existing gates; not scientific verification."
+  },
+  "resolve_supplementary_dft_candidate": {
+    "capability": "propose_corrections OR review_dft OR repair_dft_issues",
+    "read_only": false,
+    "effects": "Writes SI candidate lifecycle and audit; validates explicit main-paper canonical record relationship."
+  },
+  "compare_papers": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_figure_image": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "render_paper_page": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "read_paper_page": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "recrop_figure": {
+    "capability": "request_parse",
+    "read_only": false,
+    "effects": "Writes crop files, figure object or crop reference and audit; may remove superseded generated assets."
+  },
+  "create_figure_from_bbox": {
+    "capability": "request_parse",
+    "read_only": false,
+    "effects": "Writes crop files, figure object or crop reference and audit; may remove superseded generated assets."
+  },
+  "cleanup_unused_figure_assets": {
+    "capability": "request_parse",
+    "read_only": false,
+    "effects": "May delete unreferenced generated crop files; dry_run behavior is defined by its schema. Full-library maintenance only."
+  },
+  "review_figure": {
+    "capability": "review_corrections OR review_dft",
+    "read_only": false,
+    "effects": "Writes figure verdict/audit and may apply supplied corrections. Evidence review must already be performed."
+  },
+  "get_review_coverage": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_field_disputes": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "export_ml_dataset": {
+    "capability": "export_data",
+    "read_only": false,
+    "effects": "Legacy v2: writes export audit; no task parameter. Use export_paper_ml_dataset for task-scoped v3."
+  },
+  "scan_duplicate_dois": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "create_share_token": {
+    "capability": "create_share_links",
+    "read_only": false,
+    "effects": "Creates access token and audit; grants a new share link within its scope."
+  },
+  "get_analysis_import_status": {
+    "capability": "propose_corrections (same authenticated source identity)",
+    "read_only": true,
+    "effects": "Read-only; no database or persistent file writes."
+  },
+  "get_figure_reading_context": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; retrieves figure image path, caption, and referencing section evidence."
+  },
+  "validate_figure_reading": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; validates figure reading payload without database writes."
+  },
+  "apply_figure_reading": {
+    "capability": "review_corrections OR review_dft OR ai_verify_content",
+    "read_only": false,
+    "effects": "Writes validated reading explanation to paper_figures.reading_explanation. Does not alter review_status or DFT results."
+  },
+  "export_paper_reading_guide_html": {
+    "capability": "read_papers",
+    "read_only": false,
+    "effects": "Renders offline HTML reading guide and persists artifact file to storage (artifacts/guides/{paper_id}_guide.html). Returns artifact metadata, checksum, and HTML content."
+  }
+}

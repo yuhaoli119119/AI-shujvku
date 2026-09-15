@@ -15,10 +15,13 @@ from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import and_, func, or_, select, update
 
 from app.config import get_settings
-from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, WritingCard, utcnow
+from app.db.models import AuditLog, DFTResult, ElectrochemicalPerformance, ExternalAnalysisCandidate, ExternalAnalysisRun, ExtractionFieldReview, MechanismClaim, Paper, PaperCorrection, PaperFigure, PaperNote, PaperSection, PaperTable, ParseJob, ShareToken, WritingCard, utcnow
 from app.db.session import session_scope
 from app.mcp.auth import require_mcp_capability, require_mcp_capability_any
 from app.mcp.context import MCPAuthInfo
+from app.mcp.paper_identity import register_paper_identity_tools
+from app.mcp.paper_ml_export import register_paper_ml_export_tools
+from app.mcp.paper_progress import register_paper_progress_tools
 from app.rag.multi_paper_evidence_plan import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_CANDIDATE_POOL_PER_TYPE,
@@ -31,11 +34,7 @@ from app.rag.prompt_builder import PaperWriterPromptBuilder
 from app.rag.retriever import Retriever
 from app.rag.retrieval_intent import route_retrieval_intent
 from app.schemas.mcp import MCPCorrectionDetailResponse, MCPCorrectionResponse, MCPNoteResponse, MCPParseJobResponse
-from app.schemas.ai_verification import (
-    AIVerificationSubmission,
-    AIVerificationSubmissionWire,
-    SectionPageFragmentCandidateRef,
-)
+from app.schemas.ai_verification import AIVerificationSubmission, AIVerificationSubmissionWire, SectionPageFragmentCandidateRef
 from app.services.ai_verification_service import (
     AIVerificationService,
     AuthenticatedAIVerificationIdentity,
@@ -53,6 +52,8 @@ from app.services.dft_export_service import build_dft_csv_rows, build_dft_ml_dat
 from app.services.dft_review_bundle_service import DFTReviewBundleService
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.dft_review_service import DFTResultReviewService
+from app.services.dft_record_finalization_service import DFTRecordFinalizationService
+from app.services.dft_reaction_label_service import DFTReactionLabelError, DFTReactionLabelService
 from app.services.ai_verification_batch_receipt_service import (
     AIVerificationBatchReceiptService,
 )
@@ -350,7 +351,7 @@ mcp_server = FastMCP(
         allowed_hosts=_allowed_mcp_hosts(),
     ),
 )
-mcp_http_app = mcp_server.streamable_http_app()
+
 
 
 def _log_action(
@@ -736,21 +737,180 @@ def apply_ai_verification_batch(
             # The receipt and all field reviews become durable together before a
             # separate session is allowed to describe their post-commit state.
             session.commit()
+    # Finalization scope is derived from the committed receipt, never from the raw
+    # wire payload: only items that really wrote to dft_results count, so malformed
+    # submissions and rejected/deferred items cannot widen it.  A failure here is
+    # reported with a retry instruction instead of being swallowed.
+    record_finalization = _finalize_applied_records(
+        settings=settings,
+        paper_id=target_paper_id,
+        receipt_payload=receipt,
+        reviewer=identity.model_agent,
+    )
     try:
         with session_scope(settings.database_url) as readback_session:
-            return AIVerificationBatchReceiptService(readback_session).attach_readback(
+            payload = AIVerificationBatchReceiptService(readback_session).attach_readback(
                 paper_id=target_paper_id,
                 request_id=request_id,
                 identity=identity,
             )
+        payload["replayed"] = bool(replayed or payload.get("replayed"))
+        payload["record_finalization"] = record_finalization
+        return payload
     except Exception as exc:
-        receipt["readback"] = {
+        receipt["current_readback"] = {
             "status": "not_confirmed_after_commit",
             "reason": type(exc).__name__,
             "instruction": "The write committed. Query get_ai_verification_batch_receipt with this request_id; do not resubmit it.",
             "items": [],
         }
+        receipt["readback"] = receipt["current_readback"]  # Deprecated failure-path alias.
+        receipt["record_finalization"] = record_finalization
         return receipt
+
+
+def _finalization_targets(receipt_payload: dict[str, Any] | None) -> list[str]:
+    """DFT records this receipt actually wrote to, in a stable order.
+
+    ``AIVerificationSubmissionWire`` is a plain ``dict``: reading ``item.target_id``
+    off it raises.  The committed receipt is the authoritative record of what was
+    applied, so the scope comes from there.  Only ``dft_results`` items with a real
+    database write and an accepted outcome count; format errors and
+    rejected/deferred/skipped items can never pull an unrelated record into scope.
+    """
+
+    targets: set[str] = set()
+    for item in (receipt_payload or {}).get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("target_type") or "").strip() != "dft_results":
+            continue
+        if not bool(item.get("database_writes")):
+            continue
+        if str(item.get("outcome") or "").strip() not in {"auto_verified", "auto_repaired"}:
+            continue
+        record_id = str(item.get("record_id") or "").strip()
+        if record_id:
+            targets.add(record_id)
+    return sorted(targets)
+
+
+def _finalize_applied_records(
+    *,
+    settings: Any,
+    paper_id: UUID,
+    receipt_payload: dict[str, Any] | None,
+    reviewer: str,
+) -> dict[str, Any]:
+    """Close the backfill issue of every record this request fully verified.
+
+    Runs in its own transaction after the review write has committed.  A failure
+    is reported with the concrete error and a retry instruction: the field writes
+    are already durable, so recovery is an explicit retry through
+    ``finalize_ai_verified_dft_records`` rather than a silent pass.
+    """
+
+    targets = _finalization_targets(receipt_payload)
+    if not targets:
+        return {"status": "skipped", "reason": "no_applied_dft_results_items", "result_ids": [], "closed_total": 0}
+    try:
+        with session_scope(settings.database_url) as finalize_session:
+            outcome = DFTRecordFinalizationService(finalize_session).finalize(
+                paper_id=paper_id,
+                result_ids=targets,
+                reviewer=reviewer,
+            )
+            finalize_session.commit()
+    except Exception as exc:  # noqa: BLE001 - reported, never swallowed
+        return {
+            "status": "failed",
+            "error_type": type(exc).__name__,
+            "error": str(exc)[:500],
+            "result_ids": targets,
+            "closed_total": 0,
+            "retry_with": {
+                "tool": "finalize_ai_verified_dft_records",
+                "paper_id": str(paper_id),
+                "result_ids": targets,
+            },
+        }
+    return {"status": "completed", **outcome}
+
+
+@mcp_server.tool(
+    name="finalize_ai_verified_dft_records",
+    description=(
+        "Idempotent, retry-safe finalization of the DFT backfill audit issues for records whose "
+        "required fields are all authoritatively verified. Scope is explicit: pass result_ids "
+        "and/or exact issue_ids. Each issue is re-checked after a transaction lock against freshly "
+        "read rows and the live export gate; nothing else is closed."
+    ),
+)
+def finalize_ai_verified_dft_records(
+    paper_id: str,
+    result_ids: list[str] | None = None,
+    issue_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("ai_verify_content")
+    identity = _authenticated_ai_verification_identity(auth)
+    settings = get_settings()
+    target_paper_id = UUID(paper_id)
+    with session_scope(settings.database_url) as session:
+        outcome = DFTRecordFinalizationService(session).finalize(
+            paper_id=target_paper_id,
+            result_ids=result_ids or [],
+            issue_ids=[UUID(value) for value in (issue_ids or [])],
+            reviewer=identity.model_agent,
+        )
+        session.commit()
+    return {"status": "completed", **outcome}
+
+
+@mcp_server.tool(
+    name="assign_dft_reaction_label",
+    description=(
+        "Controlled writer for the DFT reaction-attribution labels "
+        "(reaction_type / reaction_validation_status). The caller must supply a verbatim quote from a "
+        "stored page of the target paper or its linked supplementary; the server recomputes both the "
+        "reaction classification and the validation verdict from the record itself, refuses to "
+        "overwrite an existing different attribution, requires the record to be already "
+        "evidence-verified, and is idempotent. The write takes a transaction lock and re-reads the "
+        "row before deciding. dry_run defaults to true."
+    ),
+)
+def assign_dft_reaction_label(
+    paper_id: str,
+    record_id: str,
+    reaction_type: str,
+    evidence_source_paper_id: str,
+    evidence_page: int,
+    evidence_quote: str,
+    expected_target_fingerprint: str,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("review_dft")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        service = DFTReactionLabelService(session)
+        try:
+            result = service.assign(
+                paper_id=UUID(paper_id),
+                record_id=record_id,
+                reaction_type=reaction_type,
+                evidence={
+                    "source_paper_id": evidence_source_paper_id,
+                    "page": evidence_page,
+                    "quote": evidence_quote,
+                },
+                expected_target_fingerprint=expected_target_fingerprint,
+                dry_run=dry_run,
+                commit=not dry_run,
+                actor=auth.source_identity,
+            )
+        except DFTReactionLabelError as exc:
+            session.rollback()
+            return {"status": "refused", "reason": str(exc), "wrote": False}
+        return result
 
 
 @mcp_server.tool(
@@ -765,6 +925,7 @@ def get_ai_verification_batch_receipt(paper_id: str, request_id: str) -> dict[st
     identity = _authenticated_ai_verification_identity(auth)
     settings = get_settings()
     with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
         return AIVerificationBatchReceiptService(session).get(
             paper_id=UUID(paper_id), request_id=request_id, identity=identity,
         )
@@ -931,11 +1092,20 @@ def get_dft_review_task(
     require_mcp_capability("read_papers")
     settings = get_settings()
     with session_scope(settings.database_url) as session:
-        return DFTReviewBundleService(session, settings).get_review_task(
+        result = DFTReviewBundleService(session, settings).get_review_task(
             UUID(paper_id),
             catalyst_sample_id=UUID(catalyst_sample_id) if catalyst_sample_id else None,
             dft_result_ids=[UUID(item) for item in dft_result_ids or []],
         )
+
+        verification = result.get("local_ai_writeback_contract", {}).get("required_local_ai_verification", {})
+        if verification:
+            verification["read_paper_page_arguments"] = {"paper_id": "source_paper_id", "page_start": "page"}
+            verification["pdf_evidence_semantics"] = (
+                "read_paper_page reads the actual physical PDF text layer plus stored context. "
+                "For visual evidence use render_paper_page or get_figure_image; verify source ownership."
+            )
+        return result
 
 
 @mcp_server.tool(name="get_dft_audit_issues", description="Read DFT audit issue queue entries for one paper. This is read-only and does not repair or verify DFT data.")
@@ -1874,6 +2044,82 @@ async def review_paper(
     )
 
 
+def _analysis_handoff(run, candidates) -> dict[str, Any]:
+    """Return actual materialized IDs, never substitute external candidate IDs."""
+    result_ids = sorted({str(c.materialized_target_id) for c in candidates
+                         if c.materialized_target_type == "dft_results" and c.materialized_target_id})
+    return {
+        "paper_id": str(run.paper_id),
+        "run_id": str(run.id),
+        "dft_result_ids": result_ids,
+        "scientifically_verified": False,
+        "next_call": ({"tool": "get_dft_review_task", "arguments": {
+            "paper_id": str(run.paper_id), "dft_result_ids": result_ids}}
+            if result_ids else None),
+        "recovery_call": {"tool": "get_analysis_import_status", "arguments": {
+            "paper_id": str(run.paper_id), "run_id": str(run.id)}},
+    }
+
+
+@mcp_server.tool(
+    name="get_analysis_import_status",
+    description="Recover your stored analysis import and candidate-to-record mapping without reimporting or applying rules. Requires exact paper_id and either run_id or a source_label chosen before import. Multiple matching runs are reported as ambiguous, never automatically merged or retried.",
+)
+def get_analysis_import_status(
+    paper_id: str,
+    run_id: str | None = None,
+    source_label: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict[str, Any]:
+    auth = require_mcp_capability("propose_corrections")
+    if not auth.identity_verified or not auth.source_identity:
+        raise PermissionError("analysis_import_identity_required")
+    if not run_id and not str(source_label or "").strip():
+        raise ValueError("Provide run_id or the source_label chosen before import")
+    if not 1 <= limit <= 100 or offset < 0:
+        raise ValueError("limit must be 1..100 and offset nonnegative")
+    pid = UUID(paper_id)
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        read_only = _enforce_postgres_read_only_transaction(session)
+        query = select(ExternalAnalysisRun).where(
+            ExternalAnalysisRun.paper_id == pid,
+            ExternalAnalysisRun.source_identity == auth.source_identity,
+            ExternalAnalysisRun.source_identity_verified.is_(True),
+        )
+        if run_id:
+            query = query.where(ExternalAnalysisRun.id == UUID(run_id))
+        if source_label is not None:
+            query = query.where(ExternalAnalysisRun.source_label == source_label)
+        # Only return bounded run identities on ambiguous recovery; caller must choose an exact run.
+        runs = session.scalars(query.order_by(ExternalAnalysisRun.created_at.desc(), ExternalAnalysisRun.id.desc()).limit(21)).all()
+        if len(runs) != 1:
+            return {"paper_id":str(pid), "status":"not_found" if not runs else "ambiguous",
+                    "database_writes":False, "postgres_transaction_read_only":read_only,
+                    "has_more_runs":len(runs)>20,
+                    "runs":[{"run_id":str(run.id), "source_label":run.source_label,
+                             "created_at":run.created_at.isoformat()} for run in runs[:20]],
+                    "recovery":"Do not automatically reimport. A timed-out import may still be in flight. Retry this read or supply an exact run_id."}
+        run = runs[0]
+        where = (ExternalAnalysisCandidate.run_id == run.id, ExternalAnalysisCandidate.paper_id == pid)
+        total = session.scalar(select(func.count()).select_from(ExternalAnalysisCandidate).where(*where)) or 0
+        candidates = session.scalars(select(ExternalAnalysisCandidate).where(*where)
+            .order_by(ExternalAnalysisCandidate.created_at, ExternalAnalysisCandidate.id).offset(offset).limit(limit)).all()
+        return {
+            "paper_id":str(pid), "run_id":str(run.id), "status":"found",
+            "source_label":run.source_label, "mapping_status":run.mapping_status,
+            "mapping_error":run.mapping_error, "database_writes":False,
+            "postgres_transaction_read_only":read_only,
+            "total":total, "returned":len(candidates),
+            "next_offset":offset+len(candidates) if offset+len(candidates)<total else None,
+            "candidates":[{"id":str(c.id), "type":c.candidate_type, "status":c.status,
+                "materialized_target_type":c.materialized_target_type,
+                "materialized_target_id":c.materialized_target_id} for c in candidates],
+            "handoff":_analysis_handoff(run,candidates),
+        }
+
+
 @mcp_server.tool(
     name="import_analysis",
     description=(
@@ -1937,6 +2183,8 @@ def import_analysis(
         session.commit()
         return {
             "run_id": str(run.id),
+            "paper_id": str(run.paper_id),
+            "handoff": _analysis_handoff(run, candidates),
             "mapping_status": run.mapping_status,
             "mapping_error": run.mapping_error,
             "auto_apply_review_rules": auto_apply_review_rules,
@@ -1948,6 +2196,8 @@ def import_analysis(
                 {
                     "id": str(c.id),
                     "type": c.candidate_type,
+                    "materialized_target_type": c.materialized_target_type,
+                    "materialized_target_id": c.materialized_target_id,
                     "confidence": c.confidence,
                     "status": c.status,
                     "target_type": (c.normalized_payload or {}).get("target_type"),
@@ -2005,6 +2255,7 @@ def apply_analysis_review_rules(
         session.commit()
         return {
             "run_id": str(run.id),
+            "handoff": _analysis_handoff(run, candidates),
             "paper_id": str(run.paper_id),
             "reviewer": effective_reviewer,
             "auto_apply_summary": auto_apply_summary,
@@ -3787,3 +4038,14 @@ def export_paper_reading_guide_html(paper_id: str) -> dict[str, Any]:
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return FigureReadingService(session, settings).export_offline_html(UUID(paper_id))
+
+
+# 候选扩展（R15 + R16 + R19）：按催化剂组织的单篇处理状态 + 单篇任务级 ML 导出 +
+# 单篇身份/去重/归类/标准化检测与受控身份重算。纯新增注册调用；不改动任何现有工具。
+register_paper_progress_tools(mcp_server)
+register_paper_ml_export_tools(mcp_server)
+register_paper_identity_tools(mcp_server)
+
+from app.mcp.tool_surface import configure_tool_surface
+MCP_TOOL_SURFACE = configure_tool_surface(mcp_server)
+mcp_http_app = mcp_server.streamable_http_app()

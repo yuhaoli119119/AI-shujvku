@@ -405,7 +405,5 @@ class AIVerificationBatchReceiptService:
             "items": readback_items,
         }
         payload["current_readback"] = current_readback
-        receipt.receipt_payload = payload
-        self.session.add(receipt)
-        self.session.flush()
+        # Current readback is computed per request; do not mutate the committed receipt.
         return payload
