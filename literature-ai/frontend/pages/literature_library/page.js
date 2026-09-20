@@ -6,7 +6,7 @@ const esc=value=>String(value==null?"":value).replace(/[&<>"']/g,ch=>({"&":"&amp
 function toast(message){const el=$("toast");el.textContent=message;el.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove("show"),2400)}
 async function getJson(url){state.requestCount+=1;const response=await fetch(url,{credentials:"same-origin"});if(!response.ok)throw new Error("HTTP "+response.status);return response.json()}
 function paperId(p){return String(p.paper_id||p.id||"")}
-function hasPdf(p){return p.pdf_exists===true||Boolean(p.pdf_path&&p.oa_status!=="metadata_only"&&p.oa_status!=="needs_upload")}
+function hasPdf(p){const status=p&&p.pdf_artifact_status&&typeof p.pdf_artifact_status==="object"?p.pdf_artifact_status:{};if(p&&p.pdf_exists===true||status.pdf_exists===true)return true;if(p&&p.pdf_exists===false||status.pdf_exists===false)return false;return Boolean(p&&p.pdf_path&&p.oa_status!=="metadata_only"&&p.oa_status!=="needs_upload")}
 function hasParsed(p){return p.has_parsed_content===true||Number(p.counts&&p.counts.sections||0)>0}
 function needsReview(p){return p.needs_human_confirmation===true||Number(p.dft_review_conflict_count||0)>0||Number(p.visual_review_conflict_count||0)>0||Number(p.content_review_conflict_count||0)>0}
 function hasDft(p){return p.has_active_dft_candidates===true||Number(p.counts&&p.counts.dft_results||0)>0}

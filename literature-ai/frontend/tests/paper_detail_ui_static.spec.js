@@ -96,3 +96,16 @@ test('paper detail overview uses normal font and analysis grid', () => {
   // 关键词 pills 容器
   expect(detail).toContain('id="paperKeywordsPanel"');
 });
+
+
+test('figure evidence links deduplicate PDF pages and never jump to sections', () => {
+  const detail = read('pages/paper_detail/index.html');
+  expect(detail).toContain('function uniquePdfPageLocators');
+  expect(detail).toContain('function openPdfAtPage');
+  expect(detail).toContain('原文位置：');
+  expect(detail).toContain('打开 PDF 第 ${esc(loc.page)} 页');
+  expect(detail).toContain('/pdf#page=${validPage}&toolbar=1');
+  expect(detail).toContain('图片文件缺失');
+  expect(detail).not.toContain('function jumpToEvidence');
+  expect(detail).not.toContain('证据定位（点击跳转原文章节）');
+});

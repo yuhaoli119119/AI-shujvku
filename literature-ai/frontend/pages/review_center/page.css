@@ -481,6 +481,15 @@
       color: var(--color-danger);
       font-weight: 800;
     }
+    .audit-metrics .ready,
+    .audit-metrics .closed {
+      color: var(--color-success, #16a34a);
+      font-weight: 800;
+    }
+    .audit-metrics .terminal {
+      color: var(--color-text-muted, #64748b);
+      font-weight: 700;
+    }
     .btn.btn-chip {
       min-height: 26px;
       padding: 4px 10px;
@@ -1967,11 +1976,45 @@
       font-size: 12px;
       line-height: 1.45;
     }
+    .data-export-content {
+      display: grid;
+      gap: 10px;
+      min-width: min(100%, 540px);
+    }
+    .data-export-property-list {
+      display: grid;
+      gap: 6px;
+    }
+    .data-export-property-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) 58px auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 1px solid color-mix(in srgb, var(--color-border) 72%, transparent);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--color-surface) 82%, transparent);
+    }
+    .data-export-property-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .data-export-property-count {
+      color: var(--color-text-secondary);
+      font-size: 12px;
+      text-align: right;
+      white-space: nowrap;
+    }
     .data-export-actions {
       display: flex;
       align-items: center;
+      justify-content: flex-end;
       gap: 8px;
-      flex: 0 0 auto;
+    }
+    .data-export-actions [hidden] {
+      display: none !important;
     }
     .data-export-panel .btn { min-height: 34px; }
     .visually-retained-control { max-width: 280px; }
@@ -1998,6 +2041,19 @@
       }
       .current-stage-panel {
         padding: 16px;
+      }
+      .data-export-panel {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .data-export-content {
+        min-width: 0;
+      }
+      .data-export-property-row {
+        grid-template-columns: minmax(120px, 1fr) 52px auto;
+      }
+      .data-export-property-row .btn-ghost {
+        display: none;
       }
       .current-stage-meta-row {
         flex-direction: column;
@@ -2368,3 +2424,18 @@
 [data-mode="eyecare"] .panel-head {
   box-shadow: 0 4px 12px rgba(65, 55, 40, 0.05);
 }
+
+    /* Confirmed-data statistics are not a workflow step. */
+    .paper-stage-progress::before { right: 37%; }
+    .paper-stage-progress .paper-stage-independent {
+      align-items: flex-start;
+      text-align: left;
+      padding-left: 16px;
+      border-left: 1px solid var(--color-border);
+    }
+    .paper-stage-progress .paper-stage-independent .paper-stage-number { display: none; }
+    .paper-stage-progress .paper-stage-independent .paper-stage-copy { align-items: flex-start; }
+     (max-width: 760px) {
+      .paper-stage-progress::before { right: 10%; }
+      .paper-stage-progress .paper-stage-independent { padding-left: 8px; }
+    }

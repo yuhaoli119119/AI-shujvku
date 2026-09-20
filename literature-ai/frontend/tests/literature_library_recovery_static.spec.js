@@ -23,7 +23,7 @@ test("literature library is a filter-plus-list page without embedded workspace",
   expect(js).not.toContain("/stream");
 });
 
-test("independent detail exposes summary, figure reading, lightbox, and server export", async () => {
+test("independent detail exposes summary, figure reading, lightbox, and browser download", async () => {
   const html = read("pages/paper_detail/index.html");
   expect(html).toContain('id="paperAbstract"');
   expect(html).toContain("abstract_zh");
@@ -34,6 +34,7 @@ test("independent detail exposes summary, figure reading, lightbox, and server e
   expect(html).toContain("nextFigureInLightbox");
   expect(html).toContain("e.key === \"Escape\"");
   expect(html).toContain('method: "POST"');
-  expect(html).toContain("server_path");
-  expect(html).not.toContain("a.download");
+  expect(html).toContain("resp.blob()");
+  expect(html).toContain("downloadLink.download = filename");
+  expect(html).toContain("导读 HTML 已下载");
 });

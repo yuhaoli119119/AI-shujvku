@@ -12,6 +12,10 @@
     const REVIEW_CENTER_FILTER_SESSION_KEY = "litai:review-center:filters:v1";
     const REVIEW_CENTER_MANUAL_CONTEXT_SESSION_KEY = "litai:review-center:manual-chart-context:v1";
     const REVIEW_CENTER_FETCH_LIMITS = [5000, 500];
+    const REVIEW_CENTER_AUTO_REFRESH_MS = 10000;
+    let reviewCenterLoadInFlight = false;
+    let reviewCenterDerivedRefreshInFlight = false;
+    let reviewCenterAutoRefreshTimer = null;
     const selectedPaperIds = new Set();
     const manualReviewContext = {
       paperId: "",
@@ -35,11 +39,10 @@
     };
     let dftReviewPreview = null;
     let dftReviewPreviewPaperId = "";
-    // Task-level "already gated, downloadable" subset shown on the ML exit card.
-    // The task key is a backend-defined constant; the COUNT always comes from the server.
-    const ML_SUBSET_TASK = "SRR_LiS:adsorption_energy";
-    const ML_SUBSET_LABEL = "吸附能";
-    let mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
+    let paperReviewV2Task = null;
+    let paperReviewV2PaperId = "";
+    // All current-paper DFT properties that pass the authoritative analysis/export gate.
+    let mlPropertyState = { paperId: "", status: "idle", total: 0, properties: [], error: null };
     let manualScopeMismatchMessage = "";
     const PROMPT_COPY_ACTIONS = {
       figure_table: {
@@ -831,13 +834,21 @@
       if (!target || !target.paper_id) {
         dftReviewPreview = null;
         dftReviewPreviewPaperId = "";
+        paperReviewV2Task = null;
+        paperReviewV2PaperId = "";
         box.querySelector(".manual-review-scope-details").textContent = "请选择一篇主文献；DFT 导出会自动聚合全部已完成且未过期的图表审核结果。";
         renderSinglePaperWorkbench();
         return;
       }
       try {
-        dftReviewPreview = await fetchJSON("/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-state");
+        const previewResponses = await Promise.all([
+          fetchJSON("/api/papers/" + encodeURIComponent(target.paper_id) + "/dft-review-state"),
+          fetchJSON("/api/papers/" + encodeURIComponent(target.paper_id) + "/review-v2/task")
+        ]);
+        dftReviewPreview = previewResponses[0];
         dftReviewPreviewPaperId = String(target.paper_id);
+        paperReviewV2Task = previewResponses[1];
+        paperReviewV2PaperId = String(target.paper_id);
         const summary = dftReviewPreview.summary || {};
         const modeLabel = dftReviewPreview.review_mode === "comprehensive_review" ? "DFT 全量核验（已有+查漏）" :
           (dftReviewPreview.review_mode === "gap_discovery" ? "DFT 数据查漏" : "DFT 终审");
@@ -869,45 +880,90 @@
       } catch (error) {
         dftReviewPreview = null;
         dftReviewPreviewPaperId = String(target.paper_id);
+        paperReviewV2Task = null;
+        paperReviewV2PaperId = String(target.paper_id);
         box.querySelector(".manual-review-scope-details").textContent = "DFT 证据摘要读取失败：" + error.message;
         renderSinglePaperWorkbench(error);
       }
     }
 
-    function mlSubsetDownloadHref(paperId) {
-      return "/api/dft/ml-dataset-v3.csv?task=" + encodeURIComponent(ML_SUBSET_TASK) +
-        "&ready_only=true&paper_id=" + encodeURIComponent(paperId);
+    function analysisReadyCsvHref(paperId, propertyType) {
+      return "/api/papers/export/csv?paper_id=" + encodeURIComponent(paperId) +
+        "&property_type=" + encodeURIComponent(propertyType) + "&exact_property_type=true";
     }
 
-    // Reads the REAL task-level "already gated, downloadable" subset count for the focused paper.
-    // One lightweight manifest request per paper; the number is never hardcoded.
-    async function refreshMlSubset() {
+    function renderAnalysisReadyPropertyList(paperId, properties) {
+      const list = document.getElementById("mlPropertyList");
+      if (!list) return;
+      list.replaceChildren();
+      (properties || []).forEach(function(item) {
+        const propertyType = String(item && item.property_type || "");
+        const row = document.createElement("div");
+        row.className = "data-export-property-row";
+
+        const name = document.createElement("span");
+        name.className = "data-export-property-name";
+        name.textContent = String(item && item.label || propertyType || "未标注性质");
+
+        const count = document.createElement("span");
+        count.className = "data-export-property-count";
+        count.textContent = Math.max(0, Number(item && item.count || 0)) + " 条";
+
+        const view = document.createElement("a");
+        view.className = "btn btn-ghost btn-sm";
+        view.textContent = "查看";
+        view.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId) +
+          "&tab=dft&property_type=" + encodeURIComponent(propertyType);
+
+        const download = document.createElement("a");
+        download.className = "btn btn-primary btn-sm";
+        download.textContent = "导出 CSV";
+        download.href = String(item && item.csv_url || analysisReadyCsvHref(paperId, propertyType));
+        download.setAttribute("download", "");
+
+        row.append(name, count, view, download);
+        list.appendChild(row);
+      });
+    }
+
+    async function refreshAnalysisReadyProperties(forceRefresh) {
       const target = selectedWebAiReturnTarget();
       if (!target || !target.paper_id) {
-        mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
+        mlPropertyState = { paperId: "", status: "idle", total: 0, properties: [], error: null };
         renderSinglePaperWorkbench();
         return;
       }
       const paperId = String(target.paper_id);
-      if (mlSubsetState.paperId === paperId && mlSubsetState.status !== "idle") {
+      const hasReadyState = mlPropertyState.paperId === paperId && mlPropertyState.status === "ready";
+      if (mlPropertyState.paperId === paperId && mlPropertyState.status !== "idle" && !forceRefresh) {
         return;
       }
-      mlSubsetState = { paperId: paperId, status: "loading", count: null, blockers: [], error: null };
-      renderSinglePaperWorkbench();
+      if (!hasReadyState) {
+        mlPropertyState = { paperId: paperId, status: "loading", total: 0, properties: [], error: null };
+        renderSinglePaperWorkbench();
+      }
       try {
-        const manifest = await fetchJSON(
-          "/api/dft/ml-dataset-v3/manifest?task=" + encodeURIComponent(ML_SUBSET_TASK) +
-          "&ready_only=true&paper_id=" + encodeURIComponent(paperId)
+        const payload = await fetchJSON(
+          "/api/papers/dft/analysis-ready-properties?paper_id=" + encodeURIComponent(paperId)
         );
-        mlSubsetState = {
+        mlPropertyState = {
           paperId: paperId,
           status: "ready",
-          count: Number(manifest && manifest.returned_count != null ? manifest.returned_count : 0),
-          blockers: (manifest && manifest.review_scope_blockers) || [],
+          total: Math.max(0, Number(payload && payload.total_ready || 0)),
+          totalRecords: Math.max(0, Number(payload && payload.total_records || 0)),
+          pending: Math.max(0, Number(payload && payload.pending_review || 0)),
+          terminalUnusable: Math.max(0, Number(payload && payload.terminal_unusable || 0)),
+          properties: Array.isArray(payload && payload.properties) ? payload.properties : [],
           error: null
         };
       } catch (error) {
-        mlSubsetState = { paperId: paperId, status: "failed", count: null, blockers: [], error: error.message };
+        mlPropertyState = {
+          paperId: paperId,
+          status: "failed",
+          total: 0,
+          properties: [],
+          error: error.message
+        };
       }
       renderSinglePaperWorkbench();
     }
@@ -1061,7 +1117,8 @@
       if (node) node.textContent = value;
     }
 
-    function renderCurrentStageSummary(target, pdfDisplay, gateStage, chartComplete, summary, mlSubset, mlReady) {
+    function renderCurrentStageSummary(target, pdfDisplay, gateStage, chartComplete, summary, propertyState, mlReady) {
+      const dftStatus = dftRecordStatusSummary(target);
       const activeDftCount = Number(target && target.active_dft_candidate_count);
       const hasActiveDftCount = Number.isFinite(activeDftCount);
       const reviewedFigures = Number(summary && summary.reviewed_figures);
@@ -1087,16 +1144,31 @@
           : "选择本地 MCP 直接审核或网页 AI 离线审核";
         primary = "选择图表处理方式";
         primaryHandler = function() { openProcessingMethods("chart"); };
+      } else if (chartComplete && !mlReady && dftStatus.closed) {
+        status = "DFT 审核已收口";
+        summaryText = "数据库共有 " + dftStatus.total + " 条 DFT 记录：审核可用 " + dftStatus.ready +
+          " 条，终止不可用 " + dftStatus.terminalUnusable + " 条，待审 0 条" +
+          (dftStatus.rejected > 0 ? "，拒绝 " + dftStatus.rejected + " 条" : "") + "。";
+        done = "DFT 已全部给出终态；审核可用 " + dftStatus.ready + " 条";
+        pending = "待审核 0 条；终止不可用 " + dftStatus.terminalUnusable + " 条";
+        next = "查看当前导出任务门槛；审核可用不等于每个特定数据集都能直接导出";
+        primary = "查看 DFT 数据";
+        primaryHandler = function() { openCurrentPaperDetail("dft"); };
       } else if (chartComplete && !mlReady) {
-        status = "DFT 核验与查漏";
-        summaryText = "图表门槛已经通过；这表示可以进入 DFT，不表示 DFT 或整篇论文已经完成。";
-        done = hasReviewedCounts
-          ? "图表门槛已通过（服务器纳入 " + reviewedFigures + " 图、" + reviewedTables + " 表）"
-          : "图表证据门槛已通过";
+        status = "DFT 审核进行中";
+        summaryText = dftStatus.known
+          ? "数据库共有 " + dftStatus.total + " 条 DFT 记录：审核可用 " + dftStatus.ready +
+            " 条，待审 " + dftStatus.pending + " 条，终止不可用 " + dftStatus.terminalUnusable + " 条。"
+          : "图表门槛已经通过，可以进入 DFT 审核。";
+        done = dftStatus.known
+          ? "已审核可用 " + dftStatus.ready + " 条"
+          : (hasReviewedCounts
+            ? "图表门槛已通过（服务器纳入 " + reviewedFigures + " 图、" + reviewedTables + " 表）"
+            : "图表证据门槛已通过");
         pending = hasActiveDftCount
-          ? "服务器 active DFT 候选：" + activeDftCount + " 条（记录级状态）"
-          : "DFT 仍有未解决项；后端未提供可直接展示的数量";
-        next = "按需要选择字段核验，或全量审核已有结果并查漏";
+          ? "待审核 DFT：" + activeDftCount + " 条"
+          : "DFT 待审核数量正在读取";
+        next = "继续审核剩余 DFT；每条只收口一次";
         primary = "选择 DFT 处理方式";
         primaryHandler = function() { openProcessingMethods("dft"); };
       } else if (mlReady) {
@@ -1122,8 +1194,11 @@
         primaryButton.onclick = primaryHandler;
       }
 
-      const subsetCount = mlSubset && mlSubset.status === "ready"
-        ? Math.max(0, Number(mlSubset.count || 0))
+      const analysisTotal = propertyState && propertyState.status === "ready"
+        ? Math.max(0, Number(propertyState.total || 0))
+        : null;
+      const analysisPropertyCount = propertyState && propertyState.status === "ready"
+        ? (propertyState.properties || []).length
         : null;
       setText("pdfResultSummary", pdfDisplay.summaryText || pdfDisplay.label);
       setText("chartResultSummary", chartComplete
@@ -1131,18 +1206,26 @@
           ? "门槛已通过；当前聚合 " + reviewedFigures + " 图、" + reviewedTables + " 表。"
           : "服务器图表证据门槛已通过。")
         : "尚未完成；状态为 " + (gateStage || "正在读取") + "。");
-      if (subsetCount != null) {
-        setText("mlExportTitle", "吸附能合格子集：" + subsetCount + " 条");
-        setText("mlExportDescription", subsetCount > 0
-          ? "仅包含当前论文已满足导出条件的记录；整篇论文仍有未解决项时，子集可下载不等于整篇完成。"
-          : "当前论文暂无满足吸附能导出条件的记录；这不表示整篇论文已完成。"
+      if (analysisTotal != null) {
+        const partialDft = analysisTotal > 0 && !dftStatus.closed;
+        setText("mlExportTitle", analysisTotal > 0
+          ? (partialDft
+            ? "可用数据：" + analysisTotal + " 条，" + analysisPropertyCount + " 类性质"
+            : "分析可用：" + analysisTotal + " 条，" + analysisPropertyCount + " 类性质")
+          : "暂无可用于分析的数据");
+        setText("mlExportDescription", analysisTotal > 0
+          ? (partialDft
+            ? "本篇仍有待审核 DFT " + dftStatus.pending + " 条；下方已确认数据仍可立即查看和导出，但不代表整篇审核结束。"
+            : "下方按性质列出当前论文已通过权威门槛的数据；每类都可单独查看和导出。"
+          )
+          : "当前没有通过分析门槛的性质数据；这不表示整篇论文尚未审核。"
         );
-      } else if (mlSubset && mlSubset.status === "failed") {
-        setText("mlExportTitle", "可导出数据读取失败");
-        setText("mlExportDescription", "未取得服务器清单，不能据此判断为 0 条；请刷新状态后重试。");
+      } else if (propertyState && propertyState.status === "failed") {
+        setText("mlExportTitle", "分析可用数据读取失败");
+        setText("mlExportDescription", "未取得服务器清单，不能据此判断为 0 条；页面会自动重试。");
       } else {
-        setText("mlExportTitle", "正在读取当前论文可导出数据");
-        setText("mlExportDescription", "仅显示服务器已满足当前导出条件的记录，不推测数量。");
+        setText("mlExportTitle", "正在读取当前论文分析可用数据");
+        setText("mlExportDescription", "按当前论文全部性质读取，不限定为吸附能。");
       }
     }
 
@@ -1188,6 +1271,7 @@
       }
 
       const pdfDisplay = compactPdfDisplayState(target);
+      const dftStatus = dftRecordStatusSummary(target);
       setSinglePaperStage(
         "pdfStageCard", "pdfStageStatus", "pdfStageDetail",
         pdfDisplay.label,
@@ -1222,7 +1306,12 @@
         const pendingSi = Number(summary.pending_supporting_figures || 0);
         if (chartComplete) {
           chartStatus = gateStage === "not_required" ? "无需图表审核" : "图表审核已完成";
-          chartDetail = "服务器已允许进入 DFT 阶段。";
+          const v2Matches = paperReviewV2Task && paperReviewV2PaperId === paperId;
+          const v2Coverage = v2Matches && paperReviewV2Task.status ? paperReviewV2Task.status.figure_reading_coverage : null;
+          const v2Stage = v2Matches && paperReviewV2Task.status ? String(paperReviewV2Task.status.chart_review_status || "") : "";
+          chartDetail = v2Coverage
+            ? "V2 权威覆盖 " + Number(v2Coverage.completed || 0) + "/" + Number(v2Coverage.total || 0) + " 张图片；状态 " + (v2Stage || gateStage) + "；服务器已允许进入 DFT 阶段。"
+            : "服务器已允许进入 DFT 阶段。";
           chartClass = "complete";
         } else if (gateStage === "needs_local_ai") {
           chartStatus = "等待本地 AI 逐图核验";
@@ -1258,85 +1347,89 @@
         button.disabled = !chartComplete;
         button.title = chartComplete ? "仅处理当前论文及明确关联 SI" : chartDetail;
       });
+      const dftStageStatus = !chartComplete
+        ? "尚未开放"
+        : (dftStatus.total <= 0
+          ? "未发现 DFT 数据"
+          : (dftStatus.closed ? "DFT 审核已收口" : "待审核 " + dftStatus.pending + " 条"));
+      const dftStageDetail = !chartComplete
+        ? chartDetail
+        : (dftStatus.known
+          ? "数据库记录 " + dftStatus.total + " 条；审核可用 " + dftStatus.ready + " 条；待审 " +
+            dftStatus.pending + " 条；终止不可用 " + dftStatus.terminalUnusable + " 条" +
+            (dftStatus.rejected > 0 ? "；拒绝 " + dftStatus.rejected + " 条" : "") + "。"
+          : "图表证据门槛已通过，正在读取 DFT 记录状态。");
       setSinglePaperStage(
         "dftStageCard", "dftStageStatus", "dftStageDetail",
-        chartComplete ? "可以进入 DFT 处理" : "尚未开放",
-        chartComplete
-          ? "图表证据门槛已通过，可以导出当前论文的 DFT 审核包。"
-          : chartDetail,
-        chartComplete ? "" : "blocked"
+        dftStageStatus,
+        dftStageDetail,
+        !chartComplete ? "blocked" : (dftStatus.closed ? "complete" : "")
       );
 
       const mlReady = String(target.workflow_status || "") === "ML_Ready";
-      const mlSubset = mlSubsetState && mlSubsetState.paperId === paperId
-        ? mlSubsetState
-        : { status: "idle", count: null, blockers: [], error: null };
-      const mlSubsetLink = document.getElementById("mlSubsetDownloadLink");
-      const mlSubsetViewLink = document.getElementById("mlSubsetViewLink");
-      if (mlSubsetViewLink) {
-        mlSubsetViewLink.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId) + "&tab=dft";
+      const propertyState = mlPropertyState && mlPropertyState.paperId === paperId
+        ? mlPropertyState
+        : { status: "idle", total: 0, properties: [], error: null };
+      const mlPropertyViewLink = document.getElementById("mlPropertyViewLink");
+      if (mlPropertyViewLink) {
+        mlPropertyViewLink.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId) + "&tab=dft";
       }
-      if (mlSubset.status === "loading") {
-        if (mlSubsetLink) mlSubsetLink.hidden = true;
+      renderAnalysisReadyPropertyList(
+        paperId,
+        propertyState.status === "ready" ? propertyState.properties : []
+      );
+      if (propertyState.status === "loading") {
         setSinglePaperStage(
           "mlStageCard", "mlStageStatus", "mlStageDetail",
-          "正在读取子集状态",
-          "正在向服务器查询当前论文已通过门槛、可下载的" + ML_SUBSET_LABEL + "子集条目数。",
+          "正在读取全部性质",
+          "正在向服务器查询当前论文所有已通过分析门槛的性质和条目数。",
           ""
         );
-      } else if (mlSubset.status === "failed") {
-        if (mlSubsetLink) mlSubsetLink.hidden = true;
+      } else if (propertyState.status === "failed") {
         setSinglePaperStage(
           "mlStageCard", "mlStageStatus", "mlStageDetail",
-          "子集状态读取失败",
-          "服务器子集状态读取失败：" + String(mlSubset.error || "未知错误") +
-            "。这不代表没有合格数据；请刷新后重试。",
+          "分析可用数据读取失败",
+          "服务器状态读取失败：" + String(propertyState.error || "未知错误") +
+            "。这不代表没有合格数据；页面会自动重试。",
           "blocked"
         );
-      } else if (mlSubset.status === "ready") {
-        const subsetCount = Math.max(0, Number(mlSubset.count || 0));
-        if (mlSubsetLink) {
-          mlSubsetLink.href = mlSubsetDownloadHref(paperId);
-          mlSubsetLink.textContent = "下载" + ML_SUBSET_LABEL + " CSV（" + subsetCount + " 条）";
-          mlSubsetLink.hidden = subsetCount <= 0;
-        }
+      } else if (propertyState.status === "ready") {
+        const analysisTotal = Math.max(0, Number(propertyState.total || 0));
+        const propertyCount = (propertyState.properties || []).length;
+        const partialDft = analysisTotal > 0 && !dftStatus.closed;
         setSinglePaperStage(
           "mlStageCard", "mlStageStatus", "mlStageDetail",
-          mlReady
-            ? "服务器已标记可用于机器学习"
-            : (subsetCount > 0
-              ? ML_SUBSET_LABEL + "子集已就绪：" + subsetCount + " 条可下载"
-              : "暂无已就绪子集"),
-          subsetCount > 0
-            ? "整篇：尚未完成（仍有未解决项，本页不宣称整篇完成）。当前任务子集：" + ML_SUBSET_LABEL +
-              " " + subsetCount + " 条合格记录可下载；下载子集不等于整篇完成。"
-            : "整篇：尚未完成。当前任务子集：" + ML_SUBSET_LABEL + " 暂无可导出的合格记录。",
-          mlReady ? "complete" : "blocked"
+          analysisTotal > 0
+            ? (partialDft
+              ? "可用数据：" + analysisTotal + " 条，" + propertyCount + " 类性质"
+              : "分析可用：" + analysisTotal + " 条，" + propertyCount + " 类性质")
+            : "暂无可用于分析的数据",
+          analysisTotal > 0
+            ? (partialDft
+              ? "本篇仍有待审核 DFT " + dftStatus.pending + " 条；已确认数据可立即查看和导出，但不能称为整篇完成。"
+              : "所有性质均按当前论文权威导出门槛统计；缺少非关键辅助字段不会隐藏已确认的性质数值。"
+            )
+            : "当前论文没有通过分析门槛的数据；这与 DFT 审核是否已经收口是两个独立状态。",
+          dftStatus.closed && (analysisTotal > 0 || mlReady) ? "complete" : (analysisTotal > 0 ? "" : "blocked")
         );
       } else {
-        if (mlSubsetLink) mlSubsetLink.hidden = true;
         setSinglePaperStage(
           "mlStageCard", "mlStageStatus", "mlStageDetail",
-          mlReady ? "服务器已标记可用于机器学习" : "尚未满足条件",
-          mlReady
-            ? "当前论文的服务器权威状态为 ML_Ready。"
-            : "服务器当前流程状态为 " + String(target.workflow_status || "unknown") +
-              "；正在读取当前论文可下载的任务子集状态。",
-          mlReady ? "complete" : "blocked"
+          mlReady ? "服务器已标记可用于机器学习" : "正在读取分析可用数据",
+          "正在读取当前论文全部性质，不限定为某个专项任务。",
+          mlReady && dftStatus.closed ? "complete" : ""
         );
       }
       const activeStageId = (!pdfDisplay.pdf.hasPdf || pdfDisplay.unusable)
         ? "pdfStageCard"
         : (!chartComplete
           ? "chartStageCard"
-          : (!mlReady
-            ? "dftStageCard"
-            : "mlStageCard"));
+          : (dftStatus.closed ? "mlStageCard" : "dftStageCard"));
       ["pdfStageCard", "chartStageCard", "dftStageCard", "mlStageCard"].forEach(function(id) {
         const el = document.getElementById(id);
         if (el) el.classList.toggle("is-active", id === activeStageId);
       });
-      renderCurrentStageSummary(target, pdfDisplay, gateStage, chartComplete, summary, mlSubset, mlReady);
+      renderCurrentStageSummary(target, pdfDisplay, gateStage, chartComplete, summary, propertyState, mlReady);
     }
 
     async function focusPaperForReview(paperId) {
@@ -1353,14 +1446,16 @@
       selectedPaperIds.add(String(row.paper_id));
       dftReviewPreview = null;
       dftReviewPreviewPaperId = "";
-      mlSubsetState = { paperId: "", status: "idle", count: null, blockers: [], error: null };
+      paperReviewV2Task = null;
+      paperReviewV2PaperId = "";
+      mlPropertyState = { paperId: "", status: "idle", total: 0, properties: [], error: null };
       replaceReviewCenterTargetUrl(row.paper_id);
       renderRows();
       updateManualReviewContextFromRows();
       await refreshManualReviewScope();
       await loadReviewScopeCandidates();
       await refreshDftReviewPreview();
-      await refreshMlSubset();
+      await refreshAnalysisReadyProperties();
       const workbench = document.getElementById("singlePaperWorkbench");
       if (workbench) workbench.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -1934,7 +2029,7 @@
       }
 
       if (kind === "dft") {
-        return commonWithHardening + "\n\n本次任务模块：DFT 数据专项核验与入库\n目标：核验已有 DFT 结果并补齐漏项，普通意见回写 raw_payload.object_review_audits；最终自动验收走专用 ai_verify_content 路径。\n\n开始前读取 codex-context.context.source_assets.pdf_path，并用 read_paper_page 核对主文和 SI 证据。\n\n规则：\n- 每条意见必须绑定材料/结构、性质或反应步、数值、单位以及 page + quoted_text。\n- 已有行使用 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项使用 new_candidate。材料身份或证据不能确认时必须写 NEEDS_HUMAN，不得猜测。\n- new_candidate 的 corrected_value 至少包含 material_identity、property_type、value、unit；能确认时补充 adsorbate、reaction_step 和 method。\n- 正文、SI、表格或图片对同一计算结果的重复证据应合并到同一行，不要创建重复 DFT 结果。\n- 不从曲线估读数值；图像只有明确标注数值时才可作为结果证据。\n- 普通 PASS/REVISE/REJECT 只通过 import_analysis 导入意见；new_candidate 可用 auto_apply_review_rules=true 物化为未验证候选。\n- 使用专用 ai_verify_content 身份调用 get_ai_verification_tasks，再按硬上限 20 调用 submit_ai_verification_batch；accept/correct/reject 由该服务处理，exception 才进入 Owner session。\n- 不使用第二模型、投票、共识或第三 AI 仲裁。\n- 回读 DFT row、candidate_status、ai_verification 审计和 export_safety 后才报告 completed。";
+        return commonWithHardening + "\n\n本次任务模块：DFT 数据专项核验与入库\n目标：核验已有 DFT 结果并补齐漏项，普通意见回写 raw_payload.object_review_audits；最终自动验收走专用 ai_verify_content 路径。\n\n开始前读取 codex-context.context.source_assets.pdf_path，并用 read_paper_page 核对主文和 SI 证据。\n\n规则：\n- 每条 DFT 只把性质类型和数值作为核心必审字段，并绑定 page + quoted_text。\n- 催化剂、材料、金属中心、位点、配位、载体、距离、吸附物、反应步、键类型和计算设置都是可选上下文；能合理判断就补齐，无法判断可留空，不得阻塞数值入库、导出或回归。同一匿名对象的多项性质必须填写相同 analysis_entity_id。\n- 数值必须有单位；原文缺单位时按性质推断标准单位，服务器同时保存 unit_origin、unit_inference_basis 和 unit_confidence。\n- 已有行使用 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项使用 new_candidate。不得猜测性质含义或数值。\n- new_candidate 的 corrected_value 只强制包含 property_type 和 value；unit 缺失时由 AI/服务器推断，其他上下文字段可选。\n- 正文、SI、表格或图片对同一计算结果的重复证据应合并到同一行，不要创建重复 DFT 结果。\n- 不从曲线估读数值；图像只有明确标注数值时才可作为结果证据。\n- 普通 PASS/REVISE/REJECT 只通过 import_analysis 导入意见；new_candidate 可用 auto_apply_review_rules=true 物化为未验证候选。\n- 使用专用 ai_verify_content 身份调用 get_ai_verification_tasks，再按硬上限 20 调用 submit_ai_verification_batch；只有 energy_type 和 value 必须收口。\n- defer/NEEDS_HUMAN 收口为 terminal_unusable，不再交给其他 AI；仅来源变化或人工明确重开时重新审核。\n- 不使用第二模型、投票、共识或第三 AI 仲裁。\n- 回读 DFT row、candidate_status、ai_verification 审计和 export_safety 后才报告 completed。";
       }
 
       if (kind === "figure") {
@@ -2054,8 +2149,8 @@
 
 
     function workflowClass(status, needsHuman) {
-      if (["Human_Confirmed", "ML_Ready", "Citation_Ready", "Human_Complete", "DB_Ready"].includes(status)) return "ok";
-      if (["Needs_Human_Confirmation", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "bad";
+      if (["Human_Confirmed", "ML_Ready", "ai_verified_ml_ready", "Citation_Ready", "Human_Complete", "DB_Ready"].includes(status)) return "ok";
+      if (["Needs_Human_Confirmation", "ai_terminal_unusable", "ai_rejected", "Gemini_Flagged", "Evidence_Insufficient", "Rejected", "Suspected_Missing", "Unparsed"].includes(status)) return "bad";
       if (["Initial_Parsed", "AI_Rescanned"].includes(status)) return "ok";
       if (needsHuman || ["Codex_Candidate", "Gemini_Verified", "Gemini_Revised"].includes(status)) return "warn";
       return "warn";
@@ -2080,6 +2175,9 @@
         Human_Complete: { label: "确认完整", tip: "当前候选覆盖已经确认完整。" },
         DB_Ready: { label: "可入库", tip: "已达到正式数据库入库条件。" },
         Codex_Candidate: { label: "系统候选", tip: "旧状态，仅作为审核线索，不代表最终结论。" },
+        ai_verified_ml_ready: { label: "已审核可用", tip: "性质类型和数值已由权威 AI 审核收口，可进入机器学习；可选元数据缺失不阻塞。" },
+        ai_terminal_unusable: { label: "已终止不可用", tip: "性质含义或数值无法确认，已经收口，不再自动转交其他 AI。" },
+        ai_rejected: { label: "已拒绝", tip: "权威 AI 已判定该数据不应入库，当前为终态。" },
         Gemini_Verified: { label: "AI 已核验", tip: "AI 已核验证据，但仍不等于最终正式确认。" },
         Gemini_Revised: { label: "AI 已修订", tip: "AI 认为候选内容需要调整后由 AI 继续核验。" },
         Gemini_Flagged: { label: "AI 标红", tip: "AI 发现明显疑点，建议优先复核。" },
@@ -2088,9 +2186,21 @@
         Human_Confirmed: { label: "已确认", tip: "这篇文献的当前候选已经确认。" },
         ML_Ready: { label: "可进机器学习", tip: "确认后的结构化数据已达到机器学习使用条件。" },
         Citation_Ready: { label: "可用于引用", tip: "元数据和审核状态已经足够支持写作引用。" },
-        Rejected: { label: "已拒绝", tip: "当前候选内容被判定不应进入正式库。" }
+        Rejected: { label: "已拒绝", tip: "当前候选内容被判定不应进入正式库。" },
+        candidate_unverified: { label: "未审核候选", tip: "候选已登记，尚未经过审核收口。" },
+        ai_primary_applied: { label: "AI 修复结果已应用，待验证", tip: "AI 已按审计问题写入修复结果，仍需验证后才能进入机器学习。" },
+        final_user_submitted: { label: "已提交定稿", tip: "该记录已随定稿数据集提交。" },
+        blocked_from_export: { label: "当前不可导出", tip: "记录状态可用，但证据或审核闸门判定当前不可导出。" },
+        Human_Verified: { label: "已人工核验", tip: "该记录已由人工逐字段核验。" },
+        Verified: { label: "已核验", tip: "该记录已完成核验收口。" },
+        Citation_Ready: { label: "可用于引用", tip: "元数据和审核状态已经足够支持写作引用。" }
       };
-      return mapping[status] || { label: status || "未知状态", tip: "这是系统内部状态码，仍建议查看详情。" };
+      // Never echo a raw database token back to the user: an unregistered status is
+      // reported as needing manual review instead of leaking the internal code.
+      return mapping[status] || {
+        label: status ? "未识别状态，需人工复核" : "未知状态",
+        tip: "这是系统尚未登记的状态，请联系维护者核对；请勿据此判断是否可用。"
+      };
     }
 
     function qualityMeta(status) {
@@ -2151,13 +2261,13 @@
         return sum + Number(row.dft_review_conflict_count || 0);
       }, 0);
       const items = [
-        ["文献", rows.length, "docs", ""],
-        ["待 AI 核查", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "human", ""],
-        ["A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "quality", ""],
-        ["DFT", rows.filter(function (row) {
-          return row.has_active_dft_candidates !== undefined ? row.has_active_dft_candidates : row.has_dft_candidates;
-        }).length, "dft", ""],
-        ["DFT 冲突", activeConflictCount, "conflict", "此统计仅反映后端返回的 DFT 未决冲突，不代表图表或内容问题已经解决。"]
+        ["文献", rows.length, "docs", "当前筛选范围内的论文数量。"],
+        ["整篇流程待核查", rows.filter(function (row) { return row.needs_human_confirmation; }).length, "human", "按整篇论文流程统计，不等于待审 DFT 数。"],
+        ["PDF A/B", Number(qualityCounts.A_text_readable || 0) + Number(qualityCounts.B_text_partial || 0), "quality", "PDF 质量为 A 或 B 的论文数量。"],
+        ["有待审 DFT 的论文", rows.filter(function (row) {
+          return dftRecordStatusSummary(row).pending > 0;
+        }).length, "dft", "按论文计数；具体 DFT 记录数请看每行的“待审”。"],
+        ["DFT 审计冲突项", activeConflictCount, "conflict", "不同审核意见的未决差异项，不是待审 DFT 记录数。"]
       ];
       document.getElementById("stats").innerHTML = items.map(function (item) {
         return '<div class="stat"' + (item[3] ? ' title="' + esc(item[3]) + '"' : '') + '><div class="stat-icon stat-icon-' + esc(item[2]) + '" aria-hidden="true"></div><div class="stat-label">' + esc(item[0]) + '</div><div class="stat-value">' + esc(item[1]) + '</div></div>';
@@ -2743,6 +2853,45 @@
       return "subtle";
     }
 
+    function dftRecordStatusSummary(row) {
+      const rawCounts = row && row.dft_candidate_status_counts && typeof row.dft_candidate_status_counts === "object"
+        ? row.dft_candidate_status_counts
+        : {};
+      const counts = {};
+      Object.keys(rawCounts).forEach(function(key) {
+        const normalized = String(key || "system_candidate").trim().toLowerCase();
+        counts[normalized] = toCount(counts[normalized]) + toCount(rawCounts[key]);
+      });
+      const sumStatuses = function(statuses) {
+        return statuses.reduce(function(total, status) { return total + toCount(counts[status]); }, 0);
+      };
+      const total = toCount(row && row.dft_candidate_count);
+      const ready = sumStatuses([
+        "ml_ready", "ai_verified_ml_ready", "gemini_verified", "human_confirmed",
+        "citation_ready", "verified", "human_verified"
+      ]);
+      // Kept as separate concepts: "reviewed but still lacking evidence" is not the
+      // same decision as "terminally unusable", and lumping them mislabelled the chip.
+      const terminalUnusable = sumStatuses(["ai_terminal_unusable"]);
+      const needsEvidence = sumStatuses(["human_reviewed_needs_evidence"]);
+      const rejected = sumStatuses(["rejected", "ai_rejected", "rejected_by_local_ai"]);
+      const pending = hasOwnValue(row && row.active_dft_candidate_count)
+        ? toCount(row.active_dft_candidate_count)
+        : Math.max(0, total - ready - terminalUnusable - rejected);
+      const other = Math.max(0, total - ready - terminalUnusable - needsEvidence - rejected - pending);
+      return {
+        known: Object.keys(counts).length > 0,
+        total: total,
+        ready: ready,
+        pending: pending,
+        terminalUnusable: terminalUnusable,
+        needsEvidence: needsEvidence,
+        rejected: rejected,
+        other: other,
+        closed: total > 0 && pending === 0
+      };
+    }
+
     function compactManualReviewProgress(row) {
       const source = row && row.manual_review_progress && typeof row.manual_review_progress === "object"
         ? row.manual_review_progress
@@ -2761,9 +2910,10 @@
         ? mainRow.manual_review_progress
         : {};
       const liveChartStage = String(mainRow && mainRow._live_chart_stage || row && row._live_chart_stage || "");
+      const dftSummary = dftRecordStatusSummary(row);
       return {
         figures: liveChartStage ? ["completed", "not_required"].includes(liveChartStage) : normalize(mainProgress, "figures"),
-        dft: normalize(source, "dft"),
+        dft: (dftSummary.known && dftSummary.closed) || normalize(source, "dft"),
         content: normalize(source, "content")
       };
     }
@@ -2819,9 +2969,12 @@
       const suspectedMissing = hasOwnValue(row.suspected_missing_dft_count)
         ? toCount(row.suspected_missing_dft_count)
         : toCount(dftAudit.suspected_missing_count);
-      const hasActiveDftCandidates = row.has_active_dft_candidates !== undefined
-        ? !!row.has_active_dft_candidates
-        : !!row.has_dft_candidates;
+      const statusSummary = dftRecordStatusSummary(row);
+      const hasActiveDftCandidates = statusSummary.known
+        ? statusSummary.pending > 0
+        : (row.has_active_dft_candidates !== undefined
+          ? !!row.has_active_dft_candidates
+          : !!row.has_dft_candidates);
       if (suspectedMissing > 0) {
         return { label: "疑似漏提", className: "bad", tip: "检测到 DFT 线索多于已解析候选，建议优先复核全文。", suspectedMissing: suspectedMissing };
       }
@@ -2835,7 +2988,11 @@
         if (groupRole === "main" && groupSupportActive > 0 && groupMainActive === 0) {
           return { label: "主文已审", className: "ok", tip: supplementaryGroupTip(row) || "主文献 DFT 已收口；支撑文献还有待处理项，不等同于主文献训练数据未入库。", suspectedMissing: suspectedMissing };
         }
-        return { label: "已审 DFT", className: "ok", tip: "当前 DFT 结果已写入或完成审核，列表中没有未收口候选。", suspectedMissing: suspectedMissing };
+        const closedTip = statusSummary.known
+          ? "数据库记录 " + statusSummary.total + " 条；审核可用 " + statusSummary.ready + " 条；待审 " + statusSummary.pending + " 条；终止不可用 " + statusSummary.terminalUnusable + " 条" +
+            (statusSummary.rejected > 0 ? "；拒绝 " + statusSummary.rejected + " 条" : "") + "。"
+          : "当前 DFT 记录已收口，列表中没有待审核数据。";
+        return { label: "DFT 已收口", className: "ok", tip: closedTip, suspectedMissing: suspectedMissing };
       }
       if (row.has_dft_candidates === false) {
         return { label: "未见 DFT", className: "", tip: "当前没有可审核的 DFT 候选。", suspectedMissing: suspectedMissing };
@@ -2861,15 +3018,30 @@
       const mapping = {
         system_candidate: "系统候选",
         new_candidate: "新增候选",
+        candidate_unverified: "未审核候选",
+        ai_primary_applied: "AI 修复结果已应用，待验证",
+        ai_verified_ml_ready: "已审核可用于机器学习",
+        ai_terminal_unusable: "已终止不可用",
+        ai_rejected: "已拒绝",
+        rejected_by_local_ai: "已拒绝",
         Rejected: "已拒绝",
         human_reviewed_needs_evidence: "已审核但证据仍不足",
-        Needs_Human_Confirmation: "待 AI 核查",
+        Needs_Human_Confirmation: "需人工确认（结论冲突）",
+        final_user_submitted: "已提交定稿",
+        blocked_from_export: "当前不可导出",
         ML_Ready: "已审核可用",
+        ml_ready: "已审核可导出",
+        verified: "已核验",
+        human_verified: "已人工核验",
+        human_confirmed: "已人工确认",
+        citation_ready: "可用于引用",
+        gemini_verified: "AI 已核验",
         Gemini_Verified: "AI 已核验",
         Gemini_Revised: "AI 已修订",
         Gemini_Flagged: "AI 标红",
       };
-      return mapping[status] || workflowMeta(status).label || status || "未知";
+      // Falls back to the generic label, never to the raw internal token.
+      return mapping[status] || mapping[String(status || "").trim().toLowerCase()] || workflowMeta(status).label || "未知";
     }
 
     function reviewDecisionLabel(status) {
@@ -3002,6 +3174,7 @@
         : (row.has_active_dft_candidates !== undefined
           ? (row.has_active_dft_candidates ? toCount(row.dft_candidate_count) : 0)
           : (row.has_dft_candidates ? toCount(row.dft_candidate_count) : 0));
+      const dftStatus = dftRecordStatusSummary(row);
       const latestAudit = (row.external_audit_opinions || [])[0] || null;
       const latestAuditText = latestAudit
         ? [
@@ -3086,11 +3259,12 @@
             '<div class="detail-section-tip">这些数字告诉你这篇文献当前最值得先看哪里。</div>' +
           '</div>' +
           '<div class="detail-kpi-grid">' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">待处理 DFT</div><div class="detail-kpi-value">' + esc(activeDftCount) + '</div><div class="detail-kpi-note">仍在候选队列里、还没收口的 DFT 项。</div></div>' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">DFT 冲突</div><div class="detail-kpi-value">' + esc(dftConflictCount) + '</div><div class="detail-kpi-note">当前还没处理完的 DFT 冲突项。</div></div>' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">DFT 审核</div><div class="detail-kpi-value">' + esc(dftObjectReviewCount) + '</div><div class="detail-kpi-note">只统计 target_type=dft_results 的对象审核。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">数据库记录</div><div class="detail-kpi-value">' + esc(dftStatus.total) + '</div><div class="detail-kpi-note">这篇论文当前保存在 DFT 数据表中的记录总数。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">审核可用</div><div class="detail-kpi-value">' + esc(dftStatus.ready) + '</div><div class="detail-kpi-note">已完成权威审核，可进入后续机器学习任务筛选。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">待审核</div><div class="detail-kpi-value">' + esc(dftStatus.pending) + '</div><div class="detail-kpi-note">仍在审核队列、尚未给出终态的 DFT 记录。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">终止不可用</div><div class="detail-kpi-value">' + esc(dftStatus.terminalUnusable) + '</div><div class="detail-kpi-note">已明确收口但性质含义或数值无法可靠确认。</div></div>' +
+            '<div class="detail-kpi"><div class="detail-kpi-label">审核意见冲突</div><div class="detail-kpi-value">' + esc(dftConflictCount) + '</div><div class="detail-kpi-note">不同审核意见的差异数，不等于待审核 DFT 数。</div></div>' +
             '<div class="detail-kpi"><div class="detail-kpi-label">疑似漏提</div><div class="detail-kpi-value">' + esc(suspectedMissing) + '</div><div class="detail-kpi-note">系统怀疑原文里还有没被提取出来的 DFT 线索。</div></div>' +
-            '<div class="detail-kpi"><div class="detail-kpi-label">证据定位</div><div class="detail-kpi-value">' + esc(toCount(row.evidence_count)) + '</div><div class="detail-kpi-note">目前能用于核对的定位/证据条数。</div></div>' +
           '</div>' +
           '<div class="detail-columns">' +
             compactDetailSection("候选状态", '<div class="detail-value">' + esc(candidateSummaryLines.length ? candidateSummaryLines.join("，") : "当前没有 DFT 候选。") + '</div>') +
@@ -3115,7 +3289,7 @@
           '</div>' +
           '<div class="detail-columns">' +
             compactDetailSection("外部审核", '<div class="detail-value">外部审核：' + esc(toCount(row.external_audit_count)) + '</div><div class="detail-value muted">' + esc(latestAuditText) + '</div>') +
-            compactDetailSection("DFT 审核", '<div class="detail-value">DFT 审核：' + esc(dftObjectReviewCount) + '</div>' + compactInfoList(dftObjectAuditLines, "暂无 DFT 对象级 AI 审核记录。")) +
+            compactDetailSection("DFT 审核记录", '<div class="detail-value">字段级审核记录：' + esc(dftObjectReviewCount) + '</div>' + compactInfoList(dftObjectAuditLines, "暂无 DFT 对象级 AI 审核记录。")) +
             compactDetailSection("对象审核", '<div class="detail-value">对象审核总数：' + esc(toCount(row.object_review_audit_count)) + '</div>' + compactInfoList(objectAuditLines, "暂无对象级 AI 审核记录。")) +
             compactDetailSection("AI 笔记", '<div class="detail-value">AI 笔记：' + esc(toCount(row.paper_note_count)) + '</div>' + compactInfoList(noteLines, "暂无 IDE AI 回写笔记。")) +
           '</div>' +
@@ -4146,13 +4320,20 @@
         const dftBadgeLabel = extraction.label;
         const dftBadgeClass = extraction.className || (row.dft_completeness_status === "DB_Ready" ? "ok" : "warn");
         const dftBadgeTitle = extraction.tip || "当前 DFT 提取状态摘要。";
-        const auditMetrics = ['候选 ' + esc(toCount(row.dft_candidate_count))];
+        const dftStatus = dftRecordStatusSummary(row);
+        const auditMetrics = ['数据库记录 ' + esc(dftStatus.total)];
         const activeDftCount = hasOwnValue(row.active_dft_candidate_count)
           ? toCount(row.active_dft_candidate_count)
           : (row.has_active_dft_candidates !== undefined ? (row.has_active_dft_candidates ? toCount(row.dft_candidate_count) : 0) : null);
         const dftObjectReviewCount = toCount(row.dft_object_review_audit_count);
-        if (activeDftCount > 0) {
-          auditMetrics.push('<span class="active">待处理 ' + esc(activeDftCount) + '</span>');
+        if (dftStatus.known) {
+          auditMetrics.push('<span class="ready">审核可用 ' + esc(dftStatus.ready) + '</span>');
+          auditMetrics.push('<span class="' + (dftStatus.pending > 0 ? 'active' : 'closed') + '">待审 ' + esc(dftStatus.pending) + '</span>');
+          auditMetrics.push('<span class="terminal">终止不可用 ' + esc(dftStatus.terminalUnusable) + '</span>');
+          if (dftStatus.rejected > 0) auditMetrics.push('<span class="terminal">拒绝 ' + esc(dftStatus.rejected) + '</span>');
+          if (dftStatus.other > 0) auditMetrics.push('<span>其他状态 ' + esc(dftStatus.other) + '</span>');
+        } else if (activeDftCount > 0) {
+          auditMetrics.push('<span class="active">待审 ' + esc(activeDftCount) + '</span>');
         }
         if (suspectedMissing > 0) {
           auditMetrics.push('<span class="active">疑似漏提 ' + esc(suspectedMissing) + '</span>');
@@ -4173,12 +4354,7 @@
         if (toCount(row.external_audit_count) > 0) {
           auditMetrics.push('外部审核 ' + esc(toCount(row.external_audit_count)));
         }
-        if (dftObjectReviewCount > 0) {
-          auditMetrics.push('DFT 审核 ' + esc(dftObjectReviewCount));
-        }
-        if (toCount(row.paper_note_count) > 0) {
-          auditMetrics.push('AI 笔记 ' + esc(toCount(row.paper_note_count)));
-        }
+        // 字段审核记录和 AI 笔记属于审计历史，只在“查看详情”中展示，避免与 DFT 记录状态混为一谈。
         const doiInline = row.doi
           ? '<span class="mono paper-doi-inline" title="DOI: ' + esc(row.doi) + '">DOI: ' + esc(row.doi) + '</span>'
           : '';
@@ -4220,10 +4396,10 @@
                   renderConflictChip(
                     dftConflictCount,
                     dftConflictTotalCount,
-                    "冲突",
-                    "已处理冲突",
-                    "当前 DFT 审计仍有未收口冲突，点击查看只读冲突聚合详情。",
-                    "这篇文献历史上出现过 DFT 冲突，但当前未收口冲突已处理完。"
+                    "审计意见冲突",
+                    "历史审计意见冲突",
+                    "不同审核意见之间仍有差异；这不是待审 DFT 条数，也不改变下方记录终态统计。点击查看详情。",
+                    "历史上出现过审核意见差异，但当前没有未收口的意见冲突。"
                   ) +
                 '</div>' +
                 '<button class="btn btn-ghost btn-sm btn-chip" type="button" data-action="open-details">查看详情</button>' +
@@ -4243,7 +4419,10 @@
       updateStickyLayout();
     }
 
-    async function loadReviewCenter() {
+    async function loadReviewCenter(options) {
+      const silent = Boolean(options && options.silent);
+      if (reviewCenterLoadInFlight) return false;
+      reviewCenterLoadInFlight = true;
       try {
         const library = getValue("libraryFilter");
         let data = null;
@@ -4300,17 +4479,79 @@
         ensureValidPage(state.rows.length);
         renderRows();
         updateManualReviewContextFromRows();
+        reviewCenterLoadInFlight = false;
+        if (silent) {
+          void refreshReviewCenterDerivedSilently();
+          return true;
+        }
         await refreshManualReviewScope();
         await loadReviewScopeCandidates();
         await refreshDftReviewPreview();
-        await refreshMlSubset();
+        await refreshAnalysisReadyProperties();
+        return true;
       } catch (error) {
+        if (silent) {
+          console.warn("审核中心自动刷新失败，保留当前页面", error);
+          return false;
+        }
         document.getElementById("queueMeta").textContent = "读取失败";
         document.getElementById("rows").innerHTML = '<tr><td colspan="6"><div class="error">加载失败：' + esc(error.message) + '</div></td></tr>';
         document.getElementById("paginationMeta").textContent = "分页信息读取失败";
         document.getElementById("paginationBar").innerHTML = "";
         showToast("审核中心加载失败：" + error.message);
+        return false;
+      } finally {
+        reviewCenterLoadInFlight = false;
       }
+    }
+
+    async function refreshReviewCenterDerivedSilently() {
+      if (reviewCenterDerivedRefreshInFlight) return;
+      reviewCenterDerivedRefreshInFlight = true;
+      try {
+        await refreshDftReviewPreview();
+        await refreshAnalysisReadyProperties(true);
+      } catch (error) {
+        console.warn("审核中心附加统计自动刷新失败，保留当前结果", error);
+      } finally {
+        reviewCenterDerivedRefreshInFlight = false;
+      }
+    }
+
+    function stopReviewCenterAutoRefresh() {
+      if (reviewCenterAutoRefreshTimer !== null) {
+        window.clearTimeout(reviewCenterAutoRefreshTimer);
+        reviewCenterAutoRefreshTimer = null;
+      }
+    }
+
+    function shouldPauseReviewCenterAutoRefresh() {
+      if (document.hidden) return true;
+      const activeElement = document.activeElement;
+      return Boolean(activeElement && ["INPUT", "TEXTAREA", "SELECT"].includes(activeElement.tagName));
+    }
+
+    async function runReviewCenterAutoRefresh() {
+      if (shouldPauseReviewCenterAutoRefresh() || reviewCenterLoadInFlight) return false;
+      return loadReviewCenter({ silent: true });
+    }
+
+    function scheduleReviewCenterAutoRefresh() {
+      stopReviewCenterAutoRefresh();
+      if (document.hidden) return;
+      reviewCenterAutoRefreshTimer = window.setTimeout(async function () {
+        reviewCenterAutoRefreshTimer = null;
+        await runReviewCenterAutoRefresh();
+        scheduleReviewCenterAutoRefresh();
+      }, REVIEW_CENTER_AUTO_REFRESH_MS);
+    }
+
+    function handleReviewCenterVisibilityChange() {
+      if (document.hidden) {
+        stopReviewCenterAutoRefresh();
+        return;
+      }
+      runReviewCenterAutoRefresh().finally(scheduleReviewCenterAutoRefresh);
     }
 
     async function preparePaper(paperId) {
@@ -4411,5 +4652,6 @@
         }
       });
       window.addEventListener("resize", updateStickyLayout);
-      loadLibraries().finally(loadReviewCenter);
+      window.addEventListener("pagehide", stopReviewCenterAutoRefresh);
+      loadLibraries().finally(function () { return loadReviewCenter(); });
     });

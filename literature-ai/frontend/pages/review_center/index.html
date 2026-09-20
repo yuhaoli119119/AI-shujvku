@@ -66,12 +66,12 @@
               <span id="dftStageDetail">图表阶段完成后才能处理 DFT。</span>
             </div>
           </li>
-          <li class="paper-stage" id="mlStageCard">
+          <li class="paper-stage paper-stage-independent" id="mlStageCard">
             <span class="paper-stage-number">4</span>
             <div class="paper-stage-copy">
-              <span class="paper-stage-label">第四步 · 数据导出</span>
+              <span class="paper-stage-label">独立统计 · 已确认数据</span>
               <strong id="mlStageStatus">尚未满足条件</strong>
-              <span id="mlStageDetail">只显示服务器当前可导出的合格子集。</span>
+              <span id="mlStageDetail">只显示当前可用数据，不改变 DFT 审核状态。</span>
             </div>
           </li>
         </ol>
@@ -274,9 +274,11 @@
             <h3 id="mlExportTitle">正在读取当前论文可导出数据</h3>
             <p id="mlExportDescription">仅包含服务器已满足当前导出条件的记录；不会把部分子集就绪显示为整篇完成。</p>
           </div>
-          <div class="data-export-actions">
-            <a class="btn btn-primary btn-sm" id="mlSubsetDownloadLink" href="#" download hidden>下载吸附能 CSV</a>
-            <a class="btn btn-ghost btn-sm" id="mlSubsetViewLink" href="#">查看当前论文 DFT 数据</a>
+          <div class="data-export-content">
+            <div class="data-export-property-list" id="mlPropertyList"></div>
+            <div class="data-export-actions">
+              <a class="btn btn-ghost btn-sm" id="mlPropertyViewLink" href="#">查看全部 DFT 数据</a>
+            </div>
           </div>
         </section>
       </div>
@@ -376,8 +378,8 @@
               <th class="col-divider" style="text-align:center;">ID</th>
               <th class="col-divider" style="text-align:center;">年份</th>
               <th class="col-divider" style="text-align:center;">文献标题</th>
-              <th class="col-divider" style="text-align:center;">文献状态</th>
-              <th class="col-divider" style="text-align:center;">DFT 审计</th>
+              <th class="col-divider" style="text-align:center;">论文各模块</th>
+              <th class="col-divider" style="text-align:center;">DFT 数据状态</th>
               <th style="text-align:center;">操作</th>
             </tr>
           </thead>

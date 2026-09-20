@@ -59,7 +59,7 @@ test('primary navigation and legacy review URLs converge on review center', () =
   ].map(read);
 
   expect(topnav).toContain('id: "dashboard"');
-  expect(topnav).toContain('id: "ingestion"');
+  expect(topnav).not.toContain('id: "ingestion"');
   expect(topnav).toContain('id: "literature"');
   expect(topnav).toContain('id: "review-center"');
   expect(topnav).toContain('id: "dft-database"');
@@ -71,8 +71,10 @@ test('primary navigation and legacy review URLs converge on review center', () =
   expect(dashboard).not.toContain('tab=ai-search');
   expect(dashboard).not.toContain('AI 自动搜文');
   expect(dashboard).not.toContain('AI 写作 studio');
-  expect(library).toContain("window.location.href='../ingestion/index.html'");
-  expect(library).toContain('前往入库');
+  expect(library).not.toContain("window.location.href='../ingestion/index.html'");
+  expect(library).not.toContain('前往入库');
+  expect(library).toContain('选择 PDF 并上传');
+  expect(library).toContain('查看 IDE AI 指南');
   expect(library).not.toContain('Ingestion Center');
   expect(settings).not.toContain('href="../extraction_workflow/index.html"');
   expect(settings).not.toContain("showGuidePane('writer', event)");

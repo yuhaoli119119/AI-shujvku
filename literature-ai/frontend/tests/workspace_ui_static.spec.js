@@ -54,7 +54,17 @@ test('workspace dashboard surface matches the research workbench spec', () => {
   expect(topnav).not.toContain('入库 / Add Literature');
   expect(topnav).not.toContain('id: "ingestion"');
   expect(topnav).toContain('label: "工作台"');
+  expect(topnav).toContain('label: "文献库"');
+  expect(topnav).toContain('label: "审核中心"');
+  expect(topnav).toContain('label: "DFT 数据库"');
   expect(topnav).toContain('label: "数据分析"');
+  expect(topnav).toContain('label: "设置"');
+
+  // 主题只保留浅色、深色、护眼三种显示模式
+  expect(topnav).toContain('static THEMES = ["material"]');
+  expect(topnav).toContain('static MODES = ["light", "dark", "eyecare"]');
+  expect(topnav).not.toContain('界面风格');
+  expect(topnav).not.toContain('theme-pill"');
 });
 
 test('workspace metrics avoid fake aggregate numbers', () => {

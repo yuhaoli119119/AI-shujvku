@@ -188,7 +188,7 @@
     .pd-figure-img-wrap { position: relative; width: 100%; aspect-ratio: 4 / 3; max-height: 340px; display: flex; align-items: center; justify-content: center; background: var(--color-surface-alt); border-bottom: 1px solid var(--color-border); cursor: zoom-in; overflow: hidden; }
     .pd-figure-img { width: 100%; height: 100%; object-fit: contain; display: block; }
     .pd-figure-img-wrap.is-failed .pd-figure-img { display: none; }
-    .pd-figure-img-wrap.is-failed::after { content: "图像暂不可用"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
+    .pd-figure-img-wrap.is-failed::after { content: "图片文件缺失"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
     .pd-figure-img-fallback { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--color-text-muted); font-size: 13px; background: var(--color-surface-alt); }
     .pd-figure-body { padding: 14px; display: flex; flex-direction: column; gap: 10px; flex: 1; }
     .pd-figure-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -2006,14 +2006,19 @@
       if (reading) {
         return {
           type: "ai_reading",
-          summary: reading.summary || figure.content_summary || "暂无概括",
-          core: reading.detailed_explanation || reading.core_interpretation || "",
+          summary: reading.summary_zh || reading.summary || figure.content_summary || "暂无概括",
+          core: reading.detailed_explanation_zh || reading.detailed_explanation || reading.core_interpretation || "",
           subfigures: Array.isArray(reading.subfigures) ? reading.subfigures : [],
           locators: Array.isArray(reading.evidence_locators) ? reading.evidence_locators : [],
-          uncertainties: Array.isArray(reading.uncertainties) ? reading.uncertainties : [],
+          uncertainties: Array.isArray(reading.uncertainties_zh) ? reading.uncertainties_zh : (Array.isArray(reading.uncertainties) ? reading.uncertainties : []),
           methods: Array.isArray(reading.methods) ? reading.methods : [],
           is_stale: Boolean(reading.is_stale),
-          version: reading.version || 1
+          version: reading.reading_version || reading.version || 1,
+          figureTypePrimary: reading.figure_type_primary || "",
+          figureTypeDisplayZh: reading.figure_type_display_zh || "",
+          figureTypes: Array.isArray(reading.figure_types) ? reading.figure_types : [],
+          panelTypes: Array.isArray(reading.panel_types) ? reading.panel_types : [],
+          typeConfidence: reading.type_confidence
         };
       }
       if (figure && figure.content_summary && String(figure.content_summary).trim()) {
@@ -2083,13 +2088,14 @@
           </div>`
         : "";
 
-      const locatorsHtml = readingData.locators.length
+      const pageLocators = uniquePdfPageLocators(readingData.locators);
+      const locatorsHtml = pageLocators.length
         ? `<div style="margin-top:8px;">
-            <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">证据定位（点击跳转原文章节）：</div>
+            <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">原文位置：</div>
             <div class="pd-reading-locators">
-              ${readingData.locators.map(loc => `
-                <button type="button" class="pd-reading-locator-chip clickable" onclick="jumpToEvidence('${esc(loc.section || '').replace(/'/g, "\\'")}', ${loc.page ? Number(loc.page) : 'null'}, '${esc(loc.quote || '').replace(/'/g, "\\'")}')" title="${esc(loc.quote || loc.section || '')}">
-                  ${loc.page ? `P.${esc(loc.page)}` : ""}${loc.section ? ` · ${esc(loc.section)}` : ""}${loc.subfigure ? ` (${esc(loc.subfigure)})` : ""}
+              ${pageLocators.map(loc => `
+                <button type="button" class="pd-reading-locator-chip clickable" onclick="openPdfAtPage(${Number(loc.page)})" title="${esc(loc.quote || loc.section || (`PDF 第 ${loc.page} 页`))}">
+                  打开 PDF 第 ${esc(loc.page)} 页
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:3px;vertical-align:-1px;"><path d="M7 17l9.2-9.2M17 17V8H8"/></svg>
                 </button>
               `).join("")}
@@ -2139,6 +2145,8 @@
     function renderFigureDetailCard(figure, index) {
       const imageReview = figure.image_review || {};
       const imageSrc = figure.asset_url || (figure.image_path ? `${API_BASE}/assets/${figure.image_path}` : "");
+      const imageFlags = Array.isArray(figure.flags) ? figure.flags : [];
+      const imageFileMissing = imageFlags.includes("missing_image_file") || imageFlags.includes("invalid_image_file") || !imageSrc;
       const label = figure.figure_label || ("Figure " + (index + 1));
       const caption = figure.caption || figure.figure_role || "暂无说明";
       const page = figure.page || "";
@@ -2146,7 +2154,11 @@
 
       // Tech info rows — kept only inside diagnostic <details>, fully removed from normal reading
       const techRows = [
-        ["图类型", figure.figure_role || ""],
+        ["标准类型", readingData.figureTypeDisplayZh ? readingData.figureTypeDisplayZh + " (" + readingData.figureTypePrimary + ")" : ""],
+        ["全部标准类型", Array.isArray(readingData.figureTypes) ? readingData.figureTypes.join(", ") : ""],
+        ["子图类型", Array.isArray(readingData.panelTypes) ? readingData.panelTypes.map(p => (p.label || "") + ": " + (p.figure_types || []).join(", ")).join("; ") : ""],
+        ["类型置信度", readingData.typeConfidence != null ? String(readingData.typeConfidence) : ""],
+        ["科学作用", figure.figure_role || ""],
         ["裁图状态", figure.crop_status || ""],
         ["裁图来源", figure.crop_source || ""],
         ["图片路径", figure.image_path || ""],
@@ -2160,9 +2172,9 @@
       ].filter(row => row[1] !== "" && row[1] !== 0);
 
       const onerrorAttr = `onerror="this.classList.add('pd-figure-img-failed');this.closest('.pd-figure-img-wrap') && this.closest('.pd-figure-img-wrap').classList.add('is-failed');this.onerror=null;"`;
-      const imageHtml = imageSrc
+      const imageHtml = imageSrc && !imageFileMissing
         ? `<img class="pd-figure-img" src="${esc(imageSrc)}" loading="lazy" decoding="async" alt="${esc(label)}" ${onerrorAttr}>`
-        : `<div class="pd-figure-img-fallback"><span>图像暂不可用</span><small>${esc(label)} · Page ${esc(page)}</small></div>`;
+        : `<div class="pd-figure-img-fallback"><span>图片文件缺失</span><small>${esc(label)} · Page ${esc(page)}</small></div>`;
 
       return `
         <div class="pd-figure-card" data-figure-index="${index}">
@@ -2746,43 +2758,21 @@
       ensureFullDetail(tab);
     }
 
-    function jumpToEvidence(sectionName, page, quote) {
-      if (typeof closeFigureLightbox === "function") {
-        closeFigureLightbox();
-      }
-      switchDetailTab("sections");
-      setTimeout(() => {
-        const list = document.getElementById("sectionsList");
-        if (!list) return;
-        let target = null;
-        const secItems = list.querySelectorAll(".section-item");
-        const searchName = (sectionName || "").trim().toLowerCase();
+    function uniquePdfPageLocators(locators) {
+      const seen = new Set();
+      return (Array.isArray(locators) ? locators : []).filter(locator => {
+        const page = Number(locator && locator.page);
+        if (!Number.isInteger(page) || page < 1 || seen.has(page)) return false;
+        seen.add(page);
+        return true;
+      });
+    }
 
-        for (const item of secItems) {
-          const title = (item.getAttribute("data-section-title") || "").toLowerCase();
-          if (searchName && (title.includes(searchName) || searchName.includes(title))) {
-            target = item;
-            break;
-          }
-        }
-        if (!target && page) {
-          for (const item of secItems) {
-            const text = item.textContent || "";
-            if (text.includes("页码：" + page) || text.includes(" " + page + " -") || text.includes("- " + page)) {
-              target = item;
-              break;
-            }
-          }
-        }
-        if (target) {
-          target.scrollIntoView({ behavior: "smooth", block: "center" });
-          target.classList.add("evidence-highlight-pulse");
-          setTimeout(() => target.classList.remove("evidence-highlight-pulse"), 2500);
-          showToast("已定位至证据章节: " + (sectionName || ("Page " + page)));
-        } else {
-          showToast("已切换至章节列表");
-        }
-      }, 120);
+    function openPdfAtPage(page) {
+      const validPage = Number(page);
+      const paperId = state.paper && (state.paper.id || state.paper.paper_id);
+      if (!paperId || !Number.isInteger(validPage) || validPage < 1) return;
+      window.open(`${API_BASE}/${encodeURIComponent(paperId)}/pdf#page=${validPage}&toolbar=1`, "_blank", "noopener");
     }
 
     async function toggleCitationPreview(event) {
@@ -2871,7 +2861,11 @@
       // 技术诊断信息（仅作为折叠诊断）
       const imageReview = figure.image_review || {};
       const techRows = [
-        ["图类型", figure.figure_role || ""],
+        ["标准类型", readingData.figureTypeDisplayZh ? readingData.figureTypeDisplayZh + " (" + readingData.figureTypePrimary + ")" : ""],
+        ["全部标准类型", Array.isArray(readingData.figureTypes) ? readingData.figureTypes.join(", ") : ""],
+        ["子图类型", Array.isArray(readingData.panelTypes) ? readingData.panelTypes.map(p => (p.label || "") + ": " + (p.figure_types || []).join(", ")).join("; ") : ""],
+        ["类型置信度", readingData.typeConfidence != null ? String(readingData.typeConfidence) : ""],
+        ["科学作用", figure.figure_role || ""],
         ["裁图状态", figure.crop_status || ""],
         ["裁图来源", figure.crop_source || ""],
         ["图片路径", figure.image_path || ""],
@@ -2938,13 +2932,31 @@
       const exportUrl = `${API_BASE}/${encodeURIComponent(state.paperId)}/reading-guide/export-html`;
       try {
         const resp = await fetch(exportUrl, { method: "POST", credentials: "same-origin" });
-        const result = await resp.json().catch(() => ({}));
         if (!resp.ok) {
+          const result = await resp.json().catch(() => ({}));
           showToast("导出失败: " + (result.detail || "网络请求异常"));
           return;
         }
-        const sizeKb = Math.max(1, Math.round(Number(result.size_bytes || 0) / 1024));
-        showToast("导读已生成在服务器：" + result.server_path + "（" + sizeKb + " KB）");
+        const blob = await resp.blob();
+        const disposition = resp.headers.get("content-disposition") || "";
+        const utf8Name = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const plainName = disposition.match(/filename="?([^";]+)"?/i);
+        let filename = `literature-ai-reading-guide-${state.paperId}.html`;
+        try {
+          if (utf8Name) filename = decodeURIComponent(utf8Name[1]);
+          else if (plainName) filename = plainName[1];
+        } catch (_) {}
+        const objectUrl = URL.createObjectURL(blob);
+        const downloadLink = document.createElement("a");
+        downloadLink.href = objectUrl;
+        downloadLink.download = filename;
+        downloadLink.style.display = "none";
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        downloadLink.remove();
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+        const sizeKb = Math.max(1, Math.round(blob.size / 1024));
+        showToast("导读 HTML 已下载（" + sizeKb + " KB）");
       } catch (err) {
         showToast("导出失败: " + (err.message || err));
       }
