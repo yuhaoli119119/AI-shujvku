@@ -530,9 +530,10 @@ class PaperWorkbenchAiPackageMixin:
             ],
             "policy": "Candidate values require assigned AI/human review and confirmation before ML export.",
             "ai_protocol_policy": (
-                "System rule extraction only creates system_candidate records. Final DFT/ML data must pass "
-                "PDF evidence anchoring, AI protocol extraction/review, deduplication, completeness audit, "
-                "and human or second-AI confirmation."
+                "System rule extraction only creates system_candidate records. Final DFT/ML data requires "
+                "PDF evidence anchoring plus one authenticated AI verification of property type and numeric value. "
+                "Missing optional catalyst or calculation metadata does not block storage, export, or regression; "
+                "a missing source unit is canonically inferred with provenance."
             ),
         }
         payload["dedupe_signature"] = item.get("dedupe_signature") or build_dft_dedupe_signature(

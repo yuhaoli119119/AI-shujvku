@@ -565,26 +565,60 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                 "ml_ready_source",
                 "ALTER TABLE dft_results ADD COLUMN IF NOT EXISTS ml_ready_source VARCHAR(128)",
             )
+            # Startup normalisation must never downgrade a recorded decision.
+            #
+            # This block used to rewrite *every* unrecognised status back to
+            # 'system_candidate', which silently discarded recorded AI verdicts such as
+            # ai_verified_ml_ready / ai_terminal_unusable / ai_primary_applied on every
+            # rebuild or library switch.  It now only fills genuinely empty values and
+            # maps explicitly deprecated aliases, and it takes the accepted token set
+            # from the canonical registry so the two can never drift apart again.
             try:
-                connection.execute(
-                    text(
-                        "UPDATE dft_results SET candidate_status = 'system_candidate' "
-                        "WHERE candidate_status IS NULL "
-                        "OR candidate_status = '' "
-                        "OR candidate_status = 'Codex_Candidate' "
-                        "OR ("
-                        "candidate_status NOT IN ('system_candidate', 'Rejected', 'human_reviewed_needs_evidence') "
-                        "AND NOT EXISTS ("
-                        "SELECT 1 FROM extraction_field_reviews r "
-                        "WHERE r.target_type = 'dft_results' "
-                        "AND r.target_id = CAST(dft_results.id AS TEXT) "
-                        "AND r.reviewer_status IN ('verified', 'safe_verified')"
-                        ")"
-                        ")"
-                    )
+                from app.utils.dft_candidate_status import (
+                    DFT_CANDIDATE_LEGACY_ALIASES,
+                    DFT_STATUS_PENDING,
+                    is_legacy_alias,
+                    unknown_tokens,
                 )
+
+                rows = connection.execute(
+                    text("SELECT id, candidate_status FROM dft_results")
+                ).fetchall()
+                normalised_ids: list = []
+                for row_id, raw_status in rows:
+                    token = str(raw_status or "").strip()
+                    if token and not is_legacy_alias(token):
+                        continue
+                    connection.execute(
+                        text(
+                            "UPDATE dft_results SET candidate_status = :status WHERE id = :row_id"
+                        ),
+                        {"status": DFT_STATUS_PENDING, "row_id": row_id},
+                    )
+                    normalised_ids.append(str(row_id))
+                if normalised_ids:
+                    logger.info(
+                        "DFT candidate startup normalisation filled %s empty/legacy row(s); legacy aliases=%s",
+                        len(normalised_ids),
+                        sorted(DFT_CANDIDATE_LEGACY_ALIASES),
+                    )
+
+                # Non-silent diagnostic: unregistered tokens are reported and left
+                # untouched, so registry drift becomes visible instead of being hidden
+                # by a silent rewrite.
+                unregistered = unknown_tokens(status for (_id, status) in rows)
+                if unregistered:
+                    logger.warning(
+                        "DFT candidate status registry is missing %s token(s): %s - "
+                        "rows were left unchanged; register them in app.utils.dft_candidate_status",
+                        len(unregistered),
+                        unregistered,
+                    )
             except Exception:
-                logger.exception("Automatic database migration failed while downgrading DFT candidates")
+                logger.exception(
+                    "Automatic database migration failed while normalising DFT candidate statuses; "
+                    "recorded DFT decisions were left unchanged"
+                )
             execute_migration_step(
                 "dft_results",
                 "evidence_payload",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import fitz
 from types import SimpleNamespace
 
 from sqlalchemy import create_engine
@@ -18,6 +19,7 @@ from app.db.models import (
 )
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.services.paper_query import PaperQueryService
+from app.utils.ai_verification import ai_target_fingerprint
 from app.utils.review_safety import is_export_eligible_extraction
 
 
@@ -145,12 +147,21 @@ def test_non_dft_detail_dedupe_key_still_uses_existing_display_semantics():
     )
 
 
-def test_paper_detail_dft_item_exposes_converged_status_for_exportable_historical_reject():
+def test_paper_detail_dft_item_exposes_converged_status_for_exportable_historical_reject(tmp_path):
     engine = create_engine(os.environ["LITAI_TEST_DATABASE_URL"], future=True)
     Base.metadata.create_all(engine)
     try:
         with Session(engine) as session:
-            paper = Paper(title="DFT display paper", pdf_path="display.pdf", authors=["A"])
+            evidence = "Table 1 reports Li2S4 adsorption energy of -1.23 eV on Fe-N4."
+            pdf_path = tmp_path / "display.pdf"
+            document = fitz.open()
+            for page_index in range(4):
+                page = document.new_page()
+                if page_index == 3:
+                    page.insert_text((40, 80), evidence)
+            document.save(pdf_path)
+            document.close()
+            paper = Paper(title="DFT display paper", pdf_path=str(pdf_path), authors=["A"])
             session.add(paper)
             session.flush()
             catalyst = CatalystSample(paper_id=paper.id, name="Fe-N4", metal_centers=["Fe"])
@@ -163,7 +174,7 @@ def test_paper_detail_dft_item_exposes_converged_status_for_exportable_historica
                 adsorbate="Li2S4",
                 value=-1.23,
                 unit="eV",
-                evidence_text="Table 1 reports Li2S4 adsorption energy of -1.23 eV on Fe-N4.",
+                evidence_text=evidence,
                 candidate_status="ML_Ready",
             )
             session.add(row)
@@ -195,6 +206,51 @@ def test_paper_detail_dft_item_exposes_converged_status_for_exportable_historica
                     reviewer="human_review",
                     target_resolution_status="active",
                     last_resolved_target_id=str(row.id),
+                    target_fingerprint=ai_target_fingerprint("dft_results", row),
+                    review_payload={"human_verification": {
+                        "verification_actor_type": "human",
+                        "identity_verified": True,
+                        "writes_final_truth": True,
+                        "decision": "verified",
+                        "reviewer": "human_review",
+                    }},
+                )
+            )
+            session.add(
+                EvidenceLocator(
+                    paper_id=paper.id,
+                    source_type="table",
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="energy_type",
+                    page=4,
+                    evidence_text=row.evidence_text,
+                    locator_status="exact_page",
+                    locator_confidence=0.95,
+                )
+            )
+            session.add(
+                ExtractionFieldReview(
+                    paper_id=paper.id,
+                    target_type="dft_results",
+                    target_id=str(row.id),
+                    field_name="energy_type",
+                    original_value=row.property_type,
+                    reviewed_value=row.property_type,
+                    unit=None,
+                    evidence_text=row.evidence_text,
+                    reviewer_status="verified",
+                    reviewer="human_review",
+                    target_resolution_status="active",
+                    last_resolved_target_id=str(row.id),
+                    target_fingerprint=ai_target_fingerprint("dft_results", row),
+                    review_payload={"human_verification": {
+                        "verification_actor_type": "human",
+                        "identity_verified": True,
+                        "writes_final_truth": True,
+                        "decision": "verified",
+                        "reviewer": "human_review",
+                    }},
                 )
             )
             run = ExternalAnalysisRun(paper_id=paper.id, source="ide_ai", source_label="older_ai")

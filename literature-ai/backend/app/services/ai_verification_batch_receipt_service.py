@@ -12,7 +12,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.db.models import AIVerificationBatchReceipt, Paper
+from app.db.models import AIVerificationBatchReceipt, DFTResult, Paper
 from app.schemas.ai_verification import (
     AIFieldVerificationApplyRequest,
     AIFieldVerificationSubmission,
@@ -158,6 +158,32 @@ class AIVerificationBatchReceiptService:
                 item_results.append({"item_index": item_index, "outcome": "format_error", "status": "invalid", "database_writes": False, "errors": [{"field_path": ".".join(str(part) for part in error["loc"]), "reason": error["msg"], "type": error["type"]} for error in exc.errors()]})
 
         item_results.sort(key=lambda item: int(item["item_index"]))
+        # A request may carry the two required fields for one DFT record in
+        # separate submissions.  Recompute only after the complete request,
+        # so an accepted record cannot retain a stale system_candidate label.
+        record_closures: dict[str, str] = {}
+        target_ids = sorted({
+            str(item.get("target_id") or "")
+            for item in item_results
+            if str(item.get("target_type") or "") == "dft_results" and item.get("target_id")
+        })
+        for target_id in target_ids:
+            try:
+                row = self.session.scalar(
+                    select(DFTResult).where(
+                        DFTResult.paper_id == paper_id,
+                        DFTResult.id == UUID(target_id),
+                    )
+                )
+            except (TypeError, ValueError, AttributeError):
+                row = None
+            if row is not None:
+                record_closures[str(row.id)] = self.verification._sync_dft_record_closure(paper_id, row)
+        for item in item_results:
+            record_status = record_closures.get(str(item.get("target_id") or ""))
+            if record_status is not None:
+                item["record_status"] = record_status
+                item["record_terminal"] = record_status != "pending"
         payload = {
             "schema_version": "ai_verification_batch_receipt.v2",
             "request_id": request_id,

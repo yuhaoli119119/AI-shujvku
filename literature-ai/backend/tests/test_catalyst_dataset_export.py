@@ -25,6 +25,7 @@ pytestmark = pytest.mark.no_test_database
 
 EXPECTED_COLUMNS = [
     "catalyst_name",
+    "analysis_entity_id",
     "catalyst_sample_id",
     "paper_code",
     "paper_id",
@@ -162,7 +163,7 @@ def test_fixed_wide_columns_conflicts_duplicates_and_csv_are_deterministic():
     )
     assert list(CATALYST_WIDE_COLUMNS) == EXPECTED_COLUMNS
     assert payload["columns"] == EXPECTED_COLUMNS
-    assert len(payload["field_definitions"]) == 23
+    assert len(payload["field_definitions"]) == 24
     assert payload["schema_version"] == CATALYST_WIDE_SCHEMA_VERSION
     assert payload["library_name"] == "测试库"
     assert payload["row_count"] == payload["manifest"]["row_count"] == 1

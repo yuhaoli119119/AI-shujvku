@@ -239,7 +239,7 @@ def test_v3_keeps_blocked_records_and_ready_only_filters_them():
     engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
-            _row(session, complete=False)
+            _row(session, complete=False, reaction_step=None)
             _row(session, with_setting=False)
             _row(session, property_type="cohesive_energy")
             session.commit()
@@ -247,12 +247,20 @@ def test_v3_keeps_blocked_records_and_ready_only_filters_them():
             ready = build_dft_ml_dataset_v3(session, task="adsorption_energy", ready_only=True)
 
             assert len(default["records"]) == 2
-            feature_blocked = next(record for record in default["records"] if record["label_ready"])
-            label_blocked = next(record for record in default["records"] if not record["label_ready"])
-            assert feature_blocked["tabular_ml_ready"] is False
-            assert "missing_coordination" in feature_blocked["feature_blockers"]
-            assert "missing_result_setting_link" in label_blocked["label_blockers"]
-            assert ready["records"] == []
+            assert len(ready["records"]) == 2
+            incomplete_context = next(
+                record for record in default["records"]
+                if record["catalyst"]["coordination"] is None
+            )
+            missing_setting = next(
+                record for record in default["records"]
+                if record["linked_dft_setting"] is None
+            )
+            assert incomplete_context["target"]["reaction_step"] is None
+            assert incomplete_context["tabular_ml_ready"] is True
+            assert incomplete_context["feature_blockers"] == []
+            assert missing_setting["label_ready"] is True
+            assert missing_setting["label_blockers"] == []
             assert default["manifest"]["excluded_counts"] == {"target_property_not_allowed": 1}
     finally:
         engine.dispose()
@@ -339,7 +347,7 @@ def test_v3_ready_only_limit_is_applied_after_readiness_filtering():
 
             assert len(payload["records"]) == 1
             assert payload["records"][0]["tabular_ml_ready"] is True
-            assert payload["manifest"]["task_candidate_count"] == 2
+            assert payload["manifest"]["task_candidate_count"] == 3
             assert payload["manifest"]["returned_count"] == 1
     finally:
         engine.dispose()
@@ -357,41 +365,42 @@ def test_v3_csv_defaults_to_training_ready_records_and_manifest_filter():
             rows = list(csv.DictReader(io.StringIO(csv_text)))
 
             assert manifest["filters"]["ready_only"] is True
-            assert manifest["returned_count"] == 1
-            assert [row["record_id"] for row in rows] == [str(ready.id)]
-            assert rows[0]["paper_id"]
-            assert rows[0]["title"] == "B ready"
-            assert rows[0]["year"] == "2025"
-            assert rows[0]["catalyst_name"] == "Fe-N-C"
-            assert rows[0]["catalyst_type"] == "single_atom"
-            assert rows[0]["metal_centers"] == '["Fe"]'
-            assert rows[0]["coordination"] == "Fe-N4"
-            assert rows[0]["support"] == "carbon"
-            assert rows[0]["reaction_type"] == "SRR_LiS"
-            assert rows[0]["task_profile"] == "SRR_LiS:adsorption_energy"
-            assert rows[0]["property_type"] == "adsorption_energy"
-            assert rows[0]["normalized_property_type"] == "adsorption_energy"
-            assert rows[0]["canonical_property_type"] == "adsorption_energy"
-            assert rows[0]["property_subtype"] == "adsorption"
-            assert rows[0]["normalized_value"] == "-1.23"
-            assert rows[0]["normalized_unit"] == "eV"
-            assert rows[0]["raw_value"] == "-1.23"
-            assert rows[0]["raw_unit"] == "eV"
-            assert rows[0]["adsorbate"] == "Li2S4"
-            assert rows[0]["intermediate"] == "Li2S4"
-            assert rows[0]["reaction_step"] == "Li2S4 adsorption"
-            assert rows[0]["dft_software"] == "VASP"
-            assert rows[0]["dft_functional"] == "PBE"
-            assert "Calculated adsorption energy of Li2S4 on Fe-N-C: -1.23 eV." in rows[0]["evidence_text"]
-            assert rows[0]["page_locators"] == "[7]"
-            assert rows[0]["label_ready"] == "true"
-            assert rows[0]["tabular_ml_ready"] == "true"
-            assert rows[0]["label_blockers"] == "[]"
-            assert rows[0]["feature_blockers"] == "[]"
-            assert rows[0]["split_paper_id"] == rows[0]["paper_id"]
-            assert rows[0]["split_catalyst_family"]
-            assert rows[0]["reaction_profile_version"] == "reaction_profiles_v1"
-            assert rows[0]["task_profile_version"] == "tabular_task_profiles_v1"
+            assert manifest["returned_count"] == 2
+            assert {row["record_id"] for row in rows} == {str(blocked.id), str(ready.id)}
+            ready_row = next(row for row in rows if row["record_id"] == str(ready.id))
+            assert ready_row["paper_id"]
+            assert ready_row["title"] == "B ready"
+            assert ready_row["year"] == "2025"
+            assert ready_row["catalyst_name"] == "Fe-N-C"
+            assert ready_row["catalyst_type"] == "single_atom"
+            assert ready_row["metal_centers"] == '["Fe"]'
+            assert ready_row["coordination"] == "Fe-N4"
+            assert ready_row["support"] == "carbon"
+            assert ready_row["reaction_type"] == "SRR_LiS"
+            assert ready_row["task_profile"] == "SRR_LiS:adsorption_energy"
+            assert ready_row["property_type"] == "adsorption_energy"
+            assert ready_row["normalized_property_type"] == "adsorption_energy"
+            assert ready_row["canonical_property_type"] == "adsorption_energy"
+            assert ready_row["property_subtype"] == "adsorption"
+            assert ready_row["normalized_value"] == "-1.23"
+            assert ready_row["normalized_unit"] == "eV"
+            assert ready_row["raw_value"] == "-1.23"
+            assert ready_row["raw_unit"] == "eV"
+            assert ready_row["adsorbate"] == "Li2S4"
+            assert ready_row["intermediate"] == "Li2S4"
+            assert ready_row["reaction_step"] == "Li2S4 adsorption"
+            assert ready_row["dft_software"] == "VASP"
+            assert ready_row["dft_functional"] == "PBE"
+            assert "Calculated adsorption energy of Li2S4 on Fe-N-C: -1.23 eV." in ready_row["evidence_text"]
+            assert ready_row["page_locators"] == "[7]"
+            assert ready_row["label_ready"] == "true"
+            assert ready_row["tabular_ml_ready"] == "true"
+            assert ready_row["label_blockers"] == "[]"
+            assert ready_row["feature_blockers"] == "[]"
+            assert ready_row["split_paper_id"] == ready_row["paper_id"]
+            assert ready_row["split_catalyst_family"]
+            assert ready_row["reaction_profile_version"] == "reaction_profiles_v1"
+            assert ready_row["task_profile_version"] == "tabular_task_profiles_v1"
 
             all_csv, all_manifest = build_dft_ml_dataset_v3_csv(
                 session,
@@ -402,8 +411,8 @@ def test_v3_csv_defaults_to_training_ready_records_and_manifest_filter():
             assert all_manifest["filters"]["ready_only"] is False
             assert {row["record_id"] for row in all_rows} == {str(blocked.id), str(ready.id)}
             blocked_row = next(row for row in all_rows if row["record_id"] == str(blocked.id))
-            assert blocked_row["tabular_ml_ready"] == "false"
-            assert "missing_coordination" in blocked_row["feature_blockers"]
+            assert blocked_row["tabular_ml_ready"] == "true"
+            assert blocked_row["feature_blockers"] == "[]"
     finally:
         engine.dispose()
 
@@ -571,18 +580,19 @@ def test_v3_rds_gibbs_free_energy_with_null_adsorbate_and_complete_catalyst_is_t
         engine.dispose()
 
 
-def test_v3_adsorption_energy_with_null_adsorbate_is_excluded_by_identity_gate():
+def test_v3_adsorption_energy_with_null_adsorbate_is_kept_by_base_gate_and_task():
     engine, SessionLocal = _session()
     try:
         with SessionLocal() as session:
-            row, _paper = _row(session, property_type="adsorption_energy")
-            row.adsorbate = None
-            session.commit()
+            row, _paper = _row(session, property_type="adsorption_energy", adsorbate=None)
 
             v2 = build_dft_ml_dataset(session)
             payload = build_dft_ml_dataset_v3(session, task="adsorption_energy", ready_only=False)
-            assert payload["records"] == []
-            assert v2["metadata"]["blocked_reasons"]["missing_adsorbate_identity"] == 1
+            assert len(payload["records"]) == 1
+            assert payload["records"][0]["record_id"] == str(row.id)
+            assert len(v2["records"]) == 1
+            assert v2["records"][0]["record_id"] == str(row.id)
+            assert "missing_adsorbate_identity" not in v2["metadata"]["blocked_reasons"]
     finally:
         engine.dispose()
 

@@ -37,6 +37,8 @@ def build_figure_image_review(
         flags.append("missing_image_path")
     elif check_asset_exists and asset_path is None:
         flags.append("missing_image_file")
+    elif check_asset_exists and pixel_size is None:
+        flags.append("invalid_image_file")
     if bbox is None:
         flags.append("missing_parser_bbox")
     if _get(figure, "page") is None:
@@ -151,6 +153,7 @@ def image_file_summary(path: Path | None) -> tuple[dict[str, int] | None, int | 
         from PIL import Image
 
         with Image.open(path) as image:
+            image.load()
             return {"width": int(image.width), "height": int(image.height)}, file_size
     except Exception:
         return None, file_size

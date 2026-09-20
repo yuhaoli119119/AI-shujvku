@@ -6,7 +6,7 @@ import math
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -58,6 +58,11 @@ from app.services.ai_verification_batch_receipt_service import (
     AIVerificationBatchReceiptService,
 )
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+from app.review_v2.executor import PaperReviewV2Service
+from app.review_v2.figure_types import public_registry as public_figure_type_registry
+from app.review_v2.models import FigureReadingInput, FigureReviewAction, PaperReviewBatchRequest, TableReviewAction
+from app.review_v2.receipts import read_receipt as read_paper_review_v2_receipt
+from app.review_v2.search import FigureSearchService
 from app.services.evidence_page_recovery import PaperPageTextProvider
 from app.services.section_page_fragment_materialization_service import (
     SectionPageFragmentMaterializationService,
@@ -75,6 +80,7 @@ from app.services.verification_session_service import VerificationSessionService
 from app.security.exports import require_mcp_exports_enabled
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.figure_summary import normalize_figure_content_summary, normalize_figure_key_elements
+from app.utils.dft_candidate_status import is_terminal as is_dft_terminal
 from app.utils.library_names import DEFAULT_LIBRARY_NAME, build_library_name_clause, normalize_library_name
 from app.utils.review_safety import (
     bulk_export_gate_results,
@@ -3454,7 +3460,7 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
         active_dft_gates = [
             gate
             for row in dft_rows
-            if str(row.candidate_status or "").strip().lower() != "rejected"
+            if not is_dft_terminal(row.candidate_status)
             for gate in [dft_gate_by_id.get(str(row.id))]
             if gate is not None
         ]
@@ -3480,15 +3486,20 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                     "blocked_reasons": list(gate.reasons) if gate else ["missing_export_gate"],
                 }
             )
+        all_dft_target_ids = {str(row.id) for row in dft_rows}
         reviewed_dft_target_ids = {
             target_id
             for target_id, statuses in dft_review_status_by_target.items()
-            if any(status in {"verified", "ai_verified", "rejected"} for status in statuses)
+            if any(status in {"verified", "ai_verified", "rejected", "needs_human"} for status in statuses)
         }
+        reviewed_dft_target_ids.update(
+            str(row.id) for row in dft_rows if is_dft_terminal(row.candidate_status)
+        )
+        reviewed_dft_target_ids &= all_dft_target_ids
         active_dft_target_ids = {
             str(row.id)
             for row in dft_rows
-            if str(row.candidate_status or "").strip().lower() != "rejected"
+            if not is_dft_terminal(row.candidate_status)
         }
         unreviewed_dft_target_ids = sorted(active_dft_target_ids - reviewed_dft_target_ids)
         human_verified_dft = sum(
@@ -3561,7 +3572,7 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "dft_review": {
                     "total_candidates": len(dft_rows),
                     "active_candidates": len(active_dft_target_ids),
-                    "reviewed_target_count": len(reviewed_dft_target_ids & active_dft_target_ids),
+                    "reviewed_target_count": len(reviewed_dft_target_ids),
                     "unreviewed_target_count": len(unreviewed_dft_target_ids),
                     "unreviewed_target_ids": unreviewed_dft_target_ids[:50],
                     "eligible_count": dft_summary["eligible"],
@@ -3580,7 +3591,7 @@ def get_review_coverage(paper_id: str) -> dict[str, Any]:
                 "blocked": dft_summary["blocked"],
                 "blocked_reasons": dft_summary["blocked_reasons"],
                 "active": len(active_dft_target_ids),
-                "reviewed": len(reviewed_dft_target_ids & active_dft_target_ids),
+                "reviewed": len(reviewed_dft_target_ids),
                 "unreviewed": len(unreviewed_dft_target_ids),
                 "details": dft_details[:100],
             },
@@ -4038,6 +4049,82 @@ def export_paper_reading_guide_html(paper_id: str) -> dict[str, Any]:
     settings = get_settings()
     with session_scope(settings.database_url) as session:
         return FigureReadingService(session, settings).export_offline_html(UUID(paper_id))
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Single-paper figure/table review V2
+# ---------------------------------------------------------------------------
+@mcp_server.tool(name="get_paper_review_task", description="Read one main paper plus explicitly linked SI, object versions, task fingerprint, standardized figure-type registry, prompt version, and the complete typed batch schema.")
+def get_paper_review_task(paper_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
+        return PaperReviewV2Service(session, settings).get_task(UUID(paper_id))
+
+
+@mcp_server.tool(name="apply_paper_review_batch", description="One formal evidence-backed write for one paper. Items use PostgreSQL savepoints; returns applied, unchanged, held, rejected, and authoritative_readback. Stable request_id is mandatory.")
+def apply_paper_review_batch(
+    paper_id: str,
+    request_id: str,
+    task_fingerprint: str,
+    figure_actions: list[FigureReviewAction] | None = None,
+    table_actions: list[TableReviewAction] | None = None,
+    figure_readings: list[FigureReadingInput] | None = None,
+    reviewer_label: str = "paper_review_v2_ai",
+    final_state: Literal["completed", "completed_with_issues", "blocked"] = "completed",
+    notes: list[str] | None = None,
+) -> dict[str, Any]:
+    require_mcp_capability("review_corrections")
+    settings = get_settings()
+    request = PaperReviewBatchRequest(
+        paper_id=paper_id, request_id=request_id, task_fingerprint=task_fingerprint,
+        reviewer_label=reviewer_label, figure_actions=figure_actions or [],
+        table_actions=table_actions or [], figure_readings=figure_readings or [],
+        final_state=final_state, notes=notes or [],
+    )
+    with session_scope(settings.database_url) as session:
+        return PaperReviewV2Service(session, settings).apply(request)
+
+
+@mcp_server.tool(name="get_paper_review_receipt", description="Recover a lost apply_paper_review_batch response by the original paper_id and request_id. Do not call after a normal apply response.")
+def get_paper_review_receipt(paper_id: str, request_id: str) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
+        return read_paper_review_v2_receipt(session, UUID(paper_id), request_id)
+
+
+@mcp_server.tool(name="get_figure_type_registry", description="Read the versioned extensible standardized figure-type registry with stable keys, Chinese names, bilingual aliases, and parent categories.")
+def get_figure_type_registry() -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    return public_figure_type_registry()
+
+
+@mcp_server.tool(name="search_figures", description="Search standardized whole-figure and panel types by stable key or Chinese/English alias, with optional paper, year, material, catalyst, and DFT-condition filters.")
+def search_figures(
+    query: str | None = None,
+    figure_type: str | None = None,
+    paper_id: str | None = None,
+    year: int | None = None,
+    material_system: str | None = None,
+    catalyst: str | None = None,
+    dft_condition: str | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    require_mcp_capability("read_papers")
+    settings = get_settings()
+    with session_scope(settings.database_url) as session:
+        _enforce_postgres_read_only_transaction(session)
+        return FigureSearchService(session).search(
+            query=query, figure_type=figure_type, paper_id=UUID(paper_id) if paper_id else None,
+            year=year, material_system=material_system, catalyst=catalyst,
+            dft_condition=dft_condition, limit=max(1, min(limit, 200)),
+        )
 
 
 # 候选扩展（R15 + R16 + R19）：按催化剂组织的单篇处理状态 + 单篇任务级 ML 导出 +

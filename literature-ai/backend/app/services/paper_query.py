@@ -4,7 +4,7 @@ import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import Integer, String, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import Integer, String, cast, func, literal, or_, select, union_all
 from sqlalchemy.orm import Session, load_only
 
 from app.config import get_settings
@@ -35,12 +35,16 @@ from app.schemas.api import (
     ReferenceEntryResponse,
     FigureDataPointResponse,
 )
-from app.services.paper_codes import ensure_paper_codes
+from app.services.paper_codes import (
+    backfill_paper_codes_detached,
+    ensure_paper_codes,
+)
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
 from app.services.paper_workbench_service import PaperWorkbenchService
-from app.utils.artifact_status import build_paper_artifact_status
+from app.utils.artifact_status import build_paper_artifact_status, build_paper_pdf_status
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
+from app.utils.dft_candidate_status import DFT_STATUS_NEEDS_HUMAN, is_terminal
 from app.utils.review_safety import bulk_export_gate_results
 from app.utils.workbench_status import workflow_needs_human_confirmation
 from app.rag.quality import build_rag_quality_summary
@@ -361,25 +365,26 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
                     query = query.where(Paper.id.in_(reviewed_writing_card_paper_ids))
             elif reviewed_writing_card_paper_ids:
                 query = query.where(Paper.id.not_in(reviewed_writing_card_paper_ids))
-        if filters.has_pdf is not None:
-            pdf_available_clause = and_(
-                Paper.pdf_path.is_not(None),
-                func.trim(Paper.pdf_path) != "",
-                func.coalesce(func.lower(Paper.oa_status), "").not_in(["metadata_only", "needs_upload"]),
-            )
-            query = query.where(pdf_available_clause if filters.has_pdf else ~pdf_available_clause)
 
         query = query.order_by(*self._list_ordering(filters))
-        if self._list_should_place_supplementary_after_main(filters):
+        needs_python_filter = filters.has_pdf is not None
+        if needs_python_filter or self._list_should_place_supplementary_after_main(filters):
             ordered_papers = self.session.scalars(query).all()
-            ordered_papers = self._place_supplementary_papers_after_main(ordered_papers)
+            if needs_python_filter:
+                expected_has_pdf = bool(filters.has_pdf)
+                ordered_papers = [
+                    paper
+                    for paper in ordered_papers
+                    if bool(build_paper_pdf_status(paper).get("pdf_exists")) is expected_has_pdf
+                ]
+            if self._list_should_place_supplementary_after_main(filters):
+                ordered_papers = self._place_supplementary_papers_after_main(ordered_papers)
             papers = ordered_papers[filters.offset : filters.offset + filters.limit]
         else:
             papers = self.session.scalars(query.offset(filters.offset).limit(filters.limit)).all()
         if not papers:
             return []
-        if ensure_paper_codes(self.session, papers):
-            self.session.commit()
+        backfill_paper_codes_detached(self.session, papers)
 
         paper_ids = [p.id for p in papers]
         active_dft_counts: dict[UUID, int] = {paper_id: 0 for paper_id in paper_ids}
@@ -633,8 +638,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         paper = self.session.get(Paper, paper_id)
         if not paper:
             return None
-        if ensure_paper_codes(self.session, [paper]):
-            self.session.commit()
+        backfill_paper_codes_detached(self.session, [paper])
         if compact:
             return self._get_light_paper_detail(paper, chart_run_id=chart_run_id)
 
@@ -1092,21 +1096,13 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         normalized_dft_statuses = {status.strip().lower() for status in dft_status_counts}
         if not dft_status_counts:
             dft_review_status = "missing"
-        elif "needs_human_confirmation" in normalized_dft_statuses:
+        elif DFT_STATUS_NEEDS_HUMAN in normalized_dft_statuses:
             dft_review_status = "conflict"
-        elif normalized_dft_statuses.issubset(
-            {
-                "ml_ready",
-                "ai_verified_ml_ready",
-                "human_reviewed_needs_evidence",
-                "gemini_verified",
-                "rejected",
-                "verified",
-                "human_verified",
-                "human_confirmed",
-                "citation_ready",
-            }
-        ):
+        elif all(is_terminal(status) for status in normalized_dft_statuses):
+            # Every status present is a settled decision according to the canonical
+            # registry, so the paper counts as reviewed.  An unregistered token is not
+            # terminal and therefore keeps the paper in the "candidate" bucket rather
+            # than being silently reported as reviewed.
             dft_review_status = "reviewed"
         else:
             dft_review_status = "candidate"
@@ -1159,8 +1155,7 @@ class PaperQueryService(PaperQueryReviewMixin, PaperQuerySerializationMixin):
         paper = self.session.get(Paper, paper_id)
         if paper is None:
             return None
-        if ensure_paper_codes(self.session, [paper]):
-            self.session.commit()
+        backfill_paper_codes_detached(self.session, [paper])
         detail = self._get_light_paper_detail(paper)
         dft_settings = self.session.scalars(select(DFTSetting).where(DFTSetting.paper_id == paper_id)).all()
         catalyst_samples = self.session.scalars(select(CatalystSample).where(CatalystSample.paper_id == paper_id)).all()

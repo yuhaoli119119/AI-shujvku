@@ -24,6 +24,7 @@ from app.schemas.evidence_review_bundle import (
     OfflineEvidenceReviewTableAction,
 )
 from app.services.figure_rag_quality import build_figure_rag_quality_summary
+from app.review_v2.task_builder import ReviewTaskBuilder
 from app.services.figure_review_scope import (
     include_figure_in_chart_review_scope,
 )
@@ -752,6 +753,44 @@ class EvidenceReviewBundleService:
             completed_snapshot_fingerprint = current_snapshot_fingerprint
             unresolved_actions = []
             warning_items = []
+
+        # V2 is the authoritative state machine.  Legacy chart-review readers are
+        # a thin compatibility projection so the existing DFT gate and UI do not
+        # retain a second, contradictory completed/stale state.
+        latest_v2 = self.session.scalar(
+            select(AuditLog)
+            .where(AuditLog.paper_id == paper_id, AuditLog.action == "paper_review_v2_receipt")
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+        )
+        v2_auth: dict[str, Any] = {}
+        if latest_v2 is not None and isinstance(latest_v2.payload, dict):
+            response = latest_v2.payload.get("response") if isinstance(latest_v2.payload.get("response"), dict) else {}
+            v2_auth = response.get("authoritative_readback") if isinstance(response.get("authoritative_readback"), dict) else {}
+            current_v2_status = ReviewTaskBuilder(self.session, self.settings).build(paper_id).get("status") or {}
+            v2_stage = str(current_v2_status.get("chart_review_status") or v2_auth.get("stage_status") or "")
+            if v2_stage in {"completed", "completed_with_issues", "blocked", "stale", "not_required"}:
+                stage_status = v2_stage
+                unresolved_actions = [] if v2_stage in {"completed", "not_required"} else list(response.get("held") or []) + list(response.get("rejected") or [])
+                if v2_stage in {"blocked", "stale"} and not unresolved_actions:
+                    unresolved_actions = [{"reason": "paper_review_v2_" + v2_stage, "count": int(current_v2_status.get("legacy_issue_count") or 1)}]
+                warning_items = list(unresolved_actions)
+                completed_snapshot_fingerprint = current_snapshot_fingerprint if v2_stage in {"completed", "completed_with_issues", "not_required"} else None
+                if v2_stage in {"completed", "not_required"}:
+                    scope_completion = {
+                        **scope_completion,
+                        "complete": True,
+                        "reviewed_figure_ids": scope_completion["expected_figure_ids"],
+                        "reviewed_table_ids": scope_completion["expected_table_ids"],
+                        "missing_figure_ids": [],
+                        "missing_table_ids": [],
+                    }
+        v2_reading_total = len(materials["extracted_figures"])
+        v2_reading_completed = sum(
+            1 for row in materials["extracted_figures"]
+            if isinstance(row.get("reading_explanation"), dict)
+            and row["reading_explanation"].get("detailed_explanation_zh")
+            and not row["reading_explanation"].get("is_stale")
+        )
         return {
             "schema_version": "chart_review_task_v1",
             "paper_id": materials["paper_metadata"]["paper_id"],
@@ -762,6 +801,10 @@ class EvidenceReviewBundleService:
             "bundle_fingerprint": materials["bundle_fingerprint"],
             "stage_status": stage_status,
             "apply_ready": stage_status in {"completed", "not_required"},
+            "chart_review_status": stage_status,
+            "dft_gate_allowed": stage_status in {"completed", "completed_with_issues", "not_required"} and len(unresolved_actions) == 0,
+            "figure_reading_coverage": {"completed": v2_reading_completed, "total": v2_reading_total},
+            "legacy_issue_count": len(unresolved_actions),
             "rag_quality_status": rag_quality_status,
             "rag_quality": {
                 "figures": figure_rag_quality,
@@ -2670,6 +2713,7 @@ class EvidenceReviewBundleService:
                     "image_size_bytes": artifact_size,
                     "content_sha256": _sha256(haystack.encode("utf-8")),
                     "prov": self._sanitize_for_bundle(row.prov),
+                    "reading_explanation": self._sanitize_for_bundle(row.reading_explanation),
                     "_image_abs_path": str(artifact) if artifact is not None else None,
                 }
             )

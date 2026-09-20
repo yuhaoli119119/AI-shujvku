@@ -80,7 +80,6 @@ def test_identity_v2_unknown_units_are_not_silently_deduplicated():
     ("field_name", "error_code"),
     [
         ("paper_id", "missing_paper_identity"),
-        ("material", "missing_material_identity"),
         ("property_type", "missing_property_type_identity"),
     ],
 )
@@ -122,12 +121,10 @@ def test_identity_v2_property_required_field_matrix_blocks_incomplete_subjects()
         _payload(property_type="Bader charge", site_label=None, unit="e")
     )
 
-    assert adsorption.error_code == "missing_adsorbate_identity"
-    assert reaction_without_step.error_code == "missing_reaction_step_identity"
-    assert reaction_without_state.error_code == "missing_state_context_identity"
-    assert bader_without_atom.error_code == "missing_atom_or_site_identity"
+    # Optional scientific descriptors remain quality metadata. They do not
+    # suppress a confirmed numeric observation.
     assert all(
-        identity.observation_key is None
+        identity.error_code is None and identity.observation_key is not None
         for identity in (
             adsorption,
             reaction_without_step,
@@ -135,6 +132,9 @@ def test_identity_v2_property_required_field_matrix_blocks_incomplete_subjects()
             bader_without_atom,
         )
     )
+    assert adsorption.identity_payload["subject"]["adsorbate"] == ""
+    assert reaction_without_step.identity_payload["subject"]["reaction_step"] == ""
+    assert bader_without_atom.identity_payload["subject"]["site_label"] == ""
 
 
 def test_identity_v2_property_required_field_matrix_accepts_valid_context_aliases():
@@ -164,8 +164,9 @@ def test_identity_v2_unit_policy_requires_units_unless_explicitly_dimensionless(
         _payload(property_type="coordination_number", unit="eV", value="4")
     )
 
-    assert "missing_unit_identity" in missing_unit.error_codes
-    assert missing_unit.observation_key is None
+    assert missing_unit.error_codes == ()
+    assert missing_unit.observation_key is not None
+    assert missing_unit.identity_payload["observation"]["unit"] == "eV"
     assert dimensionless.identity_payload["property_policy"] == "dimensionless"
     assert dimensionless.observation_key is not None
     assert dimensionless.identity_payload["observation"]["unit"] == ""
@@ -246,10 +247,12 @@ def test_identity_v2_atom_alias_symmetry_preserves_numbers_and_reports_errors():
     assert li1.observation_key == reversed_li1.observation_key
     assert li1.identity_payload["subject"]["canonical_atom_pair"] == "li1-s"
     assert li1.subject_key != li2.subject_key
-    assert conflicting.error_code == "conflicting_atom_pair_aliases"
-    assert conflicting.observation_key is None
-    assert missing.error_code == "missing_atom_pair_identity"
-    assert missing.observation_key is None
+    assert conflicting.error_code is None
+    assert conflicting.observation_key is not None
+    assert conflicting.atom_pair.error_code == "conflicting_atom_pair_aliases"
+    assert missing.error_code is None
+    assert missing.observation_key is not None
+    assert missing.atom_pair.error_code == "missing_atom_pair_identity"
 
 
 def test_identity_v2_provenance_does_not_affect_keys_or_payload():
@@ -378,12 +381,9 @@ def test_identity_v2_property_policy_centralizes_required_and_allowed_context():
     assert "functional" in adsorption.allowed_context_keys
     assert "configuration" in adsorption.allowed_context_keys
     assert "k_points" not in adsorption.allowed_context_keys
-    assert {requirement.error_code for requirement in reaction.requirements} >= {
+    assert {requirement.error_code for requirement in reaction.requirements} == {
         "missing_paper_identity",
-        "missing_material_identity",
         "missing_property_type_identity",
-        "missing_reaction_step_identity",
-        "missing_state_context_identity",
     }
 
 
@@ -473,10 +473,10 @@ def test_aggregate_charge_transfer_and_explicit_reaction_pathway_are_central_pol
             unit="eV",
         )
     )
-    assert atomic_charge.observation_key is None
-    assert "missing_atom_or_site_identity" in atomic_charge.error_codes
-    assert missing_pathway.observation_key is None
-    assert "missing_state_context_identity" in missing_pathway.error_codes
+    assert atomic_charge.observation_key is not None
+    assert atomic_charge.error_codes == ()
+    assert missing_pathway.observation_key is not None
+    assert missing_pathway.error_codes == ()
 
     explicit_state = build_dft_identity_v2(
         _payload(

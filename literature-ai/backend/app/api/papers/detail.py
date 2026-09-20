@@ -94,6 +94,10 @@ class DFTAIReviewResetRequest(BaseModel):
     confirm_reset_dft_ai_reviews: bool
     reviewer: str | None = None
     keep_dft_candidates: bool = True
+    # Optional precise scope.  When provided, the reset only touches these DFT result
+    # ids instead of every candidate on the paper, so a targeted reset can no longer
+    # wipe unrelated reviewed records.  Omitted (or null) keeps the whole-paper scope.
+    result_ids: list[UUID] | None = None
 
 
 class CatalystBasicInfoUpdateRequest(BaseModel):
@@ -422,12 +426,34 @@ async def reset_dft_ai_reviews(
         raise HTTPException(status_code=404, detail="Paper not found")
     reviewer = str(payload.reviewer or "literature_library_dft").strip() or "literature_library_dft"
 
-    dft_result_ids = [
-        str(row_id)
-        for row_id in session.scalars(
-            select(DFTResult.id).where(DFTResult.paper_id == paper_id)
-        ).all()
-    ]
+    all_dft_rows = session.execute(
+        select(DFTResult.id, DFTResult.candidate_status).where(DFTResult.paper_id == paper_id)
+    ).all()
+    all_dft_result_ids = [str(row_id) for row_id, _status in all_dft_rows]
+    status_by_id = {str(row_id): str(row_status or "") for row_id, row_status in all_dft_rows}
+
+    requested_result_ids = [str(item) for item in (payload.result_ids or [])]
+    if requested_result_ids:
+        unknown_result_ids = sorted(set(requested_result_ids) - set(all_dft_result_ids))
+        if unknown_result_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "result_ids must belong to this paper; unknown ids: "
+                    + ",".join(unknown_result_ids)
+                ),
+            )
+        dft_result_ids = list(dict.fromkeys(requested_result_ids))
+        reset_scope = "result_ids"
+    else:
+        dft_result_ids = all_dft_result_ids
+        reset_scope = "paper"
+
+    # Captured for the audit record: which decisions this reset is about to clear.
+    reset_before_status_counts: dict[str, int] = {}
+    for scoped_id in dft_result_ids:
+        token = status_by_id.get(scoped_id, "")
+        reset_before_status_counts[token] = reset_before_status_counts.get(token, 0) + 1
 
     deleted_field_reviews = 0
     if dft_result_ids:
@@ -453,6 +479,10 @@ async def reset_dft_ai_reviews(
         target_type = str(normalized.get("target_type") or "").strip().lower()
         materialized_type = str(candidate.materialized_target_type or "").strip().lower()
         target_id = str(normalized.get("target_id") or "").strip()
+        if reset_scope == "result_ids" and target_id not in dft_result_ids:
+            # A scoped reset must not archive object reviews that belong to records
+            # outside the requested scope.
+            continue
         if (
             target_type in {"dft_results", "dft_result"}
             or materialized_type == "dft_results"
@@ -485,7 +515,10 @@ async def reset_dft_ai_reviews(
     if dft_result_ids:
         result = session.execute(
             update(DFTResult)
-            .where(DFTResult.paper_id == paper_id)
+            .where(
+                DFTResult.paper_id == paper_id,
+                DFTResult.id.in_([UUID(item) for item in dft_result_ids]),
+            )
             .values(candidate_status="system_candidate")
         )
         reset_dft_results = int(result.rowcount or 0)
@@ -500,6 +533,9 @@ async def reset_dft_ai_reviews(
         "deleted_field_reviews": deleted_field_reviews,
         "reset_dft_results": reset_dft_results,
         "kept_dft_candidates": bool(payload.keep_dft_candidates),
+        "reset_scope": reset_scope,
+        "scoped_result_ids": dft_result_ids if reset_scope == "result_ids" else [],
+        "reset_before_status_counts": reset_before_status_counts,
     }
     session.add(
         AuditLog(
@@ -1877,10 +1913,19 @@ async def save_paper_reading_guide(
 async def export_paper_reading_guide_html(
     paper_id: UUID,
     session: Session = Depends(get_db_session),
-) -> dict[str, Any]:
-    """Generate the self-contained guide on the server; never trigger a client download."""
+) -> FileResponse:
+    """Generate the self-contained guide on the server and download the final artifact."""
     from app.services.figure_reading_service import FigureReadingService
     try:
-        return FigureReadingService(session).export_offline_html(paper_id)
+        exported = FigureReadingService(session).export_offline_html(paper_id)
+        return FileResponse(
+            path=exported["runtime_path"],
+            media_type="text/html; charset=utf-8",
+            filename=f"literature-ai-reading-guide-{paper_id}.html",
+            headers={
+                "X-Export-SHA256": exported["sha256"],
+                "X-Export-Size": str(exported["size_bytes"]),
+            },
+        )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

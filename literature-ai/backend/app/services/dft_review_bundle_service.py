@@ -34,9 +34,14 @@ from app.services.figure_rag_quality import build_figure_rag_quality_summary
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.review_bundle_shared import compact_figure_artifact, linked_source_papers
 from app.services.dft_rescan_policy import normalize_source_document_type
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.services.source_pdf_inventory import build_source_pdf_inventory, public_source_pdf_inventory
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_pdf_evidence_anchor
+from app.utils.dft_candidate_status import (
+    DFT_REJECTED_STATUSES,
+    is_settled_for_review_queue,
+)
 from app.utils.review_safety import bulk_export_gate_results
 
 
@@ -99,7 +104,7 @@ class FigureTableReviewNotCompletedError(ValueError):
     def detail(self) -> dict[str, Any]:
         return {
             "code": self.code,
-            "message": "Figure/table review must be completed or not_required, and figure RAG quality must be ready, before DFT review.",
+            "message": "Figure/table review must be completed or not_required before DFT review. Figure RAG quality alone is advisory when exact PDF text or table evidence is available.",
             "figure_table_review": self.state,
         }
 
@@ -437,6 +442,21 @@ class DFTReviewBundleService:
         status = str(state.get("stage_status") or "").strip()
         current_fingerprint = str(state.get("current_snapshot_fingerprint") or "").strip()
         completed_fingerprint = str(state.get("completed_snapshot_fingerprint") or "").strip()
+        blocking_codes = {
+            str(item.get("code") or "")
+            for item in (state.get("blocking_errors") or [])
+            if isinstance(item, dict)
+        }
+        if (
+            status == "needs_local_ai"
+            and blocking_codes == {"figure_rag_quality_incomplete"}
+            and current_fingerprint
+            and state.get("reviewed_at")
+        ):
+            # A completed chart audit may reveal that a figure is poor RAG
+            # material. Keep that as a warning; exact text/table/PDF evidence
+            # can still authorize the DFT observation itself.
+            return
         if status not in FIGURE_TABLE_REVIEW_READY_STATUSES:
             raise FigureTableReviewNotCompletedError(state)
         rag_quality = state.get("rag_quality") if isinstance(state.get("rag_quality"), dict) else {}
@@ -661,9 +681,11 @@ class DFTReviewBundleService:
 
 1. 打开 `direct_apply/field_tasks.json`，只处理 `current_status=pending` 的必审字段。
 2. 使用包中的真实 PDF、表格、页码和表格单元定位核验。`configuration_index` 只作上下文，绝不提交。
-3. 每次最多 20 项，直接调用 `apply_ai_verification_batch`。决定只能为 `accept`、`defer` 或 `reject`。
-4. `reject` 必须有同一真实来源页中的 `counter_evidence_text`、页码和定位；证据不足请用 `defer` 并给出 `blocked_reasons`。
-5. 发生格式错误时，仅以新 request_id 重提失败项；超时或响应丢失时先调用 `get_ai_verification_batch_receipt`，不得重提原 request_id。
+3. 每条 DFT 只把 `energy_type` 和 `value` 作为必审字段；催化剂、金属中心、配位、载体、距离、吸附物、反应步和计算设置都是可选上下文，缺失不得阻塞数值。
+4. 原文缺单位时仍可接受已确认数值；服务器按性质推断标准单位并记录推断来源、依据和置信度。
+5. 每次最多 20 项，直接调用 `apply_ai_verification_batch`。决定只能为 `accept`、`defer` 或 `reject`。
+6. `reject` 必须有同一真实来源页中的 `counter_evidence_text`、页码和定位；只有性质含义或数值无法确认时才用 `defer`。该决定是终态，除非来源变化或人工重开，不再转交其他 AI。
+7. 发生格式错误时，仅以新 request_id 重提失败项；超时或响应丢失时先调用 `get_ai_verification_batch_receipt`，不得重提原 request_id。
 
 该包不要求用户回传文件；原有离线 JSON 审核包仍由旧入口兼容提供。
 """
@@ -1270,18 +1292,16 @@ class DFTReviewBundleService:
             if item.get("source_record_id") and not item.get("eligible_for_auto_apply")
         )
         if unreviewed_figure_ids:
-            review_gate = dict(curated_evidence_snapshot.get("review_gate") or {})
-            review_gate["stage_status"] = "needs_local_ai"
-            review_gate["completed_snapshot_fingerprint"] = None
-            review_gate["blocking_errors"] = [
-                *(review_gate.get("blocking_errors") or []),
+            # Figure enrichment is useful context, not a gate on a DFT value
+            # that can be confirmed from an exact PDF page or table cell.
+            curated_evidence_snapshot["warnings"] = [
+                *(curated_evidence_snapshot.get("warnings") or []),
                 {
                     "code": "dft_bundle_contains_unreviewed_figures",
-                    "message": "Every figure exported in a DFT review bundle must first complete web-AI review and authenticated local-AI PDF verification.",
+                    "message": "Some figures are not locally review-ready; verify DFT values from other exact source evidence.",
                     "figure_ids": unreviewed_figure_ids,
                 },
             ]
-            curated_evidence_snapshot["review_gate"] = review_gate
         if enforce_figure_table_gate:
             self.ensure_figure_table_review_ready(curated_evidence_snapshot["review_gate"])
 
@@ -1514,9 +1534,15 @@ class DFTReviewBundleService:
             status = str(row.candidate_status or "").strip().lower()
             gate = gate_by_id.get(str(row.id))
             review_status = str(getattr(gate, "review_status", "") or "").strip().lower()
-            is_rejected = status == "rejected" or "rejected" in review_status
-            is_currently_exportable_ml_ready = status in {"ml_ready", "ai_verified_ml_ready"} and bool(
-                getattr(gate, "eligible", False)
+            is_rejected = status in DFT_REJECTED_STATUSES or "rejected" in review_status
+            # Terminal decisions -- including ai_terminal_unusable and
+            # human_reviewed_needs_evidence -- are settled and must not be offered as new
+            # review targets.  Ready statuses only count as settled when the evidence
+            # gate agrees, so a record that claims readiness while failing its gate is
+            # still presented for review.
+            is_currently_exportable_ml_ready = is_settled_for_review_queue(
+                status,
+                gate_eligible=bool(getattr(gate, "eligible", False)),
             )
             should_skip = is_rejected or is_currently_exportable_ml_ready
             if row.paper_id == main_paper_id and should_skip:
@@ -2279,6 +2305,13 @@ class DFTReviewBundleService:
             )
         elif reviewed_tables or reviewed_figures:
             stage_status = "completed"
+        elif reviewed_aggregate.get("review_runs"):
+            # A completed chart scope remains completed even if its figures
+            # are unsuitable as structured RAG evidence.
+            stage_status = "completed"
+            aggregate_fingerprint = aggregate_fingerprint or _sha256(
+                _canonical_json_bytes({"paper_id": str(paper.id), "reviewed_objects": []})
+            )
         elif not has_any_chart_objects:
             stage_status = "not_required"
             aggregate_fingerprint = aggregate_fingerprint or _sha256(
@@ -2787,16 +2820,19 @@ class DFTReviewBundleService:
 
         corrected_property = norm(corrected.get("property_type") or corrected.get("property") or corrected.get("energy_type"))
         corrected_value = number(corrected.get("value"))
-        corrected_unit = norm(corrected.get("unit"))
+        corrected_unit_resolution = resolve_dft_unit(corrected_property, corrected.get("unit"))
+        corrected_unit = norm(corrected_unit_resolution.unit)
         if not corrected_property or corrected_value is None or not corrected_unit:
             return None
         for row in terminal_rows:
-            if norm(row.get("property_type")) != corrected_property:
+            row_property = norm(row.get("property_type"))
+            if row_property != corrected_property:
                 continue
             row_value = number(row.get("value"))
             if row_value is None or abs(row_value - corrected_value) > 1e-9:
                 continue
-            if norm(row.get("unit")) != corrected_unit:
+            row_unit = norm(resolve_dft_unit(row_property, row.get("unit")).unit)
+            if row_unit != corrected_unit:
                 continue
             conflicting_identity = False
             for corrected_key, row_key in (
@@ -2861,43 +2897,23 @@ class DFTReviewBundleService:
                 }
             ]
         errors: list[dict[str, str]] = []
-        material = cls._first_nonblank(
-            corrected.get("material_identity"),
-            corrected.get("material"),
-            corrected.get("catalyst"),
-            corrected.get("structure_name"),
-        )
         property_type = cls._first_nonblank(
             corrected.get("property_type"),
             corrected.get("property"),
             corrected.get("energy_type"),
         )
         value = corrected.get("value")
-        unit = cls._first_nonblank(corrected.get("unit"))
-        if not material:
-            errors.append({"code": "missing_material_identity", "message": "corrected_value must include material_identity."})
         if not property_type:
             errors.append({"code": "missing_property_type", "message": "corrected_value must include property_type."})
         if not cls._is_number(value):
             errors.append({"code": "invalid_dft_value", "message": "corrected_value.value must be numeric."})
-        if not unit:
-            errors.append({"code": "missing_unit", "message": "corrected_value must include unit."})
-        property_text = str(property_type or "").lower()
-        needs_reaction_context = any(
-            marker in property_text
-            for marker in ("reaction", "barrier", "free_energy", "adsorption", "binding", "gibbs")
-        )
-        if needs_reaction_context and not cls._first_nonblank(
-            corrected.get("adsorbate"),
-            corrected.get("reaction_step"),
-            corrected.get("reaction_type"),
-        ):
-            errors.append(
-                {
-                    "code": "missing_reaction_context",
-                    "message": "Reaction or adsorption DFT values require adsorbate, reaction_step, or reaction_type.",
-                }
-            )
+        if property_type:
+            unit_resolution = resolve_dft_unit(property_type, corrected.get("unit"))
+            if not unit_resolution.resolved:
+                errors.append({
+                    "code": "unresolved_unit",
+                    "message": "A canonical unit could not be inferred for this property; provide a reasonable standard unit.",
+                })
         return errors
 
     @staticmethod
@@ -3429,7 +3445,9 @@ class DFTReviewBundleService:
                 "field_name": "dft_results",
                 "decision": "new_candidate",
                 "when_to_use": "Only when reviewed evidence contains a DFT result missing from both writable targets and existing_terminal_context.",
-                "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
+                "corrected_value_required_fields": ["property_type", "value"],
+                "optional_context_fields": ["analysis_entity_id", "material_identity", "unit", "adsorbate", "reaction_step", "reaction_type", "method"],
+                "unit_policy": "If unit is absent, the server infers a canonical unit and records origin, basis, and confidence.",
                 "multiple_new_candidates": "Use target_id='new' for each new candidate and give each one a unique temporary_id.",
             },
         }
@@ -3468,7 +3486,9 @@ class DFTReviewBundleService:
                     "decision_required": "new_candidate",
                     "field_name_required": "dft_results",
                     "temporary_id_required": True,
-                    "corrected_value_required_fields": ["material_identity", "property_type", "value", "unit"],
+                    "corrected_value_required_fields": ["property_type", "value"],
+                "optional_context_fields": ["analysis_entity_id", "material_identity", "unit", "adsorbate", "reaction_step", "reaction_type", "method"],
+                "unit_policy": "If unit is absent, the server infers a canonical unit and records origin, basis, and confidence.",
                 },
             },
             "hard_invariants": [
@@ -3614,11 +3634,11 @@ Do not paste the JSON body into the chat. Do not return Markdown, prose, a code 
 
 0. 从 `WEB_AI_FILL_THIS.json` 开始，直接在该对象中填写；禁止脱离模板重新生成结构。先读 `OUTPUT_RULES.json`，完成后按 `return_schema.json` 自检。把结果保存为 `{metadata['paper_code']}_web_ai_result.json`，并以文件附件回复；不要把长 JSON 正文粘贴到聊天消息中。
 1. 只核验当前这一篇主文献及包内相关支撑信息（SI）的 DFT 数据、计算参数、图表和文字证据。
-2. 不得猜测。证据不足、材料身份不清或来源冲突时，使用 `NEEDS_HUMAN`，并写入 `uncertainties`。
+2. 不得猜测性质含义或数值。材料身份、金属中心、吸附物、反应步或计算设置缺失只记为可选上下文，不得阻塞已确认数值；原文缺单位时应按性质合理推断标准单位并在 `uncertainties` 中注明推断。
 3. 每条 `object_review_audits` 都必须引用一个或多个真实 `evidence_ids`。证据编号来自 `manifest.json` 和 `evidence/`，且必须和该 DFT 目标直接相关。
 4. 本包是一次性 `comprehensive_review`：先对每个已有主文献 DFT candidate 提交 `PASS`、`REVISE`、`REJECT` 或 `NEEDS_HUMAN`，再扫描包内全部 `eligible_for_auto_apply=true` 的正文、图、表证据，追加所有确认漏提且不重复的 `new_candidate`。
 5. 必须为 `manifest.json` 的每个 `target_dft_result_id` 提交 1 条审核结果；即使 expected_target_ids 为空，也必须执行全证据查漏。两步都完成后才可设置 `coverage_acknowledgement.missing_data_search_complete=true` 和 `overall_status=completed`。查漏前必须读取 `existing_terminal_context` 做去重。
-6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`；若存在终态上下文，还必须填写 `dedupe_analysis={{compared_target_ids:[...], conclusion:"distinct", reason:"..."}}`。`corrected_value` 至少包含 `material_identity`、`property_type`、`value`、`unit`。反向同样成立：`target_id="new"` 时 `decision` 必须是 `new_candidate`；PASS/REVISE/REJECT/NEEDS_HUMAN 必须使用 checklist 中的真实已有 target_id。
+6. 发现漏项时使用 `decision="new_candidate"`、`target_type="dft_results"`、`target_id="new"`、`field_name="dft_results"`，并为每个新增候选填写唯一 `temporary_id`；若存在终态上下文，还必须填写 `dedupe_analysis={{compared_target_ids:[...], conclusion:"distinct", reason:"..."}}`。`corrected_value` 只强制包含 `property_type` 和数值 `value`；`material_identity`、`adsorbate`、`reaction_step`、`method` 等能确认则填写，缺失不阻塞。原文无单位时可省略 `unit`，服务器会推断并保存推断来源、依据和置信度。同一匿名对象的多项性质必须填写相同 `analysis_entity_id`，确保进入相关性配对。反向同样成立：`target_id="new"` 时 `decision` 必须是 `new_candidate`；PASS/REVISE/REJECT/NEEDS_HUMAN 必须使用 checklist 中的真实已有 target_id。
 7. `reviewed_supporting_evidence` 中的 SI 可作为已审核支撑；`unreviewed_supporting_context` 只能用于发现线索或返回 `NEEDS_HUMAN`，其 `eligible_for_auto_apply=false`，不能单独支持 PASS、REVISE 或 new_candidate。
 8. 不得声称已写数据库、已入库、已确认、已 verified 或已成为 ML_Ready。
 9. 严格按 `return_schema.json` 输出一个 JSON 对象；不要修改 schema，不要用自由散文替代 JSON，也不要包 Markdown 代码块。
@@ -3630,7 +3650,7 @@ Do not paste the JSON body into the chat. Do not return Markdown, prose, a code 
 
 先读 `START_HERE.md`、`WEB_AI_FILL_THIS.json`、`OUTPUT_RULES.json`、`manifest.json`、`parsed/paper_metadata.json`，然后逐份读取 `source/main.pdf` 和 `source/si/*.pdf` 原始 PDF；再读 `parsed/initial_dft_candidates.json`、`parsed/dft_review_checklist.json`、`format_examples.json`、`parsed/curated_figure_table_evidence_snapshot.json`、`evidence/text_snippets.jsonl`、相关表格和图片。`parsed/extracted_*.json` 提供证据编号与来源映射。
 
-如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，或 `rag_quality_status=blocked`，说明已审核证据聚合尚不可用；此时不要继续产出 DFT JSON。不得用某一个已完成 run 为其他未审核图表放行。
+如果 `curated_figure_table_evidence_snapshot.json` 的 `stage_status` 不是 `completed` 或 `not_required`，说明图表审核尚未收口，此时不要继续产出 DFT JSON。`rag_quality_status=blocked` 单独出现时只作为警告：只要 PDF 正文、表格单元或原始页面有精确证据，仍应继续核验并提交 DFT 数值。
 必须先核验原始主文和全部 SI PDF，再逐条核验已有候选，最后扫描正文、SI、全部已审核图表寻找漏项；每个 `new_candidate` 必须绑定真实 PDF 页码和 evidence_id。不得从曲线估读，不得把实验数据当成 DFT 结果。
 
 最终只回复一个符合 `return_schema.json` 的 JSON 文件附件，不要在聊天正文粘贴 JSON。

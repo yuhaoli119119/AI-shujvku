@@ -8,6 +8,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from typing import Any, Literal
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -37,6 +38,11 @@ from app.services.dft_export_service import (
 )
 from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
+from app.utils.dft_candidate_status import (
+    DFT_STATUS_TERMINAL_UNUSABLE,
+    is_terminal,
+    normalize as normalize_dft_status,
+)
 from app.utils.review_safety import bulk_export_gate_results
 
 router = APIRouter()
@@ -47,6 +53,17 @@ logger = logging.getLogger(__name__)
 # _dft_rows_statement, _dft_quality_row_payload) have been moved to app.services.dft_export_service.
 
 DatasetProfileParam = Literal["dac_lis_ml", "bimetallic_lis_ml", "dac_lis", "sac_lis_ml"]
+
+DFT_PROPERTY_LABELS = {
+    "entropy_correction_ts": "熵校正（TS）",
+    "zero_point_energy_correction": "零点能校正",
+    "bader_charge_transfer": "Bader 电荷转移",
+    "adsorption_energy": "吸附能",
+    "bond_length": "键长",
+    "adsorption_configuration_energy": "吸附构型能",
+    "reaction_barrier": "反应能垒",
+    "adsorption_energy_solvated": "溶剂化吸附能",
+}
 
 
 def _validate_dataset_profile(dataset_profile: Any) -> str | None:
@@ -62,9 +79,77 @@ def _validate_dataset_profile(dataset_profile: Any) -> str | None:
     return lowered
 
 
+@router.get("/dft/analysis-ready-properties")
+async def analysis_ready_properties(
+    paper_id: UUID = Query(..., description="Only count analysis-ready DFT results for this paper"),
+    session: Session = Depends(get_db_session),
+):
+    paper = session.get(P, paper_id)
+    if paper is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found")
+
+    rows = list(session.scalars(select(DR).where(DR.paper_id == paper_id)).all())
+    gate_by_id = bulk_export_gate_results(session, rows, target_type="dft_results") if rows else {}
+    property_counts: Counter[str] = Counter()
+    for row in rows:
+        gate = gate_by_id.get(str(row.id))
+        if not gate or not gate.eligible:
+            continue
+        property_type = str(row.property_type or "").strip() or "unknown_property"
+        property_counts[property_type] += 1
+
+    properties = []
+    for property_type, count in sorted(property_counts.items(), key=lambda item: (-item[1], item[0])):
+        properties.append(
+            {
+                "property_type": property_type,
+                "label": DFT_PROPERTY_LABELS.get(property_type, property_type),
+                "count": count,
+                "csv_url": "/api/papers/export/csv?"
+                + urlencode({"paper_id": str(paper_id), "property_type": property_type, "exact_property_type": "true"}),
+            }
+        )
+
+    total_ready = sum(property_counts.values())
+    total_records = len(rows)
+    # Four separate concepts, each counted from the canonical registry rather than
+    # inferred by subtraction.  The previous version hard-coded pending_review to 0 and
+    # reported terminal_unusable as (total - ready), which mislabelled every blocked or
+    # still-pending record as "unusable" and could never report pending work.
+    status_counts: Counter[str] = Counter(
+        str(row.candidate_status or "") for row in rows
+    )
+    pending_review = sum(
+        count for token, count in status_counts.items() if not is_terminal(token)
+    )
+    terminal_unusable = sum(
+        count
+        for token, count in status_counts.items()
+        if normalize_dft_status(token) == DFT_STATUS_TERMINAL_UNUSABLE
+    )
+    settled_reviewed = sum(
+        count for token, count in status_counts.items() if is_terminal(token)
+    )
+    return {
+        "paper_id": str(paper_id),
+        "total_records": total_records,
+        "total_ready": total_ready,
+        "pending_review": pending_review,
+        "terminal_unusable": terminal_unusable,
+        "settled_reviewed": settled_reviewed,
+        # Reviewed (or claimed-ready) but not export-eligible: the evidence/review gate
+        # is the only authority here, so this is reported rather than assumed.
+        "gate_blocked": max(0, total_records - total_ready - pending_review),
+        "property_count": len(properties),
+        "properties": properties,
+    }
+
+
 @router.get("/export/csv")
 async def export_dft_results_csv(
+    paper_id: UUID | None = Query(default=None, description="Only export DFT results for this paper"),
     property_type: str | None = Query(default=None, description="Filter by property type, e.g. adsorption_energy"),
+    exact_property_type: bool = Query(default=False, description="Require an exact property_type match"),
     adsorbate: str | None = Query(default=None, description="Filter by adsorbate, e.g. Li2S4"),
     catalyst_type: str | None = Query(default=None, description="Optional catalyst type filter: single_atom or dual_atom"),
     catalyst_name: str | None = Query(default=None, description="Optional catalyst name filter, e.g. Fe-GDY"),
@@ -77,9 +162,12 @@ async def export_dft_results_csv(
     session: Session = Depends(get_db_session),
 ):
     dataset_profile = _validate_dataset_profile(dataset_profile)
+    paper_id = paper_id if isinstance(paper_id, UUID) else None
     csv_text, gate_summary = build_dft_csv_rows(
         session,
+        paper_id=paper_id,
         property_type=property_type,
+        exact_property_type=exact_property_type,
         adsorbate=adsorbate,
         catalyst_type=catalyst_type,
         catalyst_name=catalyst_name,

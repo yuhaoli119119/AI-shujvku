@@ -24,6 +24,7 @@ from app.services.dft_identity_service import (
     build_dft_identity_v2,
 )
 from app.services.dft_import_batch_context import DFTImportBatchContext
+from app.services.dft_ml_policy import analysis_entity_id
 
 
 DFT_AUDIT_ISSUE_PENDING_STATUSES = {
@@ -206,6 +207,7 @@ class DFTAuditIssueLifecycleService:
             material_identity = str(sample.name).strip()
         return {
             "corrected_value": {
+                "analysis_entity_id": analysis_entity_id(row),
                 "material_identity": material_identity,
                 "property_type": row.property_type,
                 "adsorbate": row.adsorbate,

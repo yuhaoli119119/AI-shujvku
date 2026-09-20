@@ -52,6 +52,7 @@ from app.utils.ai_verification import (
     structured_table_cell_evidence_valid,
 )
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
+from app.services.dft_ml_policy import analysis_entity_id, resolve_dft_unit
 from app.services.dft_identity_service import (
     property_requires_atom_pair,
     resolve_atom_pair_identity,
@@ -466,49 +467,13 @@ def is_authoritative_verified_review(
 
 
 def required_dft_review_fields(target: Any) -> tuple[str, ...]:
-    """Return required field review names for a DFTResult entity.
+    """Only the property meaning and numeric value authorize an ML observation.
 
-    - Mandatory base fields: catalyst, energy_type, value (value checks value, sign, and unit;
-      if configuration_index is present in evidence_payload, value also checks configuration).
-    - If adsorbate is present or property is adsorption/binding energy: add adsorbate.
-    - If reaction_step is present or property is reaction barrier/free energy pathway: add reaction_step.
+    Catalyst name, metals, adsorbate, reaction step, coordination and distances
+    remain useful metadata, but their absence must not block the confirmed value.
+    The value review also verifies or infers a usable unit.
     """
-    fields: list[str] = ["catalyst", "energy_type", "value"]
-
-    adsorbate = getattr(target, "adsorbate", None) if not isinstance(target, dict) else target.get("adsorbate")
-    has_adsorbate = not _is_blank(adsorbate)
-
-    property_type = getattr(target, "property_type", None) if not isinstance(target, dict) else target.get("property_type")
-    tax = get_property_taxonomy(property_type) if property_type else {}
-    canonical_prop = str(tax.get("canonical_property_type") or "").strip().lower()
-    prop_family = str(tax.get("property_family") or "").strip().lower()
-    prop_subtype = str(tax.get("property_subtype") or "").strip().lower()
-    raw_prop = str(property_type or "").strip().lower()
-
-    is_adsorption_or_binding = (
-        canonical_prop in {"adsorption_energy", "binding_energy"}
-        or prop_subtype in {"adsorption", "generic_binding"}
-        or "adsorption" in raw_prop
-        or "binding" in raw_prop
-    )
-    if has_adsorbate or is_adsorption_or_binding:
-        fields.append("adsorbate")
-
-    reaction_step = getattr(target, "reaction_step", None) if not isinstance(target, dict) else target.get("reaction_step")
-    has_reaction_step = not _is_blank(reaction_step)
-
-    is_reaction_pathway_or_barrier = (
-        canonical_prop in {"reaction_barrier", "gibbs_free_energy_change", "reaction_energy"}
-        or prop_family in {"kinetics", "thermodynamics"}
-        or "barrier" in raw_prop
-        or "free_energy" in raw_prop
-        or "reaction" in raw_prop
-        or "pathway" in raw_prop
-    )
-    if has_reaction_step or is_reaction_pathway_or_barrier:
-        fields.append("reaction_step")
-
-    return tuple(fields)
+    return ("energy_type", "value")
 
 
 def required_review_fields(target_type: str, target: Any = None) -> tuple[str, ...]:
@@ -517,7 +482,7 @@ def required_review_fields(target_type: str, target: Any = None) -> tuple[str, .
     if canonical == "dft_results":
         if target is not None:
             return required_dft_review_fields(target)
-        return ("catalyst", "energy_type", "value")
+        return ("energy_type", "value")
     return REQUIRED_REVIEW_FIELDS_BY_TARGET_TYPE.get(canonical, ())
 
 
@@ -554,19 +519,7 @@ def dft_required_evidence_reasons(
         )
         if not authoritative_pair:
             reasons.extend((f"unsafe_required_locator:{field_name}", f"non_authoritative_review:{field_name}"))
-    configuration_index = extract_configuration_index(row.evidence_payload)
-    if configuration_index is not None:
-        value_reviews = [review for review in reviews if review.field_name == "value"]
-        if not any(
-            is_authoritative_verified_review(session, review, row)
-            and re.search(
-                rf"\b(config(?:uration)?|conf|structure)[-_ #]?{configuration_index}\b",
-                review.evidence_text or "",
-                re.I,
-            )
-            for review in value_reviews
-        ):
-            reasons.append("configuration_index_not_supported_by_evidence")
+    # Configuration and other context fields are quality metadata, not export gates.
     return tuple(dict.fromkeys(reasons))
 
 
@@ -596,24 +549,34 @@ def get_target_reviews(
 
 
 def dft_export_data_quality_reasons(row: DFTResult, session: Session | None = None) -> tuple[str, ...]:
-    property_type = _normalized(row.property_type)
+    """Return only blockers that make the numeric observation unusable.
+
+    Missing catalyst metadata, adsorbate, reaction step, atom pair, coordination,
+    support and distances are retained as quality flags elsewhere and never block
+    storage, export or exploratory regression.
+    """
     reasons: list[str] = []
-    if property_requires_atom_pair(property_type):
-        unit = _normalized(row.unit)
-        if not unit or unit in MISSING_UNIT_MARKERS:
+    taxonomy = get_property_taxonomy(row.property_type)
+    is_text_claim = taxonomy["ml_role"] == "lm_auxiliary" or taxonomy["physical_dimension"] == "text"
+    if not _normalized(row.property_type):
+        reasons.append("missing_property_type_identity")
+    if not is_text_claim:
+        if row.value is None:
+            reasons.append("missing_value_identity")
+        unit_resolution = resolve_dft_unit(row.property_type, row.unit)
+        if not unit_resolution.resolved:
             reasons.append("missing_required_unit")
-        payload = row.evidence_payload if isinstance(row.evidence_payload, dict) else {}
-        atom_pair = resolve_atom_pair_identity(payload, property_type=property_type)
-        if atom_pair.error_code:
-            reasons.append(atom_pair.error_code)
-    if session is not None:
+    if session is not None and not is_text_claim:
         from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycleService
 
-        taxonomy = get_property_taxonomy(row.property_type)
-        is_text_claim = taxonomy["ml_role"] == "lm_auxiliary" or taxonomy["physical_dimension"] == "text"
-        if not is_text_claim:
-            identity = DFTAuditIssueLifecycleService(session).identity_for_result(row)
-            reasons.extend(identity.error_codes)
+        identity = DFTAuditIssueLifecycleService(session).identity_for_result(row)
+        core_errors = {
+            "missing_paper_identity", "missing_property_type_identity",
+            "missing_value_identity", "invalid_numeric_identity",
+            "unsupported_value_kind_identity", "missing_value_upper_identity",
+            "invalid_value_upper_identity", "unsupported_unit_identity",
+        }
+        reasons.extend(error for error in identity.error_codes if error in core_errors)
     return tuple(dict.fromkeys(reasons))
 
 
@@ -787,12 +750,9 @@ def _dft_payload_has_material_identity(row: DFTResult) -> bool:
 def has_required_material_identity(session: Session, row: Any) -> bool:
     if not isinstance(row, DFTResult):
         return True
-    # A linked catalyst sample is the structured source of truth.  Do not let
-    # an evidence-payload string silently override an unsupported/unknown
-    # catalyst type on that sample.
-    if not _is_blank(row.catalyst_sample_id):
-        return _catalyst_has_material_identity(session.get(CatalystSample, row.catalyst_sample_id))
-    return _dft_payload_has_material_identity(row)
+    # Every observation has a safe row-local entity key; explicit source entity
+    # keys allow multiple properties of an anonymous catalyst to be paired.
+    return bool(analysis_entity_id(row))
 
 
 def is_borrowed_supporting_reference(row: Any) -> bool:
@@ -1307,15 +1267,7 @@ def bulk_export_gate_results(
                 not is_dft_target and has_evidence_reference
             ),
             has_safe_locator=provenance_level == "exact_pdf_page" and locator_status == "exact_page",
-            has_material_identity=(
-                (
-                    str(row.catalyst_sample_id) in material_identity_ids
-                    if not _is_blank(row.catalyst_sample_id)
-                    else _dft_payload_has_material_identity(row)
-                )
-                if is_dft_target and isinstance(row, DFTResult)
-                else True
-            ),
+            has_material_identity=has_required_material_identity(session, row),
             borrowed_supporting_reference=is_dft_target and is_borrowed_supporting_reference(row),
         )
         if has_any_review and has_unsafe_review and "unsafe_review" not in reasons:

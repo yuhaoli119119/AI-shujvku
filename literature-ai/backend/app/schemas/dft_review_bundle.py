@@ -105,7 +105,7 @@ class OfflineObjectReviewAudit(BaseModel):
                 raise ValueError("new_candidate requires corrected_value to be an object")
             missing = [
                 field
-                for field in ("material_identity", "property_type", "value", "unit")
+                for field in ("property_type", "value")
                 if self.corrected_value.get(field) in (None, "")
             ]
             if missing:

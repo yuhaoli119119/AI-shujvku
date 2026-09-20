@@ -308,7 +308,7 @@ class ArtifactReliabilityAuditService:
     def _figure_issues(figure: PaperFigure, review: dict[str, Any]) -> list[str]:
         issues: list[str] = []
         flags = set(review.get("flags") or [])
-        if "missing_image_path" in flags or "missing_image_file" in flags:
+        if "missing_image_path" in flags or "missing_image_file" in flags or "invalid_image_file" in flags:
             issues.append("missing_image")
         if (figure.crop_status or "").lower() == "caption_only" or not figure.image_path:
             issues.append("caption_only")

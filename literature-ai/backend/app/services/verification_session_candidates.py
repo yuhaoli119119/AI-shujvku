@@ -24,12 +24,12 @@ from app.services.dft_audit_issue_lifecycle_service import DFTAuditIssueLifecycl
 from app.services.dft_identity_service import (
     DFTIdentityV2,
     build_dft_scientific_identity,
-    get_dft_identity_v2_property_policy,
     normalize_atom_pair,
     normalize_dft_value_kind,
     property_has_symmetric_atom_pair,
 )
 from app.services.dft_material_binding_service import DFTMaterialBindingService
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.services.dft_rescan_policy import (
     is_dft_method_only_reaction_step,
     normalize_dft_reaction_step_for_identity,
@@ -519,27 +519,32 @@ class VerificationSessionDFTCandidateMixin:
                 payload.get("normalized_energy_type"),
             )
         )
-        identity_v2 = DFTAuditIssueLifecycleService.build_identity(
-            paper_id=paper_id or run.paper_id,
-            payload=payload,
-        )
-        if identity_v2.atom_pair.error_code == "conflicting_atom_pair_aliases":
-            return None, "conflicting_atom_pair_aliases"
         value = self._float_or_none(corrected.get("value"))
         value_upper = self._float_or_none(corrected.get("value_upper"))
         value_kind = self._new_dft_value_kind(corrected, value_upper=value_upper)
-        unit = self._first_text(corrected.get("unit"))
-        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
-        pdf_anchor = first_pdf_evidence_anchor(evidence)
-        if not material_identity:
-            return None, "missing_material_identity"
         if not property_type:
             return None, "missing_property_type"
         if value is None:
             return None, "missing_value"
-        property_policy = get_dft_identity_v2_property_policy(property_type)
-        if not unit and not property_policy.dimensionless:
+        source_unit = self._first_text(corrected.get("unit"))
+        unit_resolution = resolve_dft_unit(property_type, source_unit)
+        if not unit_resolution.resolved:
             return None, "missing_unit"
+        unit = unit_resolution.unit
+        corrected = {
+            **corrected,
+            "property_type": property_type,
+            "value": value,
+            "unit": unit,
+        }
+        identity_v2 = DFTAuditIssueLifecycleService.build_identity(
+            paper_id=paper_id or run.paper_id,
+            payload={**payload, "corrected_value": corrected},
+        )
+        if identity_v2.atom_pair.error_code == "conflicting_atom_pair_aliases":
+            return None, "conflicting_atom_pair_aliases"
+        evidence = payload.get("evidence_location") or payload.get("evidence_payload")
+        pdf_anchor = first_pdf_evidence_anchor(evidence)
         if pdf_anchor is None:
             return None, "missing_pdf_evidence_anchor"
         evidence_payload = evidence if isinstance(evidence, dict) else {"evidence": evidence}
@@ -573,6 +578,10 @@ class VerificationSessionDFTCandidateMixin:
         merged_evidence_payload = {
             **evidence_payload,
             "material_identity": material_identity,
+            "unit_resolution": {
+                **unit_resolution.as_payload(),
+                "source_unit_text": source_unit,
+            },
             "source_label": run.source_label,
             "source": run.source,
             "corrected_value": corrected,

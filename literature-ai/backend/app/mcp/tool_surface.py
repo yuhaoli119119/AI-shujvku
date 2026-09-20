@@ -29,11 +29,15 @@ EXCLUDED = {
 CONTRACTS = json.loads(Path(__file__).with_name('tool_contracts.json').read_text(encoding='utf-8'))
 PAPER_TOOLS = frozenset(CONTRACTS) - EXCLUDED.keys()
 # Conservative for operations that overwrite/delete existing state; hints are not authorization.
-DESTRUCTIVE = frozenset('repair_dft_audit_issue repair_dft_audit_issues_batch propose_correction update_table delete_table merge_table approve_correction approve_corrections_batch resolve_chart_review_actions finalize_chart_review recrop_figure review_figure cleanup_unused_figure_assets export_paper_ml_dataset'.split())
-IDEMPOTENT_WRITES = frozenset({'apply_ai_verification_batch','apply_paper_identity_rematerialization','finalize_ai_verified_dft_records'})
+DESTRUCTIVE = frozenset('repair_dft_audit_issue repair_dft_audit_issues_batch propose_correction update_table delete_table merge_table approve_correction approve_corrections_batch resolve_chart_review_actions finalize_chart_review apply_paper_review_batch recrop_figure review_figure cleanup_unused_figure_assets export_paper_ml_dataset'.split())
+IDEMPOTENT_WRITES = frozenset({'apply_paper_review_batch','apply_ai_verification_batch','apply_paper_identity_rematerialization','finalize_ai_verified_dft_records'})
 OPEN_WORLD = frozenset({'retrieve_evidence','ingest_pdf_batch','import_analysis','create_share_token'})
 
 HANDOFFS = {
+ 'get_paper_review_task': 'Use this V2 task as the only source of object versions, task_fingerprint, prompt_version and standardized figure types.',
+ 'apply_paper_review_batch': 'Submit once per paper. Inspect all four outcome lists and authoritative_readback; only use get_paper_review_receipt after response loss.',
+ 'get_paper_review_receipt': 'Use only the original request_id after response loss; never change request_id to retry a different payload.',
+ 'search_figures': 'Matches whole-figure figure_types and compound-image panel_types; resolved_query_types explains alias resolution.',
  'query_papers': 'Use items[].id as paper_id. Keep all subsequent scientific evidence within that paper and its explicitly linked SI.',
  'scan_local_pdfs': 'folder_path is a server-visible allowlisted directory, not the AI client filesystem. Returns items[].path/paper_id/already_ingested.',
  'ingest_pdf_batch': 'Use a dedicated directory containing only the intended PDF(s). Returns results[].job_id/paper_id/status/error; get_parse_status accepts job_id. Check failed items before any retry.',

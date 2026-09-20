@@ -3187,7 +3187,7 @@ def test_unvalidated_single_ai_review_cannot_bind_dft_to_catalyst_sample(monkeyp
             assert stored_row.catalyst_sample_id is None
             assert corrections == []
             assert candidates == []
-            assert "missing_material_identity" in gate.reasons
+            assert "missing_material_identity" not in gate.reasons
             assert not gate.eligible
         finally:
             app.dependency_overrides.clear()

@@ -2172,9 +2172,9 @@ def test_mcp_get_dft_review_queue_returns_codex_ready_candidates(mcp_test_env):
     assert len(payload["rows"]) == 1
     row = payload["rows"][0]
     assert row["record_id"] == row_id
-    assert "missing_material_identity" in row["blocked_reasons"]
+    assert "missing_material_identity" not in row["blocked_reasons"]
     assert "missing_review" in row["blocked_reasons"]
-    assert row["recommended_action"] == "bind_material_identity"
+    assert row["recommended_action"] == "verify_against_pdf"
     assert row["sanity_flags"] == []
     assert row["can_mark_verified"] is False
     assert row["evidence_locators"][0]["page"] == 7

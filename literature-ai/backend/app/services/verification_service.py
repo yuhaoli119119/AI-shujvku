@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.models import ExtractionFieldReview, AuditLog, Paper
 from app.utils.review_safety import verification_promotion_gate
 from app.services.extraction_review_service import ExtractionReviewService
+from app.services.dft_record_status_sync import sync_dft_record_statuses
 from app.services.review_target_resolver import canonical_target_type
 
 class VerificationService:
@@ -106,6 +107,17 @@ class VerificationService:
         self.session.add(audit)
         
         self.session.add(review)
+
+        # Record-level closure: promoting one field to 'verified' must re-derive the
+        # parent DFT record's candidate_status, otherwise the record keeps displaying as
+        # pending even though its fields are verified.
+        sync_dft_record_statuses(
+            self.session,
+            paper_id=review.paper_id,
+            target_ids=[review.target_id],
+            target_type=canonical_target_type(review.target_type),
+        )
+
         self.session.commit()
         self.session.refresh(review)
 

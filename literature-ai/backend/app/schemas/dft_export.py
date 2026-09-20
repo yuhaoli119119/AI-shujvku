@@ -48,7 +48,7 @@ class DFTPaperPayloadV2(BaseModel):
 class DFTCatalystPayloadV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    catalyst_sample_id: str
+    catalyst_sample_id: str | None = None
     name: str | None = None
     catalyst_type: str | None = None
     metal_centers: list[Any] | None = None
@@ -93,6 +93,10 @@ class DFTTargetPayloadV2(BaseModel):
     value_upper: float | None = None
     value_kind: str | None = None
     unit: str | None = None
+    source_unit: str | None = None
+    unit_origin: Literal["source_explicit", "ai_inferred", "unresolved"] | None = None
+    unit_inference_basis: str | None = None
+    unit_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     reaction_step: str | None = None
     configuration_index: int | None = Field(default=None, gt=0, strict=True)
     normalized_value: float | None = None
@@ -118,6 +122,10 @@ class DFTLMClaimPayloadV2(BaseModel):
     value_upper: float | None = None
     value_kind: str | None = None
     unit: str | None = None
+    source_unit: str | None = None
+    unit_origin: Literal["source_explicit", "ai_inferred", "unresolved"] | None = None
+    unit_inference_basis: str | None = None
+    unit_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
     reaction_step: str | None = None
     configuration_index: int | None = Field(default=None, gt=0, strict=True)
     normalized_value: float | None = None
@@ -167,6 +175,7 @@ class DFTNumericRecordV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     record_id: str
+    analysis_entity_id: str
     paper: DFTPaperPayloadV2
     target: DFTTargetPayloadV2
     catalyst: DFTCatalystPayloadV2 | None = None
@@ -190,6 +199,7 @@ class DFTLMRecordV2(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     record_id: str
+    analysis_entity_id: str
     paper: DFTPaperPayloadV2
     catalyst: DFTCatalystPayloadV2 | None = None
     catalyst_candidates: list[DFTCatalystPayloadV2] = Field(default_factory=list)
@@ -216,8 +226,8 @@ class DFTMLDatasetExportV2(BaseModel):
 def select_training_records_v2(payload: dict[str, Any] | DFTMLDatasetExportV2) -> list[DFTNumericRecordV2]:
     """Return only records that satisfy the v2 training contract.
 
-    Downstream callers must not treat `paper_level_dft_settings` as a substitute
-    for a result-level linked setting.
+    A confirmed numeric value with a resolved unit is training-usable. Calculation
+    settings and catalyst metadata remain optional quality/context fields.
     """
     dataset = payload if isinstance(payload, DFTMLDatasetExportV2) else DFTMLDatasetExportV2.model_validate(payload)
     if dataset.metadata.schema_version != "dft_results_ml_v2":
@@ -225,10 +235,6 @@ def select_training_records_v2(payload: dict[str, Any] | DFTMLDatasetExportV2) -
     ready_records: list[DFTNumericRecordV2] = []
     for record in dataset.records:
         if not record.is_ml_ready:
-            continue
-        if record.recommended_ml_setting_field != "linked_dft_setting":
-            continue
-        if record.linked_dft_setting is None:
             continue
         if record.target.normalized_value is None:
             continue

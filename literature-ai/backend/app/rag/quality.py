@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, PaperFigure, WritingCard
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.rag.eligibility import (
     figure_is_rag_eligible,
     writing_card_is_rag_eligible,
@@ -219,7 +220,7 @@ def _dft_minimum_field_reasons(row: DFTResult) -> list[str]:
         reasons.append("missing_property_type")
     if row.value is None:
         reasons.append("missing_value")
-    if not str(row.unit or "").strip():
+    if not resolve_dft_unit(row.property_type or energy_type, row.unit).resolved:
         reasons.append("missing_unit")
     return reasons
 

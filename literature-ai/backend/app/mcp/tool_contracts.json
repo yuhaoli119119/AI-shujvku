@@ -393,5 +393,30 @@
     "capability": "read_papers",
     "read_only": false,
     "effects": "Renders offline HTML reading guide and persists artifact file to storage (artifacts/guides/{paper_id}_guide.html). Returns artifact metadata, checksum, and HTML content."
+  },
+  "get_paper_review_task": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only; returns typed V2 task, registry, versions and fingerprint."
+  },
+  "apply_paper_review_batch": {
+    "capability": "review_corrections",
+    "read_only": false,
+    "effects": "One paper-scoped batch write with per-item savepoints, version/fingerprint checks, durable receipt and authoritative readback. Never writes DFT truth."
+  },
+  "get_paper_review_receipt": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only recovery of a committed V2 receipt."
+  },
+  "get_figure_type_registry": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only versioned registry."
+  },
+  "search_figures": {
+    "capability": "read_papers",
+    "read_only": true,
+    "effects": "Read-only standardized figure and panel-type search."
   }
 }

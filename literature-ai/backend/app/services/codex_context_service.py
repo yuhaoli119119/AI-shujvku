@@ -32,7 +32,7 @@ from app.utils.evidence_anchors import (
     has_material_correction_anchor,
 )
 from app.utils.figure_reliability import build_figure_image_review
-from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES
+from app.utils.dft_candidate_status import DFT_REJECTED_STATUSES, is_terminal as is_dft_terminal
 from app.utils.review_safety import bulk_export_gate_results, is_export_eligible_extraction, summarize_gate_results
 
 
@@ -339,12 +339,9 @@ class CodexContextService:
             if safety is not None:
                 item["export_safety"] = safety
         suggested_sample_creations = self._suggested_sample_creations(detail.id)
-        blocked_unbound_dft = [
-            item
-            for item in dft_results
-            if not item.get("catalyst_sample_id")
-            and "missing_material_identity" in ((item.get("export_safety") or {}).get("blocked_reasons") or [])
-        ]
+        # Unbound catalyst metadata is informative only; anonymous DFT values
+        # remain valid analysis entities and must not be reported as blockers.
+        blocked_unbound_dft = []
         supplementary_figure_payload = self._load_supplementary_figure_payloads(detail)
         figure_review_scope = "main_plus_supplementary" if include_supplementary_figures else "main_only"
         figure_items = self._figure_context_items(
@@ -1442,28 +1439,33 @@ class CodexContextService:
             review_status_by_target.setdefault(str(review.target_id), set()).add(
                 str(review.reviewer_status or "pending")
             )
+        all_target_ids = {str(row.id) for row in rows}
         active_target_ids = {
             str(row.id)
             for row in rows
-            if str(row.candidate_status or "").strip().lower() != "rejected"
+            if not is_dft_terminal(row.candidate_status)
         }
         reviewed_target_ids = {
             target_id
             for target_id, statuses in review_status_by_target.items()
-            if any(status in {"verified", "rejected"} for status in statuses)
+            if any(status in {"verified", "ai_verified", "rejected", "needs_human"} for status in statuses)
         }
+        reviewed_target_ids.update(
+            str(row.id) for row in rows if is_dft_terminal(row.candidate_status)
+        )
+        reviewed_target_ids &= all_target_ids
         unreviewed_target_ids = sorted(active_target_ids - reviewed_target_ids)
         return {
             "figure_table_review": figure_table_review,
             "dft_review": {
                 "total_candidates": dft_export_readiness.get("total_candidates", len(rows)),
-                "active_candidates": dft_export_readiness.get("active_candidates", len(active_target_ids)),
+                "active_candidates": len(active_target_ids),
                 "eligible_count": dft_export_readiness.get("eligible_count", 0),
                 "blocked_count": dft_export_readiness.get("blocked_count", 0),
                 "blocked_reasons": dft_export_readiness.get("blocked_reasons", {}),
                 "pending_import_run_count": dft_review_handoff.get("pending_run_count", 0),
                 "pending_import_opinion_count": dft_review_handoff.get("processable_dft_candidate_count", 0),
-                "reviewed_target_count": len(reviewed_target_ids & active_target_ids),
+                "reviewed_target_count": len(reviewed_target_ids),
                 "unreviewed_target_count": len(unreviewed_target_ids),
                 "unreviewed_target_ids": unreviewed_target_ids[:50],
             },
@@ -1636,11 +1638,7 @@ class CodexContextService:
             ):
                 actions.append("Do not bind this DFT row until you can cite a page, section, table, figure, or quoted-text anchor from the PDF.")
             if not item_payload.get("catalyst_sample_id"):
-                candidate_count = len(item_payload.get("candidate_catalyst_samples") or [])
-                if candidate_count > 1:
-                    actions.append("Explicitly choose one catalyst_sample_id from the candidate list; do not silently fall back to the first sample.")
-                elif candidate_count == 1:
-                    actions.append("Even with one candidate catalyst sample, confirm the binding against the PDF before proposing catalyst_sample_id.")
+                actions.append("Catalyst binding is optional context: infer and cite it when reasonable, otherwise keep the anonymous analysis_entity_id without blocking the numeric DFT value.")
         if item_type == "catalyst_sample":
             actions.append("Open the original PDF page/table/figure before trusting or editing this catalyst sample.")
             if item_payload.get("evidence_anchor_status") != "sufficient":

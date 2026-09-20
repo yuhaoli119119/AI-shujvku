@@ -30,6 +30,7 @@ from app.normalizers.chemistry_normalizer import (
 from app.normalizers.unit_normalizer import UnitNormalizer
 from app.services.catalyst_sample_identity import resolve_sample_identity
 from app.services.dft_completeness_service import DFTCompletenessService
+from app.services.dft_ml_policy import analysis_entity_id, resolve_dft_unit
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.configuration_index import extract_configuration_index
 from app.utils.review_safety import bulk_export_gate_results, summarize_gate_results
@@ -301,6 +302,9 @@ def _extract_evidence_context(payload: Any) -> dict[str, Any]:
         normalized_value = _normalized_property_type(target_properties) if target_properties else None
         normalized_properties = [normalized_value] if normalized_value else []
     return {
+        "analysis_entity_id": _context_text(
+            _get_payload_value(payload, "analysis_entity_id", "source_entity_id", "catalyst_group_id")
+        ),
         "material_identity": _first_non_blank(
             _get_payload_value(payload, "material_identity"),
             _get_payload_value(payload, "material"),
@@ -327,19 +331,7 @@ def _extract_evidence_context(payload: Any) -> dict[str, Any]:
 
 
 def _material_identity_key(row: DR, catalyst: CS | None, evidence_context: dict[str, Any]) -> str:
-    catalyst_id = row.catalyst_sample_id or (catalyst.id if catalyst is not None else None)
-    if catalyst_id:
-        return f"catalyst_sample:{catalyst_id}"
-    material_identity = _first_non_blank(
-        evidence_context.get("material_identity"),
-        evidence_context.get("material"),
-        evidence_context.get("structure_name"),
-        catalyst.name if catalyst else None,
-        catalyst.coordination if catalyst else None,
-    )
-    if material_identity:
-        return f"material:{material_identity}"
-    return f"paper:{row.paper_id}:unlinked"
+    return analysis_entity_id(row)
 
 
 def _target_context_key(
@@ -498,10 +490,7 @@ def _effective_export_catalyst(
     if resolution.status == "reuse" and resolution.sample is not None:
         return resolution.sample, "auto_bound"
 
-    if len(paper_catalysts) == 1:
-        return paper_catalysts[0], "single_candidate_fallback"
-
-    return None, "unbound"
+    return None, "unbound_optional_metadata"
 
 
 def _normalize_numeric_target(
@@ -512,6 +501,15 @@ def _normalize_numeric_target(
 ) -> tuple[float | None, str | None, str, list[str], str | None]:
     if value is None:
         return None, unit, "missing_value", ["missing_numeric_value"], None
+    unit_resolution = resolve_dft_unit(None, unit)
+    # Callers know the physical dimension even when taxonomy aliases are unusual.
+    if not unit_resolution.resolved:
+        from app.services.dft_ml_policy import DEFAULT_UNIT_BY_DIMENSION
+        inferred = DEFAULT_UNIT_BY_DIMENSION.get(physical_dimension)
+        if inferred:
+            unit = inferred
+    else:
+        unit = unit_resolution.unit
     if physical_dimension == "energy":
         normalized = _UNIT_NORMALIZER.normalize_energy(value, unit)
         status = "normalized"
@@ -768,15 +766,8 @@ def _ml_blockers_for_record(record: dict[str, Any], ambiguous_descriptor_types: 
         and not target["normalization_blockers"]
     ):
         blockers.append("missing_normalized_value")
-    if target["ml_role"] == "target":
-        if not _has_recommended_ml_setting(record) and record["setting_link_status"] == "ambiguous":
-            blockers.append("ambiguous_result_setting_link")
-        elif not _has_recommended_ml_setting(record):
-            blockers.append("missing_result_setting_link")
-        if target["canonical_property_type"] == "adsorption_energy" and not target["canonical_adsorbate"]:
-            blockers.append("missing_canonical_adsorbate")
-        if ambiguous_descriptor_types:
-            blockers.append("descriptor_instance_ambiguous")
+    # Calculation settings, adsorbate labels and descriptor-instance metadata
+    # remain quality context. They do not block a confirmed value from ML/export.
     if target["normalized_unit"] in {None, ""} and target["physical_dimension"] not in {"dimensionless", "text"}:
         blockers.append("missing_unit")
     deduped: list[str] = []
@@ -1072,6 +1063,7 @@ def build_dft_ml_dataset(
         normalized_property_type = _normalized_property_type(dr.property_type)
         taxonomy = get_property_taxonomy(dr.property_type)
         canonical_adsorbate = canonicalize_adsorbate(dr.adsorbate) or dr.adsorbate
+        unit_resolution = resolve_dft_unit(dr.property_type, dr.unit)
         (
             normalized_value,
             normalized_unit,
@@ -1080,7 +1072,7 @@ def build_dft_ml_dataset(
             normalization_basis,
         ) = _normalize_numeric_target(
             value=dr.value,
-            unit=dr.unit,
+            unit=unit_resolution.unit,
             physical_dimension=taxonomy["physical_dimension"],
         )
         setting_link = _resolve_setting_link(
@@ -1118,6 +1110,7 @@ def build_dft_ml_dataset(
 
         common_payload = {
             "record_id": str(dr.id),
+            "analysis_entity_id": analysis_entity_id(dr),
             "paper": _paper_payload(paper),
             "catalyst": _catalyst_payload(effective_catalyst),
             "catalyst_candidates": [
@@ -1161,7 +1154,11 @@ def build_dft_ml_dataset(
             "value": dr.value,
             "value_upper": dr.value_upper,
             "value_kind": dr.value_kind or ("range" if dr.value_upper is not None else "point"),
-            "unit": dr.unit,
+            "unit": unit_resolution.unit,
+            "source_unit": dr.unit,
+            "unit_origin": unit_resolution.origin,
+            "unit_inference_basis": unit_resolution.basis,
+            "unit_confidence": unit_resolution.confidence,
             "reaction_step": dr.reaction_step,
             "configuration_index": config_idx,
             "normalized_value": normalized_value,
@@ -1696,6 +1693,7 @@ def build_dft_csv_rows(
     library_name: str | None = None,
     min_confidence: float | None = None,
     paper_id: UUID | None = None,
+    exact_property_type: bool = False,
     limit: int | None = None,
     dataset_profile: str | None = None,
 ) -> tuple[str, dict]:
@@ -1729,6 +1727,8 @@ def build_dft_csv_rows(
     )
     if paper_id is not None:
         stmt = stmt.where(DR.paper_id == paper_id)
+    if exact_property_type and property_type:
+        stmt = stmt.where(DR.property_type == property_type)
     rows = session.execute(stmt).all()
     output = io.StringIO()
     writer = csv.writer(output)

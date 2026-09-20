@@ -1080,9 +1080,29 @@ class ReviewService:
             ).first()
             if not safe_anchor:
                 if review is not None:
+                    prior_status = str(review.reviewer_status or "")
+                    # Only a substantive value change invalidates a recorded decision.  If
+                    # the value is unchanged and merely the anchor cannot be re-verified,
+                    # the existing review is kept instead of being silently downgraded.
+                    substantive_change = str(reviewed_value) != str(review.reviewed_value)
+                    if prior_status in {"verified", "ai_verified", "safe_verified"} and not substantive_change:
+                        continue
+                    preserved_payload = dict(review.review_payload or {}) if isinstance(review.review_payload, dict) else {}
+                    preserved_payload["invalidation"] = {
+                        "previous_reviewer_status": prior_status,
+                        "previous_reviewed_value": review.reviewed_value,
+                        "incoming_reviewed_value": reviewed_value,
+                        "reason": "object_changed_without_verifiable_pdf_anchor",
+                        "detected_by": str(correction.source or ""),
+                        "requires_re_review": True,
+                    }
                     review.reviewer_status = "stale"
                     review.target_resolution_status = "stale"
-                    review.reviewer_note = "Object changed without exact PDF page and quoted evidence."
+                    review.review_payload = preserved_payload
+                    review.reviewer_note = (
+                        "对象已变化且缺少可核验的 PDF 页码与引用证据，需要重新审核；"
+                        "原审核结论与原因已保留在 review_payload.invalidation 中。"
+                    )
                     self.session.add(review)
                 continue
             review_payload = dict(review.review_payload or {}) if review is not None and isinstance(review.review_payload, dict) else {}

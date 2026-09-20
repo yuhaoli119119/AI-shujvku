@@ -25,6 +25,7 @@ from app.db.models import (
 from app.db.session import get_db_session
 from app.services.dft_export_service import build_dft_ml_dataset
 from app.services.catalyst_analysis_service import CatalystAnalysisService
+from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 from app.utils.text_cleaning import repair_mojibake_text
@@ -1661,19 +1662,23 @@ def _overview_summary_counts(
         return stmt.scalar_subquery()
 
     paper_count = select(func.count(Paper.id))
-    pdf_count = select(func.count(Paper.id)).where(Paper.pdf_path.is_not(None), Paper.pdf_path != "")
+    pdf_papers = select(Paper)
     parsed_count = select(func.count(func.distinct(PaperSection.paper_id))).join(
         Paper,
         PaperSection.paper_id == Paper.id,
     )
     for clause in filters:
         paper_count = paper_count.where(clause)
-        pdf_count = pdf_count.where(clause)
+        pdf_papers = pdf_papers.where(clause)
         parsed_count = parsed_count.where(clause)
+    pdf_available = sum(
+        1
+        for paper in session.scalars(pdf_papers).all()
+        if bool(build_paper_pdf_status(paper).get("pdf_exists"))
+    )
     row = session.execute(
         select(
             paper_count.scalar_subquery().label("papers"),
-            pdf_count.scalar_subquery().label("pdf_available"),
             parsed_count.scalar_subquery().label("parsed_papers"),
             joined_count(PaperFigure).label("figures"),
             joined_count(FigureDataPoint).label("figure_data_points"),
@@ -1681,7 +1686,9 @@ def _overview_summary_counts(
             joined_count(CatalystSample).label("catalyst_samples"),
         )
     ).one()
-    return {key: int(value or 0) for key, value in row._mapping.items()}
+    counts = {key: int(value or 0) for key, value in row._mapping.items()}
+    counts["pdf_available"] = pdf_available
+    return counts
 
 
 def _dft_overview_meta(

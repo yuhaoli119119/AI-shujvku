@@ -107,7 +107,7 @@ def test_pair_analysis_accepts_reviewed_legacy_numeric_target_without_generic_de
     assert _pair_analysis_record_exclusion(ready.row, ready.record) is None
 
     ready.record["setting_link_status"] = "ambiguous"
-    assert _pair_analysis_record_exclusion(ready.row, ready.record) == "missing_or_ambiguous_calculation_context"
+    assert _pair_analysis_record_exclusion(ready.row, ready.record) is None
     ready.record["setting_link_status"] = "clear_primary"
     ready.record["target"]["normalization_status"] = "unsupported_unit"
     assert _pair_analysis_record_exclusion(ready.row, ready.record) == "pair_analysis_target_not_normalized"

@@ -99,6 +99,8 @@ def _raw_evidence(row: DFTSetting) -> str:
     return str(raw.get("supporting_text") or raw.get("extracted") or "")
 
 
+from app.services.dft_record_status_sync import sync_dft_record_statuses
+
 class ExtractionReviewService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -219,6 +221,15 @@ class ExtractionReviewService:
             self.session.info.pop("dft_import_open_conflict_ids", None)
         else:
             self.session.info["dft_import_open_conflict_ids"] = self._previous_conflict_cache
+        # Settle the batch once, before the batch caches are torn down.
+        batch_paper_id = next((row.paper_id for row in self._batch_targets.values()), None)
+        if batch_paper_id is not None and self._batch_target_ids:
+            sync_dft_record_statuses(
+                self.session,
+                paper_id=batch_paper_id,
+                target_ids=sorted(self._batch_target_ids),
+                target_type="dft_results",
+            )
         self._batch_target_ids.clear()
         self._batch_targets.clear()
         self._batch_reviews.clear()
@@ -380,6 +391,22 @@ class ExtractionReviewService:
             self.session.add(review)
             self._flush_review_write()
             saved.append(self._serialize(review))
+
+        # Record-level closure: a save may move a field into or out of a verified state,
+        # so the parent DFT record's status is re-derived here as well.  Targets inside an
+        # active import batch are skipped -- the batch settles once in
+        # end_dft_import_batch, otherwise this would be quadratic.
+        sync_dft_record_statuses(
+            self.session,
+            paper_id=paper_id,
+            target_ids=[
+                item.target_id
+                for item, item_type, _target, _snapshot, _review in writable
+                if item_type == "dft_results" and str(item.target_id) not in self._batch_target_ids
+            ],
+            target_type="dft_results",
+        )
+
         if commit:
             self.session.commit()
         else:
@@ -511,6 +538,17 @@ class ExtractionReviewService:
                 },
             )
         )
+
+        # Record-level closure: verifying fields must not leave the parent record stuck
+        # in 'system_candidate'.  Skipped inside an import batch (see end_dft_import_batch).
+        if str(payload.target_id) not in self._batch_target_ids:
+            sync_dft_record_statuses(
+                self.session,
+                paper_id=paper_id,
+                target_ids=[payload.target_id],
+                target_type=canonical_type,
+            )
+
         if commit:
             self.session.commit()
         else:

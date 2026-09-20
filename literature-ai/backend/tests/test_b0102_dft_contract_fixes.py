@@ -648,8 +648,8 @@ def test_value_verification_does_not_fail_on_reaction_step_non_verbatim(setup_te
         assert "reaction_step_consistent" not in item.get("blocked_reasons", [])
 
 
-# 7. reaction_step自身核验仍执行对应一致性检查
-def test_reaction_step_field_verification_enforces_consistency(setup_test_db, tmp_path):
+# 7. reaction_step是可选元数据，不再产生阻断性字段任务
+def test_reaction_step_field_is_not_a_required_review_gate(setup_test_db, tmp_path):
     with Session(setup_test_db) as session:
         main_paper, si_paper, _, _, dft_result = _seed_test_papers(session, tmp_path)
         service = AIVerificationService(session)
@@ -674,8 +674,8 @@ def test_reaction_step_field_verification_enforces_consistency(setup_test_db, tm
             identity=_identity(),
             dry_run=True,
         )
-        assert result_fail["items"][0]["outcome"] == "accept_validation_failed"
-        assert "reaction_step_consistent" in result_fail["items"][0]["blocked_reasons"]
+        assert result_fail["items"][0]["outcome"] == "exception"
+        assert result_fail["items"][0]["blocked_reasons"] == ["dft_field_not_required"]
 
         # 7b. Evidence containing reaction_step -> passes consistency check
         submission_with_step = AIVerificationSubmission.model_validate({
@@ -697,8 +697,8 @@ def test_reaction_step_field_verification_enforces_consistency(setup_test_db, tm
             identity=_identity(),
             dry_run=True,
         )
-        assert result_pass["items"][0]["outcome"] in ("auto_verified", "auto_repaired")
-        assert result_pass["items"][0]["evidence_checks"]["reaction_step_consistent"] is True
+        assert result_pass["items"][0]["outcome"] == "exception"
+        assert result_pass["items"][0]["blocked_reasons"] == ["dft_field_not_required"]
 
 
 # 8. configuration_index进入ML输出但不改变reaction_step (支持嵌套 corrected_value)
@@ -820,8 +820,7 @@ def test_base_gate_blocks_solvent_and_dac_profile_excludes_regression(setup_test
             assert expected_gate.eligible is True, expected_gate.reasons
 
         solvent_gate = is_export_eligible_extraction(session, dft_solvent, target_type="dft_results")
-        assert solvent_gate.eligible is False
-        assert "missing_material_identity" in solvent_gate.reasons
+        assert solvent_gate.eligible is True
 
         # 9a. Target profile export excludes solvent and regression in JSON
         ml_dataset = build_dft_ml_dataset(session, paper_id=main_paper.id, dataset_profile="dac_lis_ml")
@@ -832,25 +831,27 @@ def test_base_gate_blocks_solvent_and_dac_profile_excludes_regression(setup_test
 
         meta = ml_dataset["metadata"]
         assert meta["dataset_profile"] == "dac_lis_ml"
-        assert meta["base_eligible_count"] == 2
-        assert meta["blocked_count"] == 1
-        assert meta["profile_candidate_count"] == 2
+        assert meta["base_eligible_count"] == 3
+        assert meta["blocked_count"] == 0
+        assert meta["profile_candidate_count"] == 3
         assert meta["profile_included_count"] == 1
-        assert meta["profile_excluded_count"] == 1
+        assert meta["profile_excluded_count"] == 2
         assert meta["profile_excluded_reasons"] == {
             "excluded_regression_or_statistical_parameter": 1,
+            "excluded_solvent_or_electrolyte_benchmark": 1,
         }
 
         # 9b. CSV export with profile also excludes them identically
         csv_text, csv_summary = build_dft_csv_rows(session, paper_id=main_paper.id, dataset_profile="dac_lis_ml")
         assert csv_summary["dataset_profile"] == "dac_lis_ml"
-        assert csv_summary["base_eligible_count"] == 2
-        assert csv_summary["blocked_count"] == 1
-        assert csv_summary["profile_candidate_count"] == 2
+        assert csv_summary["base_eligible_count"] == 3
+        assert csv_summary["blocked_count"] == 0
+        assert csv_summary["profile_candidate_count"] == 3
         assert csv_summary["profile_included_count"] == 1
-        assert csv_summary["profile_excluded_count"] == 1
+        assert csv_summary["profile_excluded_count"] == 2
         assert csv_summary["profile_excluded_reasons"] == {
             "excluded_regression_or_statistical_parameter": 1,
+            "excluded_solvent_or_electrolyte_benchmark": 1,
         }
         assert "FeCo-NC" in csv_text or "-1.75" in csv_text
         assert "linear_regression_slope" not in csv_text
@@ -861,12 +862,12 @@ def test_base_gate_blocks_solvent_and_dac_profile_excludes_regression(setup_test
         generic_ids = [r["record_id"] for r in generic_dataset["records"]]
         assert str(dft_dac.id) in generic_ids
         assert str(dft_regression.id) in generic_ids
-        assert str(dft_solvent.id) not in generic_ids
+        assert str(dft_solvent.id) in generic_ids
         assert generic_dataset["metadata"]["dataset_profile"] is None
 
         csv_gen_text, csv_gen_summary = build_dft_csv_rows(session, paper_id=main_paper.id, dataset_profile=None)
         assert csv_gen_summary["dataset_profile"] is None
-        assert "DME+DOL" not in csv_gen_text
+        assert "DME+DOL" in csv_gen_text
         assert "linear_regression_slope" in csv_gen_text
         assert "-1.75" in csv_gen_text
 
@@ -985,20 +986,11 @@ def test_dataset_profile_scoping_rules(setup_test_db, tmp_path):
             expected_gate = is_export_eligible_extraction(session, expected_row, target_type="dft_results")
             assert expected_gate.eligible is True, expected_gate.reasons
 
-        for blocked_row in (dft_solvent, dft_no_type, dft_unbound):
-            gate = is_export_eligible_extraction(session, blocked_row, target_type="dft_results")
-            assert gate.eligible is False
-        assert "missing_material_identity" in is_export_eligible_extraction(
-            session, dft_solvent, target_type="dft_results"
-        ).reasons
-        assert "missing_material_identity" in is_export_eligible_extraction(
-            session, dft_no_type, target_type="dft_results"
-        ).reasons
-        assert "non_authoritative_review:catalyst" in is_export_eligible_extraction(
-            session, dft_unbound, target_type="dft_results"
-        ).reasons
+        for generic_row in (dft_solvent, dft_no_type, dft_unbound):
+            gate = is_export_eligible_extraction(session, generic_row, target_type="dft_results")
+            assert gate.eligible is True, gate.reasons
 
-        # (a) dac_lis_ml: dual_atom 和 bimetallic 进入；single_atom, solvent, catalyst_type缺失, 未绑定 不进入
+        # (a) dac_lis_ml applies only an explicit task profile after the base gate.
         dac_dataset = build_dft_ml_dataset(session, paper_id=main_paper.id, dataset_profile="dac_lis_ml")
         dac_ids = {r["record_id"] for r in dac_dataset["records"]}
         assert str(dft_dual.id) in dac_ids
@@ -1008,13 +1000,15 @@ def test_dataset_profile_scoping_rules(setup_test_db, tmp_path):
         assert str(dft_no_type.id) not in dac_ids
         assert str(dft_unbound.id) not in dac_ids
         dac_meta = dac_dataset["metadata"]
-        assert dac_meta["base_eligible_count"] == 3
-        assert dac_meta["blocked_count"] == 3
-        assert dac_meta["profile_candidate_count"] == 3
+        assert dac_meta["base_eligible_count"] == 6
+        assert dac_meta["blocked_count"] == 0
+        assert dac_meta["profile_candidate_count"] == 6
         assert dac_meta["profile_included_count_before_limit"] == 2
-        assert dac_meta["profile_excluded_count"] == 1
+        assert dac_meta["profile_excluded_count"] == 4
         assert dac_meta["profile_excluded_reasons"] == {
+            "excluded_insufficient_catalyst_scope": 2,
             "excluded_non_target_catalyst_scope": 1,
+            "excluded_solvent_or_electrolyte_benchmark": 1,
         }
 
         # (b) bimetallic_lis_ml: 与 dac_lis_ml 规则一致
@@ -1033,9 +1027,11 @@ def test_dataset_profile_scoping_rules(setup_test_db, tmp_path):
         assert str(dft_unbound.id) not in sac_ids
         sac_meta = sac_dataset["metadata"]
         assert sac_meta["profile_included_count_before_limit"] == 1
-        assert sac_meta["profile_excluded_count"] == 2
+        assert sac_meta["profile_excluded_count"] == 5
         assert sac_meta["profile_excluded_reasons"] == {
+            "excluded_insufficient_catalyst_scope": 2,
             "excluded_non_target_catalyst_scope": 2,
+            "excluded_solvent_or_electrolyte_benchmark": 1,
         }
 
         # (d) Generic profile=None: 保持全部通用导出
@@ -1044,9 +1040,9 @@ def test_dataset_profile_scoping_rules(setup_test_db, tmp_path):
         assert str(dft_dual.id) in gen_ids
         assert str(dft_bimetallic.id) in gen_ids
         assert str(dft_single.id) in gen_ids
-        assert str(dft_solvent.id) not in gen_ids
-        assert str(dft_no_type.id) not in gen_ids
-        assert str(dft_unbound.id) not in gen_ids
+        assert str(dft_solvent.id) in gen_ids
+        assert str(dft_no_type.id) in gen_ids
+        assert str(dft_unbound.id) in gen_ids
 
 
 # 10c. 修正 limit 与 Profile 过滤顺序测试（前N条排除后，limit=1仍能正确导出后续DAC）
@@ -1127,8 +1123,7 @@ def test_limit_applied_after_profile_filtering(setup_test_db, tmp_path):
             assert expected_gate.eligible is True, expected_gate.reasons
 
         solvent_gate = is_export_eligible_extraction(session, dft_solvent, target_type="dft_results")
-        assert solvent_gate.eligible is False
-        assert "missing_material_identity" in solvent_gate.reasons
+        assert solvent_gate.eligible is True
 
         # 验证 JSON: limit=1 跨过前2条排除项，正确导出第3条 DAC 记录
         dataset = build_dft_ml_dataset(session, paper_id=main_paper.id, dataset_profile="dac_lis_ml", limit=1)
@@ -1137,13 +1132,14 @@ def test_limit_applied_after_profile_filtering(setup_test_db, tmp_path):
         assert dataset["records"][0]["target"]["value"] == -1.75
 
         meta = dataset["metadata"]
-        assert meta["base_eligible_count"] == 3
-        assert meta["blocked_count"] == 1
-        assert meta["profile_candidate_count"] == 3
+        assert meta["base_eligible_count"] == 4
+        assert meta["blocked_count"] == 0
+        assert meta["profile_candidate_count"] == 4
         assert meta["profile_included_count_before_limit"] == 2
-        assert meta["profile_excluded_count"] == 1
+        assert meta["profile_excluded_count"] == 2
         assert meta["profile_excluded_reasons"] == {
             "excluded_regression_or_statistical_parameter": 1,
+            "excluded_solvent_or_electrolyte_benchmark": 1,
         }
         assert meta["exported_count_after_limit"] == 1
         assert meta["limit"] == 1
@@ -1488,17 +1484,17 @@ def test_zero_production_database_writes(setup_test_db):
 
 # 15. 必审字段策略契约测试
 def test_required_dft_review_fields_contract():
-    # 基础必审字段：catalyst, energy_type, value
+    # 所有DFT数值只要求性质含义和数值；value审核同时确认或推断单位。
     base_dft = DFTResult(property_type="formation_energy", value=-0.5, unit="eV")
-    assert required_dft_review_fields(base_dft) == ("catalyst", "energy_type", "value")
+    assert required_dft_review_fields(base_dft) == ("energy_type", "value")
 
     # 吸附/结合能：自动包含 adsorbate
     ads_dft = DFTResult(property_type="adsorption_energy", adsorbate="Li2S4", value=-1.5, unit="eV")
-    assert required_dft_review_fields(ads_dft) == ("catalyst", "energy_type", "value", "adsorbate")
+    assert required_dft_review_fields(ads_dft) == ("energy_type", "value")
 
     # 反应能垒/路径：自动包含 reaction_step
     rxn_dft = DFTResult(property_type="reaction_barrier", reaction_step="Li2S6 -> Li2S4", value=0.45, unit="eV")
-    assert required_dft_review_fields(rxn_dft) == ("catalyst", "energy_type", "value", "reaction_step")
+    assert required_dft_review_fields(rxn_dft) == ("energy_type", "value")
 
     # 两者兼具
     full_dft = DFTResult(
@@ -1509,7 +1505,7 @@ def test_required_dft_review_fields_contract():
         unit="eV",
         evidence_payload={"configuration_index": 2},
     )
-    assert required_dft_review_fields(full_dft) == ("catalyst", "energy_type", "value", "adsorbate", "reaction_step")
+    assert required_dft_review_fields(full_dft) == ("energy_type", "value")
 
 
 # 16. 单一 value 审核不得放行整个 DFT 对象，必审字段全覆盖与一票否决测试
@@ -1551,7 +1547,6 @@ def test_single_value_review_does_not_authorize_whole_dft_result(setup_test_db, 
         # 仅有 value 审核时，导出门禁判定不通过，且指出缺失的必审字段
         gate_partial = is_export_eligible_extraction(session, dft, target_type="dft_results")
         assert gate_partial.eligible is False
-        assert any("missing_required_review:catalyst" in r for r in gate_partial.reasons)
         assert any("missing_required_review:energy_type" in r for r in gate_partial.reasons)
 
         # 补齐所有必审字段权威审核
@@ -1583,15 +1578,15 @@ def test_single_value_review_does_not_authorize_whole_dft_result(setup_test_db, 
         assert gate_full.eligible is False
         assert "unsafe_review" in gate_full.reasons
 
-        # 一票否决：如果其中任何一个必审字段被拒绝 (例如 catalyst 被判定 rejected)，整条记录立即 blocked
-        cat_rev = session.scalar(
+        # 一票否决：任一核心字段被拒绝时整条记录立即 blocked。
+        property_rev = session.scalar(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.paper_id == main_paper_id,
                 ExtractionFieldReview.target_id == str(dft_id),
-                ExtractionFieldReview.field_name == "catalyst",
+                ExtractionFieldReview.field_name == "energy_type",
             )
         )
-        cat_rev.reviewer_status = "rejected"
+        property_rev.reviewer_status = "rejected"
         session.flush()
 
         gate_rejected = is_export_eligible_extraction(session, dft, target_type="dft_results")
@@ -1817,54 +1812,57 @@ def test_complete_human_field_reviews_open_single_and_bulk_dft_gates(setup_test_
             session.add(EvidenceLocator(paper_id=si.id, target_type="dft_results", target_id=str(row.id),
                 field_name=field_name, evidence_text=row.evidence_text, page=17, locator_status="exact_page"))
         session.flush()
-        catalyst_review = next(review for review in session.scalars(
+        property_review = next(review for review in session.scalars(
             select(ExtractionFieldReview).where(
                 ExtractionFieldReview.target_id == str(row.id),
-                ExtractionFieldReview.field_name == "catalyst",
+                ExtractionFieldReview.field_name == "energy_type",
             )
-        ) if review.field_name == "catalyst")
-        catalyst_locator = next(locator for locator in session.scalars(
+        ) if review.field_name == "energy_type")
+        property_locator = next(locator for locator in session.scalars(
             select(EvidenceLocator).where(
                 EvidenceLocator.target_id == str(row.id),
-                EvidenceLocator.field_name == "catalyst",
+                EvidenceLocator.field_name == "energy_type",
             )
-        ) if locator.field_name == "catalyst")
+        ) if locator.field_name == "energy_type")
         # Keep this diagnostic contract beside the positive fixture.  It makes
         # a failure identify its first authority subcondition, rather than
         # hiding it behind the aggregate export-gate reason.
-        assert catalyst_review.target_fingerprint == ai_target_fingerprint("dft_results", row)
-        assert catalyst_review.reviewer_status == "verified"
-        assert catalyst_review.target_resolution_status == "active"
-        assert catalyst_review.reviewer == "human_verifier"
-        human_payload = catalyst_review.review_payload["human_verification"]
-        assert human_payload["reviewer"] == catalyst_review.reviewer == "human_verifier"
+        assert property_review.target_fingerprint == ai_target_fingerprint("dft_results", row)
+        assert property_review.reviewer_status == "verified"
+        assert property_review.target_resolution_status == "active"
+        assert property_review.reviewer == "human_verifier"
+        human_payload = property_review.review_payload["human_verification"]
+        assert human_payload["reviewer"] == property_review.reviewer == "human_verifier"
         assert human_payload["verification_actor_type"] == "human"
         assert human_payload["identity_verified"] is True
         assert human_payload["writes_final_truth"] is True
         assert human_payload["decision"] == "verified"
-        assert catalyst_locator.target_type == catalyst_review.target_type == "dft_results"
-        assert catalyst_locator.target_id == catalyst_review.target_id == str(row.id)
-        assert catalyst_locator.field_name == catalyst_review.field_name == "catalyst"
-        assert catalyst_locator.paper_id in {main.id, si.id}
-        assert catalyst_locator.locator_status == "exact_page"
-        assert catalyst_locator.page == 17
-        assert normalize_evidence_text(catalyst_locator.evidence_text) == normalize_evidence_text(catalyst_review.evidence_text)
+        assert property_locator.target_type == property_review.target_type == "dft_results"
+        assert property_locator.target_id == property_review.target_id == str(row.id)
+        assert property_locator.field_name == property_review.field_name == "energy_type"
+        assert property_locator.paper_id in {main.id, si.id}
+        assert property_locator.locator_status == "exact_page"
+        assert property_locator.page == 17
+        assert normalize_evidence_text(property_locator.evidence_text) == normalize_evidence_text(property_review.evidence_text)
         page_text, page_error, _pdf_path = cached_read_pdf_page_text(session, si, 17)
         assert page_error is None
-        assert normalize_evidence_text(catalyst_review.evidence_text) in normalize_evidence_text(page_text), page_text
-        catalyst_snapshot = ai_verification_utils.ai_field_snapshot("dft_results", row, "catalyst")
-        catalyst_checks = AIVerificationService(session)._content_checks(
-            "dft_results", row, "catalyst", catalyst_snapshot["value"], catalyst_snapshot["unit"], catalyst_review.evidence_text,
+        assert normalize_evidence_text(property_review.evidence_text) in normalize_evidence_text(page_text), page_text
+        property_snapshot = ai_verification_utils.ai_field_snapshot("dft_results", row, "energy_type")
+        property_checks = AIVerificationService(session)._content_checks(
+            "dft_results", row, "energy_type", property_snapshot["value"], property_snapshot["unit"], property_review.evidence_text,
         )
-        for check_name, passed in catalyst_checks.items():
-            assert passed, {"failed_check": check_name, "checks": catalyst_checks, "page_text": page_text}
-        assert authoritative_human_review_locator_pair_valid(session, catalyst_review, row, catalyst_locator) is True
+        for check_name, passed in property_checks.items():
+            assert passed, {"failed_check": check_name, "checks": property_checks, "page_text": page_text}
+        assert authoritative_human_review_locator_pair_valid(session, property_review, row, property_locator) is True
         single = is_export_eligible_extraction(session, row, target_type="dft_results")
         bulk = bulk_export_gate_results(session, [row], target_type="dft_results")[str(row.id)]
         assert single.eligible is True
         assert bulk.eligible is True
         assert single.reasons == bulk.reasons == ()
         assert single.provenance_level == bulk.provenance_level == "exact_pdf_page"
+        assert AIVerificationService(session)._sync_dft_record_closure(main.id, row) == "accepted"
+        assert row.candidate_status == "ai_verified_ml_ready"
+        session.flush()
 
         # An unrelated paper may not satisfy either the single-row evidence
         # reference or the batch preload, even if target/field ids coincide.
@@ -2082,7 +2080,8 @@ def test_configuration_requires_the_authoritative_value_pair_itself(setup_test_d
             evidence_text="config 2: -1.75 eV", review_payload={"human_verification": {"reviewer": "human_verifier"}}))
         session.flush()
         gate = is_export_eligible_extraction(session, row, target_type="dft_results")
-        assert "configuration_index_not_supported_by_evidence" in gate.reasons
+        assert "non_authoritative_review:value" in gate.reasons
+        assert "configuration_index_not_supported_by_evidence" not in gate.reasons
 
 
 def test_authority_cache_does_not_survive_a_second_gate_call(setup_test_db, tmp_path):
@@ -2173,12 +2172,12 @@ def test_dft_record_bundles_use_keyset_cursor_and_preserve_field_contract(setup_
         assert first_page["total_pending_fields"] is None
         assert first_page["total_records"] == 3
         assert first_page["page_pending_records"] == 1
-        assert first_page["page_pending_fields"] == 4
+        assert first_page["page_pending_fields"] == 2
         assert first_page["returned_records"] == 1
         assert first_page["has_more"] is True and first_page["next_cursor"]
         first_bundle = first_page["records"][0]
         required = {item["field_name"] for item in first_bundle["fields"] if item["required"]}
-        assert required == {"catalyst", "energy_type", "value", "adsorbate"}
+        assert required == {"energy_type", "value"}
         configuration = next(item for item in first_bundle["fields"] if item["field_name"] == "configuration_index")
         assert configuration["verification_field_name"] == "value"
         assert configuration["writable"] is False
@@ -2201,8 +2200,10 @@ def test_dft_record_bundles_use_keyset_cursor_and_preserve_field_contract(setup_
         deferred = service.process_batch(
             paper_id=paper.id, submissions=submissions, identity=_identity(), dry_run=False,
         )
-        assert deferred["auto_deferred"] == 4
+        assert deferred["auto_deferred"] == 2
         assert deferred["auto_rejected"] == 0
+        assert deferred["record_closures"][first_bundle["record_id"]] == "terminal_unusable"
+        assert deferred["terminal_record_count"] == 1
 
         after_cursor = service.list_dft_record_tasks(
             paper_id=paper.id, limit=10, cursor=first_page["next_cursor"],
@@ -2677,20 +2678,20 @@ def test_ai_blocked_alone_blocks_exports_mixed_bundle_and_real_mcp_read_only_tra
             session, row, target_type="dft_results",
         ).reasons
 
-        adsorbate_review = session.scalar(select(ExtractionFieldReview).where(
+        energy_type_review = session.scalar(select(ExtractionFieldReview).where(
             ExtractionFieldReview.paper_id == paper.id,
             ExtractionFieldReview.target_id == str(row.id),
-            ExtractionFieldReview.field_name == "adsorbate",
+            ExtractionFieldReview.field_name == "energy_type",
         ))
-        assert adsorbate_review is not None
-        session.delete(adsorbate_review)
+        assert energy_type_review is not None
+        session.delete(energy_type_review)
         session.commit()
         mixed = AIVerificationService(session).list_dft_record_tasks(paper_id=paper.id, limit=1)
         assert mixed["returned_records"] == 1
         mixed_fields = {field["field_name"]: field for field in mixed["records"][0]["fields"] if field["required"]}
         assert mixed_fields["value"]["current_status"] == "ai_blocked"
         assert mixed_fields["value"]["blocked_reasons"] == ["no_supporting_evidence"]
-        assert mixed_fields["adsorbate"]["current_status"] == "pending"
+        assert mixed_fields["energy_type"]["current_status"] == "pending"
 
         from app.config import get_settings
         from app.services import ai_verification_service as service_module

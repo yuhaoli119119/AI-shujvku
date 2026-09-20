@@ -27,7 +27,10 @@ from app.db.models import (
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.module_write_lock_service import ModuleWriteLockService
-from app.services.paper_codes import ensure_paper_codes
+from app.services.paper_codes import (
+    backfill_paper_codes_detached,
+    ensure_paper_codes,
+)
 from app.services.paper_workbench_ai_package import (
     PaperWorkbenchAiPackageMixin,
     SUPPLEMENTARY_RELATIONSHIP_TYPES,
@@ -37,7 +40,6 @@ from app.services.paper_workbench_review_center import PaperWorkbenchReviewCente
 from app.services.paper_workbench_workspace import PaperWorkbenchWorkspaceMixin
 from app.services.review_adjudication_service import ReviewAdjudicationService
 from app.services.review_conflict_service import ReviewConflictAggregationService
-from app.services.supplementary_dft_lifecycle_service import SupplementaryDFTLifecycleService
 from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.workbench_status import (
     WORKBENCH_SCHEMA_VERSION,
@@ -235,8 +237,7 @@ class PaperWorkbenchService(
         if summary_only and sort_by == "recent" and limit > 0 and not requested_paper_ids:
             paper_stmt = paper_stmt.order_by(Paper.created_at.desc()).limit(limit)
         papers = self.session.scalars(paper_stmt).all()
-        if ensure_paper_codes(self.session, papers):
-            self.session.commit()
+        backfill_paper_codes_detached(self.session, papers)
         paper_ids = {paper.id for paper in papers}
         supplementary_relationships = (
             self.session.scalars(
@@ -261,15 +262,6 @@ class PaperWorkbenchService(
             group_main_by_paper[support_id] = main_id
             support_ids_by_main[main_id].add(support_id)
             related_paper_ids.update({main_id, support_id})
-        initialized_support_lifecycle_count = SupplementaryDFTLifecycleService(self.session).initialize_pending(
-            main_id_by_support_id={
-                support_id: main_id
-                for main_id, support_ids in support_ids_by_main.items()
-                for support_id in support_ids
-            }
-        )
-        if initialized_support_lifecycle_count:
-            self.session.commit()
         related_paper_meta: dict[UUID, dict[str, Any]] = {}
         if related_paper_ids:
             for related in self.session.execute(

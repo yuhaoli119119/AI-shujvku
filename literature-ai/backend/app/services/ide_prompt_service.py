@@ -13,7 +13,7 @@ from app.domain.project_library_context import (
 from app.domain.reaction_taxonomy import REACTION_TYPES, get_reaction_profile, normalize_reaction_type
 
 
-PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v19"
+PROMPT_SCHEMA_VERSION: Final = "ide_review_prompt_v20"
 CANONICAL_MCP_PATH: Final = "/mcp"
 TARGET_LIST_TOKEN: Final = "{{TARGET_LIST}}"
 SOURCE_LABEL_TOKEN: Final = "{{SOURCE_LABEL}}"
@@ -66,9 +66,11 @@ _DFT_SHARED_RULES = """目标文献：
 - 普通审核主流程为：get_dft_review_task -> get_codex_item/read_paper_page -> import_analysis 导入意见或 new_candidate -> readback。权威自动验收由专用 ai_verify_content 身份执行 get_ai_verification_tasks -> submit_ai_verification_batch；离线 DFT 审阅 ZIP 只产生 proposal/candidate。
 - 先读取 get_dft_review_task，再用 get_codex_item、get_dft_audit_issues 和 read_paper_page 核对主文及已关联 SI 中与 DFT 直接相关的正文和表格证据。
 - SI 中的 DFT 数据写回 writeback_paper_id，并保留 source_paper_id、source_document_type、页码和原文证据。
-- 每条数据必须能定位到材料/结构/位点、性质或反应步、数值、单位及证据；不得猜测，不得把 ML prediction 当作 DFT 结果。
+- 每条数据只把性质类型和数值作为核心科学身份，并必须绑定真实 PDF 页或表格证据。催化剂、材料、金属中心、位点、配位、载体、距离、吸附物、反应步和计算设置属于可选上下文：能合理判断就补齐并标注依据/置信度，无法判断则留空，不得阻塞核心数值。若多项性质明确属于同一匿名对象，必须为它们填写相同 analysis_entity_id，确保可以配对回归。
+- 数值必须有单位。原文缺单位时，AI 应按性质推断标准单位；服务器也会执行确定性单位推断，并保存 unit_origin、unit_inference_basis 和 unit_confidence。
+- 不得猜测性质含义或数值，不得把 ML prediction 当作 DFT 结果。
 - 只使用当前会话的 Literature AI MCP 工具或 app.mcp.context.mcp_auth_context + app.mcp.server 受控后备路径；禁止直接调用 service/session/model、执行 SQL 或直接写数据库。
-- 写入后必须回读 DFT rows、审核记录和 issue 状态。"""
+- 写入后必须回读 DFT rows、审核记录、candidate_status 和 issue 状态。"""
 
 
 _DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
@@ -77,18 +79,20 @@ _DFT_REVIEW_RULES = """任务：审核并处理当前论文的 DFT 数据。
 - 核验已有 DFT candidate，并检查主文和 SI 是否漏提 DFT 数据。
 - 已有数据提交 PASS、REVISE、REJECT 或 NEEDS_HUMAN；漏项提交 new_candidate。
 - 普通 PASS、REVISE、REJECT 意见不能通过 import_analysis 完成最终验收；new_candidate 只物化未验证 DFTResult candidate。
-- 唯一自动权威验收路径由一个专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch；无法通过确定性门禁的 exception 才进入 Owner-session 人工处理。
-- 不使用第二模型、投票、共识或第三 AI 仲裁。
-- 普通本地/网页 AI 的 PASS、REVISE、REJECT、recommended_action 或“无冲突”都不构成导出授权；只有专用验收服务写入 ai_verified 且导出安全门通过后才允许导出。
-- new_candidate、NEEDS_HUMAN、REJECT、exception 或缺少权威验收的对象都不得导出；单位缺失、占位单位或键相关性质缺少 bond/bond_pair 时也不得建议导出。
+- 唯一自动权威验收路径由一个专用 ai_verify_content 身份调用 get_ai_verification_tasks 和 submit_ai_verification_batch；不使用第二模型、投票、共识或第三 AI 仲裁。
+- 对每条 DFT 只审核 energy_type 和 value。两字段均确认后收口为 accepted；明确错误收口为 rejected；性质含义或数值确实无法确认时收口为 terminal_unusable。
+- defer/NEEDS_HUMAN 是终态，不再转给其他 AI；只有来源证据变化或人工明确重开时才重新进入审核。
+- 催化剂、材料、金属中心、位点、配位、载体、距离、吸附物、反应步、键类型和计算设置缺失不得阻止入库、导出或回归。
+- 原文缺单位时必须合理推断标准单位并记录推断来源、依据和置信度；只有性质维度也无法判断、无法给出有意义单位时才可终止不可用。
+- 普通本地/网页 AI 的 PASS、REVISE、REJECT、recommended_action 或“无冲突”都不构成导出授权；只有专用验收服务写入 ai_verified 且核心证据门通过后才允许导出。
 
 执行：
 1. 调用 get_dft_review_task 取得当前任务，再读取 DFT candidates、audit issues 和主文/SI 证据；issue_count=0 不代表无需审核。
-2. 对每条已有 candidate 写入带证据的 object_review_audit。
-3. 漏项使用 target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"；corrected_value 至少包含 material_identity、property_type、value、unit，能确认时补充 adsorbate、reaction_step、method。
+2. 对每条已有 candidate 写入带证据的 object_review_audit；可选元数据缺失只作为质量说明，不得转成阻塞结论。
+3. 漏项使用 target_type="dft_results"、target_id="new"、field_name="dft_results"、decision="new_candidate"；corrected_value 只强制包含 property_type 和 value。原文缺 unit 时由 AI/服务器推断；material_identity、adsorbate、reaction_step、method 等能确认则补充，无法确认可留空。同一匿名对象的多项性质必须使用相同 analysis_entity_id。
 4. 使用 import_analysis 写入普通审核意见；只有 new_candidate 可通过 auto_apply_review_rules=true 进入受控物化，并保持未验证。
 5. 专用验收身份读取 get_ai_verification_tasks 后，以每批最多 20 项调用 submit_ai_verification_batch；提交前后均核对目标 fingerprint、DFT row、证据和 export_safety。
-6. accept/correct/reject 由权威验收服务处理；无法通过确定性门禁时提交 exception 并留给 Owner session。"""
+6. accept/defer/reject 由权威验收服务一次收口。格式错误只修正失败项；超时先查询原 request_id 回执，不得重复提交已处理项。"""
 
 
 _MODULE_RULES = {

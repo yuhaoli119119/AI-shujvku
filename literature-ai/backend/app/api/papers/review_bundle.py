@@ -16,6 +16,11 @@ from app.services.dft_review_bundle_service import (
     FigureTableReviewNotCompletedError,
 )
 from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
+from app.review_v2.executor import PaperReviewV2Service
+from app.review_v2.figure_types import public_registry as public_figure_type_registry
+from app.review_v2.models import PaperReviewBatchRequest
+from app.review_v2.prompt import public_prompt as public_review_v2_prompt
+from app.review_v2.search import FigureSearchService
 
 
 router = APIRouter()
@@ -315,3 +320,56 @@ def validate_dft_review_result(
         raise HTTPException(status_code=409, detail=exc.detail) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+
+@router.get("/figure-types/registry")
+def get_figure_type_registry_v2() -> dict[str, Any]:
+    return public_figure_type_registry()
+
+
+@router.get("/review-v2/prompt")
+def get_review_v2_prompt() -> dict[str, Any]:
+    return public_review_v2_prompt()
+
+
+@router.get("/figures/search")
+def search_figures_v2(
+    query: str | None = None, figure_type: str | None = None,
+    paper_id: UUID | None = None, year: int | None = None,
+    material_system: str | None = None, catalyst: str | None = None,
+    dft_condition: str | None = None, limit: int = Query(default=50, ge=1, le=200),
+    session: Session = Depends(get_db_session),
+) -> dict[str, Any]:
+    return FigureSearchService(session).search(
+        query=query, figure_type=figure_type, paper_id=paper_id, year=year,
+        material_system=material_system, catalyst=catalyst,
+        dft_condition=dft_condition, limit=limit,
+    )
+
+
+@router.get("/{paper_id}/review-v2/task")
+def get_paper_review_task_v2(
+    paper_id: UUID, session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    try: return PaperReviewV2Service(session, settings).get_task(paper_id)
+    except LookupError as exc: raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/{paper_id}/review-v2/apply")
+def apply_paper_review_batch_v2(
+    paper_id: UUID, payload: PaperReviewBatchRequest,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    if payload.paper_id != str(paper_id): raise HTTPException(status_code=400, detail="paper_id_mismatch")
+    try: return PaperReviewV2Service(session, settings).apply(payload)
+    except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/{paper_id}/review-v2/receipts/{request_id}")
+def get_paper_review_receipt_v2(
+    paper_id: UUID, request_id: str, session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    return PaperReviewV2Service(session, settings).get_receipt(paper_id, request_id)

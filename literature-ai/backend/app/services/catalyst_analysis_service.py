@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.db.models import CatalystSample, DFTResult, DFTSetting, Paper
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
 from app.services.dft_export_service import build_dft_ml_dataset
+from app.services.dft_ml_policy import analysis_entity_id
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 
@@ -53,7 +54,8 @@ def _field(
 
 _FIELD_REGISTRY: tuple[dict[str, Any], ...] = (
     _field("catalyst_name", "催化剂名称", None, "string", "来自明确绑定的 catalyst_sample；不做名称合并", category="metadata"),
-    _field("catalyst_sample_id", "催化剂样品 ID", None, "uuid", "必须来自 DFTResult.catalyst_sample_id；缺失即排除", category="metadata"),
+    _field("analysis_entity_id", "分析对象 ID", None, "string", "催化剂未知时由论文内来源行/构型生成；用于性质配对", category="metadata"),
+    _field("catalyst_sample_id", "催化剂样品 ID", None, "uuid", "可选；缺失时使用 analysis_entity_id", category="metadata"),
     _field("paper_code", "论文编号", None, "string", "来自 Paper.paper_code；不以 UUID 替代", category="metadata"),
     _field("paper_id", "论文 ID", None, "uuid", "来自 DFT 来源记录所属论文", category="metadata"),
     _field("doi", "DOI", None, "string", "来自 Paper.doi", category="metadata"),
@@ -105,7 +107,12 @@ class _ReadyRow:
     row: DFTResult
     paper: Paper
     record: dict[str, Any]
-    catalyst: CatalystSample
+    catalyst: CatalystSample | None
+    analysis_entity_id: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.analysis_entity_id:
+            self.analysis_entity_id = analysis_entity_id(self.row)
 
 
 @dataclass
@@ -344,8 +351,8 @@ def _pair_analysis_record_exclusion(row: DFTResult, record: dict[str, Any]) -> s
     normalization_status = _norm(target.get("normalization_status"))
     if normalization_status not in {"", "normalized", "identity"}:
         return "pair_analysis_target_not_normalized"
-    if record.get("setting_link_status") != "clear_primary" or not record.get("linked_dft_setting"):
-        return "missing_or_ambiguous_calculation_context"
+    # Calculation settings improve comparability but do not suppress an
+    # otherwise confirmed pair from exploratory regression.
     return None
 
 
@@ -518,14 +525,15 @@ def _paper_payload(paper: Paper) -> dict[str, Any]:
     }
 
 
-def _catalyst_payload(catalyst: CatalystSample) -> dict[str, Any]:
+def _catalyst_payload(catalyst: CatalystSample | None, entity_id: str) -> dict[str, Any]:
     return {
-        "catalyst_sample_id": str(catalyst.id),
-        "catalyst_name": catalyst.name,
-        "catalyst_type": catalyst.catalyst_type,
-        "metal_centers": catalyst.metal_centers or [],
-        "coordination": catalyst.coordination,
-        "support": catalyst.support,
+        "analysis_entity_id": entity_id,
+        "catalyst_sample_id": str(catalyst.id) if catalyst is not None else None,
+        "catalyst_name": catalyst.name if catalyst is not None else None,
+        "catalyst_type": catalyst.catalyst_type if catalyst is not None else None,
+        "metal_centers": (catalyst.metal_centers or []) if catalyst is not None else [],
+        "coordination": catalyst.coordination if catalyst is not None else None,
+        "support": catalyst.support if catalyst is not None else None,
     }
 
 
@@ -665,7 +673,7 @@ class CatalystAnalysisService:
                 for reason in gate.reasons or ("export_safety_gate",):
                     exclusion_reasons[f"safety_gate:{reason}"] += 1
             if not row.catalyst_sample_id:
-                exclusion_reasons["missing_catalyst_sample_id"] += 1
+                exclusion_reasons["missing_catalyst_sample_id_metadata_only"] += 1
             if not pair_analysis and row.identity_version != 2:
                 exclusion_reasons["identity_v2_required"] += 1
 
@@ -725,9 +733,13 @@ class CatalystAnalysisService:
                     exclusion_reasons["missing_or_ambiguous_calculation_context"] += 1
                     continue
             catalyst = catalyst_by_id.get(str(row.catalyst_sample_id)) if row.catalyst_sample_id else None
-            if catalyst is None:
-                continue
-            ready.append(_ReadyRow(row=row, paper=paper, record=record, catalyst=catalyst))
+            ready.append(_ReadyRow(
+                row=row,
+                paper=paper,
+                record=record,
+                catalyst=catalyst,
+                analysis_entity_id=analysis_entity_id(row),
+            ))
             if pair_analysis and row.identity_version != 2:
                 legacy_pair_analysis_rows += 1
         counts = {
@@ -762,7 +774,7 @@ class CatalystAnalysisService:
             "contributing_paper_ids": sorted(papers),
             "contributing_paper_codes": sorted(paper_codes),
             "excluded_counts": dict(sorted(exclusions.items())),
-            "analysis_policy": "Only safety-gate-eligible, identity_version=2, is_ml_ready rows with explicit catalyst_sample_id are eligible.",
+            "analysis_policy": "Confirmed numeric values with resolved units are eligible; catalyst metadata and calculation settings are optional quality context.",
         }
 
     def catalyst_dataset(self, library_name: str | None = None) -> dict[str, Any]:
@@ -772,7 +784,8 @@ class CatalystAnalysisService:
         field_exclusions: Counter[str] = Counter()
         by_catalyst: dict[str, list[_ReadyRow]] = defaultdict(list)
         for item in ready:
-            by_catalyst[str(item.catalyst.id)].append(item)
+            group_id = str(item.catalyst.id) if item.catalyst is not None else item.analysis_entity_id
+            by_catalyst[group_id].append(item)
 
         rows: list[dict[str, Any]] = []
         catalyst_manifest: dict[str, dict[str, Any]] = {}
@@ -787,32 +800,44 @@ class CatalystAnalysisService:
             catalyst = representative.catalyst
             paper = representative.paper
             metal_centers = sorted(
-                {_text(value) for value in (catalyst.metal_centers or []) if _text(value)},
+                {_text(value) for value in ((catalyst.metal_centers or []) if catalyst is not None else []) if _text(value)},
                 key=str.casefold,
             )
+            catalyst_sample_id = str(catalyst.id) if catalyst is not None else None
+            catalyst_name = catalyst.name if catalyst is not None else None
+            catalyst_type = catalyst.catalyst_type if catalyst is not None else None
+            coordination = catalyst.coordination if catalyst is not None else None
+            support = catalyst.support if catalyst is not None else None
             row: dict[str, Any] = {
-                "catalyst_name": catalyst.name,
-                "catalyst_sample_id": catalyst_id,
+                "analysis_entity_id": catalyst_id,
+                "catalyst_name": catalyst_name,
+                "catalyst_sample_id": catalyst_sample_id,
                 "paper_code": paper.paper_code,
                 "paper_id": str(paper.id),
                 "doi": paper.doi,
-                "catalyst_type": catalyst.catalyst_type,
+                "catalyst_type": catalyst_type,
                 "metal_centers": metal_centers,
-                "coordination": catalyst.coordination,
-                "support": catalyst.support,
+                "coordination": coordination,
+                "support": support,
                 "functional": None,
             }
             fields: dict[str, dict[str, Any]] = {
+                "analysis_entity_id": _manifest_field(
+                    "analysis_entity_id",
+                    selected_value=catalyst_id,
+                    selection_reason="explicit_or_source_derived_analysis_entity",
+                ),
                 "catalyst_name": _manifest_field(
                     "catalyst_name",
-                    selected_value=catalyst.name,
+                    selected_value=catalyst_name,
                     selection_reason="catalyst_sample_metadata",
-                    exclusion_reason=None if catalyst.name is not None else "missing_metadata",
+                    exclusion_reason=None if catalyst_name is not None else "missing_metadata",
                 ),
                 "catalyst_sample_id": _manifest_field(
                     "catalyst_sample_id",
-                    selected_value=catalyst_id,
-                    selection_reason="explicit_catalyst_sample_binding",
+                    selected_value=catalyst_sample_id,
+                    selection_reason="explicit_catalyst_sample_binding" if catalyst_sample_id else "missing_optional_metadata",
+                    exclusion_reason=None if catalyst_sample_id else "missing_metadata",
                 ),
                 "paper_code": _manifest_field(
                     "paper_code",
@@ -833,9 +858,9 @@ class CatalystAnalysisService:
                 ),
                 "catalyst_type": _manifest_field(
                     "catalyst_type",
-                    selected_value=catalyst.catalyst_type,
+                    selected_value=catalyst_type,
                     selection_reason="catalyst_sample_metadata",
-                    exclusion_reason=None if catalyst.catalyst_type is not None else "missing_metadata",
+                    exclusion_reason=None if catalyst_type is not None else "missing_metadata",
                 ),
                 "metal_centers": _manifest_field(
                     "metal_centers",
@@ -845,15 +870,15 @@ class CatalystAnalysisService:
                 ),
                 "coordination": _manifest_field(
                     "coordination",
-                    selected_value=catalyst.coordination,
+                    selected_value=coordination,
                     selection_reason="catalyst_sample_metadata",
-                    exclusion_reason=None if catalyst.coordination is not None else "missing_metadata",
+                    exclusion_reason=None if coordination is not None else "missing_metadata",
                 ),
                 "support": _manifest_field(
                     "support",
-                    selected_value=catalyst.support,
+                    selected_value=support,
                     selection_reason="catalyst_sample_metadata",
-                    exclusion_reason=None if catalyst.support is not None else "missing_metadata",
+                    exclusion_reason=None if support is not None else "missing_metadata",
                 ),
             }
 
@@ -947,7 +972,8 @@ class CatalystAnalysisService:
             ordered_row = {field: row.get(field) for field in CATALYST_WIDE_COLUMNS}
             rows.append(ordered_row)
             catalyst_manifest[catalyst_id] = {
-                "catalyst_sample_id": catalyst_id,
+                "analysis_entity_id": catalyst_id,
+                "catalyst_sample_id": catalyst_sample_id,
                 "paper": _paper_payload(paper),
                 "warnings": ["incompatible_row_contexts"] if incompatible_fields else [],
                 "fields": {field: fields[field] for field in CATALYST_WIDE_COLUMNS},
@@ -981,8 +1007,8 @@ class CatalystAnalysisService:
             "paper_ids": paper_ids,
             "paper_codes": paper_codes,
             "selection_policy": (
-                "One row per catalyst_sample_id. Only export-gate-eligible Identity V2 ML-ready rows "
-                "with explicit catalyst and calculation setting are considered. Ordinary conflicts and "
+                "One row per analysis_entity_id. Confirmed numeric values with resolved units are considered; "
+                "catalyst metadata and calculation settings are optional quality context. Ordinary conflicts and "
                 "incompatible contexts stay null; only comparable Li2S paths use the approved maximum rule."
             ),
             "catalysts": catalyst_manifest,
@@ -1024,7 +1050,8 @@ class CatalystAnalysisService:
         ready, exclusions, analysis_counts = self._load_pair_analysis_rows(library_name)
         by_catalyst: dict[str, list[_ReadyRow]] = defaultdict(list)
         for item in ready:
-            by_catalyst[str(item.catalyst.id)].append(item)
+            group_id = str(item.catalyst.id) if item.catalyst is not None else item.analysis_entity_id
+            by_catalyst[group_id].append(item)
 
         points: list[dict[str, Any]] = []
         details: list[dict[str, Any]] = []
@@ -1061,8 +1088,9 @@ class CatalystAnalysisService:
                 exclusions[reason or "missing_field_value"] += 1
                 details.append(
                     {
-                        "catalyst_sample_id": catalyst_id,
-                        "catalyst_name": rows[0].catalyst.name,
+                        "analysis_entity_id": catalyst_id,
+                        "catalyst_sample_id": str(rows[0].catalyst.id) if rows[0].catalyst is not None else None,
+                        "catalyst_name": rows[0].catalyst.name if rows[0].catalyst is not None else None,
                         "paper": _paper_payload(rows[0].paper),
                         "reason": reason or "missing_field_value",
                         "x_candidates": [_candidate_payload(item) for group in x_groups for item in group],
@@ -1077,9 +1105,10 @@ class CatalystAnalysisService:
                 if str(item.row.id) in source_record_ids and item.row.identity_version != 2
             )
             point = {
-                "catalyst_sample_id": catalyst_id,
-                "catalyst_name": rows[0].catalyst.name,
-                "catalyst": _catalyst_payload(rows[0].catalyst),
+                "analysis_entity_id": catalyst_id,
+                "catalyst_sample_id": str(rows[0].catalyst.id) if rows[0].catalyst is not None else None,
+                "catalyst_name": rows[0].catalyst.name if rows[0].catalyst is not None else None,
+                "catalyst": _catalyst_payload(rows[0].catalyst, rows[0].analysis_entity_id),
                 "paper": _paper_payload(rows[0].paper),
                 "x": {"field": x_field, **selected_x},
                 "y": {"field": y_field, **selected_y},
@@ -1120,7 +1149,7 @@ class CatalystAnalysisService:
             "excluded_details": details,
             "analysis_row_counts": analysis_counts,
             "warnings": warnings,
-            "selection_policy": "One point per catalyst_sample_id. The export safety gate, a normalized numeric target, and one clear DFT setting are required. Identity V2 is preferred, but reviewed legacy rows may be used when catalyst identity and calculation setting are explicit. Conflicts are null/excluded, never averaged or Cartesian-paired.",
+            "selection_policy": "One point per analysis_entity_id. Confirmed numeric targets with resolved units are required; catalyst metadata and calculation settings are optional context. Conflicts are null/excluded, never averaged or Cartesian-paired.",
             "ready": len(points) >= min_n,
             "pearson": stats["pearson"],
             "pearson_r": stats["pearson"],

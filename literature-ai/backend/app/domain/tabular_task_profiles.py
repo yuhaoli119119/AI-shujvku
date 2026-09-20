@@ -25,7 +25,9 @@ class TabularTaskProfile:
     split_group_keys: tuple[str, ...]
 
 
-_COMMON_REQUIRED_FEATURES = (
+_COMMON_REQUIRED_FEATURES: tuple[str, ...] = ()
+
+_COMMON_OPTIONAL_FEATURES = (
     "paper_id",
     "catalyst_id",
     "catalyst_family",
@@ -35,9 +37,6 @@ _COMMON_REQUIRED_FEATURES = (
     "support",
     "canonical_adsorbate",
     "reaction_step",
-)
-
-_COMMON_OPTIONAL_FEATURES = (
     "functional",
     "dispersion_correction",
     "pseudopotential",
@@ -238,12 +237,6 @@ def _label_blockers(profile: TabularTaskProfile, record: Mapping[str, Any]) -> l
     if locator_status not in {"exact", "exact_page", "verified"}:
         _append_unique(blockers, "unsafe_locator")
 
-    setting_status = _normalized_status(record.get("setting_link_status"))
-    has_linked_setting = _has_value(record.get("linked_dft_setting"))
-    if setting_status == "ambiguous":
-        _append_unique(blockers, "ambiguous_result_setting_link")
-    elif setting_status != "clear_primary" or not has_linked_setting:
-        _append_unique(blockers, "missing_result_setting_link")
 
     for blocker in record.get("label_blockers", ()) or ():
         _append_unique(blockers, str(blocker))
@@ -271,20 +264,9 @@ _FEATURE_BLOCKER_NAMES = {
 
 
 def _feature_blockers(profile: TabularTaskProfile, record: Mapping[str, Any]) -> list[str]:
-    blockers: list[str] = []
-    for feature in profile.required_features:
-        if not _has_value(record.get(feature)):
-            _append_unique(blockers, _FEATURE_BLOCKER_NAMES.get(feature, f"missing_{feature}"))
-
-    if _has_value(record.get("catalyst_type")) and _catalyst_scope(record.get("catalyst_type")) is None:
-        _append_unique(blockers, "unsupported_catalyst_scope")
-
-    if record.get("instance_ambiguous") is True or record.get("descriptor_instance_ambiguous") is True:
-        _append_unique(blockers, "instance_ambiguous")
-
-    for blocker in record.get("feature_blockers", ()) or ():
-        _append_unique(blockers, str(blocker))
-    return blockers
+    # Missing or ambiguous catalyst, structure, reaction-step, and calculation
+    # context remains visible in the payload but never blocks a verified value.
+    return []
 
 
 def evaluate_tabular_readiness(

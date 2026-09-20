@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.config import Settings, get_settings
 from app.db.models import (
     CatalystSample,
     DFTResult,
@@ -22,6 +23,7 @@ from app.db.models import (
     PaperSection,
     WritingCard,
 )
+from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.review_safety import is_safe_verified_review
 
 
@@ -77,8 +79,9 @@ class FilteredPaper:
 class PaperFilterService:
     """Read-only paper filtering for citation candidate selection."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, settings: Settings | None = None) -> None:
         self.session = session
+        self.settings = settings or get_settings()
 
     def filter(self, criteria: PaperFilterCriteria) -> list[FilteredPaper]:
         paper_ids = self._candidate_paper_ids(criteria)
@@ -175,7 +178,7 @@ class PaperFilterService:
             journal=paper.journal,
             abstract=paper.abstract,
             pdf_path=paper.pdf_path,
-            has_pdf=bool(paper.pdf_path and str(paper.pdf_path).strip()),
+            has_pdf=bool(build_paper_pdf_status(paper, settings=self.settings).get("pdf_exists")),
             has_parsed_text=has_parsed,
             has_extraction_output=has_extraction,
             has_verified_evidence=has_verified,

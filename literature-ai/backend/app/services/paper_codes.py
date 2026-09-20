@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import logging
 import re
 from typing import Iterable
 from uuid import UUID
@@ -10,6 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Paper
+
+logger = logging.getLogger(__name__)
 
 
 PAPER_CODE_RE = re.compile(r"^([A-Z])(\d+)$")
@@ -142,4 +145,57 @@ def ensure_paper_codes(session: Session, papers: Iterable[Paper] | None = None) 
         session.add(paper)
 
     session.flush()
+    return assigned
+
+
+def backfill_paper_codes_detached(session: Session, papers: Iterable[Paper] | None = None) -> dict[str, str]:
+    """Repair missing or legacy paper codes without committing the caller's transaction.
+
+    Read handlers used to call ``ensure_paper_codes`` and then ``session.commit()``
+    directly, which made a GET request a database writer -- and committed anything else
+    that happened to be pending on that read session.  The repair still happens (the UI
+    would otherwise show blank identifiers forever), but it now runs in its own
+    committed session so the reading transaction is never committed as a side effect.
+    """
+    selected = list(papers or [])
+    if not selected:
+        return {}
+
+    needs_repair = False
+    for paper in selected:
+        current_code = str(getattr(paper, "paper_code", "") or "").strip().upper()
+        if not current_code:
+            needs_repair = True
+            break
+        match = PAPER_CODE_RE.match(current_code)
+        if match and match.group(1) == "U":
+            if paper_code_prefix(getattr(paper, "paper_type", None)) != "U":
+                needs_repair = True
+                break
+    if not needs_repair:
+        return {}
+
+    paper_ids = [paper.id for paper in selected]
+    repair_session = Session(bind=session.get_bind(), expire_on_commit=False)
+    try:
+        rows = repair_session.scalars(select(Paper).where(Paper.id.in_(paper_ids))).all()
+        assigned = ensure_paper_codes(repair_session, rows)
+        if assigned:
+            repair_session.commit()
+        else:
+            repair_session.rollback()
+    finally:
+        repair_session.close()
+
+    if assigned:
+        logger.info(
+            "Repaired %s paper code(s) during a read request in a detached transaction: %s",
+            len(assigned),
+            assigned,
+        )
+        # Drop the stale attribute on the caller's objects so the response shows the
+        # persisted code, without marking the read session dirty.
+        for paper in selected:
+            if str(paper.id) in assigned:
+                session.expire(paper, ["paper_code"])
     return assigned

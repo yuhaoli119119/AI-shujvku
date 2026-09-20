@@ -19,11 +19,14 @@ from app.services.dft_identity_service import (
 )
 from app.services.dft_rescan_policy import normalize_source_document_type
 from app.utils.evidence_anchors import has_evidence_anchor
+from app.utils.dft_candidate_status import DFT_REPAIR_LOCKED_STATUSES
 from app.utils.review_safety import DFT_REJECTED_STATUSES
 
 
 AI_PRIMARY_APPLIED_STATUS = "ai_primary_applied"
-FINAL_DFT_STATUSES = {"ml_ready", "human_verified", "verified", "final_user_submitted"}
+# Canonical definition lives in app.utils.dft_candidate_status; kept as a module
+# alias so this list can never drift away from the registry again.
+FINAL_DFT_STATUSES = DFT_REPAIR_LOCKED_STATUSES
 
 
 class DFTAuditIssueRepairService:

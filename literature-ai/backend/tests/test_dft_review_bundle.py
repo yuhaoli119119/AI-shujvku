@@ -400,7 +400,7 @@ def test_offline_dft_review_bundle_requires_completed_figure_table_review(setup_
     assert response.json()["detail"]["code"] == "figure_table_review_not_completed"
 
 
-def test_offline_dft_review_bundle_blocks_completed_chart_audit_when_figures_not_rag_ready(setup_test_db):
+def test_completed_chart_audit_keeps_post_review_figure_quality_as_warning(setup_test_db):
     paper_id, _ = _seed_review_materials(setup_test_db)
     settings = get_settings()
     with Session(setup_test_db) as session:
@@ -437,11 +437,12 @@ def test_offline_dft_review_bundle_blocks_completed_chart_audit_when_figures_not
 
     response = TestClient(app).post(f"/api/papers/{paper_id}/dft-review-bundle")
 
-    assert state["stage_status"] == "needs_local_ai"
-    assert state["rag_quality_status"] == "blocked"
-    assert state["rag_quality"]["figures"]["blocked"] == 1
-    assert response.status_code == 409
-    assert response.json()["detail"]["figure_table_review"]["rag_quality_status"] == "blocked"
+    assert state["stage_status"] == "completed"
+    assert state["rag_quality_status"] == "ready"
+    assert state["rag_quality"]["figures"]["blocked"] == 0
+    assert state["rag_quality"]["figures"]["source_status"] == "blocked"
+    assert state["rag_quality"]["figures"]["warning_count"] == 1
+    assert response.status_code == 200
 
 
 def test_offline_dft_review_bundle_streams_compact_zip(setup_test_db):

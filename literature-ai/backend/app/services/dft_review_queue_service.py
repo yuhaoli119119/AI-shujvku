@@ -23,6 +23,11 @@ from app.services.artifact_reliability_audit_service import ArtifactReliabilityA
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.external_analysis_identity import review_submission_identity
 from app.services.review_conflict_service import ReviewConflictAggregationService
+from app.utils.dft_candidate_status import (
+    DFT_STATUS_PENDING,
+    display_label,
+    is_terminal as is_dft_terminal,
+)
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.review_safety import bulk_export_gate_results
 
@@ -90,7 +95,9 @@ class DFTReviewQueueService:
             gate = gate_by_id.get(str(row.id))
             if gate is None:
                 continue
-            gate_results.append(gate)
+            row_terminal = is_dft_terminal(row.candidate_status)
+            if not row_terminal:
+                gate_results.append(gate)
             for review_status in self._review_statuses(gate.review_status):
                 review_status_counts[review_status] += 1
             pid = str(paper.id)
@@ -104,11 +111,11 @@ class DFTReviewQueueService:
             parsed_by_paper[pid] += 1
             if gate.eligible:
                 exportable_by_paper[pid] += 1
-            elif self.counts_as_pending_review_block(gate):
+            elif not row_terminal and self.counts_as_pending_review_block(gate):
                 blocked_by_paper[pid] += 1
             if reason and reason not in gate.reasons:
                 continue
-            if not self._status_matches(status, gate):
+            if not self._status_matches(status, gate, row.candidate_status):
                 continue
             queue_candidates.append((row, paper, gate, self._sanity_flags(row)))
 
@@ -638,12 +645,17 @@ class DFTReviewQueueService:
         }
 
     @staticmethod
-    def _status_matches(status: str | None, gate: Any) -> bool:
+    def _status_matches(status: str | None, gate: Any, candidate_status: str | None = None) -> bool:
         normalized = (status or "needs_review").strip().lower()
         review_statuses = DFTReviewQueueService._review_statuses(gate.review_status)
+        terminal = is_dft_terminal(candidate_status)
         if normalized in {"all", "any", ""}:
             return True
+        if normalized in {"terminal", "closed"}:
+            return terminal
         if normalized in {"needs_review", "blocked"}:
+            if terminal:
+                return False
             if normalized == "blocked":
                 return not gate.eligible
             return not gate.eligible and "rejected" not in review_statuses
@@ -816,13 +828,20 @@ class DFTReviewQueueService:
             else ""
         )
 
+        normalized_candidate_status = str(candidate_status or "").strip().lower()
+        is_terminal_unusable = normalized_candidate_status == "ai_terminal_unusable"
         is_rejected = (
-            str(candidate_status or "").strip().lower() == "rejected"
+            normalized_candidate_status in {"rejected", "ai_rejected", "rejected_by_local_ai"}
             or "rejected" in review_statuses
             or "rejected" in blocked_reasons
         )
 
-        if is_rejected:
+        if is_terminal_unusable:
+            state = "terminal_unusable"
+            label = "已终止不可用"
+            reason = "性质含义或数值无法从当前来源确认，审核已经收口；除非来源变化或人工明确重开，不再派给其他 AI。"
+            action = "none"
+        elif is_rejected:
             state = "rejected"
             label = "已拒绝"
             reason = "这条 DFT 已被人工或审核结算拒绝，当前为终态，不再提供接受入库或重复拒绝操作。"
@@ -833,15 +852,15 @@ class DFTReviewQueueService:
             reason = "这条 DFT 已满足当前导出安全门要求，可进入导出/训练数据集。"
             action = "none"
         elif "missing_material_identity" in blocked_reasons:
-            state = "missing_material_binding"
-            label = "缺材料/结构绑定"
-            reason = "不能入库：当前候选缺少可核验的材料/结构身份绑定，需要先补齐材料 identity 或 catalyst_sample 绑定。"
-            action = "bind_material_identity"
-        elif latest_effective_decision == "NEEDS_HUMAN":
-            state = "needs_human"
-            label = "需要复核"
-            reason = "AI 明确标记为无法可靠判断，需要另一个确认者复核后再决定接受或拒绝。"
-            action = "review"
+            state = "review_pending_apply"
+            label = "材料信息待补（不阻塞）"
+            reason = "这是历史兼容原因；材料/结构身份属于可选上下文，不阻止已确认的性质类型和数值入库、导出或回归。"
+            action = "apply_latest_ai_review"
+        elif latest_effective_decision in {"NEEDS_HUMAN", "DEFER"}:
+            state = "terminal_unusable"
+            label = "已终止不可用"
+            reason = "AI 无法确认性质含义或数值，本轮已收口，不再转交其他 AI；仅来源变化或人工明确重开时重新审核。"
+            action = "none"
         elif raw_count > 0 and valid_count == 0:
             state = "missing_evidence_anchor"
             label = "AI 意见缺证据定位"
@@ -961,7 +980,7 @@ class DFTReviewQueueService:
             return "ready_for_ml_export"
         reason_set = set(reasons)
         if "missing_material_identity" in reason_set:
-            return "bind_material_identity"
+            return "verify_against_pdf"
         if "missing_evidence_text" in reason_set:
             return "add_evidence_text"
         if "missing_evidence" in reason_set:
@@ -1078,17 +1097,14 @@ class DFTReviewQueueService:
 
     @staticmethod
     def _candidate_source_label(status: str | None) -> str:
-        normalized = str(status or "system_candidate").strip()
-        return {
-            "system_candidate": "系统规则候选",
-            "candidate_unverified": "未审核候选",
-            "Gemini_Verified": "AI 复核候选",
-            "Human_Confirmed": "已确认",
-            "ML_Ready": "已审核可导出",
-            "blocked_from_export": "当前不可导出",
-            "Rejected": "已拒绝",
-            "human_reviewed_needs_evidence": "已审核但仍缺证据",
-        }.get(normalized, normalized)
+        """Registry-backed label.
+
+        The hand-maintained map that used to live here drifted out of sync with the
+        backend status machine and leaked raw database tokens to the UI for any status
+        it did not list.  Labels now come from ``app.utils.dft_candidate_status`` and
+        unknown tokens fall back to an explicit "needs manual review" label.
+        """
+        return display_label(status or DFT_STATUS_PENDING)
 
     @staticmethod
     def _normalized_candidate_key(row: DFTResult) -> str:
@@ -1127,7 +1143,7 @@ class DFTReviewQueueService:
         gate: Any,
     ) -> list[dict[str, Any]]:
         issue_map = {
-            "missing_material_identity": ("缺少材料/结构绑定", "danger"),
+            "missing_material_identity": ("材料/结构信息缺失（不阻塞核心数值）", "warning"),
             "missing_review": ("缺少确认", "warning"),
             "unsafe_review": ("复核状态不安全", "danger"),
             "missing_evidence_text": ("缺证据原文", "danger"),
@@ -1203,7 +1219,7 @@ class DFTReviewQueueService:
                 f"Figure reliability: {figure_reliability.get('status')}",
                 f"Locators: {locators}",
                 "",
-                "必须检查：材料/催化剂、吸附物、性质类型、数值、单位、计算条件/方法、证据原文、页码/章节/表格/图号、重复项、漏提线索。",
+                "核心必须检查：性质类型、数值、有效单位、证据原文和页码/表格定位。材料/催化剂、金属中心、吸附物、反应步与计算条件是可选上下文，缺失不得阻塞已确认数值；原文缺单位时按性质推断标准单位并记录依据。",
                 "输出只能是：accept / reject / needs_fix / suspected_duplicate / suspected_missing，并给出理由和证据位置。只有明确 accept 且确认满足导出条件时，才同时提交 recommended_action=ready_for_ml_export；其他结论不得给出导出授权。",
             ]
         )

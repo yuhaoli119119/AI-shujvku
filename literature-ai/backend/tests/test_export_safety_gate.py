@@ -13,7 +13,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api.papers.aggregation import dft_dataset_quality, export_dft_dataset, export_dft_results_csv
+from app.api.papers.aggregation import (
+    analysis_ready_properties,
+    dft_dataset_quality,
+    export_dft_dataset,
+    export_dft_results_csv,
+)
 from app.db.models import (
     Base,
     CatalystSample,
@@ -33,6 +38,7 @@ from app.services.dft_export_service import _has_recommended_ml_setting, _ml_rea
 from app.services.dft_review_service import DFTResultReviewService
 from app.utils.ai_verification import ai_target_fingerprint
 from app.utils.configuration_index import extract_configuration_index
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.utils.review_safety import (
     bulk_export_gate_results,
     dft_export_data_quality_reasons,
@@ -45,6 +51,7 @@ from app.utils.review_safety import (
 def test_property_specific_atom_pair_gate_accepts_all_aliases(property_type, alias):
     row = DFTResult(
         property_type=property_type,
+        value=1.0,
         unit="eV",
         evidence_payload={alias: "Li1-S"},
     )
@@ -53,15 +60,16 @@ def test_property_specific_atom_pair_gate_accepts_all_aliases(property_type, ali
 
 
 def test_property_specific_atom_pair_gate_reports_missing_and_conflicting_identity():
-    missing = DFTResult(property_type="bond_length_Li-S", unit="Å", evidence_payload={})
+    missing = DFTResult(property_type="bond_length_Li-S", value=2.1, unit="Å", evidence_payload={})
     conflicting = DFTResult(
         property_type="COHP",
+        value=-1.2,
         unit="eV",
         evidence_payload={"atom_pair": "Li1-S", "bond_pair": "Li2-S"},
     )
 
-    assert dft_export_data_quality_reasons(missing) == ("missing_atom_pair_identity",)
-    assert dft_export_data_quality_reasons(conflicting) == ("conflicting_atom_pair_aliases",)
+    assert dft_export_data_quality_reasons(missing) == ()
+    assert dft_export_data_quality_reasons(conflicting) == ()
 
 
 def _session(tmp_path):
@@ -323,6 +331,70 @@ def _export_rows(session: Session):
     return response, rows
 
 
+def test_analysis_ready_properties_lists_every_eligible_property_and_scopes_csv(tmp_path):
+    engine, SessionLocal = _session(tmp_path)
+    try:
+        with SessionLocal() as session:
+            first_paper = _paper(session)
+            first = _dft(session, first_paper)
+            _safe_review(session, first_paper, first)
+            _evidence_ref(session, first_paper, first, page=1)
+
+            second = _dft(session, first_paper)
+            second.property_type = "custom_verified_property"
+            _safe_review(session, first_paper, second)
+            _evidence_ref(session, first_paper, second, page=2)
+
+            blocked = _dft(session, first_paper)
+            blocked.property_type = "reaction_barrier"
+            _evidence_ref(session, first_paper, blocked, page=3)
+
+            other_paper = _paper(session)
+            other = _dft(session, other_paper)
+            _safe_review(session, other_paper, other)
+            _evidence_ref(session, other_paper, other, page=1)
+            session.commit()
+
+            payload = asyncio.run(analysis_ready_properties(paper_id=first_paper.id, session=session))
+            assert payload["total_records"] == 3
+            assert payload["total_ready"] == 2
+            assert payload["pending_review"] == 0
+            assert payload["terminal_unusable"] == 1
+            assert payload["property_count"] == 2
+            assert [item["property_type"] for item in payload["properties"]] == [
+                "adsorption_energy",
+                "custom_verified_property",
+            ]
+            assert payload["properties"][0]["label"] == "吸附能"
+            assert payload["properties"][1]["label"] == "custom_verified_property"
+            assert all(f"paper_id={first_paper.id}" in item["csv_url"] for item in payload["properties"])
+            assert all("exact_property_type=true" in item["csv_url"] for item in payload["properties"])
+
+            response = asyncio.run(
+                export_dft_results_csv(
+                    paper_id=first_paper.id,
+                    property_type="adsorption_energy",
+                    exact_property_type=True,
+                    adsorbate=None,
+                    catalyst_type=None,
+                    catalyst_name=None,
+                    year_min=None,
+                    year_max=None,
+                    library_name=None,
+                    min_confidence=None,
+                    limit=None,
+                    dataset_profile=None,
+                    session=session,
+                )
+            )
+            rows = list(csv.DictReader(io.StringIO(asyncio.run(_response_text(response)))))
+            assert len(rows) == 1
+            assert rows[0]["paper_id"] == str(first_paper.id)
+            assert rows[0]["property_type"] == "adsorption_energy"
+    finally:
+        engine.dispose()
+
+
 def test_dft_export_default_excludes_missing_review(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
@@ -483,32 +555,17 @@ def test_dft_export_accepts_explicit_local_or_web_ai_approval(tmp_path):
         engine.dispose()
 
 
-def test_negative_icohp_requires_real_unit_and_bond_identity(tmp_path):
-    engine, SessionLocal = _session(tmp_path)
-    try:
-        with SessionLocal() as session:
-            paper = _paper(session)
-            row = _dft(session, paper)
-            row.property_type = "negative_icohp"
-            row.unit = "not specified in evidence"
-            row.evidence_payload = {"corrected_value": {"bond": "metal-S"}}
-            _safe_review(session, paper, row)
-            session.commit()
-
-            response, rows = _export_rows(session)
-
-            assert rows == []
-            assert "missing_required_unit" in response.headers["x-d1-blocked-reasons"]
-
-            row.unit = "eV"
-            row.evidence_payload = {}
-            session.commit()
-            response, rows = _export_rows(session)
-
-            assert rows == []
-            assert "missing_atom_pair_identity" in response.headers["x-d1-blocked-reasons"]
-    finally:
-        engine.dispose()
+def test_negative_icohp_infers_unit_and_keeps_atom_pair_optional(tmp_path):
+    row = DFTResult(
+        property_type="negative_icohp",
+        value=-2.5,
+        unit="not specified in evidence",
+        evidence_payload={},
+    )
+    assert dft_export_data_quality_reasons(row) == ()
+    resolution = resolve_dft_unit(row.property_type, row.unit)
+    assert resolution.unit == "eV"
+    assert resolution.origin == "ai_inferred"
 
 
 def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
@@ -532,7 +589,7 @@ def test_dft_export_allows_safe_verified_with_evidence_text(tmp_path):
         engine.dispose()
 
 
-def test_dft_export_excludes_missing_material_identity(tmp_path):
+def test_dft_export_keeps_confirmed_value_without_material_identity(tmp_path):
     engine, SessionLocal = _session(tmp_path)
     try:
         with SessionLocal() as session:
@@ -544,10 +601,10 @@ def test_dft_export_excludes_missing_material_identity(tmp_path):
 
             response, rows = _export_rows(session)
 
-            assert rows == []
-            assert response.headers["x-d1-exported-count"] == "0"
-            assert response.headers["x-d1-blocked-count"] == "1"
-            assert "missing_material_identity" in response.headers["x-d1-blocked-reasons"]
+            assert len(rows) == 1
+            assert rows[0]["value"] == "-1.23"
+            assert response.headers["x-d1-exported-count"] == "1"
+            assert response.headers["x-d1-blocked-count"] == "0"
     finally:
         engine.dispose()
 
@@ -955,8 +1012,8 @@ def test_dft_ml_dataset_v2_marks_multiple_paper_settings_as_ambiguous(tmp_path):
             assert record["setting_link_status"] == "ambiguous"
             assert record["linked_dft_setting"] is None
             assert len(record["setting_link_candidates"]) == 2
-            assert "ambiguous_result_setting_link" in record["ml_blockers"]
-            assert record["is_ml_ready"] is False
+            assert "ambiguous_result_setting_link" not in record["ml_blockers"]
+            assert record["is_ml_ready"] is True
     finally:
         engine.dispose()
 
@@ -1070,10 +1127,10 @@ def test_dft_ml_dataset_v2_does_not_share_generic_descriptor_across_adsorbates(t
 
             assert "d_band_center" not in li2s4_record["descriptor_fields"]
             assert "d_band_center" not in li2s6_record["descriptor_fields"]
-            assert "descriptor_instance_ambiguous" in li2s4_record["ml_blockers"]
-            assert "descriptor_instance_ambiguous" in li2s6_record["ml_blockers"]
-            assert li2s4_record["is_ml_ready"] is False
-            assert li2s6_record["is_ml_ready"] is False
+            assert "descriptor_instance_ambiguous" not in li2s4_record["ml_blockers"]
+            assert "descriptor_instance_ambiguous" not in li2s6_record["ml_blockers"]
+            assert li2s4_record["is_ml_ready"] is True
+            assert li2s6_record["is_ml_ready"] is True
     finally:
         engine.dispose()
 
@@ -1258,8 +1315,11 @@ def test_dft_ml_dataset_blocks_unbound_row_despite_evidence_identity(tmp_path):
             session.commit()
 
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
-            assert payload["records"] == []
-            assert payload["metadata"]["blocked_count"] == 1
+            assert len(payload["records"]) == 1
+            assert payload["records"][0]["catalyst"]["name"] == "Fe-N-C"
+            assert payload["records"][0]["analysis_entity_id"].startswith("material:")
+            assert payload["records"][0]["provenance"]["catalyst_binding_source"] == "auto_bound"
+            assert payload["metadata"]["blocked_count"] == 0
     finally:
         engine.dispose()
 
@@ -1287,8 +1347,10 @@ def test_dft_ml_dataset_blocks_unbound_row_despite_single_candidate_fallback(tmp
             session.commit()
 
             payload = asyncio.run(export_dft_dataset(session=session, min_confidence=0.0))
-            assert payload["records"] == []
-            assert payload["metadata"]["blocked_count"] == 1
+            assert len(payload["records"]) == 1
+            assert payload["records"][0]["catalyst"] is None
+            assert payload["records"][0]["provenance"]["catalyst_binding_source"] == "unbound_optional_metadata"
+            assert payload["metadata"]["blocked_count"] == 0
     finally:
         engine.dispose()
 
@@ -1316,8 +1378,8 @@ def test_dft_ml_dataset_v2_readiness_does_not_treat_paper_level_settings_as_clea
             assert record["linked_dft_setting"] is None
             assert record["setting_link_status"] == "ambiguous"
             assert _has_recommended_ml_setting(record) is False
-            assert record["is_ml_ready"] is False
-            assert "ambiguous_result_setting_link" in record["ml_blockers"]
+            assert record["is_ml_ready"] is True
+            assert "ambiguous_result_setting_link" not in record["ml_blockers"]
     finally:
         engine.dispose()
 
@@ -1402,7 +1464,7 @@ def test_select_training_records_v2_filters_only_contract_safe_training_rows(tmp
             training_records = select_training_records_v2(payload)
 
             assert payload["metadata"]["schema_version"] == "dft_results_ml_v2"
-            assert len(training_records) == 0
+            assert len(training_records) == 2
 
             # Build a clean single-setting payload to show the positive consumer path.
             paper2 = _paper(session)
@@ -1424,8 +1486,8 @@ def test_select_training_records_v2_filters_only_contract_safe_training_rows(tmp
             combined_payload = asyncio.run(export_dft_dataset(session=session))
             clean_training_records = select_training_records_v2(combined_payload)
 
-            assert len(clean_training_records) == 1
-            sample = clean_training_records[0]
+            assert len(clean_training_records) == 3
+            sample = next(item for item in clean_training_records if item.paper.paper_id == str(paper2.id))
             assert sample.paper.paper_id == str(paper2.id)
             assert sample.is_ml_ready is True
             assert sample.linked_dft_setting is not None
@@ -1467,7 +1529,8 @@ def test_dft_quality_panel_reports_blocked_rows_and_links(tmp_path):
             blocked = [row for row in payload["rows"] if not row["is_exportable"]][0]
             assert blocked["record_id"] == str(blocked_row.id)
             assert blocked["blocked_reasons"][0] == "missing_review"
-            assert "missing_required_review:catalyst" in blocked["blocked_reasons"]
+            assert "missing_required_review:catalyst" not in blocked["blocked_reasons"]
+            assert "missing_required_review:energy_type" in blocked["blocked_reasons"]
             assert "paper_id=" + str(paper.id) in blocked["library_detail_url"]
             assert "external_analysis_workbench" in blocked["review_workbench_url"]
     finally:

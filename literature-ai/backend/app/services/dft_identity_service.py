@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable
 
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.services.dft_rescan_policy import (
     normalize_dft_reaction_step_for_identity,
     normalize_numeric_value,
@@ -167,7 +168,6 @@ _V2_CONTEXT_ALIASES = {
 }
 _V2_COMMON_REQUIREMENTS = (
     DFTIdentityRequirement("missing_paper_identity", ("paper_id",)),
-    DFTIdentityRequirement("missing_material_identity", ("material_key",)),
     DFTIdentityRequirement("missing_property_type_identity", ("property_type",)),
 )
 _V2_ADSORPTION_REQUIREMENTS = (
@@ -229,25 +229,25 @@ _V2_PROPERTY_POLICIES = (
         "reaction_barrier",
         property_markers=("reaction_barrier", "activation_barrier", "activation_energy"),
         context_keys=(_V2_ENERGY_CONTEXT_KEYS | _V2_REACTION_CONTEXT_KEYS),
-        requirements=_V2_REACTION_BARRIER_REQUIREMENTS,
+        requirements=(),
     ),
     _v2_policy(
         "adsorption_energy",
         property_markers=("adsorption_energy",),
         context_keys=_V2_ENERGY_CONTEXT_KEYS,
-        requirements=_V2_ADSORPTION_REQUIREMENTS,
+        requirements=(),
     ),
     _v2_policy(
         "aggregate_charge_transfer",
         exact_property_types=("bader_charge_transfer",),
         context_keys=(_V2_CHARGE_CONTEXT_KEYS | frozenset({"sign_convention"})),
-        requirements=_V2_ADSORPTION_REQUIREMENTS,
+        requirements=(),
     ),
     _v2_policy(
         "atomic_charge",
         property_markers=("bader", "lowdin"),
         context_keys=_V2_CHARGE_CONTEXT_KEYS,
-        requirements=_V2_ATOM_OR_SITE_REQUIREMENTS,
+        requirements=(),
     ),
     _v2_policy(
         "electronic_structure",
@@ -306,6 +306,8 @@ _V2_UNIT_RULES: dict[str, tuple[str, Decimal]] = {
     "ev/e": ("eV/e", Decimal("1")),
     "μb": ("μB", Decimal("1")),
     "µb": ("μB", Decimal("1")),
+    "states/ev": ("states/eV", Decimal("1")),
+    "state/ev": ("states/eV", Decimal("1")),
 }
 
 
@@ -504,6 +506,9 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
     material = _first_value(
         sources,
         (
+            "analysis_entity_id",
+            "source_entity_id",
+            "catalyst_group_id",
             "normalized_material_or_catalyst",
             "normalized_material",
             "material_key",
@@ -573,8 +578,9 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
         property_type=property_type_raw,
     )
     unit_raw = _first_value(sources, ("normalized_unit", "unit"))
+    unit_resolution = resolve_dft_unit(property_type_raw, unit_raw)
     unit, factor, unit_error = _normalize_v2_unit(
-        unit_raw,
+        unit_resolution.unit,
         property_type=property_type,
         dimensionless=property_policy.dimensionless,
     )
@@ -582,8 +588,8 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
     value_upper, value_upper_valid = _canonical_decimal(value_upper_raw, factor=factor)
 
     errors = _required_identity_errors(subject, property_policy)
-    if atom_pair.error_code:
-        errors.append(atom_pair.error_code)
+    # Atom/site identity improves interpretation but is not a prerequisite for
+    # storing and analysing an otherwise confirmed numeric observation.
     if value_raw in (None, "", []):
         errors.append("missing_value_identity")
     elif not value_valid:
@@ -623,6 +629,7 @@ def build_dft_identity_v2(payload: dict[str, Any]) -> DFTIdentityV2:
             "required": atom_pair.required,
             "symmetric": atom_pair.symmetric,
         },
+        "unit_resolution": unit_resolution.as_payload(),
         "errors": list(error_codes),
     }
     return DFTIdentityV2(

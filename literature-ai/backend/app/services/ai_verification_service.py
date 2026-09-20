@@ -30,6 +30,7 @@ from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.schemas.ai_verification import AIVerificationSubmission
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.services.dft_audit_issue_lifecycle_service import DFT_AUDIT_ISSUE_PENDING_STATUSES
+from app.services.dft_ml_policy import resolve_dft_unit
 from app.services.content_knowledge_service import ContentKnowledgeService
 from app.services.evidence_page_recovery import EvidencePageRecoveryService, compact_page_text
 from app.utils.artifact_paths import resolve_paper_pdf_path
@@ -52,6 +53,7 @@ from app.utils.ai_verification import (
 )
 from app.utils.configuration_index import extract_configuration_index
 from app.services.review_target_resolver import get_dft_catalyst_identity, preload_dft_catalyst_identity
+from app.utils.dft_candidate_status import is_repair_locked
 from app.utils.review_safety import (
     authoritative_gate_scope,
     is_authoritative_verified_review,
@@ -670,7 +672,9 @@ class AIVerificationService:
             },
             "execution_instructions": [
                 "Submit only fields whose current_status is pending; configuration_index is context-only and is never submitted.",
-                "Use accept only for evidence that passes the existing deterministic server gates. Use defer with blocked_reasons for insufficient evidence; do not turn technical errors into defer.",
+                "A DFT task requires only energy_type and value. Catalyst name, metals, coordination, support, distance, adsorbate and reaction-step metadata never block the numeric observation.",
+                "If the source omits a unit, accept the confirmed value: the server infers the canonical unit from the property taxonomy and records unit_origin=ai_inferred. Never submit a blank final unit.",
+                "Use defer only when the property meaning or numeric value cannot be confirmed. Defer is a terminal field decision and is never sent to another AI unless source evidence changes or a human explicitly reopens it.",
                 "The server returns per-item format errors. Correct only those items, with a new request_id; valid items in the original request may already be committed.",
                 "If a response times out after submission, call get_ai_verification_batch_receipt with the original request_id before any retry.",
                 "This direct protocol replaces no legacy ZIP/import workflow; it does not ask the user to upload a JSON result.",
@@ -775,6 +779,7 @@ class AIVerificationService:
                 "blocked_reasons": [],
             })
 
+        record_status = self._dft_record_status(statuses)
         catalyst_snapshot = ai_field_snapshot("dft_results", row, "catalyst")
         record_snapshot = {
             "record_id": str(row.id),
@@ -795,6 +800,8 @@ class AIVerificationService:
             "record_id": str(row.id),
             "dft_result_snapshot": record_snapshot,
             "catalyst_sample_snapshot": catalyst_snapshot,
+            "record_status": record_status,
+            "terminal": record_status != "pending",
             "required_fields": list(required_fields),
             "fields": fields,
             "shared_evidence_candidates": list(shared_by_key.values()),
@@ -969,30 +976,68 @@ class AIVerificationService:
         if self.session.get(Paper, paper_id) is None:
             raise LookupError("Paper not found")
 
-        items: list[dict[str, Any]] = []
-        for raw in submissions:
-            submission = raw if isinstance(raw, AIVerificationSubmission) else AIVerificationSubmission.model_validate(raw)
+        prepared = [
+            raw if isinstance(raw, AIVerificationSubmission) else AIVerificationSubmission.model_validate(raw)
+            for raw in submissions
+        ]
+        # A value submission may infer and persist a missing unit. Process the
+        # property meaning first so both fields from one package can share the
+        # package's original target fingerprint.
+        ordered = sorted(
+            enumerate(prepared),
+            key=lambda item: (
+                1
+                if self._same_target_type("dft_results", item[1].target_type)
+                and item[1].field_name == "value"
+                else 0,
+                item[0],
+            ),
+        )
+        indexed_items: dict[int, dict[str, Any]] = {}
+        for index, submission in ordered:
             try:
                 if dry_run:
-                    items.append(self._process_one(paper_id, submission, identity, dry_run=True))
+                    indexed_items[index] = self._process_one(paper_id, submission, identity, dry_run=True)
                     continue
                 with self.session.begin_nested():
-                    items.append(self._process_one(paper_id, submission, identity, dry_run=False))
+                    indexed_items[index] = self._process_one(paper_id, submission, identity, dry_run=False)
             except Exception as exc:
-                items.append(
-                    {
-                        "target_type": submission.target_type,
-                        "target_id": submission.target_id,
-                        "field_name": submission.field_name,
-                        "outcome": "exception",
-                        "status": "needs_human",
-                        "blocked_reasons": [
-                            f"{'validation' if dry_run else 'write'}_failed:{type(exc).__name__}"
-                        ],
-                        "database_writes": False,
-                    }
-                )
+                indexed_items[index] = {
+                    "target_type": submission.target_type,
+                    "target_id": submission.target_id,
+                    "field_name": submission.field_name,
+                    "outcome": "exception",
+                    "status": "needs_human",
+                    "blocked_reasons": [
+                        f"{'validation' if dry_run else 'write'}_failed:{type(exc).__name__}"
+                    ],
+                    "database_writes": False,
+                }
+        items = [indexed_items[index] for index in range(len(prepared))]
+        record_closures: dict[str, str] = {}
         if not dry_run:
+            target_ids = {
+                str(item.get("target_id"))
+                for item in items
+                if self._same_target_type("dft_results", item.get("target_type"))
+            }
+            for target_id in sorted(target_ids):
+                try:
+                    row = self.session.scalar(
+                        select(DFTResult).where(
+                            DFTResult.paper_id == paper_id,
+                            DFTResult.id == UUID(target_id),
+                        )
+                    )
+                except (TypeError, ValueError, AttributeError):
+                    row = None
+                if row is not None:
+                    record_closures[str(row.id)] = self._sync_dft_record_closure(paper_id, row)
+            for item in items:
+                record_status = record_closures.get(str(item.get("target_id") or ""))
+                if record_status is not None:
+                    item["record_status"] = record_status
+                    item["record_terminal"] = record_status != "pending"
             if commit:
                 self.session.commit()
             else:
@@ -1013,6 +1058,11 @@ class AIVerificationService:
             **counts,
             "items": items,
             "database_writes": False if dry_run else any(item.get("database_writes") for item in items),
+            "record_closures": record_closures,
+            "record_status_counts": dict(sorted(Counter(record_closures.values()).items())),
+            "terminal_record_count": sum(
+                status != "pending" for status in record_closures.values()
+            ),
         }
 
     def _process_one(
@@ -1267,13 +1317,22 @@ class AIVerificationService:
             )
 
         value_for_gate = submission.proposed_value if submission.decision == "correct" else snapshot["value"]
+        unit_resolution = (
+            resolve_dft_unit(target.property_type, snapshot.get("unit"))
+            if canonical == "dft_results" and submission.field_name == "value"
+            else None
+        )
+        effective_unit = unit_resolution.unit if unit_resolution is not None else snapshot.get("unit")
+        if unit_resolution is not None:
+            evidence_checks["unit_resolved"] = unit_resolution.resolved
         evidence_checks.update(self._content_checks(
             canonical,
             target,
             submission.field_name,
             value_for_gate,
-            snapshot.get("unit"),
+            effective_unit,
             effective_evidence_text,
+            unit_inferred=bool(unit_resolution and unit_resolution.inferred),
         ))
         for key, passed in evidence_checks.items():
             if not passed:
@@ -1325,11 +1384,32 @@ class AIVerificationService:
             self.session.flush()
 
         corrected = submission.decision == "correct"
+        unit_inferred = bool(unit_resolution and unit_resolution.inferred)
+        if unit_inferred and not dry_run:
+            target.unit = unit_resolution.unit
+            payload = dict(target.evidence_payload) if isinstance(target.evidence_payload, dict) else {}
+            payload["unit_resolution"] = {
+                **unit_resolution.as_payload(),
+                "source_unit_text": snapshot.get("unit"),
+                "explicit_in_source": False,
+                "resolved_at": datetime.now(UTC).isoformat(),
+                "resolved_by": identity.model_agent,
+            }
+            target.evidence_payload = payload
+            self.session.add(target)
+            self.session.flush()
         if corrected and not dry_run:
             self._apply_correction(canonical, target, submission.field_name, submission.proposed_value)
             self.session.add(target)
             self.session.flush()
         final_fingerprint = self._projected_fingerprint(canonical, target, submission) if dry_run else ai_target_fingerprint(canonical, target)
+        if unit_inferred and not dry_run and current_fingerprint != final_fingerprint:
+            self._refresh_verified_dft_sibling_fingerprints(
+                paper_id=paper_id,
+                row=target,
+                previous_fingerprint=current_fingerprint,
+                current_fingerprint=final_fingerprint,
+            )
         effective_locator_fingerprint = (
             locator_fingerprint(locator)
             if locator is not None
@@ -1350,12 +1430,12 @@ class AIVerificationService:
             "locator_matches_field": True,
             "locator_snapshot_current": True,
         }
-        outcome = "auto_repaired" if corrected or locator_recovered else "auto_verified"
+        outcome = "auto_repaired" if corrected or locator_recovered or unit_inferred else "auto_verified"
         if not dry_run:
             review = self._upsert_review(paper_id, canonical, submission.target_id, submission.field_name)
             review.original_value = snapshot["value"]
             review.reviewed_value = submission.proposed_value if corrected else snapshot["value"]
-            review.unit = snapshot.get("unit")
+            review.unit = effective_unit
             review.evidence_text = effective_evidence_text
             review.reviewer_status = "ai_verified"
             review.reviewer = identity.model_agent
@@ -1399,6 +1479,8 @@ class AIVerificationService:
             "source_paper_id": str(resolved_evidence_paper_id or paper_id),
             "evidence_paper_id": str(resolved_evidence_paper_id or paper_id),
             "table_evidence": structured_reference,
+            "unit_resolution": unit_resolution.as_payload() if unit_resolution is not None else None,
+            "terminal": True,
         }
 
     @staticmethod
@@ -1563,6 +1645,8 @@ class AIVerificationService:
                     "evidence_text": submission.evidence_text,
                     "table_evidence": evidence_context.get("table_evidence"),
                     "created_at": datetime.now(UTC).isoformat(),
+                    "terminal": True,
+                    "next_action": "none_unless_source_changes_or_human_reopens",
                 }
             }
             review.review_payload = payload
@@ -1579,6 +1663,8 @@ class AIVerificationService:
             "target_snapshot_fingerprint": target_fingerprint,
             "evidence_scope_fingerprint": scope_fingerprint,
             "database_writes": not dry_run,
+            "terminal": True,
+            "next_action": "none_unless_source_changes_or_human_reopens",
         }
 
     def _finalize_failure(
@@ -1722,6 +1808,8 @@ class AIVerificationService:
         value: Any,
         unit: Any,
         evidence_text: str,
+        *,
+        unit_inferred: bool = False,
     ) -> dict[str, bool]:
         evidence = normalize_evidence_text(evidence_text)
         value_text = normalize_evidence_text(value)
@@ -1856,7 +1944,7 @@ class AIVerificationService:
                 checks["value_unit_same_evidence_item"] = bool(normalized_unit) and all(
                     any(
                         signed_value_in_item(expected, item)
-                        and unit_in_item(item)
+                        and (unit_inferred or unit_in_item(item))
                         and range_semantics(item)
                         for item in evidence_items
                     )
@@ -1870,12 +1958,12 @@ class AIVerificationService:
                     unit_regex = r"[ÅÅ]|\bangstroms?\b"
                 else:
                     unit_regex = rf"(?<![A-Za-z0-9]){re.escape(normalized_unit)}(?![A-Za-z0-9])"
-                checks["unit_matches"] = bool(re.search(unit_regex, evidence, re.I))
+                checks["unit_matches"] = unit_inferred or bool(re.search(unit_regex, evidence, re.I))
             elif canonical == "dft_results" and field_name == "value":
                 checks["unit_matches"] = False
         if canonical == "dft_results":
-            checks["material_identity_present"] = bool(target.catalyst_sample_id) or bool((target.evidence_payload or {}).get("material_identity"))
             if field_name == "catalyst":
+                checks["material_identity_present"] = bool(target.catalyst_sample_id) or bool((target.evidence_payload or {}).get("material_identity"))
                 catalyst, active_sites = get_dft_catalyst_identity(
                     self.session,
                     target.catalyst_sample_id,
@@ -2075,6 +2163,100 @@ class AIVerificationService:
             table_references=[blocked["table_evidence"]] if isinstance(blocked.get("table_evidence"), dict) else [],
         )
         return blocked.get("evidence_scope_fingerprint") == current_scope
+
+    @staticmethod
+    def _dft_record_status(statuses: dict[str, str]) -> str:
+        values = {str(status or "pending").strip().casefold() for status in statuses.values()}
+        if "rejected" in values:
+            return "rejected"
+        if "ai_blocked" in values:
+            return "terminal_unusable"
+        if "pending" in values or not values:
+            return "pending"
+        return "accepted"
+
+    def sync_dft_record_candidate_status(self, paper_id: UUID, row: DFTResult) -> str:
+        """Re-derive one DFT record's ``candidate_status`` from its field reviews.
+
+        Public entry point for every write path that touches field reviews -- human
+        promotion, bulk mark-verified, review saves, imports and AI batches -- so the
+        record-level status can never be left stale while its fields claim to be
+        reviewed.
+
+        A human-final decision outranks automatic re-computation, so repair-locked
+        statuses are returned unchanged.  Returns the resulting candidate_status token.
+        """
+        if is_repair_locked(row.candidate_status):
+            return str(row.candidate_status or "")
+        self._sync_dft_record_closure(paper_id, row)
+        return str(row.candidate_status or "")
+
+    def _sync_dft_record_closure(self, paper_id: UUID, row: DFTResult) -> str:
+        statuses: dict[str, str] = {}
+        for field_name in required_review_fields("dft_results", row):
+            review = self._find_review(
+                paper_id,
+                "dft_results",
+                str(row.id),
+                field_name,
+            )
+            statuses[field_name] = self.dft_field_terminal_status(
+                paper_id=paper_id,
+                target_type="dft_results",
+                target=row,
+                field_name=field_name,
+                review=review,
+            ) or "pending"
+        record_status = self._dft_record_status(statuses)
+        candidate_status = {
+            "accepted": "ai_verified_ml_ready",
+            "rejected": "Rejected",
+            "terminal_unusable": "ai_terminal_unusable",
+            "pending": "system_candidate",
+        }[record_status]
+        if str(row.candidate_status or "") != candidate_status:
+            row.candidate_status = candidate_status
+            self.session.add(row)
+            self.session.flush()
+        return record_status
+
+    def _refresh_verified_dft_sibling_fingerprints(
+        self,
+        *,
+        paper_id: UUID,
+        row: DFTResult,
+        previous_fingerprint: str,
+        current_fingerprint: str,
+    ) -> None:
+        """Keep sibling field authority current after deterministic unit fill."""
+        reviews = self.session.scalars(
+            select(ExtractionFieldReview).where(
+                ExtractionFieldReview.paper_id == paper_id,
+                ExtractionFieldReview.target_id == str(row.id),
+            )
+        ).all()
+        for review in reviews:
+            if (
+                review.field_name == "value"
+                or not self._same_target_type("dft_results", review.target_type)
+                or str(review.reviewer_status or "").casefold() not in {"ai_verified", "verified"}
+                or review.target_fingerprint != previous_fingerprint
+            ):
+                continue
+            payload = dict(review.review_payload) if isinstance(review.review_payload, dict) else {}
+            verification = payload.get("ai_verification")
+            if not isinstance(verification, dict):
+                continue
+            if verification.get("target_snapshot_fingerprint") != previous_fingerprint:
+                continue
+            verification = dict(verification)
+            verification["target_snapshot_fingerprint"] = current_fingerprint
+            verification["server_refresh_reason"] = "deterministic_unit_inference"
+            payload["ai_verification"] = verification
+            review.target_fingerprint = current_fingerprint
+            review.review_payload = payload
+            self.session.add(review)
+        self.session.flush()
 
     def dft_field_terminal_status(
         self,
