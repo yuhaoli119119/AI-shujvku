@@ -90,6 +90,18 @@ async function fetchJSON(url, options) {
     const text = await resp.text();
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (_) {}
+    if (resp.status === 401) {
+        // 会话缺失或已过期：交给登录页重新认证，而不是让页面停在半死不活的状态。
+        showToast("登录状态已过期，正在跳转到登录页…", "error");
+        if (location.pathname !== "/login") {
+            if (typeof LitAIAuth !== "undefined" && LitAIAuth.redirectToLogin) LitAIAuth.redirectToLogin("expired");
+            else location.assign("/login");
+        }
+        const err = new Error("HTTP 401 Unauthorized");
+        err.status = 401;
+        err.detail = (data && data.detail) || "not_authenticated";
+        throw err;
+    }
     if (resp.status === 403) {
         const detailText = typeof (data && data.detail) === "string" ? data.detail : "";
         const looksLikeOwnerAuth =
@@ -285,12 +297,12 @@ function renderDoiMeta(raw) {
 
 function paperHasPdf(paper) {
     if (!paper) return false;
-    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload") return false;
     const artifactStatus = paper.artifact_status && typeof paper.artifact_status === "object"
         ? paper.artifact_status
         : (paper.pdf_artifact_status && typeof paper.pdf_artifact_status === "object" ? paper.pdf_artifact_status : {});
     if (paper.pdf_exists === true || artifactStatus.pdf_exists === true) return true;
     if (paper.pdf_exists === false || artifactStatus.pdf_exists === false) return false;
+    if (paper.oa_status === "metadata_only" || paper.oa_status === "needs_upload") return false;
     if (typeof paper.pdf_url === "string" && paper.pdf_url.trim()) return true;
     return !!paper.pdf_path;
 }
@@ -927,4 +939,3 @@ submitImportLibrary = async function() {
         showToast("导入失败：" + error.message, "error");
     }
 };
-

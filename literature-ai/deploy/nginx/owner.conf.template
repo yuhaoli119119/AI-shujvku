@@ -4,25 +4,58 @@ upstream literature_ai_backend {
 }
 
 # Owner 网关（经 cloudflared 暴露公网）。
-# 安全模型（2026-09-04 加固）：
-#   - 除 /mcp、/api/health 外，页面与所有 /api 一律要求 HTTP Basic 登录（htpasswd），
-#     浏览器首次输入后同源请求自动带凭据，工作台前端无需改动。
-#   - /mcp 关闭 Basic，交给后端用 Authorization: Bearer <MCP key> 自行鉴权。
-#   - /docs、/redoc、/openapi.json 对外直接 404，不暴露接口文档。
+# 安全模型（2026-09-21 起：会话鉴权，取代全局 HTTP Basic）：
+#   - 登录由后端 /api/auth/* 完成，签发 HttpOnly 会话 Cookie（+ CSRF 双提交令牌）。
+#   - 页面与 /api 通过 auth_request 子请求 /api/auth/verify 逐个校验会话；
+#     未登录 -> 页面 302 到 /login，接口 401 JSON（绝不发 WWW-Authenticate: Basic，
+#     避免浏览器原生登录弹窗卡死页面）。
+#   - /login、/api/auth/*（login/logout/me）公开；/api/auth/verify 仅内部子请求可见。
+#   - /mcp 不校验会话，交后端校验 Authorization: Bearer（MCP key / OAuth access token）。
+#   - /api/health 公开；/oauth/、/.well-known/ 保持豁免（OAuth 发现与授权流程不变）。
+#   - /docs、/redoc、/openapi.json 对外保持 404。
 server {
     listen 8080;
     server_tokens off;
+    # 容器内监听 8080，但公网经 cloudflared 隧道走 https/443。关闭绝对与端口重定向，
+    # 让 nginx 自身产生的 302（如未登录跳 /login）返回相对路径，由浏览器按当前
+    # 协议与域名拼接，避免跳到 http://<host>:8080 造成混合内容或打不开。
+    absolute_redirect off;
+    port_in_redirect off;
     access_log off;
     error_log /dev/stderr crit;
     client_max_body_size 32m;
 
-    # MCP 端点：不走 Basic，由后端校验 Bearer MCP key（无 key 返回 401）
+    # 会话校验子请求（internal）：命中后端 /api/auth/verify。
+    # 子请求始终是 GET；Cookie 默认转发；不会被外部客户端直接访问。
+    location = /_litai_auth {
+        internal;
+        proxy_pass http://literature_ai_backend/api/auth/verify;
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_set_header X-Original-URI $request_uri;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 未通过会话校验时的收口：接口返回 401 JSON，页面跳登录页。
+    location @litai_unauthenticated {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        add_header X-LitAI-Auth "required" always;
+        if ($request_uri ~ "^/api/") {
+            return 401 '{"detail":"Not authenticated"}';
+        }
+        return 302 /login;
+    }
+
+    # MCP 端点：不走会话校验，由后端校验 Bearer MCP key（无 key 返回 401）
     # 2026-09-08 修复：后端有效路由是 /mcp/，访问无斜杠 /mcp 会 307 到 /mcp/，
     #   且 location 因缺少 X-Forwarded-Proto 被写成 http，导致客户端跟随重定向时
     #   丢失 Authorization 头（401 Missing MCP API key）。此处内部 rewrite 消除
     #   外部重定向，并补 X-Forwarded-Proto 保证后端生成的绝对 URL 使用 https。
     location ^~ /mcp {
-        auth_basic off;
         if ($uri = "/mcp") { rewrite ^ /mcp/ break; }
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;
@@ -37,14 +70,27 @@ server {
 
     # 健康检查：公开（仅暴露库名/存储根，供隧道与监控探测）
     location = /api/health {
-        auth_basic off;
         proxy_pass http://literature_ai_backend;
         proxy_set_header Host $http_host;
     }
 
-    # OAuth 2.1 端点（ChatGPT 自定义 MCP 连接器授权流程）：不走 Basic
-    location ^~ /oauth/ {
-        auth_basic off;
+    # 登录入口页：公开（只返回静态登录页，不含任何数据），发布自 frontend/pages/pelican_bike/index.html
+    location = /login {
+        proxy_pass http://literature_ai_backend/pages/pelican_bike/index.html;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /login/ {
+        return 302 /login;
+    }
+
+    # 会话校验端点：只允许内部子请求访问，外部直接请求一律 404
+    location = /api/auth/verify { return 404; }
+
+    # 鉴权接口：公开（登录 / 登出 / 当前身份）；不经过 auth_request，
+    # 由后端自行校验会话与 CSRF。
+    location ^~ /api/auth/ {
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -55,9 +101,20 @@ server {
         proxy_buffering off;
     }
 
-    # OAuth 发现元数据（RFC 8414 / RFC 9728）：不走 Basic
+    # OAuth 2.1 端点（ChatGPT 自定义 MCP 连接器授权流程）：不走会话校验
+    location ^~ /oauth/ {
+        proxy_pass http://literature_ai_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;
+    }
+
+    # OAuth 发现元数据（RFC 8414 / RFC 9728）：不走会话校验
     location ^~ /.well-known/ {
-        auth_basic off;
         proxy_pass http://literature_ai_backend;
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -68,23 +125,31 @@ server {
     location = /redoc { return 404; }
     location = /openapi.json { return 404; }
 
-    # 根路径：登录后跳转工作台
-    location = / {
-        auth_basic "Literature AI Owner";
-        auth_basic_user_file /etc/nginx/.htpasswd;
-        return 302 https://$host/pages/literature_library/index.html;
-    }
-
-    # 其余一切（工作台静态页 + 全部 /api）都要 Basic 登录
-    location / {
-        auth_basic "Literature AI Owner";
-        auth_basic_user_file /etc/nginx/.htpasswd;
+    # 分享接口：token 授权、只读；沿用会话校验，但保留后端自身的 401
+    # （Invalid share token / expired），不做登录页跳转。
+    location ^~ /api/share/ {
+        auth_request /_litai_auth;
         proxy_pass http://literature_ai_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+    }
+
+    # 其余一切（工作台静态页 + 全部 /api）：先过会话校验
+    location / {
+        auth_request /_litai_auth;
+        error_page 401 = @litai_unauthenticated;
+        proxy_pass http://literature_ai_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_read_timeout 3600s;
     }

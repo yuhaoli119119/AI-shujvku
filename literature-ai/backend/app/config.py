@@ -112,6 +112,20 @@ class Settings(BaseSettings):
     oauth_jwt_secret: str = ""
     oauth_login_user: str = "liyuhao"
     oauth_login_pass: str = ""
+    # --- Workbench web login (HttpOnly cookie session + CSRF double submit) ---
+    # Accounts live in the Apache htpasswd file that used to back the nginx
+    # HTTP Basic gate; the backend only reads it (mounted read-only).
+    auth_enabled: bool = True
+    auth_htpasswd_file: str = "/etc/litai/owner.htpasswd"
+    auth_session_secret: str = ""
+    auth_session_ttl_hours: int = Field(default=12, ge=1, le=24 * 7)
+    auth_session_remember_days: int = Field(default=30, ge=1, le=365)
+    auth_cookie_secure: bool = True
+    auth_allowed_origins: str = ""
+    auth_redis_url: str = "redis://redis:6379/2"
+    auth_login_window_seconds: int = Field(default=900, ge=30, le=86400)
+    auth_login_max_failures_per_ip_user: int = Field(default=8, ge=1, le=1000)
+    auth_login_max_failures_per_ip: int = Field(default=30, ge=1, le=5000)
     oauth_scope_capabilities: str = (
         "read_papers,append_notes,propose_corrections,request_parse,"
         "review_corrections,review_dft,create_share_links,ai_verify_content"

@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · 文献数据库</title>
+<style>
+:root{--ink:#294a4b;--paper:#f4efe3;--accent:#d88354;--accent-dark:#c26b3c;--line:#adc0af;--muted:#7a9185}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:var(--paper);color:var(--ink);font-family:Arial,"Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+.scene{position:fixed;inset:0;z-index:0;overflow:hidden}
+.scene svg{display:block;width:100%;height:100%}
+.veil{position:fixed;inset:0;z-index:1;pointer-events:none;background:linear-gradient(96deg,rgba(244,239,227,.94) 0%,rgba(244,239,227,.86) 26%,rgba(244,239,227,.34) 52%,rgba(244,239,227,0) 72%)}
+.shell{position:relative;z-index:2;min-height:100vh;min-height:100dvh;display:flex;align-items:center;padding:44px clamp(18px,4.5vw,68px)}
+.card{width:min(402px,100%);padding:30px 30px 22px;border:1px solid rgba(173,192,175,.85);border-radius:26px;background:rgba(255,252,242,.88);backdrop-filter:blur(16px) saturate(1.15);box-shadow:0 26px 70px rgba(41,74,75,.18),inset 0 1px 0 rgba(255,255,255,.65)}
+.eyebrow{margin:0;font-size:11px;letter-spacing:3.5px;color:var(--muted)}
+h1{margin:10px 0 8px;font-size:clamp(22px,2.6vw,28px);font-weight:500}
+.lede{margin:0 0 22px;font-size:13px;line-height:1.6;color:var(--muted)}
+.field{margin:0 0 14px}
+.field label{display:block;margin:0 0 6px;font-size:13px;color:#5d7a72}
+input[type=text],input[type=password]{width:100%;padding:12px 14px;font:inherit;color:var(--ink);background:rgba(255,255,255,.72);border:1px solid #cdd9cb;border-radius:14px;transition:border-color .15s,box-shadow .15s}
+input[type=text]::placeholder,input[type=password]::placeholder{color:#a9b8ac}
+input[type=text]:focus,input[type=password]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(216,131,84,.22)}
+.pwd{position:relative}
+.pwd input{padding-right:64px}
+.peek{position:absolute;top:50%;right:8px;transform:translateY(-50%);padding:6px 10px;font:inherit;font-size:12px;color:var(--muted);background:transparent;border:0;border-radius:10px;cursor:pointer}
+.peek:hover{background:rgba(173,192,175,.22);color:var(--ink)}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:16px 0 18px;font-size:13px;color:var(--muted)}
+.check{display:flex;align-items:center;gap:8px;cursor:pointer}
+.check input{width:15px;height:15px;accent-color:var(--accent)}
+.link{font:inherit;font-size:13px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px}
+.link:hover{color:var(--accent-dark)}
+.primary{width:100%;padding:13px 18px;font:inherit;font-size:15px;font-weight:600;color:#fff8ec;background:var(--accent);border:1px solid #c8743f;border-radius:16px;cursor:pointer;box-shadow:0 10px 24px rgba(216,131,84,.28);transition:background .15s,transform .12s}
+.primary:hover{background:var(--accent-dark)}
+.primary:active{transform:translateY(1px)}
+.primary:disabled{opacity:.72;cursor:progress}
+.status{min-height:19px;margin:12px 0 0;font-size:13px;color:#b4552f}
+.caps{margin:8px 0 0;font-size:12px;color:#b4552f}
+.status.ok{color:#3f6f51}
+.hint{margin:10px 0 0;font-size:12px;color:#b4552f}
+.demo{margin:16px 0 0;padding-top:12px;font-size:12px;color:var(--muted);border-top:1px dashed rgba(173,192,175,.9)}
+.legal{margin:6px 0 0;font-size:12px;color:var(--muted)}
+.alt{margin:14px 0 0;font-size:13px}
+.alt a{color:var(--accent-dark);text-decoration:none;border-bottom:1px solid rgba(216,131,84,.5)}
+button:focus-visible,input:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.pause{position:fixed;z-index:3;top:18px;right:18px;padding:8px 16px;font:inherit;font-size:13px;color:var(--ink);background:rgba(255,252,242,.84);border:1px solid var(--line);border-radius:30px;cursor:pointer;backdrop-filter:blur(8px)}
+.pause:hover{background:#e9eee0}
+.credit{position:fixed;z-index:3;bottom:16px;right:clamp(18px,4.5vw,68px);margin:0;font-size:12px;letter-spacing:2px;color:#7f9585}
+.card.shake{animation:shake .38s}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(3px)}}
+@media(max-width:760px),(max-aspect-ratio:1/1){
+.scene{position:relative;inset:auto;height:auto}
+.scene svg{height:auto;max-height:34vh}
+.scene::after{content:"";position:absolute;left:0;right:0;bottom:0;height:46%;background:linear-gradient(180deg,rgba(244,239,227,0),rgba(244,239,227,.96))}
+.veil{display:none}
+.shell{flex-direction:column;justify-content:center;min-height:0;padding:0 16px 30px;margin-top:-22px}
+.card{padding:24px 20px 18px;border-radius:22px}
+.credit{position:static;margin:18px 0 0;text-align:center}
+.pause{top:12px;right:12px;padding:7px 13px}
+}
+@media(max-width:760px) and (max-height:700px){
+.scene svg{max-height:24vh}
+.shell{padding-bottom:16px}
+.card{padding:18px 16px 14px}
+h1{margin:8px 0 6px;font-size:20px}
+.lede{margin-bottom:14px}
+.field{margin-bottom:11px}
+.row{margin:12px 0 14px}
+.primary{padding:12px 16px}
+.demo{margin-top:12px;padding-top:9px}
+.credit{display:none}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="scene" aria-hidden="true"><svg viewBox="0 0 1000 600" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc"><title id="title">鹈鹕骑自行车</title><desc id="desc">白色鹈鹕踩着珊瑚红自行车，轮子转动、围巾飘扬，海岸风景缓缓后退。</desc><defs>
+<linearGradient id="sky" x2="0" y2="1"><stop stop-color="#d1e8e3"/><stop offset="1" stop-color="#edf1d9"/></linearGradient>
+<g id="cloud" fill="#fffcec"><path d="M0 22Q-4 4 23 9Q33-17 55 4Q76-7 87 14Q111 6 110 22Z"/></g>
+<g id="wheel" fill="none"><circle r="69" stroke="#2b484d" stroke-width="10"/><circle r="61" stroke="#fff6db" stroke-width="3"/><g stroke="#849d95" stroke-width="2"><path d="M-60 0H60M0-60V60M-42-42L42 42M-42 42L42-42M-55-23L55 23M-55 23L55-23M-23-55L23 55M-23 55L23-55"/></g><circle r="7" fill="#2b484d"/></g>
+<g id="land"><path d="M0 388Q150 340 310 380T660 375T1000 388V450H0" fill="#b4c5a0"/><path d="M0 415Q200 385 400 418T760 407T1000 415V454H0" fill="#ccd3ac"/><g stroke="#819d7f" stroke-width="4" fill="none" stroke-linecap="round"><path d="M120 434q-4-21-15-28m15 28q-1-27 9-37m-9 37q10-19 22-20M820 434q-4-21-15-28m15 28q-1-27 9-37m-9 37q10-19 22-20"/></g></g>
+<g id="marks" stroke="#f8efd9" stroke-width="4" stroke-linecap="round"><path d="M30 545H100M230 545H300M430 545H500M630 545H700M830 545H900"/></g></defs>
+<path fill="url(#sky)" d="M0 0H1000V600H0Z"/><circle cx="794" cy="116" r="65" fill="#fae4a8" opacity=".3"/><circle cx="794" cy="116" r="48" fill="#fae2a0"/>
+<g id="clouds"><use href="#cloud" x="120" y="110"/><use href="#cloud" x="530" y="65"/><use href="#cloud" x="910" y="150"/><use href="#cloud" x="1120" y="110"/><use href="#cloud" x="1530" y="65"/><use href="#cloud" x="1910" y="150"/></g>
+<path d="M0 303Q240 286 480 304T1000 303V445H0" fill="#94beb5"/><path d="M45 335H155M210 350H275M741 330H850M865 357H945" stroke="#dfebd4" stroke-width="3" stroke-linecap="round"/><path d="M672 189q9-9 18 0q9-9 18 0m25 26q6-6 12 0q6-6 12 0" fill="none" stroke="#75968e" stroke-width="2"/>
+<g id="landscape"><use href="#land"/><use href="#land" x="1000"/></g><path fill="#dfcfaf" d="M0 450H1000V600H0Z"/><path d="M0 450H1000" stroke="#f6e8cb" stroke-width="7"/><g id="road"><use href="#marks"/><use href="#marks" x="1000"/></g>
+<ellipse cx="499" cy="515" rx="204" ry="13" fill="#6c8571" opacity=".16"/>
+<g transform="translate(355 438)"><g id="rear"><use href="#wheel"/></g></g><g transform="translate(645 438)"><g id="front"><use href="#wheel"/></g></g>
+<g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M355 438L423 334L492 438ZM423 334H600L492 438M600 334L645 438" stroke="#b65f4e" stroke-width="10"/><path d="M355 438L423 334L492 438M423 334H600L492 438M600 334L645 438" stroke="#e8896c" stroke-width="5"/><path d="M423 334L416 310M600 334L589 294L619 282" stroke="#345157" stroke-width="8"/><path d="M610 282H634Q647 282 642 296M393 310H438" stroke="#345157" stroke-width="10"/></g>
+<circle cx="492" cy="438" r="21" fill="#eee1c4" stroke="#46635e" stroke-width="4"/><path d="M355 432L492 417A21 21 0 0 1 492 459L355 444Z" fill="none" stroke="#688078" stroke-width="2"/>
+<path id="farLeg" fill="none" stroke="#bf8647" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/><path id="crank" stroke="#395954" stroke-width="6"/><path id="farFoot" stroke="#ca944f" stroke-width="12" stroke-linecap="round"/>
+<g id="bird" stroke="#38555a" stroke-width="3" stroke-linejoin="round"><path d="M417 283L360 253Q362 282 392 299L370 287Q382 318 420 316" fill="#f0f1e5"/><path d="M404 267C433 239 477 244 516 266C537 260 536 232 533 210C526 176 539 149 565 150C591 150 605 170 597 190C589 209 573 208 571 228C575 264 586 296 549 321C520 343 460 337 426 322C404 313 396 286 404 267Z" fill="#fbf9ed"/><path d="M549 208Q563 235 549 263Q545 278 529 287" stroke="#d6e1d5" stroke-width="12" fill="none" stroke-linecap="round"/>
+<path d="M592 182L724 196Q701 241 653 230Q616 222 591 201Z" fill="#eeb162"/><path d="M593 179Q662 181 725 195L730 201L592 197Z" fill="#f7cd7f"/><path d="M615 204Q642 214 679 212" fill="none" stroke="#ce9147" stroke-width="2"/>
+<circle cx="580" cy="176" r="9" fill="#eddb9e" stroke="none"/><circle cx="582" cy="176" r="4.5" fill="#29464b" stroke="none"/><circle cx="583" cy="174" r="1.5" fill="white" stroke="none"/><path d="M548 154Q536 143 541 138M556 153Q548 140 552 134" fill="none" stroke-linecap="round"/>
+<path id="scarf" d="M545 246Q515 236 486 250L505 258L485 270Q518 272 551 252" fill="#d97759" stroke="none"/><path d="M536 236Q553 249 574 239L578 251Q554 262 536 248Z" fill="#d97759" stroke="none"/>
+<path d="M438 268Q470 251 508 277Q540 302 611 283Q623 280 624 289Q606 309 554 314Q491 326 457 302Q444 292 438 268Z" fill="#e6eadd"/><path d="M456 275Q478 297 510 302M454 286Q476 307 502 310" fill="none" stroke="#b9cbbf" stroke-linecap="round"/>
+</g>
+<path id="nearLeg" fill="none" stroke="#e4aa59" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><path id="nearFoot" stroke="#eeb660" stroke-width="12" stroke-linecap="round"/><path id="pedals" stroke="#345252" stroke-width="5" stroke-linecap="round"/><circle cx="492" cy="438" r="6" fill="#345252"/>
+<text x="38" y="581" font-family="Arial,sans-serif" font-size="10" letter-spacing="3" fill="#86967e">A LITTLE RIDE, A LITTLE JOY.</text></svg></div>
+<div class="veil" aria-hidden="true"></div>
+<div class="shell">
+<section class="card" id="card">
+<p class="eyebrow">LITERATURE AI · 文献数据库</p>
+<h1>登录文献数据库</h1>
+<p class="lede">用你的账号进入工作台，继续检索、核验与整理。</p>
+<form id="login" novalidate>
+<div class="field">
+<label for="account">账号</label>
+<input id="account" name="account" type="text" autocomplete="username" placeholder="请输入账号" required>
+</div>
+<div class="field">
+<label for="password">密码</label>
+<div class="pwd">
+<input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+<button type="button" class="peek" id="peek" aria-pressed="false" aria-label="显示密码">显示</button>
+</div>
+<p class="caps" id="caps" hidden>大写锁定已开启</p>
+</div>
+<div class="row">
+<label class="check"><input type="checkbox" id="remember" checked> 记住我</label>
+<button type="button" class="link" id="forgot">忘记密码？</button>
+</div>
+<button class="primary" id="submit" type="submit">登录</button>
+</form>
+<p class="status" id="status" role="status" aria-live="polite"></p>
+<p class="hint" id="hint" hidden>请联系管理员重置密码。</p>
+<p class="demo" id="demo" hidden></p>
+<p class="alt"><a id="direct" href="/pages/literature_library/index.html">直接进入工作台 →</a></p>
+<p class="legal">仅限授权用户访问。</p>
+</section>
+<p class="credit">插图 · 鹈鹕的海岸骑行</p>
+</div>
+<button class="pause" id="toggle" aria-pressed="false">暂停动画</button>
+<script>
+const CONFIG={authEndpoint:"/api/auth/login",sessionEndpoint:"/api/auth/me",logoutEndpoint:"/api/auth/logout",workbenchUrl:"/pages/literature_library/index.html",requestTimeoutMs:15000,demo:false};
+const ids=["rear","front","bird","clouds","landscape","road","farLeg","nearLeg","farFoot","nearFoot","crank","pedals","scarf","toggle"];
+const el=Object.fromEntries(ids.map(id=>[id,document.getElementById(id)]));
+const svgEl=document.querySelector(".scene svg"),wide=matchMedia("(min-width:761px) and (min-aspect-ratio:1/1)");
+function sceneFit(){svgEl.setAttribute("preserveAspectRatio",wide.matches?"xMidYMid slice":"xMidYMid meet");}
+wide.addEventListener("change",sceneFit);
+let paused=matchMedia("(prefers-reduced-motion: reduce)").matches,t=0,last=null;
+function knee(x,y,p){const dx=p.x-x,dy=p.y-y,d=Math.hypot(dx,dy),a=72,b=77,c=(a*a-b*b+d*d)/(2*d),h=Math.sqrt(Math.max(0,a*a-c*c));return `M${x} ${y}L${x+c*dx/d+h*dy/d} ${y+c*dy/d-h*dx/d}L${p.x} ${p.y}`;}
+function draw(){const phase=t/1600*Math.PI*2,bob=-2+2*Math.cos(phase*2),p={x:492+27*Math.cos(phase),y:438+27*Math.sin(phase)},q={x:492-27*Math.cos(phase),y:438-27*Math.sin(phase)};
+for(const id of ["rear","front"])el[id].setAttribute("transform",`rotate(${t/1600*360%360})`);
+el.bird.setAttribute("transform",`translate(0 ${bob})`);
+for(const [id,duration] of [["clouds",45000],["landscape",9000],["road",3000]])el[id].setAttribute("transform",`translate(${-t%duration/duration*1000} 0)`);
+el.nearLeg.setAttribute("d",knee(466,322+bob,p));el.farLeg.setAttribute("d",knee(454,321+bob,q));el.crank.setAttribute("d",`M${p.x} ${p.y}L${q.x} ${q.y}`);
+for(const [id,f] of [["nearFoot",p],["farFoot",q]])el[id].setAttribute("d",`M${f.x-5} ${f.y-6}L${f.x+15} ${f.y-3}`);
+el.pedals.setAttribute("d",`M${p.x-10} ${p.y+3}h27M${q.x-10} ${q.y+3}h27`);
+const wave=Math.sin(phase*2)*6;el.scarf.setAttribute("d",`M545 246Q515 ${236+wave} 486 ${250+wave}L505 258L485 ${270+wave}Q518 272 551 252`);}
+function label(){el.toggle.textContent=paused?"播放动画":"暂停动画";el.toggle.setAttribute("aria-pressed",String(paused));}
+el.toggle.onclick=()=>{paused=!paused;label();};
+document.addEventListener("visibilitychange",()=>{last=null;});
+function frame(now){if(last!==null&&!paused)t+=Math.min(now-last,100);last=now;draw();requestAnimationFrame(frame);}
+const card=document.getElementById("card"),form=document.getElementById("login"),accountEl=document.getElementById("account"),pwdEl=document.getElementById("password"),peek=document.getElementById("peek"),remember=document.getElementById("remember"),submitBtn=document.getElementById("submit"),statusEl=document.getElementById("status"),hintEl=document.getElementById("hint"),demoEl=document.getElementById("demo"),forgot=document.getElementById("forgot");
+function setStatus(text,ok){statusEl.textContent=text||"";statusEl.classList.toggle("ok",!!ok);}
+function shake(){card.classList.remove("shake");void card.offsetWidth;card.classList.add("shake");}
+if(CONFIG.demo){demoEl.hidden=false;demoEl.textContent="演示模式：本页尚未接入真实鉴权接口，提交不会发送任何凭据。";}
+const caps=document.getElementById("caps"),STORE="litaidb.login.account";
+function capsWatch(event){caps.hidden=!(event.getModifierState&&event.getModifierState("CapsLock"));}
+pwdEl.addEventListener("keydown",capsWatch);pwdEl.addEventListener("keyup",capsWatch);pwdEl.addEventListener("blur",()=>{caps.hidden=true;});
+for(const node of [accountEl,pwdEl])node.addEventListener("input",()=>node.setAttribute("aria-invalid","false"));
+try{const saved=localStorage.getItem(STORE);if(saved)accountEl.value=saved;}catch(error){}
+function rememberAccount(){try{if(remember.checked&&accountEl.value.trim())localStorage.setItem(STORE,accountEl.value.trim());else localStorage.removeItem(STORE);}catch(error){}}
+peek.addEventListener("click",()=>{const show=pwdEl.type==="password";pwdEl.type=show?"text":"password";peek.textContent=show?"隐藏":"显示";peek.setAttribute("aria-pressed",String(show));peek.setAttribute("aria-label",show?"隐藏密码":"显示密码");pwdEl.focus();});
+forgot.addEventListener("click",()=>{hintEl.hidden=!hintEl.hidden;if(!hintEl.hidden)setStatus("");});
+const FLASH_KEY="litai.auth.reason";
+function readFlash(){try{const value=sessionStorage.getItem(FLASH_KEY);if(value)sessionStorage.removeItem(FLASH_KEY);return value||"";}catch(error){return "";}}
+function safeTarget(){try{const requested=new URLSearchParams(location.search).get("next");if(requested&&requested.charAt(0)==="/"&&requested.slice(0,2)!=="//")return requested;}catch(error){}return CONFIG.workbenchUrl;}
+async function requestJSON(url,options,timeoutMs){const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeoutMs||CONFIG.requestTimeoutMs);try{const response=await fetch(url,Object.assign({credentials:"include"},options||{},{signal:controller.signal}));let data=null;try{data=await response.json();}catch(error){}return {response:response,data:data};}finally{clearTimeout(timer);}}
+function failureMessage(response,data){const detail=data&&typeof data.detail==="string"?data.detail:"";
+if(response.status===401)return "账号或密码不正确";
+if(response.status===429){const wait=Math.max(1,Math.ceil(Number(data&&data.retry_after)||60));return `登录尝试过于频繁，请 ${wait} 秒后再试`;}
+if(response.status===503||detail==="auth_not_configured")return "服务器登录服务暂不可用，请联系管理员";
+if(response.status===403)return "请求被拒绝，请刷新页面后重试";
+if(response.status===400||response.status===422)return "请输入有效的账号和密码";
+if(response.status>=500)return "服务器内部错误，请稍后重试";
+return `登录失败（HTTP ${response.status}）`;}
+function isOffline(error){return error&&(error.name==="AbortError"||error.name==="TypeError");}
+form.addEventListener("submit",async event=>{event.preventDefault();
+const account=accountEl.value.trim(),password=pwdEl.value;
+if(!account||!password){accountEl.setAttribute("aria-invalid",account?"false":"true");pwdEl.setAttribute("aria-invalid",password?"false":"true");setStatus("请输入账号和密码");shake();(account?pwdEl:accountEl).focus();return;}
+submitBtn.disabled=true;setStatus("正在验证…");
+try{
+if(CONFIG.authEndpoint){
+const {response,data}=await requestJSON(CONFIG.authEndpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:account,password:password,remember:remember.checked})});
+if(!response.ok){setStatus(failureMessage(response,data));pwdEl.setAttribute("aria-invalid","true");shake();pwdEl.select();return;}
+rememberAccount();setStatus("登录成功，正在进入工作台…",true);location.assign(safeTarget());return;}
+await new Promise(resolve=>setTimeout(resolve,650));
+rememberAccount();
+setStatus("表单校验通过（演示模式，未连接服务器）。",true);
+}catch(error){setStatus(isOffline(error)?"无法连接服务器，请检查网络后重试":"登录失败，请稍后重试");shake();}
+finally{submitBtn.disabled=false;}});
+const flash=readFlash();
+if(flash==="expired")setStatus("登录状态已过期，请重新登录");
+(async function probeSession(){
+if(!CONFIG.sessionEndpoint)return;
+try{const {response,data}=await requestJSON(CONFIG.sessionEndpoint,{method:"GET"},6000);
+if(response.ok&&data&&data.username){setStatus(`已登录为 ${data.username}，正在进入工作台…`,true);location.assign(safeTarget());return;}
+if(response.status===503)setStatus("服务器登录服务暂不可用，请联系管理员");
+}catch(error){/* 未登录或服务器暂时不可达时保留表单，页面不会卡死 */}})();
+label();sceneFit();draw();requestAnimationFrame(frame);
+if(wide.matches)accountEl.focus();
+</script>
+</body>
+</html>

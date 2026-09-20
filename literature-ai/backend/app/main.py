@@ -4,8 +4,10 @@ import logging
 
 import anyio
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.auth import router as auth_router
 from app.api.corrections import router as corrections_router
 from app.api.content_knowledge import router as content_knowledge_router
 from app.api.dft import router as dft_router
@@ -37,6 +39,7 @@ from app.mcp.auth import enforce_mcp_auth
 from app.oauth import router as oauth_router
 from app.security.exports import enforce_export_boundary
 from app.security.share import enforce_share_protection
+from app.security.session_auth import enforce_workbench_session
 from app.services.workflow_jobs import expire_stale_activity
 from app.utils.active_database import activate_active_library_database
 
@@ -82,6 +85,7 @@ app = FastAPI(
 app.middleware("http")(enforce_mcp_auth)
 app.middleware("http")(enforce_export_boundary)
 app.middleware("http")(enforce_share_protection)
+app.middleware("http")(enforce_workbench_session)
 
 @app.middleware("http")
 async def no_cache_frontend_assets(request, call_next):
@@ -95,6 +99,7 @@ async def no_cache_frontend_assets(request, call_next):
 
 
 app.include_router(health_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(impact_metadata_router, prefix="/api/library/impact-metadata", tags=["impact-metadata"])
@@ -132,5 +137,12 @@ if frontend_shared_dir.exists():
 
 
 @app.get("/")
-async def root() -> dict[str, str]:
-    return {"message": "Literature AI backend is running"}
+async def root():
+    """Send browsers landing on the gateway root to the workbench.
+
+    The owner gateway proxies ``/`` here (after its session check) so the
+    redirect happens in the content phase; that is what lets nginx gate the
+    root path with ``auth_request`` (a rewrite-phase ``return`` would run
+    before the access check).
+    """
+    return RedirectResponse(url="/pages/literature_library/index.html", status_code=302)

@@ -15,6 +15,7 @@ x-app-environment: &app-environment
   LITAI_EMBEDDING_MODEL: ${LITAI_EMBEDDING_MODEL:-BAAI/bge-m3}
   LITAI_EMBEDDING_DIMENSION: ${LITAI_EMBEDDING_DIMENSION:-1024}
   LITAI_DOCLING_ENABLED: ${LITAI_DOCLING_ENABLED:-true}
+  LITAI_DOCLING_ARTIFACTS_PATH: ${LITAI_DOCLING_ARTIFACTS_PATH:-/home/litai/.cache/docling}
   LITAI_DOCLING_DO_OCR: ${LITAI_DOCLING_DO_OCR:-false}
   LITAI_DOCLING_AUTO_OCR: ${LITAI_DOCLING_AUTO_OCR:-true}
   LITAI_DOCLING_FORCE_FULL_PAGE_OCR: ${LITAI_DOCLING_FORCE_FULL_PAGE_OCR:-false}
@@ -42,6 +43,19 @@ x-app-environment: &app-environment
   LITAI_OAUTH_JWT_SECRET: ${LITAI_OAUTH_JWT_SECRET:-}
   LITAI_OAUTH_LOGIN_USER: ${LITAI_OAUTH_LOGIN_USER:-liyuhao}
   LITAI_OAUTH_LOGIN_PASS: ${LITAI_OAUTH_LOGIN_PASS:-}
+  # Workbench web login: accounts are read from the Apache htpasswd file that
+  # used to back the nginx HTTP Basic gate (mounted read-only into the backend).
+  LITAI_AUTH_ENABLED: ${LITAI_AUTH_ENABLED:-true}
+  LITAI_AUTH_HTPASSWD_FILE: ${LITAI_AUTH_HTPASSWD_FILE:-/etc/litai/owner.htpasswd}
+  LITAI_AUTH_SESSION_SECRET: ${LITAI_AUTH_SESSION_SECRET:-}
+  LITAI_AUTH_SESSION_TTL_HOURS: ${LITAI_AUTH_SESSION_TTL_HOURS:-12}
+  LITAI_AUTH_SESSION_REMEMBER_DAYS: ${LITAI_AUTH_SESSION_REMEMBER_DAYS:-30}
+  LITAI_AUTH_COOKIE_SECURE: ${LITAI_AUTH_COOKIE_SECURE:-true}
+  LITAI_AUTH_ALLOWED_ORIGINS: ${LITAI_AUTH_ALLOWED_ORIGINS:-}
+  LITAI_AUTH_REDIS_URL: ${LITAI_AUTH_REDIS_URL:-redis://redis:6379/2}
+  LITAI_AUTH_LOGIN_WINDOW_SECONDS: ${LITAI_AUTH_LOGIN_WINDOW_SECONDS:-900}
+  LITAI_AUTH_LOGIN_MAX_FAILURES_PER_IP_USER: ${LITAI_AUTH_LOGIN_MAX_FAILURES_PER_IP_USER:-8}
+  LITAI_AUTH_LOGIN_MAX_FAILURES_PER_IP: ${LITAI_AUTH_LOGIN_MAX_FAILURES_PER_IP:-30}
 
 services:
   # PostgreSQL + pgvector is the intended production source of truth when
@@ -135,6 +149,9 @@ services:
       - ./prompts:/prompts:ro
       - ./data:/data
       - ./data/docling_cache:/home/litai/.cache/docling
+      # Read-only user store for the workbench web login (same file the nginx
+      # Basic gate used). Edits go through scripts/litai_auth_user.py on the host.
+      - ./deploy/nginx/owner.htpasswd:/etc/litai/owner.htpasswd:ro
       # Host user directory browsing is optional. Override LITAI_HOST_USERS_ROOT on macOS/Linux.
       # If you do not need host directory browsing, comment this line out.
       - ${LITAI_HOST_USERS_ROOT:-/c/Users}:/host/users
