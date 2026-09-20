@@ -6,7 +6,7 @@
 
 - Ordinary DFT `PASS` / `REVISE` / `REJECT` opinions imported through `import_analysis` are candidate audit evidence and cannot perform final acceptance.
 - A DFT `new_candidate` with complete evidence may be materialized as an unverified `DFTResult` candidate. Materialization is not `verified`, exportable, or ML-ready.
-- The only automatic authoritative acceptance path is `get_ai_verification_tasks` followed by `submit_ai_verification_batch` under one authenticated `ai_verify_content` identity. Task pages are capped at 50; submission batches are hard-capped at 20.
+- The only automatic authoritative acceptance path is `apply_ai_verification_batch` under one authenticated `ai_verify_content` identity, fed by the read-only `get_ai_verification_record_tasks` (DFT record bundles, keyset) or `get_ai_verification_tasks` (field-level content targets). Task pages are capped at 50; submission batches are hard-capped at 20. `submit_ai_verification_batch(dry_run=true)` is the optional zero-write preflight, not the formal write entry.
 - A passing automatic decision writes `ai_verified`, which remains distinct from human `verified`. Only deterministic-gate exceptions are routed to the Owner-session human queue.
 - No second model, vote, consensus, or third-AI adjudication is part of the current path.
 - The historical human-final-review statements below describe the earlier integration snapshot; they do not override this addendum.

@@ -34,7 +34,7 @@ Capabilities are checked inside tool handlers:
 - `review_corrections` for approving or rejecting corrections.
 - `review_dft` as a narrower DFT review capability where accepted.
 - `repair_dft_issues` for the primary DFT repair AI to call `repair_dft_audit_issue`; it is not implied by audit, proposal, or review capabilities.
-- `ai_verify_content` for the one designated verifier to call `get_ai_verification_tasks`, `materialize_ai_section_page_fragments`, and `submit_ai_verification_batch`.
+- `ai_verify_content` for the one designated verifier to call `get_ai_verification_record_tasks` / `get_ai_verification_tasks`, `materialize_ai_section_page_fragments`, `submit_ai_verification_batch` (preflight) and the formal `apply_ai_verification_batch`.
 - `export_data` for Word/dataset export operations; this is also subject to the global `LITAI_EXPORTS_ENABLED` policy, which defaults to `false`.
 - `create_share_links` for creating read-only share tokens; it is not implied by `read_papers` or review capabilities.
 
@@ -66,23 +66,25 @@ For parsed-paper review, the AI assigned to the current task should use:
 - `query_papers`
 - `get_codex_context`
 - `get_codex_item`
-- `retrieve_evidence`
 - `read_paper_page`
-- `get_paper_knowledge`
 - `get_review_coverage`
 - `get_field_disputes`
 - `import_analysis`
-- `plan_multi_paper_evidence`
+- `get_ai_verification_record_tasks`
 - `get_ai_verification_tasks`
 - `materialize_ai_section_page_fragments`
 - `submit_ai_verification_batch`
+- `apply_ai_verification_batch`
+- `finalize_ai_verified_dft_records`
+
+> `get_paper_knowledge`, `retrieve_evidence` and `plan_multi_paper_evidence` are outside the current callable paper surface (`EXCLUDED`; use `get_codex_context` / `get_codex_item` for paper context).
 
 For high-risk DFT, figure, chart, or table review, the intended order is:
 
 1. Read `get_codex_context`.
 2. Read the original PDF page through `read_paper_page`.
 3. Compare parsed sections/tables/figures/locators against the original PDF.
-4. Only then trust `get_codex_item`, `retrieve_evidence`, and parsed candidate structure for detailed review.
+4. Only then trust `get_codex_item` and parsed candidate structure for detailed review (`retrieve_evidence` is `EXCLUDED`; use `read_paper_page` for source-backed evidence).
 
 The parsed package is a candidate aid, not a substitute for checking the original PDF.
 
@@ -113,7 +115,7 @@ The `source` and `source_label` fields record the role for that run, for example
 
 `materialize_ai_section_page_fragments` accepts at most 20 opaque fragment IDs/fingerprints, reruns recovery against the stored PDF, and rejects stale, approximate, forged, cross-paper, or cross-section inputs. Newly materialized objects remain unverified candidates and do not unlock the parent section.
 
-`plan_multi_paper_evidence` is read-only. It plans bounded evidence in batches of at most 10 papers and preserves separate writing/citation eligibility. AI Writer uses the equivalent `/api/content-knowledge/writing-plan` endpoint and does not call `/api/writer/draft`.
+`plan_multi_paper_evidence` is read-only. It plans bounded evidence in batches of at most 10 papers and preserves separate writing/citation eligibility. It is currently `EXCLUDED` from the callable single-paper MCP surface; the equivalent `/api/content-knowledge/writing-plan` endpoint is the usable route. AI Writer does not call `/api/writer/draft`.
 
 ## Artifact Gate
 
@@ -132,7 +134,7 @@ When the gate fails, the import records `artifact_precondition_failed` instead o
 - External AI should not trust parsed markdown, split tables, figure crops, or locators without checking the original PDF page first.
 - External AI audit opinions are stored as `external_audit_opinion` candidates with `verification_status=unverified`.
 - Ordinary external AI imports do not mark papers, fields, DFT rows, or citations as final verified truth.
-- The dedicated `ai_verify_content` identity may write `ai_verified` only through `submit_ai_verification_batch`; it cannot write human `verified`.
+- The dedicated `ai_verify_content` identity may write `ai_verified` only through the formal `apply_ai_verification_batch`; it cannot write human `verified`.
 - DFT export remains protected by review, evidence, and locator gates.
 - `review_corrections` should remain reserved for trusted admin or human-review keys.
 - `repair_dft_issues` should remain reserved for a separate primary DFT repair key, not ordinary audit/propose-only keys.

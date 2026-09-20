@@ -9,7 +9,7 @@
 - Ordinary `import_analysis` is a candidate/opinion path. DFT `new_candidate` may materialize only an unverified candidate; ordinary imports do not write final truth or overwrite an earlier writer.
 - For untrusted direct `propose_correction` writes, the server-enforced module-lock scope is only top-level `abstract` and structured `sections`, `mechanism_claims`, and `writing_cards`. Other allowed fields are not universally server-lock-enforced.
 - Table and figure mutations follow their dedicated tool capability/evidence contracts. Figure metadata corrections use evidence-backed `propose_correction` or the corresponding dedicated figure capability.
-- DFT authoritative AI verification uses `get_ai_verification_tasks` under a dedicated `ai_verify_content` identity followed by `submit_ai_verification_batch`; only `exception` enters Owner-session human handling. There is no second model, vote, consensus, or third-AI adjudication.
+- DFT authoritative AI verification uses `get_ai_verification_record_tasks` / `get_ai_verification_tasks` under a dedicated `ai_verify_content` identity followed by the formal `apply_ai_verification_batch` (`submit_ai_verification_batch` is an optional `dry_run=true` preflight); only `exception` enters Owner-session human handling. There is no second model, vote, consensus, or third-AI adjudication.
 
 ## Historical Objective
 

@@ -8,8 +8,8 @@
 
 唯一自动权威验收路径是：
 
-1. 专用 `ai_verify_content` 身份调用只读 `get_ai_verification_tasks`；任务读取页最大 50。
-2. 同一验收身份调用 `submit_ai_verification_batch`；每批硬上限 20。
+1. 专用 `ai_verify_content` 身份调用只读 `get_ai_verification_record_tasks`（DFT 记录级，keyset 分页，用 `next_cursor`）或 `get_ai_verification_tasks`（字段级内容对象，limit+offset）；任务读取页最大 50。
+2. 同一验收身份调用 `apply_ai_verification_batch` 正式落库；每批硬上限 20。`submit_ai_verification_batch(dry_run=true)` 仅作可选预校验，不是正式提交入口。
 3. 服务端重跑 PDF 页、证据文本、精确定位、目标快照、版本、数值/单位与未解决冲突等确定性门禁。
 4. 通过项可写 `ai_verified`，但不能写成人工 `verified`；无法确定处理的 `exception` 才进入 Owner-session 人工队列。
 
@@ -29,7 +29,7 @@
 
 ## AI Writer 与多论文证据计划
 
-AI Writer 只调用只读 `/api/content-knowledge/writing-plan`；MCP 对应入口为 `plan_multi_paper_evidence`。二者按每批最多 10 篇生成有界 evidence plan，不加载所有论文全文，不写数据库，也不调用 `/api/writer/draft`。
+AI Writer 只调用只读 `/api/content-knowledge/writing-plan`；MCP 对应入口 `plan_multi_paper_evidence` 目前 `EXCLUDED`，不在可调用的单篇论文工具面内，需用 HTTP 端点。二者按每批最多 10 篇生成有界 evidence plan，不加载所有论文全文，不写数据库，也不调用 `/api/writer/draft`。
 
 `content_object_gate` 分开给出：
 

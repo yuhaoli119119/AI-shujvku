@@ -1,5 +1,7 @@
 # 离线网页 AI DFT 核验包执行方案
 
+> 历史设计记录。其中 DFT 权威验收路径的表述已过期：正式写入入口现在是 `apply_ai_verification_batch`（`submit_ai_verification_batch` 降为可选 `dry_run=true` 预校验）。当前有效说明见 [Content Review Workflow](../CONTENT_REVIEW_WORKFLOW.md)、[MCP API](../mcp/MCP_API.md)、[AI Task Routing](../mcp/AI_TASK_ROUTING.md)。
+
 ## 目标
 
 在不向网页 AI 暴露 MCP、数据库、服务器工具或完整 PDF 的前提下，按单篇主文献手动导出一个小型 DFT 核验包。网页 AI 只返回结构化审核建议；本地执行 AI 先校验，再通过现有 `import_analysis` 受控入口写回候选和审核意见。
@@ -41,7 +43,7 @@
 - 校验接口只返回 `import_analysis_request`，不创建 run、不写候选、不修改 DFT 数据。
 - 本地执行 AI 复核校验结果后，再通过带认证身份的 MCP/API `import_analysis` 执行。
 - 网页 AI 返回始终只是 proposal/candidate；本地 `import_analysis` 只把它导入候选/审核意见链。即使 DFT `new_candidate` 被物化为未验证行，也不等于最终验收。
-- 自动权威验收由专用 `ai_verify_content` 身份依次调用 `get_ai_verification_tasks` 与 `submit_ai_verification_batch`；确定性门禁无法解决的 exception 才进入 Owner-session 人工处理。普通 `PASS` / `REVISE` / `REJECT` 意见不能替代该路径。
+- 自动权威验收由专用 `ai_verify_content` 身份先读 `get_ai_verification_record_tasks` / `get_ai_verification_tasks`，再经正式入口 `apply_ai_verification_batch` 落库（`submit_ai_verification_batch` 仅作可选 `dry_run=true` 预校验）；确定性门禁无法解决的 exception 才进入 Owner-session 人工处理。普通 `PASS` / `REVISE` / `REJECT` 意见不能替代该路径。
 
 ## 数据库影响
 

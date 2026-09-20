@@ -15,7 +15,7 @@
 - **IDE 后备路径**：若当前 IDE 会话未暴露 MCP 工具，可改走 `literature-ai/backend` 中 `app.mcp.context.mcp_auth_context` + `app.mcp.server` 的仓库内后备路径。
 - **服务暴露**：Docker 默认暴露本机 `8000` Owner 网关，以及 `8080` 只读分享网关；数据库和内部服务不直接暴露到 LAN。
 - **DFT / project-library**：DFT 抽取结果默认只是候选，必须经过证据、审核、材料绑定和导出安全门。
-- **单 AI 权威验收**：`get_ai_verification_tasks` 只读分发待验收对象，`submit_ai_verification_batch` 由一个专用验收身份提交；自动门禁无法确定处理的对象才进入 Owner-session 人工异常队列。
+- **单 AI 权威验收**：`get_ai_verification_record_tasks`（DFT 记录级，keyset）与 `get_ai_verification_tasks`（内容字段级）只读分发待验收对象，`apply_ai_verification_batch` 由专用验收身份正式落库（`submit_ai_verification_batch` 仅 `dry_run=true` 预校验）；自动门禁无法确定处理的对象才进入 Owner-session 人工异常队列。
 - **页片段恢复**：`materialize_ai_section_page_fragments` 只把服务端重新验证的页片段物化为未审核候选，不会解锁父章节或写作资格。
 - **Content Knowledge 与 AI Writer**：Content Knowledge 显示对象级门禁；AI Writer 只读取有界、只读的多论文 evidence plan，每批最多 10 篇，并分别遵守 `can_use_for_writing` 与 `can_use_for_citation`。
 - **网页审核包**：content review bundle v1 已废弃；v2 只接收 proposal，提供 history 与受保护 retention，不提供直接 apply 路径。

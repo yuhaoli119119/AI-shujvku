@@ -89,7 +89,7 @@ DFT 推荐流程：
 3. `get_dft_review_queue` 找到待审核 DFT 候选。
 4. `get_codex_item(item_type="dft_result")` 读取单条 DFT 候选。
 5. `read_paper_page` 核对 PDF 原文页。
-6. 普通 AI 可用 `import_analysis(raw_payload.object_review_audits)` 提交候选意见；专用验收 AI 使用 `submit_ai_verification_batch` 完成验收。
+6. 普通 AI 可用 `import_analysis(raw_payload.object_review_audits)` 提交候选意见；专用验收 AI 先读 `get_ai_verification_record_tasks`（DFT，keyset 分页）或 `get_ai_verification_tasks`（内容），再用 `apply_ai_verification_batch` 正式落库；`submit_ai_verification_batch(dry_run=true)` 只是可选预校验，不是正式写入入口。
 
 补充：
 

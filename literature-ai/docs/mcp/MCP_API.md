@@ -5,7 +5,11 @@
 The default acceptance workflow is single-AI-first. A server-authenticated MCP identity with the dedicated `ai_verify_content` capability may use:
 
 - `get_ai_verification_tasks`: read a bounded task list and current target fingerprints; this tool is read-only.
-- `submit_ai_verification_batch`: submit a configured bounded batch (default 20, hard maximum 20). `dry_run=true` is zero-write; formal mode reruns deterministic PDF-page, evidence-text, exact-locator, target-snapshot, version, numeric/unit and unresolved-conflict checks before writing `ai_verified`, `rejected`, or `exception`.
+- `get_ai_verification_record_tasks`: keyset-paginated reader of per-record DFT field bundles (preferred for mutating DFT work; use `next_cursor`, not offsets).
+- `submit_ai_verification_batch`: preflight validator. `dry_run=true` is zero-write and is the recommended use; the deterministic PDF-page, evidence-text, exact-locator, target-snapshot, version, numeric/unit and unresolved-conflict checks run here.
+- `apply_ai_verification_batch`: **the formal write entry.** Up to 20 decisions per call under one stable caller-supplied `request_id`; the receipt is persisted in the same transaction as the review writes, then committed state is re-read from a new session (`current_readback`). Verify per-item `item_index`/`outcome`/`database_writes`/`errors` — MCP/HTTP success alone does not mean all items passed. `accept`/`defer`/`reject` only; never human `verified`.
+- `finalize_ai_verified_dft_records`: idempotent finalization of DFT audit issues for records whose required fields are all authoritatively verified.
+- `get_ai_verification_batch_receipt`: only for recovering a lost `apply_ai_verification_batch` response — same `paper_id`/`request_id`/identity; never change `request_id` to retry a different payload.
 
 `ai_verified` is not human `verified`. The audit payload records `actor_type=ai`, the authenticated source identity and label, model/agent identifier, capability, policy version, confidence, evidence and locator checks, target fingerprint, decision and time. Ordinary MCP keys, anonymous clients and request-body identity fields cannot create this status. The workflow never calls a second model and never uses AI consensus. Human Owner-session verification remains available only for the exception queue.
 
@@ -107,9 +111,9 @@ The DFT audit center UI is read-only: it is an issue queue, copy surface, and na
 - `review_corrections`: approve or reject pending correction proposals; reserve this for an admin or human reviewer.
 - `review_dft`: optional narrower DFT review capability accepted by DFT verification tools.
 - `repair_dft_issues`: permits `repair_dft_audit_issue` for the primary DFT repair AI only. It does not permit false-positive closure. Do not grant it to ordinary IDE, audit, or propose-only keys.
-- `ai_verify_content`: permits the dedicated authenticated single verifier to list verification tasks and submit bounded verification batches. It is distinct from candidate creation and human exception review.
+- `ai_verify_content`: permits the dedicated authenticated single verifier to read verification tasks (`get_ai_verification_record_tasks` / `get_ai_verification_tasks`) and to submit bounded batches through the formal `apply_ai_verification_batch` (`submit_ai_verification_batch` is the optional `dry_run=true` preflight). It is distinct from candidate creation and human exception review.
 - `export_data`: permits Word/dataset exports only when `LITAI_EXPORTS_ENABLED=true`; `read_papers` no longer implies export.
-- `create_share_links`: permits `create_share_token`; this is independent from read, export, and review capabilities.
+- `create_share_links`: permits `create_share_token` (the token-creation capability; `create_share_token` itself is `EXCLUDED` from the callable paper surface); this is independent from read, export, and review capabilities.
 
 ## Dynamic AI Review Flow
 
@@ -129,13 +133,13 @@ Use this flow when any IDE AI needs to review already parsed literature:
 2. `get_codex_context` for a compact paper bundle with artifact status, sections, figures, tables, structured candidates, evidence locators, warnings, and Markdown.
 3. Read the original PDF or page-derived artifact with `read_paper_page` before trusting parsed sections, tables, figures, or locators for high-risk review.
 4. Optionally call `get_codex_item` for a low-token bundle for one section, figure, table, DFT result, mechanism claim, or writing card.
-5. Optionally call `retrieve_evidence`, `get_paper_knowledge`, `get_review_coverage`, or `get_field_disputes` for targeted checks.
+5. Optionally call `get_review_coverage` or `get_field_disputes` for targeted checks (`retrieve_evidence` / `get_paper_knowledge` are `EXCLUDED`; use `get_codex_context` / `get_codex_item`).
 6. Write the assigned AI's paper-level or object-level audit back through `import_analysis`.
 
 For DFT rows, chart values, and figure/table-based claims, the expected behavior is:
 
 1. The dedicated single verifier re-reads the original PDF and checks the exact locator, current target version/fingerprint, value, unit, entity/material binding, and unresolved conflicts.
-2. It submits one of `accept`, `correct`, `reject`, or `exception` through `submit_ai_verification_batch`.
+2. It submits one of `accept`, `defer`, or `reject` through `apply_ai_verification_batch` (the formal write entry with a stable `request_id`; `submit_ai_verification_batch(dry_run=true)` is an optional zero-write preflight).
 3. Accepted and safely corrected items become `ai_verified`; rejected items remain blocked; only `exception` items require a human.
 
 Paper-level audit payload example:
@@ -279,7 +283,7 @@ Use `import_analysis` through the same external candidate and verification flow.
 }
 ```
 
-Automated settlement uses the one designated `ai_verify_content` identity and `submit_ai_verification_batch`. Missing PDF anchors, ambiguous identities, or multiple plausible sample matches remain exceptions and are never auto-merged. No second or third AI lane exists.
+Automated settlement uses the one designated `ai_verify_content` identity and `apply_ai_verification_batch` (with `submit_ai_verification_batch(dry_run=true)` as an optional preflight). Missing PDF anchors, ambiguous identities, or multiple plausible sample matches remain exceptions and are never auto-merged. No second or third AI lane exists.
 
 ## Artifact Preconditions
 
@@ -311,9 +315,8 @@ Reader and AI review tools:
 - `get_paper`
 - `get_codex_context`
 - `get_codex_item`
-- `get_paper_knowledge`
-- `retrieve_evidence`
 - `read_paper_page`
+- `render_paper_page`
 - `get_review_coverage`
 - `get_field_disputes`
 - `get_review_conflicts`
@@ -321,9 +324,21 @@ Reader and AI review tools:
 - `append_note`
 - `propose_correction`
 - `get_ai_verification_tasks`
+- `get_ai_verification_record_tasks`
 - `submit_ai_verification_batch`
+- `apply_ai_verification_batch`
+- `finalize_ai_verified_dft_records`
 - `materialize_ai_section_page_fragments`
-- `plan_multi_paper_evidence`
+
+Chart review (V2, current):
+
+- `get_paper_review_task`: read object versions, `task_fingerprint`, `prompt_version`, figure-type registry and the typed batch schema for one main paper plus its linked SI.
+- `apply_paper_review_batch`: the single formal chart-review write per paper (stable `request_id`; per-item savepoints; inspect the applied/unchanged/held/rejected lists and `authoritative_readback`).
+- `get_paper_review_receipt`: recovery only, after a lost `apply_paper_review_batch` response.
+- `get_figure_type_registry`, `search_figures`, `get_figure_image`.
+- `get_chart_review_task`, `review_figure`, `recrop_figure`, `create_figure_from_bbox`, `create_table`, `update_table`, `merge_table`, `delete_table`, `resolve_chart_review_actions`, `finalize_chart_review` are the v1/single-object entries; they remain callable but do not replace the V2 batch submission.
+
+> `get_paper_knowledge`, `retrieve_evidence`, `compare_papers`, `plan_multi_paper_evidence` and `scan_duplicate_dois` are `EXCLUDED` (cross-paper or writing-oriented, outside single-paper processing); use `get_codex_context` / `get_codex_item` for paper context.
 
 `get_review_coverage` reports authoritative `content_object_gate` totals for
 `sections`, `mechanism_claims`, and `writing_cards`: `total`,
@@ -358,24 +373,25 @@ Parsing tools:
 
 - `scan_local_pdfs`
 - `ingest_pdf_batch`
-- `parse_paper`
 - `get_parse_status`
 
 Reviewer and admin tools:
 
 - `get_correction_queue`
 - `get_correction_detail`
-- `approve_correction`
-- `reject_correction`
-- `verify_dft_result`
-- `reject_dft_result`
+- `approve_corrections_batch`
+- `reject_corrections_batch`
+- `apply_ai_verification_batch`
 - `propose_dft_result_correction`
 - `get_dft_review_queue`
+
+> `approve_correction` / `reject_correction` / `verify_dft_result` / `reject_dft_result` are `EXCLUDED` compatibility stubs and are not part of the callable paper surface.
 
 `verify_dft_result`, `verify_dft_results_batch`, and the compatibility
 `auto_finalize` option never create final verified state for an MCP identity.
 They report the request as requiring `ai_verify_content`; the designated single
-AI must use `submit_ai_verification_batch`. Owner-session review is reserved for
+AI must use `apply_ai_verification_batch` (after the read-only
+`get_ai_verification_record_tasks`). Owner-session review is reserved for
 the exception queue.
 
 ## Collaboration Rules
@@ -407,4 +423,4 @@ read through `get_ai_verification_tasks(target_type="section_page_fragments")` a
 
 ### Multi-paper evidence planning and AI Writer
 
-`plan_multi_paper_evidence` and `/api/content-knowledge/writing-plan` are bounded, read-only evidence planners. They accept at most 10 papers per batch, do not load all paper full text, and do not write review state. `content_object_gate` keeps `can_use_for_writing` separate from `can_use_for_citation`: writing-only evidence may appear in writing context but not citation plans, while blocked/unreviewed content appears in neither. AI Writer calls only `/api/content-knowledge/writing-plan`, never `/api/writer/draft`.
+`plan_multi_paper_evidence` (the MCP view of `/api/content-knowledge/writing-plan`) is a bounded, read-only evidence planner. It accepts at most 10 papers per batch, does not load all paper full text, and does not write review state. Note it is currently `EXCLUDED` from the callable single-paper MCP surface, so the HTTP endpoint is the usable route. `content_object_gate` keeps `can_use_for_writing` separate from `can_use_for_citation`: writing-only evidence may appear in writing context but not citation plans, while blocked/unreviewed content appears in neither. AI Writer calls only `/api/content-knowledge/writing-plan`, never `/api/writer/draft`.

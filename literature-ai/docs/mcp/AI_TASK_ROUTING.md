@@ -8,6 +8,8 @@ Ordinary AI output remains candidate or audit evidence. Only the dedicated, auth
 
 ## Common Routing Rules
 
+> **Callable-surface note (2026-09-16):** `retrieve_evidence`, `get_paper_knowledge`, `compare_papers`, `plan_multi_paper_evidence` and `scan_duplicate_dois` are listed in the routing recipes below for historical continuity, but they are `EXCLUDED` from the current callable paper surface (`backend/app/mcp/tool_surface.py`). Use `get_codex_context` / `get_codex_item` for paper context and `read_paper_page` for source-page evidence instead. Chart review now runs through the V2 flow (`get_paper_review_task` → `apply_paper_review_batch`).
+
 - Start with `query_papers` unless the user already provided a `paper_id`.
 - Use `get_codex_context` for the paper-level context bundle.
 - For high-risk review, use `read_paper_page` to compare the parsed bundle with the original PDF before trusting parsed sections, tables, figures, or locators.
@@ -18,7 +20,7 @@ Ordinary AI output remains candidate or audit evidence. Only the dedicated, auth
 - Use `propose_correction` or `propose_dft_result_correction` for suggested data changes.
 - For an untrusted direct `propose_correction`, acquire a module write lock when the target is top-level `abstract` or structured `sections`, `mechanism_claims`, or `writing_cards`. Other allowed metadata fields such as `title`, `year`, `journal`, and `authors` are not universally server-lock-enforced; table and figure tools follow their dedicated capability/evidence contracts.
 - Use `release_module_write_lock` after the assigned lock-protected write task is complete.
-- Route normal acceptance through `get_ai_verification_tasks` and `submit_ai_verification_batch` with a dedicated `ai_verify_content` key. Reserve legacy approve/reject tools for explicit exception handling.
+- Route normal acceptance through `get_ai_verification_record_tasks` (bounded keyset reader) and the formal `apply_ai_verification_batch` under a dedicated `ai_verify_content` key. `submit_ai_verification_batch` is the optional `dry_run=true` preflight, not the formal write entry. Reserve legacy approve/reject tools for explicit exception handling.
 
 Recommended capability set for ordinary IDE AI keys:
 
@@ -70,7 +72,7 @@ Repair worker: candidate repair only; it cannot grant ai_verified
 Other worker: a different paper or non-overlapping module
 ```
 
-## Command: "通过 MCP 解析文章"
+## Command: "éčŋ MCP č§ĢææįŦ "
 
 Meaning:
 
@@ -103,7 +105,7 @@ Forbidden:
 
 Do not mark parsed output verified. Do not invent missing metadata when parser/provider evidence is absent.
 
-## Command: "核验 DFT 数据"
+## Command: "æ ļéŠ DFT æ°æŪ"
 
 Meaning:
 
@@ -117,7 +119,7 @@ Recommended tool order:
 3. `read_paper_page` for the original PDF page(s) that contain the candidate table, section, or figure. This is mandatory before trusting parser structure for high-risk review.
 4. `get_dft_review_queue` for rows needing review.
 5. `get_codex_item` with `item_type="dft_result"` for each target row.
-6. `retrieve_evidence` for targeted evidence checks when needed.
+6. `read_paper_page` for targeted page-text evidence checks (`retrieve_evidence` is `EXCLUDED`; it is cross-paper semantic search).
 7. `propose_dft_result_correction` for concrete field changes, or `import_analysis` for a paper-level or object-level DFT audit opinion.
 
 Required capability:
@@ -169,7 +171,7 @@ Forbidden:
 Do not call final verification tools with an ordinary IDE AI key. Do not unlock ML export from external AI review alone. Do not infer precise numeric values from plots unless the value is explicitly readable in source evidence.
 Do not trust parsed markdown or split tables without checking the original PDF page first.
 
-## Command: "核验图片"
+## Command: "æ ļéŠåūį"
 
 Meaning:
 
@@ -207,7 +209,7 @@ Forbidden:
 Do not treat figure crops as exact evidence without checking page/caption context. Do not estimate hidden or unreadable values from image trends.
 Do not let parsed figure crops replace the original PDF page review.
 
-## Command: "核验写作卡"
+## Command: "æ ļéŠåä―åĄ"
 
 Meaning:
 
@@ -219,9 +221,9 @@ Recommended tool order:
 1. `query_papers` with `has_writing_cards=true` or the supplied `paper_id`.
 2. If the assigned AI will directly apply writing-card or section fixes, call `acquire_module_write_lock` with `module_name="content"` or `module_name="writing_cards"`.
 3. `get_codex_context` to inspect writing cards and knowledge candidates.
-4. `get_paper_knowledge` for mechanism, gap, method, and writing logic candidates.
+4. `get_codex_item` for mechanism, gap, method, and writing logic candidates (`get_paper_knowledge` is `EXCLUDED`).
 5. `get_codex_item` with `item_type="writing_card"` for focused checks.
-6. `retrieve_evidence` for source-backed support.
+6. `read_paper_page` for source-backed support.
 7. `append_note` or `import_analysis` for candidate review output; use `propose_correction` with a valid lock for an authorized writing-card edit.
 8. `release_module_write_lock` when the direct write task is complete.
 
@@ -245,7 +247,7 @@ Forbidden:
 
 Do not generate final bibliography or final citation-ready claims from unverified writing cards.
 
-## Command: "核验机制 claim"
+## Command: "æ ļéŠæšåķ claim"
 
 Meaning:
 
@@ -256,9 +258,9 @@ Recommended tool order:
 
 1. `query_papers` or use the provided `paper_id`.
 2. `get_codex_context` to inspect mechanism candidates.
-3. `get_paper_knowledge` with mechanism-oriented categories when useful.
+3. `get_codex_item` with mechanism-oriented categories when useful (`get_paper_knowledge` is `EXCLUDED`).
 4. `get_codex_item` with `item_type="mechanism_claim"`.
-5. `retrieve_evidence` or `read_paper_page` for support checks.
+5. `read_paper_page` for support checks.
 6. Use `append_note` or `import_analysis` for candidate observations; use lock-protected `propose_correction` only when an actual mechanism-claim edit is authorized.
 
 Required capability:
@@ -279,7 +281,7 @@ Forbidden:
 
 Do not promote mechanistic interpretation to final truth without direct evidence and the authoritative object gate. `ai_verified` and human `verified` must remain distinct.
 
-## Command: "核验表格"
+## Command: "æ ļéŠčĄĻæ ž"
 
 Meaning:
 
@@ -292,7 +294,7 @@ Recommended tool order:
 2. `get_codex_context` with enough `max_tables`.
 3. `read_paper_page` for the original PDF page that contains the table. This is mandatory before trusting parser table split or cell alignment.
 4. `get_codex_item` with `item_type="table"` for each target table.
-5. `retrieve_evidence` for table-derived structured rows.
+5. `read_paper_page` for table-derived structured rows.
 6. Use `update_table`, `create_table`, `merge_table`, or `delete_table` for table object mutations; use `import_analysis` only for paper-level or object-level table audit opinions. Use `propose_dft_result_correction` for DFT candidates derived from table evidence.
 
 Required capability:
@@ -314,7 +316,7 @@ Forbidden:
 Do not apply table mutations through `import_analysis`. Do not create verified values from ambiguous table text.
 Do not trust parsed table structure without checking the original PDF page first.
 
-## Command: "导入外部 AI 审核意见"
+## Command: "åŊžåĨåĪéĻ AI åŪĄæ ļæč§"
 
 Meaning:
 

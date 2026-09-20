@@ -1,21 +1,21 @@
 # MCP 单篇论文执行指令
 
-> 面向执行 AI 的单篇论文处理指令，基于当前已上线 **74 个** MCP 工具（生产端点 `https://dft.researchlife.top/mcp`，Bearer key 鉴权）。
-> 工具名与参数核对自生产真实 schema（`tools/list` 拉取于 2026-09-12，全量 74 工具 inputSchema 已存档）；本轮仅修改本说明文件，未开发/未发布/未运行生产写入。
+> 面向执行 AI 的单篇论文处理指令，基于当前已上线 MCP 工具**论文处理面 69 个**（生产端点 `https://dft.researchlife.top/mcp`，Bearer key 鉴权）。
+> 工具名与参数核对自生产真实 schema 与仓库 `backend/app/mcp/tool_contracts.json`（契约 84 项 − `app/mcp/tool_surface.py` 的 `EXCLUDED` 15 项 = 论文处理面 69 项），并与实际会话暴露的工具列表逐项一致（核对于 2026-09-16）；本轮仅修改本说明文件，未开发/未发布/未运行生产写入。
 > 固定流程：**选择论文 → PDF解析确认 → 图表(figure+table)审核 → DFT提取 → 证据核验 → 单篇去重/归类/标准化 → 任务导出 → 文件读取与验收**。
 > 标注规则：[已验证] = 本轮或既有调用记录已端到端跑通（如 R5/R16/R19 隔离与生产调用）；"返回字段映射待补证" = 工具可用（部分已有生产执行证据），但精确响应字段名未在已引用证据中找到，正式使用时按响应实际读取，不推断工具不可用、不重写生产验证。
 
 ## 通用铁律（全流程适用）
 
 1. **身份重算只改派生身份字段**（`identity_version`/`subject_key`/`observation_key`/`identity_payload` + 审计），**不等于科学去重完成**；执行 AI 用 `review_paper_identity` + `read_paper_page` 按存储证据核查，确需人工裁决的项单列（见末尾"缺口"）。
-2. **纠正提案 ≠ 应用成功**：`propose_dft_result_correction` 只创建 pending 提案；须 `approve_correction` 才落库。
-3. **字段核验不改原始科学值**：`apply_ai_verification_batch` 只写审核状态（accept/defer/reject），**永不改原始 DFTResult 字段**（value/unit/材料等）。科学字段更正按问题类型使用既有受控入口——`propose_dft_result_correction → approve_correction`（提案+批准，保留原始数据）或 `repair_dft_audit_issue(action=update_dft_fields)`（审计问题快速路径，需 DFT 写身份）等——遵守各入口的证据、权限、锁与回读要求，**不声称只有一条路径**。
+2. **纠正提案 ≠ 应用成功**：`propose_dft_result_correction` 只创建 pending 提案；须 `approve_corrections_batch(correction_ids=[...])` 才落库（`approve_correction` 单条入口已在论文处理面排除）。
+3. **字段核验不改原始科学值**：`apply_ai_verification_batch` 只写审核状态（accept/defer/reject），**永不改原始 DFTResult 字段**（value/unit/材料等）。科学字段更正按问题类型使用既有受控入口——`propose_dft_result_correction → approve_corrections_batch`（提案+批量批准，保留原始数据）或 `repair_dft_audit_issue(action=update_dft_fields)`（审计问题快速路径，需 DFT 写身份）等——遵守各入口的证据、权限、锁与回读要求，**不声称只有一条路径**。
 4. **正式提交以 `apply_ai_verification_batch` 为准**：它在同事务持久化 `request_id` 回执并新会话回读存储审核状态（逐项隔离校验）。**正常批次只调一次** `apply_ai_verification_batch`，返回即含独立真实回读——不要先 dry-run、再 apply、再逐项查询。响应丢失/结果不明时按**原 `request_id`** 调 `get_ai_verification_batch_receipt` 查回执（鉴权身份+paper_id+request_id 须匹配原 apply）；**仅修正返回的坏项时才用新 `request_id`**，禁止换新 `request_id` 盲目重交整批。`submit_ai_verification_batch(dry_run=true)` 仅可选预校验，不是正式提交入口。
 5. **不确定数据不进入训练集**：blocked/来源不明/单位不明/身份不完整的行不进导出（`export_paper_ml_dataset` 默认 `ready_only=true` 只含 eligible）。
-6. **不使用已禁用/兼容桩入口**：`review_paper`、`verify_dft_result`、`verify_dft_results_batch`、`reject_dft_result`、`reject_dft_results_batch`（见末尾"排除入口"）。保留服务器完整 74 工具集合，不改全局配置或其他客户端。
+6. **不使用已禁用/兼容桩入口**：`review_paper`、`verify_dft_result`、`verify_dft_results_batch`、`reject_dft_result`、`reject_dft_results_batch` 等共 15 个 `EXCLUDED` 入口（见末尾"排除入口"）。保留服务器完整工具集合，不改全局配置或其他客户端。
 7. **标准化 ≠ 覆盖原始值/单位**：`review_paper_identity.standardization` 只给问题与规范单位建议；改写必须走受控更正入口（见铁律 3），保留原始数据，不自动覆盖。
 8. 逐字引文（`evidence_text`/`evidence_quote`）由执行 AI 用 `read_paper_page` 读取并核对真实 PDF 证据，**不代表必须人工操作**。
-9. **条件操作不是每篇必跑**：`merge_table`/`delete_table`/`create_figure_from_bbox`/`recrop_figure`/身份重算 `apply_paper_identity_rematerialization`/纠正应用 `approve_correction`/`repair_dft_audit_issue` 等，仅在发现对应问题且已获任务授权时才执行；下方工具清单是可用集合，**不是逐个调用清单**。
+9. **条件操作不是每篇必跑**：`merge_table`/`delete_table`/`create_figure_from_bbox`/`recrop_figure`/身份重算 `apply_paper_identity_rematerialization`/纠正应用 `approve_corrections_batch`/`repair_dft_audit_issue` 等，仅在发现对应问题且已获任务授权时才执行；下方工具清单是可用集合，**不是逐个调用清单**。
 10. 所有 `paper_id` 为 UUID 字符串；证据定位用 `evidence_payload`（`table_id` + 0-based `source_row_index`/`source_column_index`，或逐字 `evidence_text` + `page`）。
 
 ---
@@ -40,29 +40,34 @@
   - **未入库**（论文不在库）：无单篇按 `paper_id` 触发解析的 MCP 入口。须先将 PDF 放到服务器侧目录（非 MCP 操作），再 `ingest_pdf_batch(folder_path, recursive=true, limit=20, only_unparsed=true)` 按文件夹批量入库。
   - **已入库但解析未完成/失败**：`get_parse_status(job_id)` 按 `job_id` 查解析作业（**无 paper_id 级解析状态入口**；论文级状态见 `get_paper_processing_status`）。解析未完成则停止后续阶段。
 - **blocked/缺口**：无单篇解析触发入口是已知 MCP 缺口（见末尾）。
+- **注意**：`stages.figure_review` 的 `stale`/`unresolved_count` 来自 v1 图表快照；是否真正完成以阶段 3 的 V2 任务（`get_paper_review_task` 的 `status.figure_reading_coverage` 与 `dft_gate_allowed`）为准，两者口径不同。
 
 ## 阶段 3 · 图表（figure + table）审核
 
-**首选（读取任务）**：`get_chart_review_task(paper_id, run_id?)` — 同时覆盖 figure 与 table 的图表审核任务（含 `unresolved_actions`）。
+> **当前生产流程是 V2**（prompt_version `paper-review-v2-2026.09.16.2`，注册表 `figure-types-2026.09.16-v1`）。v1 的 `get_chart_review_task` + `review_figure` + `finalize_chart_review` 流程已被 V2 正式批量写入取代；v1 入口仍可读（用于查看遗留 `unresolved_actions`），但**不得**再把 v1 单独裁决当作图表阶段完成。
+
+**首选（读取 V2 任务）**：`get_paper_review_task(paper_id)` — 返回主文 + 显式关联 SI 的对象版本、任务指纹、标准图表类型注册表、当前 `prompt_version` 与完整扁平 schema。
 - **参数来源**：`paper_id` 同前。
-- **成功判据**：**不能**仅凭"无 `unresolved_actions`"或"某张图 verified"判定全部图表完成；须逐个核对所有 in-scope figure 与 table 的证据。证据不足保持未解决（`needs_attention`），不为进入下一阶段强制完成。
+- **成功判据**：`schema_version=paper_review_task_v2`；对每个 figure/table 取 `object_version`；整体取 `task_fingerprint`。`status.figure_reading_coverage` 显示 main 模块解读覆盖（如 `0/6`）。
 - **写库/文件**：读不写。
 
-**figure 工具**：
-- `get_figure_image(paper_id, figure_id)` — 取当前裁剪图为 MCP 图像块（只读；`paper_id` 须拥有 `figure_id`，含显式关联 SI）。
-- `review_figure(figure_id, verdict, reasoning, figure_role?, content_summary?, key_elements?, crop_status?)` — 写图表审核结论；verdict ∈ {verified, needs_attention, incorrect}；非 DFT 元数据可在核对 PDF/图后直接更新。
-- `create_figure_from_bbox(paper_id, page, caption, figure_label?, figure_role?, content_summary?, key_elements?, strategy="ai_bbox", bbox?)` — 解析漏登记图表时新建；`strategy="full_page"` 当 bbox 不确定。
-- `recrop_figure(figure_id, strategy="full_page", new_bbox?)` — 重裁；`ai_bbox` 须先本地 PyMuPDF 验证。
+**V2 正式写入**：`apply_paper_review_batch(paper_id, request_id, task_fingerprint, figure_actions?, table_actions?, figure_readings?, final_state?, notes?)`
+- **参数来源**：`task_fingerprint` 与逐对象 `expected_object_version` 均取自 `get_paper_review_task`；`request_id` 由调用方生成（8–64 字符，`^[A-Za-z0-9._:-]+$`）。
+- **figure_actions.action** ∈ {KEEP, UPDATE, RECROP, COMPOSE_PAGES, CREATE, DELETE_FALSE_POSITIVE, HOLD}；参考文献列表/页眉/出版社标志/CrossMark 等版面碎片用 `DELETE_FALSE_POSITIVE`；同页裁图问题用 `RECROP`；跨页同一逻辑图用 `COMPOSE_PAGES`（按 `pages` 顺序给 `bbox_norm`）；数据不足用 `HOLD` 但继续处理其他有效项。
+- **figure_readings** 每项必填 `summary_zh`、`detailed_explanation_zh`、`evidence_locators`（≥1，含 `quote`+`page` 或 `visual_observation`）、`typing`（`figure_type_primary`/`figure_types`/`type_confidence`/`type_evidence`）。**标准类型不得只按标题关键词猜测**；`panel_types` 记录了子图时 `subfigures` 必须逐个 label 一一对应并写非空中文 `description`，禁止只写 "(a)"、"(b)" 或用 "(a-b)" 代替真实子图。
+- **table_actions.action** ∈ {KEEP, UPDATE, CREATE, DELETE_FALSE_POSITIVE, HOLD}；`UPDATE` 需给证据。
+- **成功判据**：一次论文**只正式调用一次**；返回按 savepoint 分组的 `applied`/`unchanged`/`held`/`rejected` 四类结果 + `authoritative_readback`。**必须检查四类结果与权威回读**，不得把 HTTP/MCP 成功当作全部写入成功。
+- **重试/丢失**：正常响应直接看 `authoritative_readback`；**仅**响应超时或丢失时才用原 `request_id` 调 `get_paper_review_receipt(paper_id, request_id)`，禁止换新 `request_id` 重交不同载荷。
+- **写库/文件**：写 figure/table 对象、标准类型与中文解读 + 审计。
 
-**table 工具**（与 figure 并行覆盖）：
-- `create_table(paper_id, table, reason, evidence_payload)` — 新建漏登记表格；`table` 可含 `caption`/`markdown_content`/`page`/`extraction_source`/`prov`。
-- `update_table(paper_id, table_id, updates, reason, evidence_payload)` — 更新表格证据字段（`caption`/`markdown_content`/`page`/`extraction_source`/`prov`）。
-- `merge_table(paper_id, source_table_id, target_table_id, reason, evidence_payload, target_updates?, target_markdown_content?)` — 合并源表到已完成目标表（源表删除）。
-- `delete_table(paper_id, table_id, reason, evidence_payload)` — 删无效/重复表（与审计原子提交）。
+**辅助只读入口**：
+- `get_figure_type_registry()` — 版本化标准图表类型注册表（稳定 key/中文名/双语别名/父类）。
+- `search_figures(query?, figure_type?, paper_id?, year?, material_system?, catalyst?, dft_condition?)` — 按标准类型或中英别名检索整图与复合图子图类型。
+- `get_figure_image(paper_id, figure_id)` — 取当前裁剪图为 MCP 图像块（`paper_id` 须拥有 `figure_id`，含显式关联 SI）。
+- `render_paper_page(paper_id, page, dpi?)` — 渲染真实 PDF 页为图像，用于裁图/版式核对。
 
-**收尾**：`resolve_chart_review_actions(paper_id, review_result, run_id?, dry_run=false)` 批量解决图表审核动作（返回剩余 `unresolved_actions`）；全部 figure+table 核对 PDF 后 `finalize_chart_review(paper_id, review_result?, run_id?, dry_run=false)`。
-- **写库/文件**：`review_figure`/`create_figure_from_bbox`/`recrop_figure`/`create_table`/`update_table`/`merge_table`/`delete_table`/`resolve_chart_review_actions`/`finalize_chart_review` 写库（图表对象与审核状态）+审计。
-- **blocked**：缺对象 → 用 `create_figure_from_bbox`/`create_table` 补；证据不足 → `needs_attention`，不伪造 verified。
+**单对象工具（条件执行，非每篇必跑）**：`review_figure` / `recrop_figure` / `create_figure_from_bbox` / `update_table` / `create_table` / `merge_table` / `delete_table` 仍可用于单对象修复；`resolve_chart_review_actions` / `finalize_chart_review` 属 v1 入口，仅在处理遗留 v1 未解决动作时使用，**不能替代 V2 批量提交**。
+- **blocked**：缺对象 → `create_figure_from_bbox`/`create_table` 补；证据不足 → `HOLD`，不伪造 verified。
 
 ## 阶段 4 · DFT 提取（新候选物化 + 审核任务读取）
 
@@ -76,7 +81,7 @@
 
 **对既有 run 重算**：`apply_analysis_review_rules(run_id, reviewer?, write_lock_token?)` — 对 `auto_apply_review_rules=false` 导入的 run 物化 object_review_audit 候选，或新增候选后重算。
 
-**审计问题快速修复（替代/补充路径，条件执行）**：`repair_dft_audit_issue(issue_id, action, repair_payload, reason, evidence_payload)` — actions ∈ {create_missing_dft, update_dft_fields, link_existing_duplicate, mark_needs_user_decision}（需 DFT 写身份）。仅在审计问题驱动且获授权时用；与 `propose_dft_result_correction→approve_correction` 是不同受控路径（见铁律 3）。
+**审计问题快速修复（替代/补充路径，条件执行）**：`repair_dft_audit_issue(issue_id, action, repair_payload, reason, evidence_payload)` — actions ∈ {create_missing_dft, update_dft_fields, link_existing_duplicate, mark_needs_user_decision}（需 DFT 写身份）。仅在审计问题驱动且获授权时用；与 `propose_dft_result_correction→approve_corrections_batch` 是不同受控路径（见铁律 3）。
 
 **SI 拥有候选生命周期**：`resolve_supplementary_dft_candidate(main_paper_id, support_candidate_id, status, reason?, canonical_dft_result_id?)` — status ∈ {ignored, replaced, written_back, needs_human}；replaced/written_back 须给 `canonical_dft_result_id`。
 
@@ -124,11 +129,11 @@
 - **成功判据**：服务端按记录重算分类与校验结论；拒绝覆盖既有不同归属；要求记录已通过证据核验；幂等；`dry_run=true` 零写。**已有生产应用证据**：R5 `assign_dft_reaction_label(dry_run=false)×3` → 3/3 `applied`，审计 `assign_dft_reaction_label` 28→31（即 28+3 条生产应用）。精确逐项响应字段映射——返回字段映射待补证。
 - **写库/文件**：写 `reaction_type`/`reaction_validation_status`。**这是反应标签归类入口，不等于全部性能分类完成。**
 
-**字段更正（标准化/数值/单位/材料，保留原始数据）**：`propose_dft_result_correction(paper_id, dft_result_id, field_name, proposed_value, reason, confirm_correction_proposal, evidence_payload?)` → `approve_correction(correction_id, write_lock_token?)`
-- **参数来源**：`dft_result_id`/`field_name` 取自 `review_paper_identity.standardization.{unit_mismatch,out_of_scope}` 或核验问题；`evidence_payload` 含 `table_id`+行/列索引或逐字引文+页码。
-- **成功判据**：`propose_*` 返回 pending `correction_id`（**提案 ≠ 应用**）；`approve_correction` 应用后落库。**不自动改写**，证据不足保持原值；标准化是建议，不覆盖原始值/单位。[已验证]
-- **写库/文件**：`approve_correction` 应用更正；顶层结构/机制/写作卡字段需 `write_lock_token`（`acquire_module_write_lock` 取得）。
-- **备用**：`reject_correction(correction_id, reason?)` 拒提案。
+**字段更正（标准化/数值/单位/材料，保留原始数据）**：`propose_dft_result_correction(paper_id, dft_result_id, field_name, proposed_value, reason, confirm_correction_proposal, evidence_payload?)` → `approve_corrections_batch(correction_ids=[...])`
+- **参数来源**：`dft_result_id`/`field_name` 取自 `review_paper_identity.standardization.{unit_mismatch,out_of_scope}` 或核验问题；`evidence_payload` 含 `table_id`+行/列索引或逐字引文+页码。先 `get_correction_queue`/`get_correction_detail` 复核 pending 提案。
+- **成功判据**：`propose_*` 返回 pending `correction_id`（**提案 ≠ 应用**）；`approve_corrections_batch` 逐项跳过非 pending/失败项并回报后落库。**不自动改写**，证据不足保持原值；标准化是建议，不覆盖原始值/单位。
+- **写库/文件**：`approve_corrections_batch` 应用更正；顶层结构/机制/写作卡字段需 `write_lock_token`（`acquire_module_write_lock` 取得，用完 `release_module_write_lock`）。
+- **备用**：`reject_corrections_batch(correction_ids=[...], reason?)` 拒提案（单条 `approve_correction`/`reject_correction` 已在论文处理面排除）。
 
 **只读辅助**：`get_dft_audit_issues(paper_id, statuses?, issue_types?, limit=50, cursor?, sort_direction="desc")`（审计问题队列，只读不修复）；`get_review_conflicts(paper_id, target_type?, target_id?, field_name?, include_non_conflicts=false, limit=200)`（字段级冲突聚合，只读不下裁决）；`append_note(paper_id, content, field_name?, page?, section_title?, quoted_text?)`（附共享评审备注）。
 - **blocked**：身份 incomplete / 字段冲突 manual+evidence_insufficient / reaction_type 无证据 → 保持未定，不进训练集，不阻塞其他有效行。
@@ -140,7 +145,7 @@
 - **成功判据**：`counts.exported_rows` 为该 task 实际训练行数；`downloads.artifact.{artifact_id, expires_at, formats.{csv,json,manifest}.{byte_count, sha256}}`。[已验证]
 - **写库/文件**：`export_paper_ml_dataset` 在受控存储生成 4 个产物文件（dataset.csv/json + manifest.json + artifact.json，TTL 默认 24h），机会式清理本论文名下已过期产物（不可恢复）。**不确定数据不进入训练集**。
 - **关键口径**：`evidence_gate_eligible`（证据闸门可导出候选数，导出安全层面）**≠** `counts.exported_rows`（该 task 实际训练行数）。
-- **备用**：`export_ml_dataset`（全库 v2 旧版，无 task 参数，非本流程首选）。
+- **备用**：无（全库 v2 旧版 `export_ml_dataset` 已列入 `EXCLUDED`，不作为任何流程入口）。
 - **blocked**：`exported_rows=0` 表示该 task 无就绪行（不伪造数据）；换 task 或回前序阶段补证据。
 
 ## 阶段 8 · 文件读取与验收
@@ -167,16 +172,18 @@
 
 ---
 
-## 工具清单（正文与清单一致；合计 74 在线，本指令引用如下）
+## 工具清单（论文处理面 69 = 84 契约 − 15 排除；本指令引用如下）
 
-**主流程首选（38）**：
-`query_papers`、`get_paper`、`get_paper_processing_status`、`get_chart_review_task`、`get_figure_image`、`review_figure`、`create_figure_from_bbox`、`recrop_figure`、`create_table`、`update_table`、`merge_table`、`delete_table`、`resolve_chart_review_actions`、`finalize_chart_review`、`get_dft_review_task`、`read_paper_page`、`import_analysis`、`apply_analysis_review_rules`、`repair_dft_audit_issue`、`resolve_supplementary_dft_candidate`、`get_ai_verification_record_tasks`、`get_ai_verification_tasks`、`submit_ai_verification_batch`、`apply_ai_verification_batch`、`finalize_ai_verified_dft_records`、`review_paper_identity`、`apply_paper_identity_rematerialization`、`get_dft_audit_issues`、`get_review_conflicts`、`assign_dft_reaction_label`、`propose_dft_result_correction`、`approve_correction`、`reject_correction`、`append_note`、`list_ml_export_tasks`、`export_paper_ml_dataset`、`read_ml_export_artifact`、`get_ai_verification_batch_receipt`。
+**主流程引用（48）**：
+`query_papers`、`get_paper`、`get_paper_processing_status`、`get_paper_review_task`、`apply_paper_review_batch`、`get_paper_review_receipt`、`get_figure_type_registry`、`search_figures`、`get_figure_image`、`render_paper_page`、`get_chart_review_task`、`review_figure`、`create_figure_from_bbox`、`recrop_figure`、`resolve_chart_review_actions`、`finalize_chart_review`、`create_table`、`update_table`、`merge_table`、`delete_table`、`get_dft_review_task`、`read_paper_page`、`import_analysis`、`apply_analysis_review_rules`、`repair_dft_audit_issue`、`resolve_supplementary_dft_candidate`、`get_ai_verification_record_tasks`、`get_ai_verification_tasks`、`submit_ai_verification_batch`、`apply_ai_verification_batch`、`get_ai_verification_batch_receipt`、`finalize_ai_verified_dft_records`、`review_paper_identity`、`apply_paper_identity_rematerialization`、`get_dft_audit_issues`、`get_review_conflicts`、`assign_dft_reaction_label`、`propose_dft_result_correction`、`approve_corrections_batch`、`reject_corrections_batch`、`get_correction_queue`、`get_correction_detail`、`acquire_module_write_lock`、`release_module_write_lock`、`append_note`、`list_ml_export_tasks`、`export_paper_ml_dataset`、`read_ml_export_artifact`。
 
-**条件入口（3）**：`ingest_pdf_batch`（新论文入库，按服务器侧文件夹）、`get_parse_status`（按 `job_id` 查解析作业，非论文级）、`export_ml_dataset`（全库 v2 旧版，非首选）。
+**条件入口（2）**：`ingest_pdf_batch`（新论文入库，按服务器侧文件夹）、`get_parse_status`（按 `job_id` 查解析作业，非论文级）。
 
-**排除旧入口（5）**：`review_paper`（已禁用）+ `verify_dft_result`、`verify_dft_results_batch`、`reject_dft_result`、`reject_dft_results_batch`（四个旧 verify/reject 兼容桩）。
+**领域专用/辅助（19，非单篇主流程首选）**：`get_codex_context`、`get_codex_item`、`scan_local_pdfs`、`get_dft_review_queue`、`get_field_disputes`、`list_notes`、`propose_correction`、`repair_dft_audit_issues_batch`、`get_review_coverage`、`get_figure_reading_context`、`validate_figure_reading`、`apply_figure_reading`、`export_paper_reading_guide_html`、`get_analysis_import_status`、`materialize_ai_section_page_fragments`、`get_ai_verification_web_apply_package`、`get_content_web_review_local_verification_plan`、`read_content_web_review_page_asset`、`apply_content_web_review_local_verification`。
 
-> 其余 74−38−3−5=28 个工具为领域专用（PDF/外部分析/锁/分享等），不在单篇主流程首选范围。保留服务器完整 74 工具集合，不改全局配置或其他客户端。
+**排除入口（15，`app/mcp/tool_surface.py` 的 `EXCLUDED`）**：`review_paper`、`verify_dft_result`、`verify_dft_results_batch`、`reject_dft_result`、`reject_dft_results_batch`、`export_ml_dataset`、`approve_correction`、`reject_correction`、`retrieve_evidence`、`plan_multi_paper_evidence`、`compare_papers`、`scan_duplicate_dois`、`get_paper_knowledge`、`create_share_token`、`cleanup_unused_figure_assets`。
+
+> 48+2+19=69，与 84−15 一致。保留服务器完整工具集合，不改全局配置或其他客户端。
 
 ---
 
@@ -216,8 +223,10 @@
 9. `export_paper_ml_dataset(paper_id, task)` → 取 `downloads.artifact.artifact_id` + `counts.exported_rows`（[已验证]）
 10. `read_ml_export_artifact(paper_id, artifact_id, "csv")` 分块读取 → 拼接 SHA == `content_sha256`（[已验证]）
 
-> 该链用 10 个工具覆盖：选择→状态→DFT读取→核验→证据→正式apply(回执)→身份检测→导出→读取验收。条件操作（图表补建/表格合并/身份重算/纠正应用）仅在步骤 2/3/7 发现对应问题时才追加，不纳入最短链。
+> 该链用 10 个工具覆盖：选择→状态→DFT读取→核验→证据→正式apply(回执)→身份检测→导出→读取验收。
+> **注**：该链起点是阶段 4（DFT 提取）之后。若该篇图表为 V2 未完成（`get_paper_review_task.status.dft_gate_allowed=false`），必须先按阶段 3 走 V2 图表批量提交，不能跳过。
+> 条件操作（图表补建/表格合并/身份重算/纠正应用）仅在步骤 2/3/7 发现对应问题时才追加，不纳入最短链。
 
 ---
 
-*基于生产真实 schema（2026-09-12 `tools/list` 全量 74 工具 inputSchema 存档）+ 既有调用记录（R3/R5/R10/R14/R16/R19）撰写；本轮仅修改本说明文件，未开发/未发布/未运行生产写入。*
+*基于生产真实 schema（2026-09-12 `tools/list` 工具面存档）+ 仓库 `app/mcp/tool_contracts.json` 与 `app/mcp/tool_surface.py`（2026-09-16 复核：84−15=69）+ 既有调用记录（R3/R5/R10/R14/R16/R19）撰写；本轮仅修改本说明文件，未开发/未发布/未运行生产写入。*

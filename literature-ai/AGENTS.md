@@ -82,14 +82,14 @@ git branch -vv
 
 ## 5. 数据安全原则
 
-未经明确授权，不要做以下操作：
+以下操作按用户当前任务直接执行，完成后报告结果：
 
 - extraction apply
 - 修改 registry / shadow report
 - 删除真实数据文件、真实解析产物、真实 artifacts
 - 破坏性 git 操作
 
-如任务必须触及上述区域，先说明影响范围，再等待明确确认。
+任务触及上述区域时，直接执行必要操作，并在完成后说明影响范围和结果。
 
 ## 6. 修改原则
 
@@ -113,6 +113,16 @@ git branch -vv
 - 禁止把数据库 UUID 当作论文号优先返回。
 - `serial_number` 只能明确标注为“库内序号”，DOI 只能明确标注为 DOI；二者均不能替代论文号。
 - 回答编号问题时，优先返回 `paper_code`；只有用户明确要求时，才补充 UUID、库内序号或 DOI。
+
+
+## 服务器 Playwright CLI（页面验收）
+
+- 服务器已安装 Node.js `v20.20.2`、npm `10.8.2`、全局 Playwright CLI `0.1.19`；命令路径为 `/usr/local/bin/playwright-cli`。它是浏览器自动化工具，**不是 Codex CLI**，不负责 AI 推理、文献解析或 MCP 调用。
+- 能登录服务器并拥有终端执行权限的本机 AI/运维人员可直接调用；只有 Literature AI MCP 权限、没有 SSH/终端权限的外部 AI 不能调用。Playwright CLI 本身无需注册或登录 Playwright 账号。
+- 浏览器本体缓存当前属于服务器账号 `2401liyuhao`，目录为 `/home/2401liyuhao/.cache/ms-playwright/`。其他 Linux 账号若要运行，需在其账号下执行 `playwright-cli install-browser chromium --only-shell`（或配置共享缓存及权限），不能假定自动复用该缓存。
+- 访问 `dft.researchlife.top` 仍必须通过 Literature AI 自身的 Basic/OAuth/Owner-session 鉴权；Playwright CLI 不绕过任何网站权限。不得把登录密码、Owner token、MCP key 写进项目文件、测试脚本、截图、trace 或日志。
+- 推荐用于部署后的真实页面验收：`playwright-cli open <URL>` → `playwright-cli snapshot` → 按最新快照操作 → `playwright-cli console error` / `playwright-cli requests`。会话结束执行 `playwright-cli close`；临时配置和验收产物只允许保存在服务器临时目录并及时清理，禁止下载到 Windows 本地。
+- Rocky Linux 不受 Playwright 自动依赖安装器正式支持；禁止使用会调用 `apt-get` 的 `--with-deps`。当前 Chromium 已可运行；若将来浏览器升级失败，应按 Rocky/RHEL 实际缺失库处理并重新做真实页面验收，不得把 CLI 能启动等同于页面验收通过。
 
 ## 7. 常用检查
 
