@@ -256,3 +256,25 @@ def test_metal_formation_energy_is_not_judged_on_the_adsorbate_column():
     assert shared["valid"] is False
     assert shared["status"] == "out_of_scope"
     assert "intermediate_out_of_scope" in shared["reasons"]
+
+
+def test_corrected_sulfur_desorption_barrier_releases_the_stale_out_of_scope():
+    """Precondition of the label writer's re-derivation guard.
+
+    ``DFTReactionLabelService`` refuses to overwrite a stored ``out_of_scope``
+    unless the record's own *current* fields no longer justify it.  This pins both
+    halves: the un-corrected B0091 shape still fails, the reviewed correction
+    (property_type=sulfur desorption barrier, adsorbate=S) passes.
+    """
+
+    stale = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "S8", "property_type": "reaction_barrier", "unit": "eV"}
+    )
+    assert stale["valid"] is False
+    assert "property_out_of_scope" in stale["reasons"]
+
+    corrected = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "S", "property_type": "sulfur desorption barrier", "unit": "eV"}
+    )
+    assert corrected["valid"] is True
+    assert corrected["property_type"] == "sulfur_desorption_barrier"

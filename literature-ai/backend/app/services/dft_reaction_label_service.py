@@ -111,7 +111,22 @@ class DFTReactionLabelService:
         if existing_type and existing_type != requested_type:
             raise DFTReactionLabelError("existing_reaction_type_differs")
         if str(row.reaction_validation_status or "").strip().lower() == "out_of_scope":
-            raise DFTReactionLabelError("existing_out_of_scope_not_auto_changed")
+            # A stored ``out_of_scope`` verdict is a recorded decision and is never
+            # overwritten silently.  It is only stale when the record's own
+            # *current* fields no longer justify it -- for example after a reviewed
+            # correction of ``property_type`` / ``adsorbate``.  Re-derive the
+            # verdict from the row itself, so a corrected record is not stranded
+            # forever, and keep refusing whenever the stored verdict still holds.
+            stored_verdict = validate_reaction_record(
+                existing_type or requested_type,
+                {
+                    "adsorbate": row.adsorbate,
+                    "property_type": row.property_type,
+                    "reaction_step": row.reaction_step,
+                },
+            )
+            if not stored_verdict.get("valid"):
+                raise DFTReactionLabelError("existing_out_of_scope_not_auto_changed")
 
         # The record must already be evidence-verified for its own required fields.
         gate = is_export_eligible_extraction(self.session, row, target_type="dft_results")
