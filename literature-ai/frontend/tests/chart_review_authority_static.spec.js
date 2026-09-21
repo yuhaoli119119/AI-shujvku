@@ -34,6 +34,12 @@ test('only the whole-paper authoritative payload may drive the chart chip', () =
   // a user-visible reload re-reads the stage; the background refresh keeps it
   expect(reviewCenterPage).toContain('if (!silent) clearAuthoritativeChartStages();');
   // selecting a paper still refreshes, but the preview gate is a secondary opinion
+  expect(reviewCenterPage).toContain('const authoritativeEntry = authoritativeChartStages[authoritativePaperId]');
+  expect(reviewCenterPage).toContain('? authoritativeDisplayStage(authoritativeEntry)');
+  expect(reviewCenterPage).toContain('renderSinglePaperWorkbench();');
+  expect(reviewCenterPage).toContain('const chartStateReady = Boolean(');
+  // A late legacy preview may populate diagnostics, but it cannot overwrite the
+  // authoritative selected-paper gate after the first-paint batch has returned.
   expect(reviewCenterPage).toContain('void queueAuthoritativeChartStages([target.paper_id]);');
   expect(reviewCenterPage).toContain('const CHART_STAGE_BATCH_LIMIT = 50;');
 });

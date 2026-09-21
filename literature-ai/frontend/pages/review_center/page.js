@@ -652,7 +652,12 @@
       } finally {
         chartStageFlushInFlight = null;
       }
-      if (updatedAny) renderRows();
+      if (updatedAny) {
+        renderRows();
+        // Keep the selected-paper panel on the same authoritative answer as
+        // the first-paint list chips; a late legacy DFT preview must not win.
+        renderSinglePaperWorkbench();
+      }
       if (Object.keys(queuedChartStagePaperIds).length) {
         chartStageFlushInFlight = flushAuthoritativeChartStages();
       }
@@ -1392,8 +1397,15 @@
       const previewMatches = dftReviewPreview && dftReviewPreviewPaperId === paperId;
       const gate = previewMatches && dftReviewPreview.review_gate ? dftReviewPreview.review_gate : {};
       const summary = previewMatches && dftReviewPreview.summary ? dftReviewPreview.summary : {};
-      const gateStage = String(gate.stage_status || "");
+      const authoritativePaperId = chartStagePaperIdForRow(target);
+      const authoritativeEntry = authoritativeChartStages[authoritativePaperId];
+      const gateStage = authoritativeEntry && authoritativeEntry.authoritative
+        ? authoritativeDisplayStage(authoritativeEntry)
+        : String(gate.stage_status || "");
       const chartComplete = gateStage === "completed" || gateStage === "not_required";
+      const chartStateReady = Boolean(
+        authoritativeEntry && authoritativeEntry.authoritative
+      ) || previewMatches;
       const routePaperChanged = renderSinglePaperWorkbench.routePaperId !== paperId;
       if (routePaperChanged || renderSinglePaperWorkbench.routeGate !== chartComplete) {
         processingStage = chartComplete ? "dft" : "chart";
@@ -1411,7 +1423,7 @@
         chartStatus = "状态读取失败";
         chartDetail = previewError.message || String(previewError);
         chartClass = "blocked";
-      } else if (previewMatches) {
+      } else if (chartStateReady) {
         const pendingMain = Number(summary.pending_main_figures || 0);
         const pendingSi = Number(summary.pending_supporting_figures || 0);
         if (chartComplete) {
