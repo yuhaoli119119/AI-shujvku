@@ -69,7 +69,7 @@ scp 文件 litai:/opt/literature-ai/frontend/对应路径/
 ssh litai 'cd /opt/ai-shujvku-src && ./update.sh'
 
 # 备份数据库（改数据前必做）
-ssh litai 'cd /opt/literature-ai && docker exec literature-ai-postgres-1 pg_dump -Fc -U literature_ai literature_ai > /home/2401liyuhao/literature_ai_latest.dump'
+ssh litai 'cd /opt/literature-ai && docker exec literature-ai-postgres-1 pg_dump -Fc -U literature_ai literature_ai > /home/2401liyuhao/backups/literature-ai/database/literature_ai_latest.dump'
 ```
 
 ## 5. 凭据与安全

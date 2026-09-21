@@ -71,7 +71,7 @@ PDF 解析
 ## 数据库备份（其他 AI 必须知晓）
 
 - **权威备份位置**：
-  - 服务器：`/home/2401liyuhao/literature_ai_latest.dump`（pg_dump -Fc）
+  - 服务器：`/home/2401liyuhao/backups/literature-ai/database/literature_ai_latest.dump`（pg_dump -Fc）
   - 本机同步副本：`local/backups/runtime/literature_ai_latest.dump`
 - **一键备份/恢复**（在 `local/srv_deploy/` 下执行）：
   ```powershell
