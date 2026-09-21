@@ -271,3 +271,22 @@ def test_lis_extended_tasks_are_registered_and_do_not_force_adsorbate() -> None:
     assert result["label_ready"] is True
     assert "missing_canonical_adsorbate" not in result["feature_blockers"]
     assert normalize_tabular_task("electronic_descriptors") == "SRR_LiS:electronic_descriptors"
+
+
+def test_structure_bond_lengths_accepts_the_generic_bond_length_property() -> None:
+    """Bare ``bond_length`` (the stored property name in ACS Li-S tables) is a
+    registered SRR target for the bond-length task."""
+
+    record = _ready_adsorption_record()
+    record.update(
+        canonical_property_type="bond_length",
+        normalized_value=2.41,
+        normalized_unit="A",
+        canonical_adsorbate=None,
+        reaction_step="M-S bond length",
+    )
+
+    result = evaluate_tabular_readiness("SRR_LiS:structure_bond_lengths", record)
+
+    assert result["label_ready"] is True
+    assert "target_property_not_allowed" not in result["label_blockers"]

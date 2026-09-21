@@ -92,7 +92,7 @@ _PROFILES = MappingProxyType(
         ),
         "SRR_LiS:structure_bond_lengths": _profile(
             "SRR_LiS:structure_bond_lengths",
-            ("bond_length_Li-S", "bond_length_S-S", "bond_length_M-N", "bond_length_M-S", "bond_length_M-M", "li_s_bond_length"),
+            ("bond_length", "bond_length_Li-S", "bond_length_S-S", "bond_length_M-N", "bond_length_M-S", "bond_length_M-M", "li_s_bond_length"),
             require_adsorbate=False,
             allowed_units=("A", "Å", "nm", "pm"),
         ),

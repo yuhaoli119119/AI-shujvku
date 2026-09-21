@@ -202,3 +202,31 @@ def test_bare_s_adsorbate_resolves_to_atomic_sulfur_and_not_s8():
     assert s_binding["valid"] is True
     assert s_binding["intermediate"] == "S_atom"
     assert s_binding["property_type"] == "binding_energy"
+
+
+def test_srr_accepts_formation_energy_and_bond_length_observations():
+    """User-approved scope (2026-09-22): SAC formation energies and M-S bond
+    lengths count as sulfur-reduction observations.
+
+    Regression for the B0091 platform defect: the SRR task profiles already
+    allowed ``formation_energy`` (active_site_stability) and bond lengths
+    (structure_bond_lengths), but the reaction profile did not, so those records
+    could never receive a reaction attribution.
+    """
+
+    assert normalize_property_type("SRR_LiS", "formation_energy") == "formation_energy"
+    assert normalize_property_type("SRR_LiS", "formation energy") == "formation_energy"
+    assert normalize_property_type("SRR_LiS", "bond_length") == "bond_length"
+    assert normalize_property_type("SRR_LiS", "bond length") == "bond_length"
+
+    formation = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "S", "property_type": "formation energy", "unit": "eV"}
+    )
+    assert formation["valid"] is True
+    assert formation["property_type"] == "formation_energy"
+
+    bond_length = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "S", "property_type": "bond length", "unit": "\u00c5"}
+    )
+    assert bond_length["valid"] is True
+    assert bond_length["property_type"] == "bond_length"

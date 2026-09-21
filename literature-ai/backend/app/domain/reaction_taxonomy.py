@@ -88,6 +88,14 @@ _SRR_PROPERTIES = {
     "deposition barrier of li2s": "li2s_deposition_barrier",
     "li2s nucleation barrier": "li2s_nucleation_barrier",
     "nucleation barrier of li2s": "li2s_nucleation_barrier",
+    # 结构/稳定性描述量：SAC 形成能与 M-S 键长是 Li-S 论文用来解释硫中毒与
+    # 活性位稳定性的观测量（用户 2026-09-22 明确承认其属于 SRR 观测）。
+    "formation energy": "formation_energy",
+    "formation energies": "formation_energy",
+    "formation_energy": "formation_energy",
+    "bond length": "bond_length",
+    "bond lengths": "bond_length",
+    "bond_length": "bond_length",
     "migration barrier": "migration_barrier",
     "d band center": "d_band_center",
     "d-band center": "d_band_center",
