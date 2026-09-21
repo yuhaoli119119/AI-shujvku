@@ -38,12 +38,33 @@
   `ui-2026-09-21`（同日用新脚本重跑、带 meta）。`full` 不传参时用**最新**的那条，
   两者内容逐条一致。
 
+## 定向回归（focused）与功能专项验收
+
+`ui-check.sh` 之外还有两个入口，覆盖"结构性回归"之外的断言：
+
+| 命令 | 作用 | 实测耗时 |
+|---|---|---|
+| `tools/focused-suite.sh [源] [OUT]` | 跑 18 个 spec 文件共 71 条既有测试，输出 Playwright JSON | 约 4–5 分钟 |
+| `node tools/focused-diff.js <基线> <当前>` | 逐条对比 spec 状态；两种输入都吃（原始报告或紧凑摘要） | 秒级 |
+| `node tools/filter-return-check.js` | 筛选→进详情→返回的状态还原、冷启动带参 URL、`return_to` 开放重定向、screening 显式应用语义；`ONLY=<页名>` 可只跑一页 | 全量约 10 分钟 / 单页约 2 分钟 |
+
+**跑 focused 必须用安全源 `127.0.0.1:4173`**（`playwright.config.static.js` 自带
+`npm run test:serve`）；用 `172.18.0.6:8000` 会让审核中心 4 个"复制命令"用例假失败。
+基线 `baselines/focused-2026-09-21.json` 里有 29 个 `unexpected` 是**既有环境性失败**，
+判据是「0 新增失败」，不是"全绿"。
+
+冻结基线里的紧凑摘要（`*.json` + `specs: [{file,title,status}]`）由原始 Playwright 报告压掉
+stdout 得来（3.4M → 13K），`focused-diff.js` 两种格式都能读。
+2026-09-21 那次的全部证据与逐条结论见 `baselines/evidence-2026-09-21/README.md`。
+
 ## 旋钮（环境变量）
 
 `BASE`（被测源，默认 `http://172.18.0.6:8000`）、`WORKERS`（默认 min(8,CPU)）、
 `SETTLE`（默认 6000ms，**与基线对比时必须一致**）、`STABLE`（默认 2500ms，"连续 2.5s 高度不变"
 才算渲染完；设 0 = 关闭，等价旧脚本）、`QUICK=1`（jumps 跳过慢入口）、`SPOT_PAGES`、
 `SPOT_SIZES`、`OUT`、`UI_CHECK_TMP`（结果目录，默认 `/tmp/litai-uicheck`）。
+Playwright 的 `outputDir` 由 `PW_OUT_DIR` 控制（默认 `/tmp/litai-uicheck`）：临时目录写在
+仓库外的 `/tmp`，不再往 `frontend/` 里堆 `pw-out-<pid>/` 污染 `git status`。
 
 ## 已知边界
 

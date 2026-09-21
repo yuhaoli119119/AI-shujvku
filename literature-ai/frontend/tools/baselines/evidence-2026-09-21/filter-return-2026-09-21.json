@@ -1,0 +1,473 @@
+{
+  "base": "http://172.18.0.6:8000",
+  "pages": {
+    "literature_library": {
+      "before": {
+        "pathname": "/pages/literature_library/index.html",
+        "search": "?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "href": "http://172.18.0.6:8000/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "params": [
+          "library_name=双原子催化剂",
+          "page=2",
+          "pdf=true",
+          "size=10",
+          "sort=title_asc"
+        ],
+        "controls": {
+          "librarySelect": "双原子催化剂",
+          "searchInput": "",
+          "yearFilter": "",
+          "journalFilter": "",
+          "typeFilter": "",
+          "dftFilter": "",
+          "contentFilter": "",
+          "pdfFilter": "true",
+          "sortSelect": "title_asc",
+          "pageSizeSelect": "10"
+        },
+        "total": "65",
+        "rows": 10
+      },
+      "after": {
+        "pathname": "/pages/literature_library/index.html",
+        "search": "?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "href": "http://172.18.0.6:8000/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "params": [
+          "library_name=双原子催化剂",
+          "page=2",
+          "pdf=true",
+          "size=10",
+          "sort=title_asc"
+        ],
+        "controls": {
+          "librarySelect": "双原子催化剂",
+          "searchInput": "",
+          "yearFilter": "",
+          "journalFilter": "",
+          "typeFilter": "",
+          "dftFilter": "",
+          "contentFilter": "",
+          "pdfFilter": "true",
+          "sortSelect": "title_asc",
+          "pageSizeSelect": "10"
+        },
+        "total": "65",
+        "rows": 10
+      },
+      "cold": {
+        "pathname": "/pages/literature_library/index.html",
+        "search": "?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "href": "http://172.18.0.6:8000/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+        "params": [
+          "library_name=双原子催化剂",
+          "page=2",
+          "pdf=true",
+          "size=10",
+          "sort=title_asc"
+        ],
+        "controls": {
+          "librarySelect": "双原子催化剂",
+          "searchInput": "",
+          "yearFilter": "",
+          "journalFilter": "",
+          "typeFilter": "",
+          "dftFilter": "",
+          "contentFilter": "",
+          "pdfFilter": "true",
+          "sortSelect": "title_asc",
+          "pageSizeSelect": "10"
+        },
+        "total": "65",
+        "rows": 10
+      },
+      "detailUrl": "http://172.18.0.6:8000/pages/paper_detail/index.html?paper_id=ac202f60-fcc3-4165-bf8c-d087beeb2f79&from=literature_library&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fliterature_library%2Findex.html%3Flibrary_name%3D%25E5%258F%258C%25E5%258E%259F%25E5%25AD%2590%25E5%2582%25AC%25E5%258C%2596%25E5%2589%2582%26sort%3Dtitle_asc%26pdf%3Dtrue%26size%3D10%26page%3D2",
+      "detailLinks": {
+        "back": {
+          "href": "/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+          "text": "返回文献库"
+        },
+        "crumb": {
+          "href": "/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+          "text": "文献库"
+        },
+        "fallback": {
+          "href": "/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2",
+          "text": "返回文献库"
+        },
+        "barLinks": []
+      }
+    },
+    "literature_screening": {
+      "before": {
+        "pathname": "/pages/literature_screening/index.html",
+        "search": "?year_min=2015&has_pdf=1",
+        "href": "http://172.18.0.6:8000/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+        "params": [
+          "has_pdf=1",
+          "year_min=2015"
+        ],
+        "controls": {
+          "filterYearMin": "2015",
+          "filterYearMax": "",
+          "filterJournalInc": "",
+          "filterJournalExc": "",
+          "filterIFMin": "",
+          "filterIFMax": "",
+          "filterNeedsMetadata": "0",
+          "filterHasPdf": "1",
+          "filterHasParsedText": "0",
+          "filterHasExtractionOutput": "0",
+          "filterHasVerifiedEvidence": "0",
+          "filterHasSafeVerifiedEvidence": "0",
+          "filterExcludeFromCitation": "",
+          "filterCitationPriority": ""
+        },
+        "total": "79",
+        "rows": 79
+      },
+      "after": {
+        "pathname": "/pages/literature_screening/index.html",
+        "search": "?year_min=2015&has_pdf=1",
+        "href": "http://172.18.0.6:8000/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+        "params": [
+          "has_pdf=1",
+          "year_min=2015"
+        ],
+        "controls": {
+          "filterYearMin": "2015",
+          "filterYearMax": "",
+          "filterJournalInc": "",
+          "filterJournalExc": "",
+          "filterIFMin": "",
+          "filterIFMax": "",
+          "filterNeedsMetadata": "0",
+          "filterHasPdf": "1",
+          "filterHasParsedText": "0",
+          "filterHasExtractionOutput": "0",
+          "filterHasVerifiedEvidence": "0",
+          "filterHasSafeVerifiedEvidence": "0",
+          "filterExcludeFromCitation": "",
+          "filterCitationPriority": ""
+        },
+        "total": "79",
+        "rows": 79
+      },
+      "cold": {
+        "pathname": "/pages/literature_screening/index.html",
+        "search": "?year_min=2015&has_pdf=1",
+        "href": "http://172.18.0.6:8000/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+        "params": [
+          "has_pdf=1",
+          "year_min=2015"
+        ],
+        "controls": {
+          "filterYearMin": "2015",
+          "filterYearMax": "",
+          "filterJournalInc": "",
+          "filterJournalExc": "",
+          "filterIFMin": "",
+          "filterIFMax": "",
+          "filterNeedsMetadata": "0",
+          "filterHasPdf": "1",
+          "filterHasParsedText": "0",
+          "filterHasExtractionOutput": "0",
+          "filterHasVerifiedEvidence": "0",
+          "filterHasSafeVerifiedEvidence": "0",
+          "filterExcludeFromCitation": "",
+          "filterCitationPriority": ""
+        },
+        "total": "79",
+        "rows": 79
+      },
+      "detailUrl": "http://172.18.0.6:8000/pages/paper_detail/index.html?paper_id=1b6dfbb2-c1eb-4887-acd2-0fa8e18aa62a&from=literature_screening&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fliterature_screening%2Findex.html%3Fyear_min%3D2015%26has_pdf%3D1",
+      "detailLinks": {
+        "back": {
+          "href": "/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+          "text": "返回文献筛选"
+        },
+        "crumb": {
+          "href": "/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+          "text": "文献筛选"
+        },
+        "fallback": {
+          "href": "/pages/literature_screening/index.html?year_min=2015&has_pdf=1",
+          "text": "返回文献筛选"
+        },
+        "barLinks": []
+      }
+    },
+    "dft_database": {
+      "before": {
+        "pathname": "/pages/dft_database/index.html",
+        "search": "?energy=adsorption_energy&page=2",
+        "href": "http://172.18.0.6:8000/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+        "params": [
+          "energy=adsorption_energy",
+          "page=2"
+        ],
+        "controls": {
+          "libraryFilter": "",
+          "propertyType": "adsorption_energy",
+          "adsorbate": "",
+          "catalystName": "",
+          "minConfidence": "0.30",
+          "datasetProfile": "",
+          "dftPageSizeSelect": "25"
+        },
+        "total": null,
+        "rows": 8
+      },
+      "after": {
+        "pathname": "/pages/dft_database/index.html",
+        "search": "?energy=adsorption_energy&page=2",
+        "href": "http://172.18.0.6:8000/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+        "params": [
+          "energy=adsorption_energy",
+          "page=2"
+        ],
+        "controls": {
+          "libraryFilter": "",
+          "propertyType": "adsorption_energy",
+          "adsorbate": "",
+          "catalystName": "",
+          "minConfidence": "0.30",
+          "datasetProfile": "",
+          "dftPageSizeSelect": "25"
+        },
+        "total": null,
+        "rows": 8
+      },
+      "cold": {
+        "pathname": "/pages/dft_database/index.html",
+        "search": "?energy=adsorption_energy&page=2",
+        "href": "http://172.18.0.6:8000/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+        "params": [
+          "energy=adsorption_energy",
+          "page=2"
+        ],
+        "controls": {
+          "libraryFilter": "",
+          "propertyType": "adsorption_energy",
+          "adsorbate": "",
+          "catalystName": "",
+          "minConfidence": "0.30",
+          "datasetProfile": "",
+          "dftPageSizeSelect": "25"
+        },
+        "total": null,
+        "rows": 8
+      },
+      "detailUrl": "http://172.18.0.6:8000/pages/paper_detail/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&from=dft_database&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fdft_database%2Findex.html%3Fenergy%3Dadsorption_energy%26page%3D2",
+      "detailLinks": {
+        "back": {
+          "href": "/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+          "text": "返回 DFT 数据库"
+        },
+        "crumb": {
+          "href": "/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+          "text": "DFT 数据库"
+        },
+        "fallback": {
+          "href": "/pages/dft_database/index.html?energy=adsorption_energy&page=2",
+          "text": "返回 DFT 数据库"
+        },
+        "barLinks": []
+      }
+    },
+    "mechanism_knowledge": {
+      "actualTab": "adsorbates",
+      "before": {
+        "pathname": "/pages/mechanism_knowledge/index.html",
+        "search": "?tab=adsorbates",
+        "href": "http://172.18.0.6:8000/pages/mechanism_knowledge/index.html?tab=adsorbates",
+        "params": [
+          "tab=adsorbates"
+        ],
+        "controls": {},
+        "total": null,
+        "rows": 74
+      },
+      "after": {
+        "pathname": "/pages/mechanism_knowledge/index.html",
+        "search": "?tab=adsorbates",
+        "href": "http://172.18.0.6:8000/pages/mechanism_knowledge/index.html?tab=adsorbates",
+        "params": [
+          "tab=adsorbates"
+        ],
+        "controls": {},
+        "total": null,
+        "rows": 74
+      },
+      "cold": {
+        "pathname": "/pages/mechanism_knowledge/index.html",
+        "search": "?tab=adsorbates",
+        "href": "http://172.18.0.6:8000/pages/mechanism_knowledge/index.html?tab=adsorbates",
+        "params": [
+          "tab=adsorbates"
+        ],
+        "controls": {},
+        "total": null,
+        "rows": 74
+      },
+      "detailUrl": "http://172.18.0.6:8000/pages/paper_detail/index.html?paper_id=67ab0940-ef4a-4219-a592-2d9fd3bad6f9&from=mechanism_knowledge&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fmechanism_knowledge%2Findex.html%3Ftab%3Dadsorbates",
+      "detailLinks": {
+        "back": {
+          "href": "/pages/mechanism_knowledge/index.html?tab=adsorbates",
+          "text": "返回机理知识"
+        },
+        "crumb": {
+          "href": "/pages/mechanism_knowledge/index.html?tab=adsorbates",
+          "text": "机理知识"
+        },
+        "fallback": {
+          "href": "/pages/mechanism_knowledge/index.html?tab=adsorbates",
+          "text": "返回机理知识"
+        },
+        "barLinks": []
+      }
+    },
+    "visuals": {
+      "actualTab": "matrix",
+      "before": {
+        "pathname": "/pages/visuals/index.html",
+        "search": "?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "href": "http://172.18.0.6:8000/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "params": [
+          "library_name=锂硫双原子",
+          "matrix_min_n=4",
+          "tab=matrix"
+        ],
+        "controls": {
+          "librarySelect": "锂硫双原子",
+          "xField": "li2s_bader_charge_transfer",
+          "yField": "li_s_bond_max",
+          "minN": "3",
+          "matrixScopeSelect": "core",
+          "matrixReactionSelect": "",
+          "matrixAdsorbateSelect": "",
+          "matrixFamilySelect": "",
+          "matrixMinN": "4"
+        },
+        "total": null,
+        "rows": 1
+      },
+      "after": {
+        "pathname": "/pages/visuals/index.html",
+        "search": "?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "href": "http://172.18.0.6:8000/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "params": [
+          "library_name=锂硫双原子",
+          "matrix_min_n=4",
+          "tab=matrix"
+        ],
+        "controls": {
+          "librarySelect": "锂硫双原子",
+          "xField": "li2s_bader_charge_transfer",
+          "yField": "li_s_bond_max",
+          "minN": "3",
+          "matrixScopeSelect": "core",
+          "matrixReactionSelect": "",
+          "matrixAdsorbateSelect": "",
+          "matrixFamilySelect": "",
+          "matrixMinN": "4"
+        },
+        "total": null,
+        "rows": 1
+      },
+      "cold": {
+        "pathname": "/pages/visuals/index.html",
+        "search": "?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "href": "http://172.18.0.6:8000/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+        "params": [
+          "library_name=锂硫双原子",
+          "matrix_min_n=4",
+          "tab=matrix"
+        ],
+        "controls": {
+          "librarySelect": "锂硫双原子",
+          "xField": "li2s_bader_charge_transfer",
+          "yField": "li_s_bond_max",
+          "minN": "3",
+          "matrixScopeSelect": "core",
+          "matrixReactionSelect": "",
+          "matrixAdsorbateSelect": "",
+          "matrixFamilySelect": "",
+          "matrixMinN": "4"
+        },
+        "total": null,
+        "rows": 1
+      },
+      "detailUrl": "http://172.18.0.6:8000/pages/paper_detail/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&from=visuals&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fvisuals%2Findex.html%3Flibrary_name%3D%25E9%2594%2582%25E7%25A1%25AB%25E5%258F%258C%25E5%258E%259F%25E5%25AD%2590%26tab%3Dmatrix%26matrix_min_n%3D4",
+      "detailLinks": {
+        "back": {
+          "href": "/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+          "text": "返回图表"
+        },
+        "crumb": {
+          "href": "/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+          "text": "图表"
+        },
+        "fallback": {
+          "href": "/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4",
+          "text": "返回图表"
+        },
+        "barLinks": []
+      }
+    }
+  },
+  "security": {
+    "外部域名": {
+      "payload": "https://evil.example.com/",
+      "href": "../literature_library/index.html"
+    },
+    "协议相对": {
+      "payload": "//evil.example.com/pages/visuals/index.html",
+      "href": "../literature_library/index.html"
+    },
+    "路径穿越": {
+      "payload": "/pages/../admin",
+      "href": "../literature_library/index.html"
+    },
+    "javascript:": {
+      "payload": "javascript:alert(1)",
+      "href": "../literature_library/index.html"
+    },
+    "非白名单页": {
+      "payload": "/pages/dashboard/index.html",
+      "href": "../literature_library/index.html"
+    },
+    "详情页自身": {
+      "payload": "/pages/paper_detail/index.html?paper_id=x",
+      "href": "../literature_library/index.html"
+    },
+    "内网地址": {
+      "payload": "http://127.0.0.1:8000/pages/visuals/index.html",
+      "href": "../literature_library/index.html"
+    },
+    "超长": {
+      "payload": "/pages/visuals/index.html?aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "href": "../literature_library/index.html"
+    },
+    "控制字符": {
+      "payload": "/pages/visuals/index.html%0d%0aX-Injected:1",
+      "href": "../literature_library/index.html"
+    },
+    "缺 index.html": {
+      "payload": "/pages/visuals/",
+      "href": "../literature_library/index.html"
+    },
+    "data:": {
+      "payload": "data:text/html,<script>alert(1)</script>",
+      "href": "../literature_library/index.html"
+    }
+  },
+  "summary": {
+    "PASS": 120,
+    "FAIL": 0,
+    "fails": [],
+    "warns": [],
+    "notes": [
+      "mechanism_knowledge 用的是 tab=adsorbates"
+    ]
+  }
+}

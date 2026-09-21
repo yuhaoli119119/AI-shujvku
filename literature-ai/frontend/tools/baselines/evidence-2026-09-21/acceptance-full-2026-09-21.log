@@ -1,0 +1,148 @@
+
+================ literature_library ================
+  进详情前 URL  : ?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82&sort=title_asc&pdf=true&size=10&page=2
+  进详情前 结果 : total=65 rows=10
+  PASS  literature_library URL 写入 sort=title_asc
+  PASS  literature_library URL 写入 pdf=true
+  PASS  literature_library URL 写入 size=10
+  PASS  literature_library URL 写入 page=2
+  PASS  literature_library 筛选后结果非空
+  PASS  literature_library 进详情 URL 带 return_to
+  PASS  literature_library return_to == 进去前的列表 URL
+  PASS  literature_library 详情 URL 带 from=literature_library
+  PASS  literature_library 详情页「返回列表」href == 进去前列表 URL
+  PASS  literature_library 面包屑 href == 进去前列表 URL
+  PASS  literature_library 空态返回按钮同源同目标
+  PASS  literature_library 定位条内返回链接同目标
+  PASS  literature_library 返回后落在 literature_library（真实点击返回）
+  PASS  literature_library 返回后 URL 参数逐项一致
+  PASS  literature_library 返回后控件值全部还原
+  PASS  literature_library 返回后结果条数一致
+  PASS  literature_library 全程 0 JS 报错
+  PASS  literature_library 冷启动控件值 == 进详情前
+  PASS  literature_library 冷启动结果条数一致
+  PASS  literature_library 冷启动 URL 未被改写
+  PASS  literature_library 冷启动 0 JS 报错
+
+================ literature_screening ================
+  进详情前 URL  : ?year_min=2015&has_pdf=1
+  进详情前 结果 : total=79 rows=79
+  PASS  literature_screening URL 写入 year_min=2015
+  PASS  literature_screening URL 写入 has_pdf=1
+  PASS  literature_screening 筛选后结果非空
+  PASS  literature_screening 进详情 URL 带 return_to
+  PASS  literature_screening return_to == 进去前的列表 URL
+  PASS  literature_screening 详情 URL 带 from=literature_screening
+  PASS  literature_screening 详情页「返回列表」href == 进去前列表 URL
+  PASS  literature_screening 面包屑 href == 进去前列表 URL
+  PASS  literature_screening 空态返回按钮同源同目标
+  PASS  literature_screening 定位条内返回链接同目标
+  PASS  literature_screening 返回后落在 literature_screening（真实点击返回）
+  PASS  literature_screening 返回后 URL 参数逐项一致
+  PASS  literature_screening 返回后控件值全部还原
+  PASS  literature_screening 返回后结果条数一致
+  PASS  literature_screening 全程 0 JS 报错
+  PASS  literature_screening 冷启动控件值 == 进详情前
+  PASS  literature_screening 冷启动结果条数一致
+  PASS  literature_screening 冷启动 URL 未被改写
+  PASS  literature_screening 冷启动 0 JS 报错
+
+================ dft_database ================
+  进详情前 URL  : ?energy=adsorption_energy&page=2
+  进详情前 结果 : total=null rows=8
+  PASS  dft_database URL 写入 energy=adsorption_energy
+  PASS  dft_database URL 写入 page=2
+  PASS  dft_database 筛选后结果非空
+  PASS  dft_database 进详情 URL 带 return_to
+  PASS  dft_database return_to == 进去前的列表 URL
+  PASS  dft_database 详情 URL 带 from=dft_database
+  PASS  dft_database 详情页「返回列表」href == 进去前列表 URL
+  PASS  dft_database 面包屑 href == 进去前列表 URL
+  PASS  dft_database 空态返回按钮同源同目标
+  PASS  dft_database 定位条内返回链接同目标
+  PASS  dft_database 返回后落在 dft_database（真实点击返回）
+  PASS  dft_database 返回后 URL 参数逐项一致
+  PASS  dft_database 返回后控件值全部还原
+  PASS  dft_database 返回后结果条数一致
+  PASS  dft_database 全程 0 JS 报错
+  PASS  dft_database 冷启动控件值 == 进详情前
+  PASS  dft_database 冷启动结果条数一致
+  PASS  dft_database 冷启动 URL 未被改写
+  PASS  dft_database 冷启动 0 JS 报错
+
+================ mechanism_knowledge ================
+  进详情前 URL  : ?tab=adsorbates
+  进详情前 结果 : total=null rows=74
+  PASS  mechanism_knowledge URL 写入 tab=adsorbates
+  PASS  mechanism_knowledge 筛选后结果非空
+  PASS  mechanism_knowledge 进详情 URL 带 return_to
+  PASS  mechanism_knowledge return_to == 进去前的列表 URL
+  PASS  mechanism_knowledge 详情 URL 带 from=mechanism_knowledge
+  PASS  mechanism_knowledge 详情页「返回列表」href == 进去前列表 URL
+  PASS  mechanism_knowledge 面包屑 href == 进去前列表 URL
+  PASS  mechanism_knowledge 空态返回按钮同源同目标
+  PASS  mechanism_knowledge 定位条内返回链接同目标
+  PASS  mechanism_knowledge 返回后落在 mechanism_knowledge（真实点击返回）
+  PASS  mechanism_knowledge 返回后 URL 参数逐项一致
+  PASS  mechanism_knowledge 返回后控件值全部还原
+  PASS  mechanism_knowledge 返回后结果条数一致
+  PASS  mechanism_knowledge 全程 0 JS 报错
+  PASS  mechanism_knowledge 冷启动控件值 == 进详情前
+  PASS  mechanism_knowledge 冷启动结果条数一致
+  PASS  mechanism_knowledge 冷启动 URL 未被改写
+  PASS  mechanism_knowledge 冷启动 0 JS 报错
+
+================ visuals ================
+  进详情前 URL  : ?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix&matrix_min_n=4
+  进详情前 结果 : total=null rows=1
+  PASS  visuals URL 写入 tab=matrix
+  PASS  visuals URL 写入 matrix_min_n=4
+  PASS  visuals 筛选后结果非空
+  PASS  visuals 进详情 URL 带 return_to
+  PASS  visuals return_to == 进去前的列表 URL
+  PASS  visuals 详情 URL 带 from=visuals
+  PASS  visuals 详情页「返回列表」href == 进去前列表 URL
+  PASS  visuals 面包屑 href == 进去前列表 URL
+  PASS  visuals 空态返回按钮同源同目标
+  PASS  visuals 定位条内返回链接同目标
+  PASS  visuals 返回后落在 visuals（真实点击返回）
+  PASS  visuals 返回后 URL 参数逐项一致
+  PASS  visuals 返回后控件值全部还原
+  PASS  visuals 返回后结果条数一致
+  PASS  visuals 全程 0 JS 报错
+  PASS  visuals 冷启动控件值 == 进详情前
+  PASS  visuals 冷启动结果条数一致
+  PASS  visuals 冷启动 URL 未被改写
+  PASS  visuals 冷启动 0 JS 报错
+
+================ literature_screening：显式应用语义 ================
+  PASS  未点 Apply 时 URL 不变
+  PASS  未点 Apply 时列表不变
+  PASS  点 Apply 后 URL 与列表一起更新
+  PASS  Clear Filters 后 URL 一起清空
+  PASS  显式应用语义下 0 JS 报错
+
+================ return_to 安全 ================
+  PASS  拒绝 外部域名
+  PASS  拒绝 协议相对
+  PASS  拒绝 路径穿越
+  PASS  拒绝 javascript:
+  PASS  拒绝 非白名单页
+  PASS  拒绝 详情页自身
+  PASS  拒绝 内网地址
+  PASS  拒绝 超长
+  PASS  拒绝 控制字符
+  PASS  拒绝 缺 index.html
+  PASS  拒绝 data:
+  PASS  接受合法 return_to（同源白名单页）
+  PASS  嵌套 return_to 被剔除
+  PASS  无 return_to 时 from=review_center 决定去向
+  PASS  无 return_to 时 from=review_center 按钮文案已随来源切换，当前=「返回审核中心」
+  PASS  无 return_to 时 from=dft_database 决定去向
+  PASS  无 return_to 时 from=dft_database 按钮文案已随来源切换，当前=「返回 DFT 数据库」
+  PASS  literature_library replace 透传 return_to
+  PASS  透传后返回目标带筛选参数
+
+================ 汇总 ================
+PASS=120 FAIL=0  WARN=0
+报告：/tmp/litai-accept/filter-return-check.json

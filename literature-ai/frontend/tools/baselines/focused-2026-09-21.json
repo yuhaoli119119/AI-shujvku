@@ -1,0 +1,370 @@
+{
+ "name": "focused-2026-09-21",
+ "frozenAt": "2026-09-21T16:19:35+08:00",
+ "source": "tools/focused-suite.sh（18 个 spec 文件，workers=6，TEST_BASE_URL=http://127.0.0.1:4173 安全源）",
+ "origin": "由 /tmp/litai-uicheck/focused-after11.json 压缩而来（只保留 文件/标题/状态，去掉 stdout 等大字段）",
+ "stats": {
+  "expected": 42,
+  "skipped": 0,
+  "unexpected": 29,
+  "flaky": 0
+ },
+ "note": "29 个 unexpected 是既有环境性失败（改动前就失败），不是回归；本基线用于证明\"0 新增失败\"。",
+ "specs": [
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "DFT export stays paper-scoped and completed chart runs are not shown as pending work",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "chart review validation errors are merged by code and message",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "content knowledge routes run-scoped figure field reminders to chart review",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "excluded duplicate figures are outside effective coverage and have their own card state",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "literature detail renders direct review state and loads full chart scope only on demand",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "main-paper DFT entry restores the completed recommended chart run",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "review center defaults to an unconfirmed scope and exposes explicit scope choices",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "review center exposes local AI chart review copy instruction and status fields",
+   "status": "passed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "review center shares the live chart stage across a main and supplementary group only",
+   "status": "failed"
+  },
+  {
+   "file": "chart_review_flow_static.spec.js",
+   "title": "run-scoped chart review keeps and verifies its fixed manual scope",
+   "status": "passed"
+  },
+  {
+   "file": "dft_complete_loading.spec.js",
+   "title": "literature library falls back to 50 item DFT pages when backend rejects larger pages",
+   "status": "failed"
+  },
+  {
+   "file": "dft_complete_loading.spec.js",
+   "title": "literature library waits for all DFT pages before rendering material groups",
+   "status": "failed"
+  },
+  {
+   "file": "dft_database_profile_export.spec.js",
+   "title": "datasetProfile selection does not reload table and carries correct param in CSV and ML exports",
+   "status": "passed"
+  },
+  {
+   "file": "dft_detail_deeplink.spec.js",
+   "title": "DFT deep link fetches a target outside the first server page",
+   "status": "passed"
+  },
+  {
+   "file": "dft_detail_deeplink.spec.js",
+   "title": "DFT deep link opens tab, expands, scrolls and highlights target card with issue context",
+   "status": "failed"
+  },
+  {
+   "file": "dft_detail_deeplink.spec.js",
+   "title": "DFT deep link shows a non-blocking warning when target card is missing",
+   "status": "passed"
+  },
+  {
+   "file": "dft_detail_deeplink.spec.js",
+   "title": "paper detail edits one DFT row through the audited manual update API",
+   "status": "timedOut"
+  },
+  {
+   "file": "dft_detail_deeplink.spec.js",
+   "title": "paper detail starts light and automatically loads the complete DFT collection",
+   "status": "failed"
+  },
+  {
+   "file": "layout.spec.js",
+   "title": "ai_writer sticky nav",
+   "status": "passed"
+  },
+  {
+   "file": "layout.spec.js",
+   "title": "literature_library sticky nav",
+   "status": "passed"
+  },
+  {
+   "file": "literature_library_optimization_static.spec.js",
+   "title": "literature library implements bidirectional filter sync and total calibration",
+   "status": "failed"
+  },
+  {
+   "file": "literature_library_optimization_static.spec.js",
+   "title": "literature library index.html is slimmed of dead modals and has responsive styles",
+   "status": "failed"
+  },
+  {
+   "file": "literature_library_optimization_static.spec.js",
+   "title": "literature library render-list renders title links, short code, DOI, badges, and select-all",
+   "status": "failed"
+  },
+  {
+   "file": "literature_library_recovery_static.spec.js",
+   "title": "independent detail exposes summary, figure reading, lightbox, and browser download",
+   "status": "passed"
+  },
+  {
+   "file": "literature_library_recovery_static.spec.js",
+   "title": "literature library is a filter-plus-list page without embedded workspace",
+   "status": "passed"
+  },
+  {
+   "file": "literature_library_tab_simplification_static.spec.js",
+   "title": "literature detail exposes figures, mechanism, and DFT tabs by default",
+   "status": "failed"
+  },
+  {
+   "file": "literature_library_ui_simplification_static.spec.js",
+   "title": "literature library hides dynamic review and maintenance shortcuts without removing their implementations",
+   "status": "failed"
+  },
+  {
+   "file": "literature_library_ui_simplification_static.spec.js",
+   "title": "literature library keeps the PDF-first daily action surface",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "A 库请求进行中切换到 B，B 的刷新在旧请求结束后立即执行",
+   "status": "passed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "A 的延迟失败不得在 B 成功后显示过期错误",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "URL paper_id 直载不等待延迟 4 秒的列表，且同一详情只请求一次",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "URL 论文不在前 200 条列表中时保留临时 option 和已加载详情",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "field_reviews 派生 audit 保留计数、orphan、write_version 与嵌入 locator，并在切换后清空旧缓存",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "paper detail 失败时不得提交新论文状态或泄漏 locatorCache",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "visibilitychange 恢复时立即轮询，不等待未触发的定时器",
+   "status": "timedOut"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "写后显式刷新仍请求 audit 和 evidence-locators",
+   "status": "failed"
+  },
+  {
+   "file": "optimization_p1_p2_fixes.spec.js",
+   "title": "无 URL paper_id 时列表完成后只加载首篇一次且不产生空 extraction 请求",
+   "status": "failed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "figure evidence links deduplicate PDF pages and never jump to sections",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail active nav context is literature (所属文献库)",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail breadcrumb and header actions present",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail evidence sidebar exists and is no longer mono block",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail figures hide engineering fields by default",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail keeps DFT edit and translation UI",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail keeps all research tabs",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail keeps four metric regions as compact cards",
+   "status": "passed"
+  },
+  {
+   "file": "paper_detail_ui_static.spec.js",
+   "title": "paper detail overview uses normal font and analysis grid",
+   "status": "passed"
+  },
+  {
+   "file": "pdf_availability_static.spec.js",
+   "title": "explicit missing PDF status wins over stale database paths",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "exposes single-paper prompt entrypoints and rejects multi-target copy",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "keeps review center filter state during the current session",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "links grouped conflicts to read-only evidence preview",
+   "status": "failed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "renders zero pending DFT items when the API reports terminal candidates only",
+   "status": "failed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "shows resolved conflict history as a subtle badge instead of an active red conflict badge",
+   "status": "failed"
+  },
+  {
+   "file": "review_center_conflict_modal.spec.js",
+   "title": "status filter includes real workflow statuses and matches Parsed_Material_Ready exactly",
+   "status": "failed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "假契约字段失效验证：用旧的 proposed_value/evidence_location 假字段无法让命令生成有效建议与证据",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "剪贴板 API 与 fallback 均失败时，正确展示失败提示且无未捕获异常",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "命令生成与复制：包含完整真实上下文、三态判断逻辑，且无网络写入副作用",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "多冲突独立性与双快照离线闭环：复制命令不改状态，外部处理后刷新页面读取新状态",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "审核中心界面文案不将科研核查责任推给普通用户",
+   "status": "failed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "支持信息 (SI) 优先按 supplementary_group.role 判定",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "缺失字段容错：缺失项显示“后端未提供”，严禁伪造兜底数据",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "网络与安全边界：页面交互不发起 verification-sessions、human-confirm、accept-ai 或 manual-decision",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "网页 AI 图表回传人工导入工具：依赖指纹与范围校验，不作为后台自动任务",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_issues_ai.spec.js",
+   "title": "静态代码检查：前端不含 verification-sessions、human-confirm、accept-ai、manual-decision 及 finalizeWebAiEvidenceReview",
+   "status": "passed"
+  },
+  {
+   "file": "review_center_title_metadata_static.spec.js",
+   "title": "review center title metadata does not repeat the paper code and renders SI as plain green text",
+   "status": "passed"
+  },
+  {
+   "file": "review_discoverability_static.spec.js",
+   "title": "detail review entrypoints use paper_code and keep manual progress separate from approval",
+   "status": "passed"
+  },
+  {
+   "file": "review_discoverability_static.spec.js",
+   "title": "literature detail unifies paper content while preserving DFT and legacy deep links",
+   "status": "failed"
+  },
+  {
+   "file": "review_discoverability_static.spec.js",
+   "title": "primary navigation and legacy review URLs converge on review center",
+   "status": "failed"
+  },
+  {
+   "file": "review_discoverability_static.spec.js",
+   "title": "review center exposes the canonical text_review prompt action",
+   "status": "passed"
+  },
+  {
+   "file": "test_infrastructure_static.spec.js",
+   "title": "Playwright uses an isolated server and never reuses the owner gateway",
+   "status": "passed"
+  },
+  {
+   "file": "workspace_ui_static.spec.js",
+   "title": "workspace dashboard surface matches the research workbench spec",
+   "status": "failed"
+  },
+  {
+   "file": "workspace_ui_static.spec.js",
+   "title": "workspace metrics avoid fake aggregate numbers",
+   "status": "failed"
+  }
+ ]
+}

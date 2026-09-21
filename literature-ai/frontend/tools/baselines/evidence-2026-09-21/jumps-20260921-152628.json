@@ -1,0 +1,136 @@
+[
+ {
+  "entry": "review_center",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&tab=dft&from=review_center",
+  "crumb": {
+   "text": "审核中心",
+   "href": "../review_center/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef",
+   "path": "/pages/review_center/index.html"
+  },
+  "back": {
+   "text": "返回审核中心",
+   "href": "../review_center/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef",
+   "path": "/pages/review_center/index.html"
+  },
+  "dock": [
+   {
+    "text": "返回审核中心",
+    "path": "/pages/review_center/index.html"
+   }
+  ],
+  "jsErr": 0
+ },
+ {
+  "entry": "literature_library",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=1e8a3704-d00f-4eaf-a087-05cf9f0d1b35&from=literature_library&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fliterature_library%2Findex.html%3Flibrary_name%3D%25E5%258F%258C%25E5%258E%259F%25E5%25AD%2590%25E5%2582%25AC%25E5%258C%2596%25E5%2589%2582",
+  "crumb": {
+   "text": "文献库",
+   "href": "/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82",
+   "path": "/pages/literature_library/index.html"
+  },
+  "back": {
+   "text": "返回文献库",
+   "href": "/pages/literature_library/index.html?library_name=%E5%8F%8C%E5%8E%9F%E5%AD%90%E5%82%AC%E5%8C%96%E5%89%82",
+   "path": "/pages/literature_library/index.html"
+  },
+  "dock": [],
+  "jsErr": 0
+ },
+ {
+  "entry": "literature_screening",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=1b6dfbb2-c1eb-4887-acd2-0fa8e18aa62a&from=literature_screening&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fliterature_screening%2Findex.html",
+  "crumb": {
+   "text": "文献筛选",
+   "href": "/pages/literature_screening/index.html",
+   "path": "/pages/literature_screening/index.html"
+  },
+  "back": {
+   "text": "返回文献筛选",
+   "href": "/pages/literature_screening/index.html",
+   "path": "/pages/literature_screening/index.html"
+  },
+  "dock": [],
+  "jsErr": 0
+ },
+ {
+  "entry": "mechanism_knowledge",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=00547a02-8efb-4ea1-8136-47844e31b320&from=mechanism_knowledge&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fmechanism_knowledge%2Findex.html",
+  "crumb": {
+   "text": "机理知识",
+   "href": "/pages/mechanism_knowledge/index.html",
+   "path": "/pages/mechanism_knowledge/index.html"
+  },
+  "back": {
+   "text": "返回机理知识",
+   "href": "/pages/mechanism_knowledge/index.html",
+   "path": "/pages/mechanism_knowledge/index.html"
+  },
+  "dock": [],
+  "jsErr": 0
+ },
+ {
+  "entry": "dft_database",
+  "ok": null,
+  "note": "QUICK=1 跳过慢入口"
+ },
+ {
+  "entry": "dashboard",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=4fec6e12-fe27-4078-bc43-46444bca9bec&from=dashboard",
+  "crumb": {
+   "text": "工作台",
+   "href": "../dashboard/index.html",
+   "path": "/pages/dashboard/index.html"
+  },
+  "back": {
+   "text": "返回工作台",
+   "href": "../dashboard/index.html",
+   "path": "/pages/dashboard/index.html"
+  },
+  "dock": [],
+  "jsErr": 0
+ },
+ {
+  "entry": "visuals",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&from=visuals&return_to=http%3A%2F%2F172.18.0.6%3A8000%2Fpages%2Fvisuals%2Findex.html%3Flibrary_name%3D%25E9%2594%2582%25E7%25A1%25AB%25E5%258F%258C%25E5%258E%259F%25E5%25AD%2590%26tab%3Dmatrix",
+  "crumb": {
+   "text": "图表",
+   "href": "/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix",
+   "path": "/pages/visuals/index.html"
+  },
+  "back": {
+   "text": "返回图表",
+   "href": "/pages/visuals/index.html?library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90&tab=matrix",
+   "path": "/pages/visuals/index.html"
+  },
+  "dock": [],
+  "jsErr": 0
+ },
+ {
+  "entry": "dft_audit_center",
+  "ok": true,
+  "url": "/pages/paper_detail/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&from=review_center&tab=dft&library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90",
+  "crumb": {
+   "text": "审核中心",
+   "href": "../review_center/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90",
+   "path": "/pages/review_center/index.html"
+  },
+  "back": {
+   "text": "返回审核中心",
+   "href": "../review_center/index.html?paper_id=0ed01979-08b6-4fa2-9d24-81ef54c71aef&library_name=%E9%94%82%E7%A1%AB%E5%8F%8C%E5%8E%9F%E5%AD%90",
+   "path": "/pages/review_center/index.html"
+  },
+  "dock": [
+   {
+    "text": "返回审核中心",
+    "path": "/pages/review_center/index.html"
+   }
+  ],
+  "jsErr": 0
+ }
+]
