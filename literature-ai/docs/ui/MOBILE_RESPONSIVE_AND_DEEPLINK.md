@@ -361,3 +361,38 @@ cd /opt/literature-ai && docker exec literature-ai-backend-1 sh -c 'export LITAI
 `frontend/` 下本次改动的文件**都在 git 源 `/opt/ai-shujvku-src` 里**，而 `update.sh` 用
 `rsync --delete` 同步。如果不把这些改动提交进 GitHub，下次有人在服务器跑 `update.sh`
 会把本次改动整体回滚（新增的 `shared/responsive.css` 会被删除）。改动清单见本文"改动范围"。
+
+## 快跑工具（`frontend/tools/`，2026-09-21 落地）
+
+本次的审计脚本原来散在 `/tmp/litai-uicheck/`（每次要重写、且串行跑一次全站要 25 分钟）。
+现在收敛成仓库内的四个工具 + 一个入口脚本，并已用"与历史基线逐条对比"验证过等价性：
+
+| 工具 | 作用 | 实测 |
+|---|---|---|
+| `tools/audit-responsive.js` | 响应式扫描，**并行**（每个"页面×档位"仍是独立 context，保持与旧脚本同样的量法） | 102 条 **193.5s**（串行约 1500s，**7.8×**），结果与 `FINAL15.json` **逐条 0 差异** |
+| `tools/audit-diff.js` | 两份扫描结果逐条对比，只打差异（`sh`/`ovf`/`errors`/`bad` 变化、新增缺失） | 替代原来的一次性 python 对比 |
+| `tools/link-audit.js` | 全站内部链接体检：唯一目标逐个请求、`paper_detail` 链接必须带 `paper_id`、统计每页"进入详情"入口（含 `tr[data-paper-id]` 行点击） | 15 页、**160 个唯一目标、异常 0** |
+| `tools/return-nav-check.js` | 8 个入口**真实点击**进详情，断言面包屑/返回按钮/定位条/底部动作条都回来源页 | **PASS=8 FAIL=0 SKIP=0** |
+| `tools/ui-check.sh` | 入口：`full` / `spot` / `links` / `jumps` / `shots` / `diff` | `spot`（6 页 × 2 档）**37s**，串行约 240s |
+
+```bash
+# 迭代期：只抽查最容易回归的页面（默认 6 页 × 390/1024，约 40 秒）
+/opt/literature-ai/frontend/tools/ui-check.sh spot
+
+# 收尾：全站 17 页 × 6 档，并与冻结基线逐条对比（有差异退出码 1）
+BASE=http://172.18.0.6:8000 /opt/literature-ai/frontend/tools/ui-check.sh full /tmp/litai-uicheck/FINAL15.json
+
+# 跳转专项
+/opt/literature-ai/frontend/tools/ui-check.sh links
+/opt/literature-ai/frontend/tools/ui-check.sh jumps
+```
+
+- **抽查清单**由 `ui-check.sh` 顶部的 `SPOT_PAGES` 决定（当前：`paper_detail,literature_library,
+  review_center,dft_database,literature_screening,mechanism_knowledge`），改动面变了就改这一行。
+- **并行不会改变结论**：每个"页面 × 档位"依旧用全新 context（避免 localStorage 串页），
+  只有调度并行；验证方式就是拿并行结果和串行冻结基线逐条 diff（0 差异）。
+- **两个必须知道的旋钮**：`SETTLE`（默认 6000ms）会改变量到的高度，**和历史基线对比时必须与
+  基线一致**；`STABLE`（默认 2500ms，设 0 关闭）是"连续 2500ms 高度不变才算渲染完"的安全网，
+  本次实测开着与关掉结果相同（值都稳定），但它能防"机器繁忙时量到半张页面"的假结论。
+- **慢页面**：`dft_database`（约 24s 才出表格）、`visuals`（要等热力图自动选中）、`review_center`
+  需要更长静置，`link-audit.js` 里用 `PAGE_SETTLE` 表覆盖，否则会漏检它们的链接（早期版本就漏了）。
