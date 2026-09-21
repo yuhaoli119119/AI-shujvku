@@ -912,8 +912,8 @@
         const view = document.createElement("a");
         view.className = "btn btn-ghost btn-sm";
         view.textContent = "查看";
-        view.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId) +
-          "&tab=dft&property_type=" + encodeURIComponent(propertyType);
+        view.href = "../paper_detail/index.html?paper_id=" + encodeURIComponent(paperId) +
+          "&tab=dft&property_type=" + encodeURIComponent(propertyType) + "&from=review_center";
 
         const download = document.createElement("a");
         download.className = "btn btn-primary btn-sm";
@@ -1108,8 +1108,8 @@
         return;
       }
       const normalizedTab = tab === "dft" ? "dft" : "figures";
-      window.location.href = "../literature_library/index.html?paper_id=" +
-        encodeURIComponent(target.paper_id) + "&tab=" + normalizedTab;
+      window.location.href = "../paper_detail/index.html?paper_id=" +
+        encodeURIComponent(target.paper_id) + "&tab=" + normalizedTab + "&from=review_center";
     }
 
     function setText(id, value) {
@@ -1241,7 +1241,7 @@
         : focusedSingleMainPaperRow();
       if (!target) {
         workbench.classList.add("is-empty");
-        empty.style.display = "flex";
+        empty.style.display = ""; // 交回 CSS：<=700px 时 .single-paper-empty 需要纵向 grid，不能被 inline flex 盖掉
         empty.querySelector("strong").textContent = selectedRows.length > 1 ? "一次只处理一篇主文献" : "先选择一篇主文献";
         empty.querySelector("span").textContent = selectedRows.length > 1
           ? "当前选择了多篇论文，请点击某一行的“进入处理”固定单篇范围。"
@@ -1266,7 +1266,7 @@
       const detailButton = document.getElementById("singlePaperDetailBtn");
       if (detailButton) {
         detailButton.onclick = function() {
-          window.location.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId);
+          window.location.href = "../paper_detail/index.html?paper_id=" + encodeURIComponent(paperId) + "&from=review_center";
         };
       }
 
@@ -1372,7 +1372,7 @@
         : { status: "idle", total: 0, properties: [], error: null };
       const mlPropertyViewLink = document.getElementById("mlPropertyViewLink");
       if (mlPropertyViewLink) {
-        mlPropertyViewLink.href = "../literature_library/index.html?paper_id=" + encodeURIComponent(paperId) + "&tab=dft";
+        mlPropertyViewLink.href = "../paper_detail/index.html?paper_id=" + encodeURIComponent(paperId) + "&tab=dft&from=review_center";
       }
       renderAnalysisReadyPropertyList(
         paperId,
@@ -2533,20 +2533,21 @@
           catalyst_samples: "dft",
           dft_results: "dft",
           electrochemical_performance: "dft",
-          writing_card: "sections",
-          writing_cards: "sections",
-          mechanism_claim: "sections",
-          mechanism_claims: "sections",
+          writing_card: "cards",
+          writing_cards: "cards",
+          mechanism_claim: "cards",
+          mechanism_claims: "cards",
           figure: "figures",
-        figures: "figures",
-        table: "figures",
-        tables: "figures",
+          figures: "figures",
+          table: "figures",
+          tables: "figures"
         };
-        const tab = tabByTarget[item.target_type] || "review";
+        const tab = tabByTarget[item.target_type] || "summary";
         const bestPdfLocator = bestDeepLinkPdfLocator(item);
         const params = new URLSearchParams();
         const libraryName = (row && row.library_name) || getValue("libraryFilter") || getQueryLibraryName() || getStoredLibraryName() || "";
         params.set("paper_id", row.paper_id);
+        params.set("from", "review_center");
         params.set("tab", tab);
         if (libraryName && libraryName !== "全部文献库") params.set("library_name", libraryName);
         if (item && item.target_type) params.set("target_type", item.target_type);
@@ -2557,9 +2558,7 @@
           params.set("pdf_locator_status", bestPdfLocator.locator_status || "exact_page");
           if (bestPdfLocator.evidence_text) params.set("pdf_evidence_text", clipText(bestPdfLocator.evidence_text, 240));
         }
-        return item && item.target_type === "dft_results"
-          ? "../paper_detail/index.html?" + params.toString()
-          : "../literature_library/index.html?" + params.toString();
+        return "../paper_detail/index.html?" + params.toString();
       }
 
     function isDftConflictItem(item) {
@@ -4309,9 +4308,10 @@
         const inspectTarget = getInspectTarget(row);
         const detailParams = new URLSearchParams();
         detailParams.set("paper_id", row.paper_id);
+        detailParams.set("from", "review_center");
         detailParams.set("tab", inspectTarget.tab);
         if (row.library_name) detailParams.set("library_name", row.library_name);
-        const detailUrl = "../literature_library/index.html?" + detailParams.toString();
+        const detailUrl = "../paper_detail/index.html?" + detailParams.toString();
         const extraction = compactExtractionMeta(row);
         const progress = compactManualReviewProgress(row);
         const suspectedMissing = extraction.suspectedMissing;

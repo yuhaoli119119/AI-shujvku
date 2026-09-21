@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20260904-core-nav"></script>
   <script>ThemeManager.init();</script>
   <link rel="stylesheet" href="./page.css">
@@ -19,7 +20,7 @@
       <div>
         <div class="review-eyebrow">单篇论文数据闭环</div>
         <h1>AI 问题与复查中心</h1>
-        <p>选择一篇主文献，先完成主文与 SI 图表核验，再处理 DFT 数据。页面只显示真实状态和阻断原因，问题由你复制命令交给 AI。</p>
+        <input type="checkbox" class="rc-fold-toggle" id="rcFoldHeroIntro"><label class="rc-fold-label" for="rcFoldHeroIntro">说明</label><p class="rc-fold-body">选择一篇主文献，先完成主文与 SI 图表核验，再处理 DFT 数据。页面只显示真实状态和阻断原因，问题由你复制命令交给 AI。</p>
       </div>
       <button class="btn btn-ghost" type="button" onclick="loadReviewCenter()" title="刷新服务器真实状态">刷新状态</button>
     </header>
@@ -144,26 +145,26 @@
               <button type="button" class="btn btn-ghost" data-ai-route="offline" aria-pressed="false" onclick="selectAiRoute('offline')">网页 AI 离线审核（回传 JSON）</button>
               <button type="button" class="btn btn-ghost" data-ai-route="webmcp" aria-pressed="false" onclick="selectAiRoute('webmcp')">网页 AI 直连 MCP（字段核验 ZIP）</button>
             </div>
-            <p>三种方式相互独立。先选择使用的 AI，再按下方步骤处理；所有任务仅限当前论文与明确关联 SI。</p>
+            <input type="checkbox" class="rc-fold-toggle" id="rcFoldRoutes"><label class="rc-fold-label" for="rcFoldRoutes">说明</label><p class="rc-fold-body">三种方式相互独立。先选择使用的 AI，再按下方步骤处理；所有任务仅限当前论文与明确关联 SI。</p>
             <p id="aiRouteStageNotice" role="status"></p>
             <section class="method-section" id="localMethodSection" data-ai-panel="local">
               <h3>本地 AI 直连 MCP（无需下载）</h3>
-              <p>适合当前电脑上已连接 Literature AI MCP 的 Codex 或其他智能体。直接读取最新任务、主文与关联 SI、PDF 页面、裁图、表格和证据，无需 ZIP，也无需先让网页 AI 处理。</p>
+              <input type="checkbox" class="rc-fold-toggle" id="rcFoldLocalIntro"><label class="rc-fold-label" for="rcFoldLocalIntro">说明</label><p class="rc-fold-body">适合当前电脑上已连接 Literature AI MCP 的 Codex 或其他智能体。直接读取最新任务、主文与关联 SI、PDF 页面、裁图、表格和证据，无需 ZIP，也无需先让网页 AI 处理。</p>
               <div class="ai-local-actions">
                 <button class="btn btn-primary" id="directLocalChartPromptBtn" type="button" onclick="copyDirectLocalInstruction('chart')">复制本地 AI 直接审核图表指令</button>
                 <button class="btn btn-primary" id="directLocalDftPromptBtn" type="button" onclick="copyDirectLocalInstruction('dft')" disabled>复制本地 AI 直接处理 DFT 指令</button>
               </div>
-              <p>读取不写库。修正、resolve、finalize、导入与批量应用需用户明确授权和现有 MCP 权限；写入后读取真实状态。完成子任务不等于整篇完成。</p>
+              <input type="checkbox" class="rc-fold-toggle" id="rcFoldLocalScope"><label class="rc-fold-label" for="rcFoldLocalScope">说明</label><p class="rc-fold-body">读取不写库。修正、resolve、finalize、导入与批量应用需用户明确授权和现有 MCP 权限；写入后读取真实状态。完成子任务不等于整篇完成。</p>
             </section>
             <div data-ai-panel="offline">
-              <p>适合不能连接 MCP 的网页 AI。图表 JSON 在本页明确应用；DFT JSON 校验后按原有本地 AI 受控导入流程处理。</p>
+              <input type="checkbox" class="rc-fold-toggle" id="rcFoldOfflineIntro"><label class="rc-fold-label" for="rcFoldOfflineIntro">说明</label><p class="rc-fold-body">适合不能连接 MCP 的网页 AI。图表 JSON 在本页明确应用；DFT JSON 校验后按原有本地 AI 受控导入流程处理。</p>
             <section class="method-section" id="chartMethodSection">
               <div class="method-section-head">
                 <div class="method-section-title-wrap">
                   <span class="method-tag method-tag-chart">图表审核</span>
                   <h3>离线图表审核：下载材料 → 返回 JSON → 页面校验 → 明确应用</h3>
                 </div>
-                <p>使用图表审核包及其配套提示词。校验不写库；明确应用后写入图表建议。若服务器仍要求逐图 PDF 核验，可独立选择本地 MCP 方式继续；应用不代表整篇完成。</p>
+                <input type="checkbox" class="rc-fold-toggle" id="rcFoldChartPack"><label class="rc-fold-label" for="rcFoldChartPack">说明</label><p class="rc-fold-body">使用图表审核包及其配套提示词。校验不写库；明确应用后写入图表建议。若服务器仍要求逐图 PDF 核验，可独立选择本地 MCP 方式继续；应用不代表整篇完成。</p>
               </div>
               <ol class="method-steps">
                 <li>
@@ -199,7 +200,7 @@
                   <span class="method-tag method-tag-web">DFT 全量审核包</span>
                   <h3>全量审核已有 DFT，并扫描漏提数据</h3>
                 </div>
-                <p>适合需要同时覆盖现有 DFT 结果和全部合格证据查漏的场景。审核包产出 DFT JSON；页面只校验，再复制本地 AI 受控导入指令。</p>
+                <input type="checkbox" class="rc-fold-toggle" id="rcFoldDftPack"><label class="rc-fold-label" for="rcFoldDftPack">说明</label><p class="rc-fold-body">适合需要同时覆盖现有 DFT 结果和全部合格证据查漏的场景。审核包产出 DFT JSON；页面只校验，再复制本地 AI 受控导入指令。</p>
               </div>
               <ol class="method-steps">
                 <li>
@@ -231,14 +232,14 @@
 
             </div>
             <div data-ai-panel="webmcp">
-              <p>此正式入口用于 DFT 字段核验；图表阶段不适用。字段核验 ZIP 冻结当前 pending 必审字段与证据；DFT 全量审核包则覆盖已有数据和漏提扫描，两者不能交换提示词。</p>
+              <input type="checkbox" class="rc-fold-toggle" id="rcFoldDftDirectIntro"><label class="rc-fold-label" for="rcFoldDftDirectIntro">说明</label><p class="rc-fold-body">此正式入口用于 DFT 字段核验；图表阶段不适用。字段核验 ZIP 冻结当前 pending 必审字段与证据；DFT 全量审核包则覆盖已有数据和漏提扫描，两者不能交换提示词。</p>
             <section class="method-section" id="dftDirectMethodSection">
               <div class="method-section-head">
                 <div class="method-section-title-wrap">
                   <span class="method-tag method-tag-mcp">字段核验 ZIP</span>
                   <h3>核验当前 pending 的 DFT 必审字段</h3>
                 </div>
-                <p>适合已连接 Literature AI MCP 的网页 AI。ZIP 只列当前 pending 字段，AI 通过 <code>apply_ai_verification_batch</code> 分批提交；返回真实回读，无需回传 JSON。字段任务为 0 时仅表示“当前没有 pending 字段任务”，不表示 DFT 或整篇完成。</p>
+                <input type="checkbox" class="rc-fold-toggle" id="rcFoldDftDirectScope"><label class="rc-fold-label" for="rcFoldDftDirectScope">说明</label><p class="rc-fold-body">适合已连接 Literature AI MCP 的网页 AI。ZIP 只列当前 pending 字段，AI 通过 <code>apply_ai_verification_batch</code> 分批提交；返回真实回读，无需回传 JSON。字段任务为 0 时仅表示“当前没有 pending 字段任务”，不表示 DFT 或整篇完成。</p>
               </div>
               <ol class="method-steps compact">
                 <li>
@@ -372,7 +373,7 @@
         </div>
       </div>
       <div class="table-wrap" id="tableWrap">
-        <table>
+        <table class="rc-stack">
           <thead>
             <tr>
               <th class="col-divider" style="text-align:center;">ID</th>
@@ -448,5 +449,18 @@
 
   <script src="./page.js"></script>
   <script src="./web-ai-return.js"></script>
+  <script>
+    /* 手机 / 平板上默认收起"选择 AI 处理方式"整块：
+       空态下这一块展开时要占 1500px 以上，是首屏最大的空间浪费。
+       桌面（>900px）维持展开，行为不变；用户手动点开仍然正常展开。 */
+    (function () {
+      try {
+        if (!window.matchMedia("(max-width: 900px)").matches) return;
+        var details = document.getElementById("processingMethods");
+        if (!details || !details.open) return;
+        details.open = false;
+      } catch (e) {}
+    })();
+  </script>
 </body>
 </html>

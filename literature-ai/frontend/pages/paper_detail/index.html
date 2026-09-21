@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
 <style>
@@ -72,6 +73,88 @@
     .pd-summary { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--color-border); font-size: 13px; color: var(--color-text-secondary); line-height: 1.65; }
     .pd-summary:empty { display: none; }
 
+    /* ---- Deep-link context bar (来自审核中心 / DFT 数据库的定位跳转) ---- */
+    .pd-deeplink-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px 12px;
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--color-primary);
+      border-radius: var(--radius);
+      background: var(--color-primary-bg);
+      font-size: 12.5px;
+      line-height: 1.5;
+    }
+    .pd-deeplink-bar[hidden] { display: none; }
+    .pd-deeplink-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+      font-weight: 700;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+    .pd-deeplink-target {
+      color: var(--color-text);
+      font-weight: 700;
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
+    .pd-deeplink-quote {
+      flex: 1 1 220px;
+      min-width: 0;
+      color: var(--color-text-secondary);
+      font-size: 11.5px;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .pd-deeplink-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+    .pd-deeplink-actions .btn { height: 28px; padding: 0 10px; font-size: 12px; }
+    .pd-deeplink-notice {
+      width: 100%;
+      color: var(--color-warning);
+      font-size: 11.5px;
+      font-weight: 600;
+    }
+
+    /* 手机上的定位跳转动作条：固定在底部，随时能"打开 PDF 第 N 页 / 返回审核中心"，
+       不用为了按按钮把页面滚回顶部；同时把顶部定位条压成纯信息行，避免占掉大半屏。 */
+    .pd-deeplink-dock { display: none; }
+    .pd-deeplink-dock[hidden] { display: none; }
+
+    @media (max-width: 700px) {
+      .pd-deeplink-bar { padding: 7px 10px; gap: 4px 6px; font-size: 12px; }
+      .pd-deeplink-bar .pd-deeplink-quote { display: none; }
+      .pd-deeplink-tag { padding: 1px 7px; font-size: 11px; }
+      .pd-deeplink-actions { display: none; }
+      .pd-deeplink-dock {
+        display: flex;
+        gap: 6px;
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 1500;
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+        background: color-mix(in srgb, var(--color-surface, #ffffff) 96%, transparent);
+        border-top: 1px solid var(--color-border);
+        box-shadow: 0 -6px 16px rgba(15, 23, 42, 0.10);
+        backdrop-filter: blur(10px);
+      }
+      .pd-deeplink-dock .btn { flex: 1 1 0; min-width: 0; height: 36px; font-size: 12.5px; }
+      body.has-deeplink-dock { padding-bottom: 58px; }
+    }
+
     /* ---- Compact Metric Cards (90–105px) ---- */
     .pd-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
     @media (max-width: 880px) { .pd-metrics { grid-template-columns: repeat(2, 1fr); } }
@@ -95,7 +178,8 @@
 
     /* ---- Main layout: left tabs+content / right sticky evidence ---- */
     .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
-    @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+    /* minmax(0,1fr) 而不是 1fr：否则内部 nowrap 的标签条/表格会把栅格撑出视口 */
+    @media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
     /* ---- Panel cards (lighter, no heavy left border) ---- */
     .panel-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; padding: 16px 18px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); margin-bottom: 14px; }
@@ -301,6 +385,7 @@
     .deep-link-context a { color: var(--color-primary); font-weight: 700; text-decoration: none; }
     .deep-link-warning { margin: 0 0 10px; border: 1px solid rgba(217,119,6,0.22); border-radius: 10px; background: var(--color-warning-bg); color: var(--color-warning); padding: 10px 12px; font-size: 13px; line-height: 1.5; }
     .structured-card.deep-link-target { border-color: var(--color-primary); box-shadow: 0 0 0 3px rgba(100,66,214,0.16); background: var(--color-surface); }
+    .deep-link-target { scroll-margin-top: calc(var(--nav-height, 40px) + 56px); }
 
     /* ---- Translation tab ---- */
     .translation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -372,7 +457,8 @@
     .pd-error-msg { font-size: 13px; color: var(--color-text-secondary); margin-bottom: 12px; line-height: 1.6; }
 
     @media (max-width: 980px) {
-      .layout { grid-template-columns: 1fr; }
+      /* minmax(0,1fr)：1fr 的最小值是 auto，会被内部 nowrap 内容撑出视口 */
+      .layout { grid-template-columns: minmax(0, 1fr); }
       .pd-evidence-aside { position: static; max-height: none; }
     }
 
@@ -420,6 +506,74 @@
       .dft-catalyst-group-body .dft-compact-head .dft-card-actions { width: 100%; }
       .dft-catalyst-group-body .dft-card-actions .btn { flex: 1 1 auto; }
     }
+
+    /* ============================================================
+       2026-09-21 — 手机端紧凑化（用户要求：字体可缩小、别浪费空间、
+       单个操作按钮不要占大块）
+       ============================================================ */
+    @media (max-width: 700px) {
+      .shell { padding: 10px 12px 28px; }
+      .pd-page-intro { margin-bottom: 8px; min-height: 0; gap: 8px; }
+
+      .pd-header { padding: 12px 14px; margin-bottom: 10px; border-radius: 10px; }
+      .pd-title { font-size: 17.5px; line-height: 1.35; }
+      .pd-title-zh { font-size: 13px; margin-top: 4px; }
+      .pd-authors { font-size: 12px; margin-top: 6px; }
+      .pd-meta-line { font-size: 12px; gap: 4px 10px; margin-top: 6px; }
+      .pd-badges { margin-top: 8px; }
+      .pd-summary { margin-top: 10px; padding-top: 10px; font-size: 12.5px; line-height: 1.6; }
+
+      /* 操作按钮：统一 32px 高、12px 字，最多两行 */
+      .pd-actions { gap: 6px; }
+      .pd-actions .btn-primary,
+      .pd-actions .btn-ghost,
+      .pd-actions .btn-secondary,
+      #pdViewPdfBtn,
+      #pdExportGuideBtn {
+        height: 32px;
+        padding: 0 11px;
+        font-size: 12px;
+        border-radius: 7px;
+        flex: 0 1 auto;
+      }
+
+      /* 指标卡：2x2、单卡 <= 64px，去掉多余的描述留白 */
+      .pd-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+      .pd-metric { min-height: 0; padding: 8px 10px; border-radius: 10px; }
+      .pd-metric-label { font-size: 11px; gap: 4px; }
+      .pd-metric-icon { width: 12px; height: 12px; }
+      .pd-metric-value { font-size: 19px; margin-top: 2px; }
+      .pd-metric-desc { font-size: 10.5px; margin-top: 2px; line-height: 1.35; }
+
+      /* 标签页：单行横向滚动，省掉第二行的 44px */
+      .tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 0;
+        margin-bottom: 10px;
+      }
+      .tabs::-webkit-scrollbar { display: none; }
+      .tab-btn {
+        flex: 0 0 auto;
+        height: 38px;
+        padding: 0 12px;
+        font-size: 12.5px;
+        white-space: nowrap;
+      }
+
+      .panel-card { padding: 12px; margin-bottom: 10px; border-radius: 10px; }
+      .panel-title { font-size: 14px; margin-bottom: 8px; }
+      .prewrap { font-size: 13.5px; line-height: 1.7; }
+      .mono { font-size: 11.5px; padding: 10px; }
+      .empty-state { padding: 24px 12px; font-size: 12.5px; }
+
+      /* 右侧证据面板在窄屏落到文档流末尾，限制高度避免拖出超长页面 */
+      .pd-evidence-aside { position: static; max-height: none; overflow: visible; }
+      .pd-analysis-item { padding: 10px; }
+      .pd-analysis-item .pd-analysis-text { font-size: 12.5px; line-height: 1.6; }
+    }
   </style>
 
 </head>
@@ -429,18 +583,21 @@
     <div id="fallbackState" class="panel-card empty-state" style="display:none;">
       <h3>未选择文献</h3>
       <p id="fallbackMsg">请先从文献库选择一篇文献查看详情。</p>
-      <div style="margin-top:16px;"><a href="../literature_library/index.html" class="btn primary">返回文献库</a></div>
+      <div style="margin-top:16px;"><a href="../literature_library/index.html" class="btn primary" id="pdFallbackBack">返回文献库</a></div>
     </div>
 
     <div id="paperContent" style="display:none;">
       <div class="pd-page-intro">
         <nav class="pd-breadcrumb">
-          <a href="../literature_library/index.html">文献库</a>
+          <a href="../literature_library/index.html" id="pdBreadcrumbHome">文献库</a>
           <span class="pd-breadcrumb-sep">›</span>
           <span class="pd-breadcrumb-current">文献详情</span>
         </nav>
-        <a class="btn btn-ghost btn-sm" href="../literature_library/index.html">返回列表</a>
+        <a class="btn btn-ghost btn-sm" href="../literature_library/index.html" id="pdReturnList">返回列表</a>
       </div>
+
+      <div id="pdDeepLinkBar" class="pd-deeplink-bar" hidden></div>
+      <div id="pdDeepLinkDock" class="pd-deeplink-dock" hidden></div>
 
       <header class="pd-header">
         <div class="pd-header-top">
@@ -636,6 +793,7 @@
       translation: null,
       translationViewMode: "bilingual",
       deepLink: {},
+      returnSource: "",
       currentTab: "summary",
       fullDetailLoaded: false,
       fullDetailPromise: null,
@@ -883,11 +1041,19 @@
     function parseParams() {
       const params = new URLSearchParams(window.location.search);
       state.paperId = params.get("id") || params.get("paper_id");
+      const rawPage = parseInt(params.get("pdf_page") || "", 10);
       state.deepLink = {
         tab: params.get("tab") || "",
         targetType: params.get("target_type") || "",
         targetId: params.get("target_id") || "",
-        issueId: params.get("issue_id") || ""
+        issueId: params.get("issue_id") || "",
+        fieldName: params.get("field_name") || "",
+        propertyType: params.get("property_type") || "",
+        exactPropertyType: params.get("exact_property_type") === "true",
+        pdfPage: Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 0,
+        pdfLocatorStatus: params.get("pdf_locator_status") || "",
+        pdfEvidenceText: params.get("pdf_evidence_text") || "",
+        libraryName: params.get("library_name") || ""
       };
       return Boolean(state.paperId);
     }
@@ -1456,7 +1622,7 @@
         const entries = buckets.get(prop);
         const isUnset = prop === "__unset__";
         const headLabel = isUnset ? "性能类型未记录" : propertyTypeLabel(prop);
-        return '<div class="dft-prop-section">' +
+        return '<div class="dft-prop-section"' + (isUnset ? "" : ' data-property-type="' + escAttr(prop) + '"') + '>' +
             '<div class="dft-prop-head"><h4' + (isUnset ? "" : ' title="' + escAttr(prop) + '"') + '>' + esc(headLabel) + '</h4>' +
               '<span class="dft-prop-count">' + entries.length + ' 条</span>' +
             '</div>' +
@@ -1639,6 +1805,9 @@
       panel.innerHTML =
         deepLinkIssueContextHtml() +
         renderStructuredCollection(state.paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
+      // 分页加载会整块重渲染 DFT 列表，深链高亮必须在这里补回来
+      if (state.deepLink && state.deepLink.targetType === "dft_results") applyDftDeepLinkHighlightSync();
+      if (state.deepLink && state.deepLink.propertyType) applyDftPropertyDeepLinkSync();
       if (openKeys.size) {
         panel.querySelectorAll("details.dft-catalyst-group").forEach(function(el) {
           const id = el.getAttribute("data-catalyst-sample-id") || "__unconfirmed__";
@@ -1916,13 +2085,10 @@
     function deepLinkIssueContextHtml() {
       const link = state.deepLink || {};
       if (!link.issueId) return "";
-      const params = new URLSearchParams();
-      if (state.paperId) params.set("paper_id", state.paperId);
-      params.set("include_closed", "true");
       return `
         <div class="deep-link-context" id="dftIssueContext">
           <span>来自 DFT 核验 issue: ${esc(link.issueId)}</span>
-          <a href="../review_center/index.html?${esc(params.toString())}">返回审核中心</a>
+          <a href="${esc(returnHref({ includeClosed: true }))}">${esc(returnSourceDef().list)}</a>
         </div>
       `;
     }
@@ -1932,6 +2098,7 @@
       if (!panel) return;
       const existing = document.getElementById("dftDeepLinkWarning");
       if (existing) existing.remove();
+      if (!message) return;
       panel.insertAdjacentHTML("afterbegin", '<div class="deep-link-warning" id="dftDeepLinkWarning">' + esc(message) + '</div>');
     }
 
@@ -1953,28 +2120,76 @@
       });
     }
 
-    async function applyDftDeepLink() {
+    /* 同步版的 DFT 目标高亮：在 DFT 结果每一次异步重渲染之后都要重跑，
+       否则 ensureCompleteDftResults() 的分页重渲染会把高亮节点整块替换掉。 */
+    function applyDftDeepLinkHighlightSync(options) {
       const link = state.deepLink || {};
-      if (link.tab === "dft") switchDetailTab("dft");
-      if (link.targetType !== "dft_results" || !link.targetId) return;
+      if (link.targetType !== "dft_results" || !link.targetId) return false;
       const selector = '#dftResults [data-collection="dft_results"][data-record-id="' + cssEscape(link.targetId) + '"]';
-      const card = await waitForElement(selector, 20, 80);
-      if (!card) {
-        showDftDeepLinkWarning("未找到目标 DFT 条目，可能已被删除或筛选隐藏。");
-        return;
-      }
+      const card = document.querySelector(selector);
+      if (!card) return false;
       card.classList.add("deep-link-target");
       const dftDetails = card.querySelector("details.dft-detail-toggle");
       if (dftDetails) dftDetails.open = true;
-      const details = card.querySelector("details.raw-data-toggle");
-      if (details) details.open = true;
+      const rawDetails = card.querySelector("details.raw-data-toggle");
+      if (rawDetails) rawDetails.open = true;
       // 记录位于催化剂分组内：先逐级展开所有祖先 details，再定位
       let ancestorDetails = card.parentElement;
       while (ancestorDetails) {
         if (ancestorDetails.tagName === "DETAILS") ancestorDetails.open = true;
         ancestorDetails = ancestorDetails.parentElement;
       }
-      card.scrollIntoView({ behavior: "smooth", block: "center" });
+      showDftDeepLinkWarning("");
+      // block:"start" + CSS scroll-margin-top：落在目标卡片顶部，
+      // 而不是被展开后的超长原始 JSON 顶到卡片中间。
+      card.scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
+    }
+
+    /* property_type 深链（审核中心 / DFT 数据库的行跳过来时带“性质类型”）：
+       同一性质在同一催化剂分组里可能有多条记录，这里定位到该性质分组本身并展开所在卡片。 */
+    function applyDftPropertyDeepLinkSync() {
+      const link = state.deepLink || {};
+      const want = String(link.propertyType || "").trim().toLowerCase();
+      if (!want) return false;
+      const panel = document.getElementById("dftResults");
+      if (!panel) return false;
+      const wantLabel = String(propertyTypeLabel(link.propertyType) || "").trim().toLowerCase();
+      const sections = Array.from(panel.querySelectorAll(".dft-prop-section"));
+      const hit = sections.find(function (el) {
+        const raw = String(el.getAttribute("data-property-type") || "").trim().toLowerCase();
+        if (raw && raw === want) return true;
+        const head = el.querySelector(".dft-prop-head h4");
+        return Boolean(wantLabel && head && String(head.textContent || "").trim().toLowerCase() === wantLabel);
+      });
+      if (!hit) return false;
+      let ancestor = hit.parentElement;
+      while (ancestor) {
+        if (ancestor.tagName === "DETAILS") ancestor.open = true;
+        ancestor = ancestor.parentElement;
+      }
+      hit.classList.add("deep-link-target");
+      hit.scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
+    }
+
+    async function applyDftDeepLink() {
+      const link = state.deepLink || {};
+      if (link.tab === "dft") switchDetailTab("dft");
+      if (link.propertyType && !applyDftPropertyDeepLinkSync()) {
+        const section = await waitForElement("#dftResults .dft-prop-section", 20, 100);
+        if (section) applyDftPropertyDeepLinkSync();
+        else setDeepLinkNotice("已切到「DFT 候选与性能」。本条记录的性质类型是 " + propertyTypeLabel(link.propertyType) + "，DFT 数据还在加载，请稍候核对。");
+      }
+      if (link.targetType !== "dft_results" || !link.targetId) return;
+      if (applyDftDeepLinkHighlightSync()) return;
+      const selector = '#dftResults [data-collection="dft_results"][data-record-id="' + cssEscape(link.targetId) + '"]';
+      const card = await waitForElement(selector, 20, 80);
+      if (!card) {
+        showDftDeepLinkWarning("未找到目标 DFT 条目，可能已被删除或筛选隐藏。");
+        return;
+      }
+      applyDftDeepLinkHighlightSync();
     }
 
     function cssEscape(value) {
@@ -2360,8 +2575,282 @@
 
     function viewPaperPdf() {
       if (!state.paperId) { showToast("未选择文献。"); return; }
-      const url = `/api/papers/${encodeURIComponent(state.paperId)}/pdf#page=1&toolbar=1`;
+      // 从审核中心/DFT 数据库跳转过来时会带 pdf_page，直接落到证据页。
+      const deepPage = Number(state.deepLink && state.deepLink.pdfPage) || 0;
+      const page = deepPage > 0 ? deepPage : 1;
+      const url = `/api/papers/${encodeURIComponent(state.paperId)}/pdf#page=${page}&toolbar=1`;
       window.open(url, "_blank", "noopener");
+    }
+
+    /* ============================================================
+       Deep link（来自审核中心 / DFT 数据库 / 工作台的对象级跳转）
+       - 顶部显示定位条，明确"到了哪篇、哪个对象、哪一页证据"
+       - 自动切到目标 tab，并把目标对象高亮 + 滚动到视口
+       ============================================================ */
+    const DEEP_LINK_TARGET_LABELS = {
+      section: "章节",
+      sections: "章节",
+      writing_card: "写作卡",
+      writing_cards: "写作卡",
+      mechanism_claim: "机理论断",
+      mechanism_claims: "机理论断",
+      dft_setting: "DFT 设置",
+      dft_settings: "DFT 设置",
+      catalyst_sample: "催化剂样本",
+      catalyst_samples: "催化剂样本",
+      dft_results: "DFT 数据行",
+      electrochemical_performance: "电化学性能",
+      figure: "图",
+      figures: "图",
+      table: "表",
+      tables: "表"
+    };
+
+    const DEEP_LINK_TAB_LABELS = {
+      summary: "概览",
+      sections: "章节",
+      figures: "图表",
+      dft: "DFT 候选与性能",
+      cards: "机理与写作",
+      translation: "中文译文"
+    };
+
+    /* 旧链接 / 外部页面用过 writing、mechanism、content 等 tab 命名，
+       这里统一映射到详情页真实存在的 tab，避免"跳过来却停在第 1 个 tab"或直接报错。 */
+    const DETAIL_TAB_ALIASES = {
+      review: "summary", overview: "summary", abstract: "summary", info: "summary", basic: "summary",
+      section: "sections", content: "sections", contents: "sections", parsed: "sections", text: "sections",
+      figure: "figures", table: "figures", tables: "figures", charts: "figures", visuals: "figures",
+      writing: "cards", "writing-card": "cards", "writing-cards": "cards",
+      writing_card: "cards", writing_cards: "cards",
+      mechanism: "cards", claim: "cards", claims: "cards",
+      mechanism_claim: "cards", mechanism_claims: "cards",
+      dft_result: "dft", dft_results: "dft", dft_setting: "dft", dft_settings: "dft",
+      catalyst_sample: "dft", catalyst_samples: "dft",
+      electrochemical_performance: "dft", performance: "dft",
+      translate: "translation", zh: "translation", translation_preview: "translation"
+    };
+
+    function resolveDetailTab(tab) {
+      const raw = String(tab || "").trim().toLowerCase();
+      if (!raw) return "summary";
+      if (document.getElementById("tab-" + raw)) return raw;
+      const mapped = DETAIL_TAB_ALIASES[raw];
+      if (mapped && document.getElementById("tab-" + mapped)) return mapped;
+      return "summary";
+    }
+
+    function deepLinkHasContext() {
+      const link = state.deepLink || {};
+      return Boolean(link.tab || link.targetType || link.targetId || link.issueId || link.pdfPage || link.fieldName || link.propertyType);
+    }
+
+    /* ---- 来源感知的“返回”（2026-09-21） ----
+       详情页以前无论从哪个页面进来，“返回”都固定回文献库（定位条固定回审核中心），
+       从 DFT 数据库、文献筛选、机理知识、工作台进来的用户会被送回错误的页面。
+       这里按 `from` 参数 > document.referrer > 上下文兜底 逐级判定来源，
+       统一驱动面包屑、返回按钮、定位条与手机底部动作条。
+       注意：literature_library 带 paper_id 会 location.replace 回详情页，所以它不能带 paper_id。 */
+    const RETURN_SOURCES = {
+      review_center: { label: "审核中心", list: "返回审核中心", path: "../review_center/index.html", paperId: true, library: true },
+      literature_library: { label: "文献库", list: "返回文献库", path: "../literature_library/index.html", library: true },
+      literature_screening: { label: "文献筛选", list: "返回文献筛选", path: "../literature_screening/index.html" },
+      mechanism_knowledge: { label: "机理知识", list: "返回机理知识", path: "../mechanism_knowledge/index.html", library: true },
+      dft_database: { label: "DFT 数据库", list: "返回 DFT 数据库", path: "../dft_database/index.html", library: true },
+      dft_audit_center: { label: "DFT 审核中心", list: "返回 DFT 审核中心", path: "../dft_audit_center/index.html", paperId: true },
+      dashboard: { label: "工作台", list: "返回工作台", path: "../dashboard/index.html" },
+      visuals: { label: "图表", list: "返回图表", path: "../visuals/index.html", library: true }
+    };
+    const RETURN_DEFAULT_SOURCE = "literature_library";
+
+    function returnSourceFromReferrer() {
+      try {
+        const raw = document.referrer || "";
+        if (!raw) return "";
+        const ref = new URL(raw, window.location.href);
+        if (ref.origin !== window.location.origin) return "";
+        const match = ref.pathname.match(/\/pages\/([a-z0-9_]+)\//i);
+        return match && RETURN_SOURCES[match[1]] ? match[1] : "";
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function returnSourceKey() {
+      if (state.returnSource) return state.returnSource;
+      const explicit = String(new URLSearchParams(window.location.search).get("from") || "").trim().toLowerCase();
+      if (RETURN_SOURCES[explicit]) {
+        state.returnSource = explicit;
+        return explicit;
+      }
+      const fromReferrer = returnSourceFromReferrer();
+      if (fromReferrer) {
+        state.returnSource = fromReferrer;
+        return fromReferrer;
+      }
+      /* 没有来源信息时：带 DFT 核验 issue 的深链仍按审核中心兜底（保持既有行为），其余回文献库。 */
+      const guess = (state.deepLink && state.deepLink.issueId) ? "review_center" : RETURN_DEFAULT_SOURCE;
+      state.returnSource = guess;
+      return guess;
+    }
+
+    function returnSourceDef() {
+      return RETURN_SOURCES[returnSourceKey()] || RETURN_SOURCES[RETURN_DEFAULT_SOURCE];
+    }
+
+    function returnHref(options) {
+      const def = returnSourceDef();
+      const opts = options || {};
+      const params = new URLSearchParams();
+      if (def.paperId && state.paperId) params.set("paper_id", state.paperId);
+      const libraryName = state.deepLink && state.deepLink.libraryName;
+      if (def.library && libraryName) params.set("library_name", libraryName);
+      if (opts.includeClosed && state.deepLink && state.deepLink.issueId) params.set("include_closed", "true");
+      const query = params.toString();
+      return def.path + (query ? "?" + query : "");
+    }
+
+    function applyReturnSource() {
+      const def = returnSourceDef();
+      const href = returnHref();
+      const crumb = document.getElementById("pdBreadcrumbHome");
+      if (crumb) { crumb.textContent = def.label; crumb.href = href; }
+      const back = document.getElementById("pdReturnList");
+      if (back) { back.textContent = def.list; back.href = href; }
+      const fallback = document.getElementById("pdFallbackBack");
+      if (fallback) { fallback.textContent = def.list; fallback.href = href; }
+    }
+
+    function renderDeepLinkBar() {
+      const bar = document.getElementById("pdDeepLinkBar");
+      if (!bar) return;
+      const dock = document.getElementById("pdDeepLinkDock");
+      if (!deepLinkHasContext()) {
+        bar.hidden = true; bar.innerHTML = "";
+        if (dock) { dock.hidden = true; dock.innerHTML = ""; }
+        document.body.classList.remove("has-deeplink-dock");
+        return;
+      }
+
+      const link = state.deepLink || {};
+      const typeLabel = DEEP_LINK_TARGET_LABELS[link.targetType] || link.targetType || "";
+      const tabLabel = link.tab ? (DEEP_LINK_TAB_LABELS[resolveDetailTab(link.tab)] || "") : "";
+      const chips = [];
+
+      if (tabLabel) chips.push('<span class="pd-deeplink-tag">区域：' + esc(tabLabel) + "</span>");
+      if (typeLabel) chips.push('<span class="pd-deeplink-tag">对象：' + esc(typeLabel) + "</span>");
+      if (link.issueId) chips.push('<span class="pd-deeplink-tag">issue：' + esc(String(link.issueId).slice(0, 18)) + "</span>");
+      if (link.propertyType) chips.push('<span class="pd-deeplink-tag">性质：' + esc(propertyTypeLabel(link.propertyType) || link.propertyType) + "</span>");
+      if (link.pdfPage) {
+        const statusLabel = link.pdfLocatorStatus === "exact_page" ? "精确页码" : (link.pdfLocatorStatus || "页码");
+        chips.push('<span class="pd-deeplink-tag">PDF 第 ' + esc(link.pdfPage) + " 页（" + esc(statusLabel) + "）</span>");
+      }
+
+      const targetText = link.targetId
+        ? '<span class="pd-deeplink-target" title="' + esc(link.targetId) + '">目标 ID：' + esc(String(link.targetId).slice(0, 24)) + (String(link.targetId).length > 24 ? "…" : "") + "</span>"
+        : (link.fieldName ? '<span class="pd-deeplink-target">字段：' + esc(link.fieldName) + "</span>" : "");
+
+      const quote = link.pdfEvidenceText
+        ? '<span class="pd-deeplink-quote" title="' + esc(link.pdfEvidenceText) + '">证据原文：' + esc(link.pdfEvidenceText) + "</span>"
+        : "";
+
+      const actions = [];
+      if (link.pdfPage) {
+        actions.push('<button class="btn btn-primary btn-sm" type="button" onclick="viewPaperPdf()">打开 PDF 第 ' + esc(link.pdfPage) + " 页</button>");
+      }
+      const returnDef = returnSourceDef();
+      actions.push('<a class="btn btn-ghost btn-sm" href="' + esc(returnHref()) + '">' + esc(returnDef.list) + "</a>");
+
+      bar.innerHTML =
+        '<span class="pd-deeplink-tag">来自' + esc(returnDef.label) + '的定位跳转</span>' +
+        chips.join("") +
+        targetText +
+        quote +
+        '<span class="pd-deeplink-actions">' + actions.join("") + "</span>" +
+        '<span class="pd-deeplink-notice" id="pdDeepLinkNotice" hidden></span>';
+      bar.hidden = false;
+
+      if (dock) {
+        dock.innerHTML = actions.join("");
+        dock.hidden = actions.length === 0;
+        document.body.classList.toggle("has-deeplink-dock", actions.length > 0);
+      }
+    }
+
+    function setDeepLinkNotice(message) {
+      const notice = document.getElementById("pdDeepLinkNotice");
+      if (!notice) return;
+      if (!message) { notice.hidden = true; notice.textContent = ""; return; }
+      notice.hidden = false;
+      notice.textContent = message;
+    }
+
+    function highlightDeepLinkTarget(node, containerSelector) {
+      if (!node) return false;
+      node.classList.add("deep-link-target");
+      let ancestor = node.parentElement;
+      while (ancestor && ancestor !== document.body) {
+        if (ancestor.tagName === "DETAILS") ancestor.open = true;
+        if (containerSelector && ancestor.matches && ancestor.matches(containerSelector)) break;
+        ancestor = ancestor.parentElement;
+      }
+      node.scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
+    }
+
+    /* 非 DFT 对象（章节 / 图表 / 写作卡 / 机理论断）的通用定位：
+       先按 data-record-id 精确匹配，再按证据页码匹配，最后退回"该 tab 第一屏"。 */
+    async function applyStructuredDeepLink() {
+      const link = state.deepLink || {};
+      if (!link.tab) return;
+      const tab = resolveDetailTab(link.tab);
+      if (tab === "summary") return;
+      if (link.targetType === "dft_results") return; // 由 applyDftDeepLink 处理
+
+      const pane = document.getElementById("tab-" + tab);
+      if (!pane) return;
+
+      if (link.targetId) {
+        const byId = await waitForElement(
+          '#tab-' + cssEscape(tab) + ' [data-record-id="' + cssEscape(link.targetId) + '"]',
+          10, 120
+        );
+        if (highlightDeepLinkTarget(byId, "#tab-" + tab)) return;
+      }
+
+      if (tab === "sections" && link.pdfPage) {
+        // 章节没有稳定 record id，用渲染出来的页码范围（"页码：3 - 5"）定位包含证据页的章节
+        const page = Number(link.pdfPage);
+        const items = Array.from(pane.querySelectorAll(".section-item"));
+        const hit = items.find(function (item) {
+          const meta = item.querySelector(".muted");
+          const m = meta && String(meta.textContent).match(/(\d+)\s*-\s*(\d+)/);
+          if (!m) return false;
+          return page >= Number(m[1]) && page <= Number(m[2]);
+        });
+        if (highlightDeepLinkTarget(hit, "#tab-sections")) {
+          setDeepLinkNotice("已定位到包含 PDF 第 " + page + " 页的章节。");
+          return;
+        }
+        setDeepLinkNotice("已切到「章节」。没有章节明确覆盖 PDF 第 " + page + " 页，已列出全部章节供核对。");
+        return;
+      }
+
+      if (tab === "figures" && link.pdfPage) {
+        const cards = Array.from(pane.querySelectorAll(".pd-figure-card"));
+        const target = cards.find(card => {
+          const badge = card.querySelector(".pd-figure-page-badge");
+          const m = badge && String(badge.textContent).match(/(\d+)/);
+          return m && Number(m[1]) === Number(link.pdfPage);
+        });
+        if (highlightDeepLinkTarget(target, "#tab-figures")) return;
+        setDeepLinkNotice("已切到「图表」。没有找到与 PDF 第 " + link.pdfPage + " 页对应的图，已列出全部图表供核对。");
+        return;
+      }
+
+      if (link.targetId || link.pdfPage) {
+        setDeepLinkNotice("已切到对应的标签页，但未在此页找到精确匹配的对象，请按上方目标 ID / 页码核对。");
+      }
     }
 
     async function reparsePaperDetail() {
@@ -2605,7 +3094,9 @@
       document.getElementById("electrochemicalPerformance").innerHTML = renderStructuredCollection(paper.electrochemical_performance_items || [], "暂无电化学性能数据。");
       document.getElementById("mechanismClaims").innerHTML = renderMechanismClaims(paper.mechanism_claims_items || []);
       document.getElementById("writingCards").innerHTML = renderStructuredCollection(paper.writing_cards_items || [], "暂无写作卡片。");
+      renderDeepLinkBar();
       applyDftDeepLink();
+      applyStructuredDeepLink();
     }
 
     function formatEvidenceText(text) {
@@ -2660,7 +3151,7 @@
           ["证据类型", Array.isArray(item.evidence_types) && item.evidence_types.length ? item.evidence_types.join(", ") : ""]
         ].filter(r => r[1]);
         return `
-          <div class="structured-card pd-mechanism-card">
+          <div class="structured-card pd-mechanism-card" data-collection="mechanism_claims" data-record-id="${esc(item.id || "")}" data-record-index="${esc(idx)}">
             <div class="structured-card-title">
               <span>${esc(claimType || "机理论断")}</span>
               <span class="dft-status-chip ${esc(statusCls)}">${esc(statusLabel)}</span>
@@ -2746,16 +3237,18 @@
     }
 
     function switchDetailTab(tab, event) {
-      state.currentTab = tab || "summary";
+      const resolved = resolveDetailTab(tab);
+      const pane = document.getElementById("tab-" + resolved) || document.getElementById("tab-summary");
+      state.currentTab = pane.id.replace(/^tab-/, "");
       document.querySelectorAll(".tab-btn").forEach(btn => btn.classList.remove("active"));
-      document.querySelectorAll(".tab-pane").forEach(pane => pane.classList.remove("active"));
+      document.querySelectorAll(".tab-pane").forEach(el => el.classList.remove("active"));
       if (event && event.target) event.target.classList.add("active");
       if (!event) {
-        const button = document.querySelector('.tab-btn[onclick*="' + cssEscape(tab) + '"]');
+        const button = document.querySelector('.tab-btn[onclick*="' + cssEscape(state.currentTab) + '"]');
         if (button) button.classList.add("active");
       }
-      document.getElementById("tab-" + tab).classList.add("active");
-      ensureFullDetail(tab);
+      pane.classList.add("active");
+      ensureFullDetail(state.currentTab);
     }
 
     function uniquePdfPageLocators(locators) {
@@ -2824,7 +3317,10 @@
 
     document.addEventListener("DOMContentLoaded", () => {
       TopNav.init({ currentPage: "literature", mountId: "topnav-mount" });
-      if (parseParams()) {
+      /* 先解析参数再决定返回目标：returnHref() 依赖 state.paperId / state.deepLink。 */
+      const hasPaper = parseParams();
+      applyReturnSource();
+      if (hasPaper) {
         loadPaperData();
       } else {
         showFallback("请先从文献库选择一篇文献查看详情。");

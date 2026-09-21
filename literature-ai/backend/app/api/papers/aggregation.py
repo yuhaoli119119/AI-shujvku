@@ -283,7 +283,7 @@ async def dft_dataset_quality(
         paper_meta_by_id[paper_id] = {
             "title": paper.title,
             "doi": paper.doi,
-            "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
+            "library_detail_url": f"../paper_detail/index.html?paper_id={paper_id}&tab=dft",
             "review_workbench_url": f"../external_analysis_workbench/index.html?paper_id={paper_id}",
         }
         parsed_by_paper[paper_id] += 1

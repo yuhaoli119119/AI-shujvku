@@ -1,0 +1,182 @@
+/* ============================================================
+   responsive.css — LitAI 工作台移动端/平板共用基线 (2026-09-21)
+   ------------------------------------------------------------
+   加载顺序：必须紧跟 topnav.css 之后（各页自带样式之前），
+   这样页面自身的 @media 规则仍然可以覆盖这里。
+   只放"所有页面都该有"的行为，不放任何单页专属布局。
+   ============================================================ */
+
+/* ---- 0. 断点约定（其他文件请复用这些变量） ---- */
+:root {
+  --bp-phone: 560px;   /* 手机横竖屏 */
+  --bp-tablet: 900px;  /* 平板竖屏 / 小笔记本 */
+  --touch-target: 40px; /* 移动端最小可点高度 */
+}
+
+/* ---- 1. 小屏收紧字号与间距（用户要求：字体可以缩小，别浪费空间） ---- */
+@media (max-width: 900px) {
+  :root {
+    --nav-height: 40px;
+    --page-top-gap: 6px;
+    --font-size-xl: 1.3rem;
+    --font-size-2xl: 1.7rem;
+    --card-padding: 0.9rem;
+  }
+}
+
+@media (max-width: 560px) {
+  :root {
+    --font-size-lg: 1rem;
+    --font-size-xl: 1.15rem;
+    --font-size-2xl: 1.4rem;
+    --radius-lg: 10px;
+  }
+}
+
+/* ---- 2. 长串（DOI、路径、哈希、英文标题）不要撑破容器 ---- */
+@media (max-width: 900px) {
+  code, pre, .mono, .pd-doi, .doi-line {
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ---- 3. 横向滚动容器的可见提示（宽表格兜底方案） ---- */
+.litai-scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 900px) {
+  .litai-scroll-x {
+    /* 右侧渐隐，提示"还能往右滑"，比纯截断友好 */
+    background:
+      linear-gradient(to right, transparent calc(100% - 28px), var(--color-surface, #fff)) right / 28px 100% no-repeat;
+    background-attachment: local, scroll;
+  }
+  .litai-scroll-x::-webkit-scrollbar { height: 6px; }
+  .litai-scroll-x::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.45);
+    border-radius: 999px;
+  }
+}
+
+/* ---- 4. 通用"宽表格 → 卡片"模式（手机端） ----
+   用法：在 <table class="litai-stack"> 上启用，并给每个 <td> 加
+   data-label="列名"。空 data-label 的单元格按整行块显示（用于标题/操作区）。 */
+@media (max-width: 700px) {
+  table.litai-stack { display: block; width: 100%; min-width: 0 !important; table-layout: auto !important; }
+  table.litai-stack > thead { display: none; }
+  table.litai-stack > tbody { display: block; }
+  table.litai-stack > tbody > tr {
+    display: block;
+    border: 1px solid var(--color-border, rgba(0,0,0,.08));
+    border-radius: 10px;
+    background: var(--color-surface, #fff);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  table.litai-stack > tbody > tr:hover td { background: transparent !important; }
+  table.litai-stack > tbody > tr > td {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 8px;
+    border: 0 !important;
+    padding: 3px 0 !important;
+    text-align: left !important;
+    white-space: normal !important;
+    overflow: visible !important;
+  }
+  table.litai-stack > tbody > tr > td::before {
+    content: attr(data-label);
+    color: var(--color-text-muted, #9CA3AF);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.5;
+  }
+  /* 无 data-label 的单元格：整块显示（标题、状态条、操作按钮组） */
+  table.litai-stack > tbody > tr > td:not([data-label])::before,
+  table.litai-stack > tbody > tr > td[data-label=""]::before { display: none; }
+  table.litai-stack > tbody > tr > td:not([data-label]),
+  table.litai-stack > tbody > tr > td[data-label=""] { display: block; }
+  /* 空状态/跨列表格不要被卡片模式拆开 */
+  table.litai-stack > tbody > tr > td[colspan] { display: block; text-align: center !important; }
+}
+
+/* ---- 5. 移动端弹窗：全屏抽屉，避免小屏里挤成一条 ---- */
+@media (max-width: 700px) {
+  .modal-card,
+  .evidence-modal,
+  .litai-fullscreen-sm {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    height: 100% !important;
+    border-radius: 0 !important;
+  }
+  .overlay,
+  .modal-backdrop {
+    padding: 0 !important;
+  }
+}
+
+/* ---- 6. 移动端按钮/输入不要被撑成"大模块"（用户明确要求） ---- */
+@media (max-width: 700px) {
+  .btn,
+  button,
+  select,
+  input[type="text"],
+  input[type="search"],
+  input[type="number"],
+  textarea {
+    min-height: 0;
+  }
+  /* 明确需要触摸友好的主操作按钮才给 40px */
+  .btn-touch { min-height: var(--touch-target); }
+}
+
+/* ---- 7. 显示/隐藏工具类 ---- */
+.only-sm { display: none !important; }
+
+@media (max-width: 900px) {
+  .hide-md { display: none !important; }
+}
+@media (max-width: 700px) {
+  .hide-sm { display: none !important; }
+  .only-sm { display: revert !important; }
+}
+
+/* ---- 8. 无障碍：尊重"减少动效" ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   横向可滚动条带的两端渐隐提示
+   用法：滚动容器加 class="litai-hscroll"，状态类由 TopNav.syncScrollHints() 维护
+   （is-scrollable / not-start / at-end，与顶栏 .topnav-items 同一套语义）。
+   滚动条通常被藏掉（scrollbar-width:none），没有这条渐隐，手机上看起来像是内容被硬切。
+   不需要媒体查询：只有真的溢出时才会被加上 is-scrollable。
+   ============================================================ */
+.litai-hscroll.is-scrollable {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent 100%);
+}
+.litai-hscroll.is-scrollable.not-start {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 calc(100% - 16px), transparent 100%);
+}
+.litai-hscroll.is-scrollable.at-end {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+.litai-hscroll.is-scrollable.not-start.at-end {
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 16px, #000 100%);
+}

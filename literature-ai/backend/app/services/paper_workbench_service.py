@@ -812,7 +812,7 @@ class PaperWorkbenchService(
                     "content_review_conflict_count": (conflict_counts_by_module.get(str(paper.id)) or {}).get("content", 0),
                     "content_review_conflict_total_count": (conflict_total_counts_by_module.get(str(paper.id)) or {}).get("content", 0),
                     "workspace_path": paper.workspace_path,
-                    "detail_url": f"../literature_library/index.html?paper_id={paper.id}&tab=review",
+                    "detail_url": f"../paper_detail/index.html?paper_id={paper.id}&tab=review",
                     "dft_review_queue_url": f"../review_center/index.html?paper_id={paper.id}",
                 }
             )

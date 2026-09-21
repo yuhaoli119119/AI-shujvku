@@ -1,3 +1,14 @@
+/* ============================================================
+   literature_screening/page.css — 响应式改版 (2026-09-21)
+   ------------------------------------------------------------
+   作用域：只作用于本页（index.html 最后加载本文件）。
+   依赖（只读，不修改）：shared/tokens.css、components.css、
+   topnav.css、responsive.css（含 table.litai-stack 手机卡片模式、
+   .litai-scroll-x 横向滚动渐隐）。
+   断点：<=700px 手机卡片化；701-900px 窄平板横向滚动兜底；>=1024px 桌面保持原样。
+   ============================================================ */
+
+/* ---- 1. 表格基础样式（桌面原样保留） ---------------------------- */
 .screening-table {
     width: 100%;
     border-collapse: collapse;
@@ -28,6 +39,99 @@
     white-space: normal;
 }
 
+/* 标题即入口：点标题进该篇详情（此前筛选列表只能勾选，无法打开论文） */
+.screening-table td.title-col .screening-title-link {
+    color: inherit;
+    text-decoration: none;
+    font: inherit;
+}
+
+.screening-table td.title-col .screening-title-link:hover,
+.screening-table td.title-col .screening-title-link:focus-visible {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+/* ---- 2. 页面骨架 ----------------------------------------------
+   原实现：<div class="layout" style="...overflow:hidden"> +
+   <div class="table-container" style="flex:1; overflow:auto">
+   但 shared 里 .shell/.layout 没有任何样式，flex:1 不生效，
+   外层 overflow:hidden 反而把超宽表格整块裁掉 —— 390px 下
+   scrollWidth=479 且 scrollY 永远为 0（整页不能纵向滚动）。
+   现在：层不再裁剪、不再吃高度，纵向交回页面自然滚动。 */
+.shell {
+    display: block;
+    padding: 0 10px 12px;
+    box-sizing: border-box;
+}
+
+.layout {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.table-container {
+    padding: 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+/* ---- 3. 工具栏 ------------------------------------------------ */
+.toolbar-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.toolbar-row h2 {
+    margin: 0;
+}
+
+.result-count {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+/* 本页 HTML 写的是 class="btn primary|ghost|danger"（空格写法），
+   shared/components.css 只定义了 .btn-primary/.btn-ghost/... （连字符写法），
+   所以这些按钮此前完全没有视觉层级（浏览器默认灰底）。这里按 token 补齐，
+   仅作用于本页；若总协调后续在 shared 统一命名，可整块删除。 */
+.btn.primary {
+    background: var(--color-primary);
+    color: #FFFFFF;
+}
+
+.btn.primary:hover {
+    background: var(--color-primary-hover);
+}
+
+.btn.ghost {
+    background: transparent;
+    color: var(--color-text-secondary);
+    box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+
+.btn.ghost:hover {
+    background: var(--color-surface-alt);
+    color: var(--color-text);
+}
+
+.btn.danger {
+    background: var(--color-danger);
+    color: #FFFFFF;
+}
+
+/* 折叠「筛选」区块：桌面隐藏 summary、始终展开（原布局不变）；
+   <=900px 由下面同名选择器覆盖为 display:flex（保持同特异性、后者生效）。 */
+.filters-panel > summary.filters-summary {
+    display: none;
+}
+
+/* ---- 4. 原有行样式（保持原值） --------------------------------- */
 .filters-row {
     display: flex;
     gap: 12px;
@@ -46,4 +150,299 @@
 
 .small-input {
     width: 120px;
+}
+
+/* 弹窗类共享样式里没有定义，本页自己补最小集合 */
+.subtle {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-sm);
+    margin: 0;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+/* ============================================================
+   5. 平板 / 手机紧凑化（<=900px）
+   ============================================================ */
+@media (max-width: 900px) {
+    .shell {
+        padding: 0 8px 10px;
+    }
+
+    .toolbar-row {
+        gap: 6px 8px;
+        margin-bottom: 8px;
+    }
+
+    .toolbar-row h2 {
+        font-size: 1.15rem;
+    }
+
+    .filters-row {
+        gap: 6px 8px;
+        margin-bottom: 6px;
+    }
+
+    .actions-row {
+        gap: 6px 8px;
+        margin-top: 8px;
+        padding-top: 8px;
+    }
+
+    /* 按钮：30-34px 高、12px 字号（要求 E） */
+    .btn {
+        padding: 5px 12px;
+        font-size: 12px;
+        line-height: 1.2;
+        min-height: 32px;
+    }
+
+    .small-input {
+        width: auto;
+        flex: 1 1 130px;
+        min-width: 0;
+        height: 32px;
+        font-size: 12px;
+        padding: 4px 8px;
+        box-sizing: border-box;
+    }
+
+    .filters-row label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .table-container {
+        padding: 8px;
+    }
+
+    /* 701-900px 窄平板：保留表格，横向滚动兜底
+       （溢出滚动 + 右侧渐隐来自 shared/.litai-scroll-x，这里只保证最小可读宽度） */
+    .screening-table {
+        min-width: 1080px;
+    }
+
+    /* 折叠区块的表头：32px 高、12px 字号 */
+    .filters-panel > summary.filters-summary {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 32px;
+        padding: 4px 10px;
+        margin-bottom: 8px;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius);
+        background: var(--color-surface-alt);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text);
+        cursor: pointer;
+        list-style: none;
+    }
+
+    .filters-summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .filters-summary-text {
+        white-space: nowrap;
+    }
+
+    .filters-summary-hint {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 400;
+        color: var(--color-text-muted);
+    }
+
+    .filters-summary::after {
+        content: "▾";
+        margin-left: auto;
+        color: var(--color-text-muted);
+        transition: transform var(--transition, 0.2s);
+    }
+
+    details[open] > .filters-summary::after {
+        transform: rotate(180deg);
+    }
+
+    /* 手机/平板：选中的行操作按钮不要撑成一整块 */
+    .actions-row .btn {
+        flex: 0 1 auto;
+    }
+}
+
+/* ============================================================
+   6. 手机（<=700px）：表格卡片化 + 输入 2 列网格 + 弹窗不溢出
+   ============================================================ */
+@media (max-width: 700px) {
+    .filters-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 8px;
+    }
+
+    .filters-grid .small-input {
+        width: 100%;
+        flex: none;
+    }
+
+    .filters-checks {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 8px;
+    }
+
+    .filters-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px 8px;
+    }
+
+    .filters-actions .small-input {
+        width: 100%;
+        flex: none;
+    }
+
+    /* 2 列网格里最后一个按钮占满一行，避免留下半格空位 */
+    .filters-actions .btn:last-of-type {
+        grid-column: 1 / -1;
+    }
+
+    /* --- 表格 -> 卡片（列名来自 td[data-label]，由 page.js 补） --- */
+    .screening-table.litai-stack {
+        font-size: 12px;
+        background: transparent;
+        min-width: 0 !important;
+    }
+
+    .screening-table.litai-stack > tbody > tr {
+        position: relative;
+        padding: 8px 10px;
+        box-shadow: var(--shadow-card);
+    }
+
+    .screening-table.litai-stack > tbody > tr > td {
+        grid-template-columns: 96px minmax(0, 1fr);
+        padding: 2px 0 !important;
+        max-width: none !important;
+        overflow-wrap: anywhere;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td::before {
+        font-size: 11px;
+    }
+
+    /* Title：卡片标题，整块显示、绝不截断 */
+    .screening-table.litai-stack > tbody > tr > td.title-col {
+        display: block !important;
+        max-width: none !important;
+        padding: 0 28px 6px 0 !important;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.4;
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td.title-col::before {
+        display: none !important;
+        content: none !important;
+    }
+
+    /* 复选框：钉在卡片右上角，不占一行 */
+    .screening-table.litai-stack > tbody > tr > td.cell-select {
+        position: absolute;
+        top: 8px;
+        right: 10px;
+        display: block !important;
+        width: auto;
+        padding: 0 !important;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td.cell-select::before {
+        display: none !important;
+        content: none !important;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td.empty-row {
+        padding: 12px 4px !important;
+        color: var(--color-text-muted);
+    }
+
+    /* 字段改「流式小标签」排布：短字段不再各占一整行，
+       一行按实际宽度放 2–3 个（Year 2026 / Journal … / IF 18.1 …），
+       消除每行右侧的大片空白。标签由 td[data-label] 生成，信息一字未删。 */
+    .screening-table.litai-stack > tbody > tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 3px 14px;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td {
+        display: inline-flex !important;
+        align-items: baseline;
+        gap: 4px;
+        width: auto !important;
+        max-width: 100% !important;
+        padding: 0 !important;
+        white-space: normal !important;
+        overflow-wrap: anywhere;
+    }
+
+    .screening-table.litai-stack > tbody > tr > td::before {
+        content: attr(data-label) ":";
+        font-size: 10.5px;
+        white-space: nowrap;
+    }
+
+    /* 标题 / 空态行仍然独占整行 */
+    .screening-table.litai-stack > tbody > tr > td.title-col,
+    .screening-table.litai-stack > tbody > tr > td.empty-row {
+        flex: 1 1 100%;
+    }
+
+    /* 弹窗：手机整宽、不撑出横向滚动条 */
+    .modal-overlay {
+        padding: 10px;
+        overflow-y: auto;
+        align-items: flex-start;
+    }
+
+    #importPanelOverlay .modal,
+    #confirmModalOverlay .modal {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding: 12px;
+        box-sizing: border-box;
+        margin: auto 0;
+    }
+
+    #importPanelOverlay textarea {
+        max-width: 100%;
+        box-sizing: border-box;
+        font-size: 12px;
+    }
+}
+
+/* 极窄手机：勾选项单列，避免长字段名换行撑高 */
+@media (max-width: 560px) {
+    .filters-checks {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
 }

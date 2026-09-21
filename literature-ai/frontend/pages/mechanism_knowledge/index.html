@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
+    <link rel="stylesheet" href="../../shared/responsive.css">
     <script src="../../shared/topnav.js"></script>
     <script>ThemeManager.init();</script>
     <style>
@@ -139,7 +140,7 @@
         }
         .aggregate-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr));
             gap: 16px;
         }
         .material-card {
@@ -264,6 +265,29 @@
             border-left: 4px solid var(--color-danger);
         }
 
+        .fold-toggle {
+            display: none;
+            margin-left: 8px;
+            padding: 1px 7px;
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius-pill);
+            background: var(--color-surface-alt);
+            color: var(--color-text-secondary);
+            font: inherit;
+            font-size: var(--font-size-xs);
+            font-weight: 800;
+            line-height: 1.5;
+            cursor: pointer;
+            white-space: nowrap;
+            vertical-align: middle;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .fold-toggle:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+
         @media (max-width: 860px) {
             .knowledge-shell {
                 width: min(100% - 28px, 1440px);
@@ -277,6 +301,179 @@
                 margin-top: 14px;
             }
         }
+        /* 平板紧凑层：两列卡片、中等密度，桌面不受影响 */
+        @media (max-width: 1023px) and (min-width: 701px) {
+            .knowledge-shell {
+                width: min(100% - 28px, 1440px);
+                padding-top: 18px;
+            }
+            .hero {
+                display: block;
+                margin-bottom: 16px;
+            }
+            .hero .btn {
+                margin-top: 12px;
+            }
+            h1 { font-size: 24px; }
+            .hero p { font-size: 13px; line-height: 1.65; }
+            .tabs { margin-bottom: 14px; padding-bottom: 10px; }
+            .tab-btn { font-size: 13px; padding: 6px 12px; }
+            .panel-card { padding: 14px; }
+            .panel-heading { margin-bottom: 12px; }
+            .panel-title { font-size: var(--font-size-md); }
+            .panel-desc { font-size: 13px; line-height: 1.6; }
+            .aggregate-grid { gap: 10px; }
+            .material-card { padding: 12px; gap: 10px; }
+            .material-name { font-size: var(--font-size-sm); }
+            .meta-list { display: flex; flex-wrap: wrap; gap: 4px 5px; }
+            .meta-row {
+                display: inline-flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                gap: 3px;
+                max-width: 100%;
+                padding: 3px 7px;
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            .relation-list { display: flex; flex-wrap: wrap; gap: 4px 5px; margin-top: 0; }
+            .relation-item {
+                display: inline-flex;
+                align-items: center;
+                padding: 3px 8px;
+                border-radius: var(--radius-pill);
+                font-size: 12px;
+            }
+            .empty-state { padding: 18px 14px; font-size: 13px; }
+        }
+
+        /* 1024–1280：卡片已经排到 3–4 列、每张只有 300–540px 宽，字段再各占一整块边框太多，
+           又恰好落在 701–1023 紧凑带之外，整页会被撑到 1.3–1.9 万像素。这里只压字段与关系项，
+           不动 hero（hero 在这一段仍是标题左、按钮右）；>=1281 保持原桌面样式。 */
+        @media (max-width: 1280px) and (min-width: 1024px) {
+            .meta-list { display: flex; flex-wrap: wrap; gap: 4px 5px; }
+            .meta-row {
+                display: inline-flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                gap: 3px;
+                max-width: 100%;
+                padding: 3px 7px;
+                font-size: 13px;
+                line-height: 1.4;
+            }
+            .relation-list { display: flex; flex-wrap: wrap; gap: 4px 5px; margin-top: 0; }
+            .relation-item {
+                display: inline-flex;
+                align-items: center;
+                padding: 3px 8px;
+                border-radius: var(--radius-pill);
+                font-size: 12px;
+            }
+        }
+
+        /* 手机层 <=700px：单列 + 高密度 + 说明折叠 */
+        @media (max-width: 700px) {
+            .knowledge-shell {
+                width: min(100% - 20px, 1440px);
+                padding: 12px 0 24px;
+            }
+            .hero {
+                /* 标题块 + 右侧小按钮：主操作不再独占一整行大模块 */
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) auto;
+                align-items: start;
+                gap: 4px 10px;
+                margin-bottom: 12px;
+                padding: 12px;
+                border: 1px solid var(--color-border);
+                border-radius: var(--radius-lg);
+                background: var(--color-surface);
+            }
+            .hero > div { grid-column: 1; min-width: 0; }
+            .hero > .btn { grid-column: 2; grid-row: 1; align-self: start; margin-top: 2px; white-space: nowrap; }
+            .hero .eyebrow { font-size: 10px; margin-bottom: 4px; }
+            h1 { font-size: 18px; letter-spacing: -0.02em; }
+            .hero p { font-size: 12px; line-height: 1.6; margin-top: 4px; }
+            .hero .btn { padding: 6px 10px; font-size: 12px; }
+            .hero-desc { display: none; }
+            .hero.desc-open .hero-desc { display: block; }
+            .fold-toggle { display: inline-flex; align-items: center; margin-left: 6px; font-size: 10px; padding: 0 6px; }
+
+            .tabs {
+                flex-wrap: nowrap;
+                gap: 6px;
+                margin-bottom: 12px;
+                padding-bottom: 5px;
+                overflow-x: auto;
+                overscroll-behavior-x: contain;
+                -webkit-overflow-scrolling: touch;
+                scrollbar-width: none;
+            }
+            .tabs::-webkit-scrollbar { display: none; }
+            .tab-btn {
+                display: inline-flex;
+                align-items: center;
+                flex: 0 0 auto;
+                height: 32px;
+                padding: 0 10px;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+
+            .status-area { margin-bottom: 10px; }
+            .state-card { padding: 10px 12px; font-size: 12px; line-height: 1.6; }
+            .panel-card { padding: 9px; }
+            .panel-heading { margin-bottom: 9px; }
+            .panel-title { font-size: 14px; line-height: 1.4; }
+            .panel-desc { font-size: 12px; line-height: 1.55; margin-top: 4px; }
+            .panel-heading:not(.desc-open) .panel-desc { display: none; }
+
+            .aggregate-grid {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 8px;
+            }
+            .material-card { padding: 8px; gap: 7px; border-radius: var(--radius); }
+            .material-header { gap: 6px; }
+            .material-name { font-size: 13px; line-height: 1.35; }
+            .tag { padding: 2px 6px; font-size: 10px; }
+            .state-chip { padding: 1px 6px; font-size: 10px; }
+
+            /* 字段不再各占一整块：小标签流式排布，一行放 2-3 个 */
+            .meta-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 2px 4px;
+            }
+            .meta-row {
+                display: inline-flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                gap: 3px;
+                max-width: 100%;
+                padding: 1px 6px;
+                border-radius: var(--radius-sm, 6px);
+                font-size: 12px;
+                line-height: 1.3;
+            }
+            .relation-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 3px 4px;
+                margin-top: 0;
+            }
+            .relation-item {
+                display: inline-flex;
+                align-items: center;
+                padding: 2px 7px;
+                border-radius: var(--radius-pill);
+                font-size: 12px;
+                line-height: 1.3;
+            }
+            .empty-state { padding: 12px; font-size: 12px; line-height: 1.6; }
+            .toast-container { top: calc(var(--nav-height) + 10px); right: 10px; }
+        }
+
     </style>
 </head>
 <body>
@@ -285,9 +482,9 @@
     <main class="knowledge-shell">
         <section class="hero">
             <div>
-                <p class="eyebrow">Mechanism Knowledge</p>
+                <p class="eyebrow">Mechanism Knowledge<button class="fold-toggle" type="button" aria-expanded="false" onclick="toggleFold(this)">说明</button></p>
                 <h1>机理知识聚合</h1>
-                <p>汇总跨文献抽取出的催化剂、吸附物 / 中间体、命名别名与证据缺口。空字段会明确标记为“未解析、缺少证据、需重新解析或需确认”，避免把空白误读成已确认结论。</p>
+                <p class="hero-desc">汇总跨文献抽取出的催化剂、吸附物 / 中间体、命名别名与证据缺口。空字段会明确标记为“未解析、缺少证据、需重新解析或需确认”，避免把空白误读成已确认结论。</p>
             </div>
             <button class="btn btn-primary" onclick="loadAggregationData()">刷新聚合数据</button>
         </section>
@@ -305,7 +502,7 @@
             <div class="panel-card">
                 <div class="panel-heading">
                     <div>
-                        <h2 class="panel-title">催化剂材料与结构线索</h2>
+                        <h2 class="panel-title" onclick="toggleFold(this)">催化剂材料与结构线索<button class="fold-toggle" type="button" aria-expanded="false">说明</button></h2>
                         <p class="panel-desc">按规范化名称聚合同类催化剂，并展示载体、金属中心、配位结构、合成方法和证据状态。</p>
                     </div>
                 </div>
@@ -319,7 +516,7 @@
             <div class="panel-card">
                 <div class="panel-heading">
                     <div>
-                        <h2 class="panel-title">吸附物 / 中间体与反应步骤</h2>
+                        <h2 class="panel-title" onclick="toggleFold(this)">吸附物 / 中间体与反应步骤<button class="fold-toggle" type="button" aria-expanded="false">说明</button></h2>
                         <p class="panel-desc">聚合吸附能、反应步骤、单位和置信度，帮助快速发现同一中间体的趋势。</p>
                     </div>
                 </div>
@@ -333,7 +530,7 @@
             <div class="panel-card">
                 <div class="panel-heading">
                     <div>
-                        <h2 class="panel-title">别名与命名变化</h2>
+                        <h2 class="panel-title" onclick="toggleFold(this)">别名与命名变化<button class="fold-toggle" type="button" aria-expanded="false">说明</button></h2>
                         <p class="panel-desc">展示系统检测到的可能同义词、缩写、表面符号或带电状态变体。这里只做提示，最终合并仍建议确认。</p>
                     </div>
                 </div>
@@ -347,7 +544,7 @@
             <div class="panel-card">
                 <div class="panel-heading">
                     <div>
-                        <h2 class="panel-title">证据缺口与重解析提示</h2>
+                        <h2 class="panel-title" onclick="toggleFold(this)">证据缺口与重解析提示<button class="fold-toggle" type="button" aria-expanded="false">说明</button></h2>
                         <p class="panel-desc">列出关键结构字段、反应字段或证据字段缺失的位置，方便回到文献详情或确认工作台补证据。</p>
                     </div>
                 </div>
@@ -435,6 +632,16 @@
             return state.currentLibrary;
         }
 
+        function toggleFold(el) {
+            const host = el.closest(".hero, .panel-heading");
+            if (!host) return;
+            const open = host.classList.toggle("desc-open");
+            host.querySelectorAll(".fold-toggle").forEach(btn => {
+                btn.setAttribute("aria-expanded", open ? "true" : "false");
+                btn.textContent = open ? "收起" : "说明";
+            });
+        }
+
         function switchTab(tab) {
             state.activeTab = tab;
             document.querySelectorAll(".tab-btn").forEach(btn => {
@@ -509,7 +716,7 @@
 
         function paperLink(paperId) {
             if (!paperId) return "关联文献未解析";
-            return `<a href="../literature_library/index.html?paper_id=${encodeURIComponent(paperId)}">打开文献</a>`;
+            return `<a href="../paper_detail/index.html?paper_id=${encodeURIComponent(paperId)}&from=mechanism_knowledge">打开文献</a>`;
         }
 
         async function loadAggregationData() {

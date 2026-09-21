@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <link rel="stylesheet" href="./page.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
@@ -19,7 +20,10 @@
       <div>
         <span class="eyebrow">READ-ONLY · SAFETY-GATED</span>
         <h1>本地 AI 写作证据计划</h1>
-        <p>网页不生成论文草稿，只准备通过对象级安全门的结构化证据。几十篇论文会按每批最多 10 篇拆分，不会一次塞给 AI。</p>
+        <details class="fold-exp" open>
+          <summary>说明</summary>
+          <p>网页不生成论文草稿，只准备通过对象级安全门的结构化证据。几十篇论文会按每批最多 10 篇拆分，不会一次塞给 AI。</p>
+        </details>
       </div>
       <div class="hero-actions">
         <button id="buildPlanBtn" class="btn primary" type="button">生成安全证据计划</button>
@@ -27,8 +31,10 @@
     </header>
 
     <section class="notice" aria-label="工作流说明">
-      <strong>正确用法：</strong>
-      先生成有界计划，再让本地 / IDE / MCP AI 一次只处理一个批次；最后仅用批次摘要与 claim-evidence 映射综合。
+      <details class="fold-exp" open>
+        <summary>正确用法</summary>
+        <p><strong>正确用法：</strong>先生成有界计划，再让本地 / IDE / MCP AI 一次只处理一个批次；最后仅用批次摘要与 claim-evidence 映射综合。</p>
+      </details>
     </section>
 
     <section class="workspace">
@@ -54,7 +60,10 @@
           <div class="section-head">
             <div>
               <h2>1. 设置检索意图与预算</h2>
-              <p>普通写作默认不检索 DFT；只有明确启用时才请求正式 DFT 证据。</p>
+              <details class="fold-exp" open>
+                <summary>说明</summary>
+                <p>普通写作默认不检索 DFT；只有明确启用时才请求正式 DFT 证据。</p>
+              </details>
             </div>
             <span id="dftFormState" class="status neutral">DFT 未启用</span>
           </div>
@@ -107,7 +116,10 @@
 
         <section id="planEmpty" class="card empty-plan">
           <h2>2. 查看证据计划</h2>
-          <p>计划生成后，这里会显示论文覆盖、预算、DFT 路由、批次和证据来源。</p>
+          <details class="fold-exp" open>
+            <summary>说明</summary>
+            <p>计划生成后，这里会显示论文覆盖、预算、DFT 路由、批次和证据来源。</p>
+          </details>
         </section>
 
         <section id="planResults" class="results" hidden>

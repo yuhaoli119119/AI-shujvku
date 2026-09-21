@@ -19,6 +19,15 @@ function byId(id) {
   return document.getElementById(id);
 }
 
+const foldQuery = window.matchMedia ? window.matchMedia("(max-width: 1023px)") : null;
+
+function syncExplanatoryFolds() {
+  const collapsed = Boolean(foldQuery && foldQuery.matches);
+  document.querySelectorAll("details.fold-exp").forEach((element) => {
+    element.open = !collapsed;
+  });
+}
+
 function esc(value) {
   return String(value ?? "").replace(
     /[&<>"']/g,
@@ -283,6 +292,10 @@ document.addEventListener("DOMContentLoaded", () => {
   TopNav.init({ currentPage: "ai-writer", mountId: "topnav-mount" });
   bindEvents();
   updateDftFormState();
+  syncExplanatoryFolds();
+  if (foldQuery && typeof foldQuery.addEventListener === "function") {
+    foldQuery.addEventListener("change", syncExplanatoryFolds);
+  }
   loadPapers();
 });
 

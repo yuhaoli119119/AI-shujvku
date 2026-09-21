@@ -2,7 +2,25 @@ let currentPapers = [];
 let pendingAction = null;
 let pendingData = null;
 
+// 手机（<=700px）默认折叠「筛选」区块；桌面/平板（>=701px）保持展开（原布局不变）。
+const filtersPanelMq = window.matchMedia('(max-width: 700px)');
+
+function syncFiltersPanel() {
+    const panel = document.getElementById('filtersPanel');
+    if (panel) panel.open = !filtersPanelMq.matches;
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    // 这个页面有 #topnav-mount 却从来没有初始化导航，导致页面上完全没有顶栏、无法跳回其它页面。
+    // 注意：shared/topnav.js 里是 `class TopNav`（词法作用域全局），window.TopNav 永远是 undefined，
+    // 用 window.TopNav 做判断会让顶栏永远挂载不上；这里改成 typeof 判断，调用方式不变。
+    if (typeof TopNav !== 'undefined' && TopNav && typeof TopNav.init === 'function') {
+        TopNav.init({ currentPage: "screening", mountId: "topnav-mount" });
+    }
+    syncFiltersPanel();
+    if (filtersPanelMq.addEventListener) {
+        filtersPanelMq.addEventListener('change', syncFiltersPanel);
+    }
     applyFilters();
 });
 
@@ -44,11 +62,29 @@ async function applyFilters() {
         }
         
         const data = await resp.json();
-        currentPapers = data.papers || data; // depending on API response format
+        // /api/library/papers/filter 返回 {total, items, safety}；
+        // 旧代码只认 data.papers，于是 currentPapers 变成整个对象，
+        // renderTable() 里 forEach 抛错 -> 表格永远空白（手机上的那个 console error 就是它）。
+        if (Array.isArray(data)) {
+            currentPapers = data;
+        } else if (Array.isArray(data.papers)) {
+            currentPapers = data.papers; // 兼容旧字段名
+        } else if (Array.isArray(data.items)) {
+            currentPapers = data.items;
+        } else {
+            currentPapers = [];
+        }
+        updateResultCount(typeof data.total === 'number' ? data.total : currentPapers.length);
         renderTable();
     } catch (err) {
         console.error('Error applying filters', err);
     }
+}
+
+function updateResultCount(count) {
+    const el = document.getElementById('resultCount');
+    if (!el) return;
+    el.textContent = count === 0 ? 'No papers' : `${count} paper${count === 1 ? '' : 's'}`;
 }
 
 function clearFilters() {
@@ -72,10 +108,17 @@ function clearFilters() {
 function renderTable() {
     const tbody = document.getElementById('resultsTableBody');
     tbody.innerHTML = '';
-    
+
+    if (currentPapers.length === 0) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="16" class="empty-row">No papers match the current filters.</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+
     currentPapers.forEach(paper => {
         const tr = document.createElement('tr');
-        
+
         const safeVerifiedCount = paper.safe_verified_evidence_count !== undefined ? paper.safe_verified_evidence_count : '-';
         const verifiedCount = paper.verified_evidence_count !== undefined ? paper.verified_evidence_count : '-';
 
@@ -84,26 +127,40 @@ function renderTable() {
             ifStatusDisplay = 'needs_metadata';
         }
 
+        // data-label 带上列名：<=700px 时 shared/responsive.css 的 table.litai-stack
+        // 规则会把每个 td 渲染成「列名 + 值」的卡片行；标题和复选框不带列名。
+        // 注意：title 内层 HTML 保持原样 —— 库里有 11 条标题带 <sub> 下标标记，
+        // 必须继续按 HTML 渲染（转义会把 <sub> 显示成字面标签，桌面行高也会变）；
+        // 只有 title 属性做转义，避免标题里的引号截断属性。
         tr.innerHTML = `
-            <td><input type="checkbox" class="row-checkbox" value="${paper.id}"></td>
-            <td class="title-col" title="${paper.title || ''}">${paper.title || '-'}</td>
-            <td>${paper.year || '-'}</td>
-            <td>${paper.journal || '-'}</td>
-            <td>${paper.impact_factor || '-'}</td>
-            <td>${paper.impact_factor_year || '-'}</td>
-            <td>${paper.impact_factor_source || '-'}</td>
-            <td>${ifStatusDisplay}</td>
-            <td>${paper.has_pdf ? 'Yes' : 'No'}</td>
-            <td>${paper.has_parsed_text ? 'Yes' : 'No'}</td>
-            <td>${paper.has_extraction_output ? 'Yes' : 'No'}</td>
-            <td>${verifiedCount}</td>
-            <td>${safeVerifiedCount}</td>
-            <td>${paper.exclude_from_citation ? 'Yes' : 'No'}</td>
-            <td>${paper.citation_priority || '-'}</td>
-            <td>${paper.user_note || ''}</td>
+            <td class="cell-select"><input type="checkbox" class="row-checkbox" value="${esc(paper.id)}"></td>
+            <td class="title-col" title="${esc(paper.title || '')}"><a class="screening-title-link" href="../paper_detail/index.html?paper_id=${esc(paper.id)}&from=literature_screening" title="${esc(paper.title || '')}">${paper.title || '-'}</a></td>
+            <td data-label="Year">${esc(paper.year || '-')}</td>
+            <td data-label="Journal">${esc(paper.journal || '-')}</td>
+            <td data-label="Impact Factor">${esc(paper.impact_factor || '-')}</td>
+            <td data-label="IF Year">${esc(paper.impact_factor_year || '-')}</td>
+            <td data-label="IF Source">${esc(paper.impact_factor_source || '-')}</td>
+            <td data-label="IF Status">${esc(ifStatusDisplay)}</td>
+            <td data-label="PDF">${paper.has_pdf ? 'Yes' : 'No'}</td>
+            <td data-label="Parsed Text">${paper.has_parsed_text ? 'Yes' : 'No'}</td>
+            <td data-label="Ext. Output">${paper.has_extraction_output ? 'Yes' : 'No'}</td>
+            <td data-label="Verified Ev. Count">${esc(verifiedCount)}</td>
+            <td data-label="Safe Ver. Ev. Count">${esc(safeVerifiedCount)}</td>
+            <td data-label="Exclude Citation">${paper.exclude_from_citation ? 'Yes' : 'No'}</td>
+            <td data-label="Priority">${esc(paper.citation_priority || '-')}</td>
+            <td data-label="User Note">${esc(paper.user_note || '')}</td>
         `;
         tbody.appendChild(tr);
     });
+}
+
+function esc(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
 function toggleSelectAll() {

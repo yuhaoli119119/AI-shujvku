@@ -1594,3 +1594,140 @@ details[open]>summary.table-card-header:after { transform:rotate(180deg); }
  .plot-empty-summary h3 { font-size:16px; }
 }
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; transition:none!important; } }
+
+/* ============================================================
+   手机 / 平板紧凑改版（2026-09-21）
+   用户要求：字体可以缩小、不要大块留白、单个操作按钮不做成大模块。
+   仅作用于 <=900px 与 <=560px；桌面 (>=1024px) 布局与字号保持原样。
+   ============================================================ */
+@media (max-width: 900px) {
+  .workbench-shell { padding: 14px 14px 22px; }
+  .header-main .page-title { font-size: 20px; }
+  .header-compact-summary { font-size: 11.5px; padding: 2px 8px; }
+  .header-actions { gap: 8px; }
+  .btn-compact { height: 30px; padding: 0 9px; font-size: 11.5px; gap: 5px; }
+  .library-select-wrapper { height: 30px; padding: 0 8px; }
+  .library-select-label, .header-library-select { font-size: 11.5px; }
+
+  /* F. 顶部 tab 收紧 */
+  .subtabs-bar { margin-bottom: 10px; }
+  .subtab-item {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 36px;
+    padding: 4px 12px;
+    font-size: 12.5px;
+  }
+
+  /* A. 指标卡：压缩留白（手机端另见 <=560px 分支） */
+  .stats-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+  .stat-card { min-height: 0; padding: 6px 9px; justify-content: center; }
+  .stat-label { font-size: 9.5px; margin: 0 0 1px; }
+  .stat-card .stat-value { font-size: 16px; }
+  .stat-unit { font-size: 9.5px; }
+  .stat-card .stat-equation { font-size: 11px; }
+
+  /* B. 分析设置控件收紧 */
+  .relations-layout { gap: 8px; }
+  .relations-main { gap: 8px; }
+  .relations-sidebar .sidebar-card { padding: 10px; }
+  .relations-sidebar .card-title-row { margin-bottom: 6px; }
+  .relations-sidebar .status-row { font-size: 11px; line-height: 1.3; }
+  .control-label { font-size: 10px; margin-bottom: 2px; }
+  .form-select, .form-input { height: 32px; font-size: 12px; }
+
+  /* C. 常用关系胶囊收紧 */
+  .preset-buttons-stack { gap: 8px; }
+  .preset-btn { height: 30px; padding: 3px 8px; font-size: 11.5px; gap: 6px; }
+  .preset-arrow { font-size: 12px; }
+  .preset-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .chart-card-header { padding: 8px 10px; min-height: 0; gap: 8px; }
+  .chart-title { font-size: 13px; }
+  .chart-legend { font-size: 10.5px; gap: 10px; }
+  .plot-wrap { padding: 0 8px; }
+  .fit-notice { font-size: 10.5px; padding: 0 4px 6px; }
+  .verdict-summary-strip { padding: 8px 10px; gap: 6px 12px; font-size: 11px; }
+  .plot-empty-summary { inset: 0 10px 12px; gap: 10px; }
+  .plot-empty-summary h3 { font-size: 15px; }
+  .plot-empty-summary p { font-size: 11px; line-height: 1.5; }
+
+  summary.table-card-header { min-height: 40px; padding: 8px 10px; gap: 8px; }
+  .table-title-group h3 { font-size: 12.5px; }
+  .table-subtitle { font-size: 10.5px; margin: 2px 0 0; }
+  #morePairs { margin: 8px; }
+}
+
+/* E. 表格转卡片时去掉外层表框（与 shared/responsive.css 的 litai-stack 同步） */
+@media (max-width: 700px) {
+  .table-wrapper { border: 0; border-radius: 0; }
+  .paired-data-table { font-size: 11.5px; }
+  /* 标签列略放宽 + 标签字号缩小，让 X/Y 全名少换行、卡片更矮 */
+  table.litai-stack.paired-data-table > tbody > tr > td { grid-template-columns: 86px minmax(0, 1fr); }
+  table.litai-stack.paired-data-table > tbody > tr > td::before { font-size: 10px; }
+}
+
+@media (max-width: 560px) {
+  .workbench-shell { padding: 10px 10px 18px; }
+  .header-main .page-title { font-size: 19px; }
+  .header-title-row { gap: 6px; }
+
+  /* A. 指标卡：6 列网格 → 3 张紧凑条 + 2 张宽卡 + 1 行拟合公式，单卡 <= 52px */
+  .stats-strip { grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .stats-strip > .stat-card { height: 44px; padding: 5px 8px; justify-content: center; gap: 0; overflow: hidden; }
+  .stats-strip > .stat-card:nth-child(-n+3) { grid-column: span 2; }
+  .stats-strip > .stat-card:nth-child(4),
+  .stats-strip > .stat-card:nth-child(5) { grid-column: span 3; }
+  .stats-strip > .stat-card-equation {
+    grid-column: span 6;
+    height: 30px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 8px;
+  }
+  .stat-label { font-size: 9px; margin: 0; }
+  .stat-card .stat-value { font-size: 15px; }
+  .stat-unit { font-size: 9px; }
+  .stat-value-group { gap: 3px; min-width: 0; }
+  .stat-card .stat-equation { font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* B. 分析设置：x/y 并排 2 列，最少样本数与状态/按钮同一行 */
+  .relations-sidebar .sidebar-card:first-child { grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+  .relations-sidebar .sidebar-card:first-child > .card-title-row { grid-column: 1 / -1; }
+  .relations-sidebar .status-row {
+    grid-column: 2;
+    grid-row: 3;
+    align-self: center;
+    margin: 0;
+    font-size: 10.5px;
+  }
+  .form-select, .form-input { height: 32px; font-size: 12px; padding: 0 6px; }
+
+  /* C. 常用关系：一行 3 个胶囊 */
+  .relations-sidebar .sidebar-card:nth-child(2) { gap: 6px; align-items: stretch; }
+  .preset-buttons-stack { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; width: 100%; }
+  .preset-btn { width: 100%; height: 30px; padding: 2px 6px; font-size: 11.5px; line-height: 1.08; gap: 4px; }
+  /* 胶囊文案固定，允许折成两行完整显示，避免省略号丢信息 */
+  .preset-name { white-space: normal; text-overflow: clip; overflow: hidden; }
+  .preset-arrow { display: none; }
+
+  /* D. 图表容器收到 220-260px（含空态），空态文案同步收紧 */
+  .plot-wrap { padding: 0 6px; }
+  .scatter-plot { height: 232px; }
+  .plot-empty-summary { inset: 0 4px 4px; gap: 6px; }
+  .plot-empty-summary h3 { font-size: 13.5px; }
+  .plot-empty-summary p { font-size: 10.5px; line-height: 1.45; }
+  .availability-strip { gap: 6px; }
+  .availability-strip span { padding: 3px 8px; font-size: 10.5px; border-radius: 6px; }
+  .availability-strip b { font-size: 13px; padding-left: 6px; }
+  .fit-notice { font-size: 10px; padding: 0 4px 4px; }
+  .verdict-summary-strip { padding: 8px 10px; gap: 4px 10px; font-size: 10.5px; }
+  .plot-tick { font-size: 10px; }
+
+  /* E. 配对明细卡片内的细节字号 */
+  .paired-data-table { font-size: 11.5px; }
+  .tech-detail-summary { font-size: 11px; }
+}

@@ -1276,6 +1276,13 @@
       table {
         min-width: 980px;
       }
+      /* 表头是独立 grid（不随表格布局）；表格 min-width 收到 980px 后必须用
+         同口径列宽，否则 700–820px 区间表头列与数据列错位。基准规则里的
+         minmax(320px,36fr) 是按 1080px 表宽设计的，此处改为纯 fr。 */
+      .review-table-head {
+        min-width: 980px;
+        grid-template-columns: 108px 70px 36fr 18fr 24fr 16fr;
+      }
       .overlay {
         padding: 12px;
       }
@@ -2435,7 +2442,640 @@
     }
     .paper-stage-progress .paper-stage-independent .paper-stage-number { display: none; }
     .paper-stage-progress .paper-stage-independent .paper-stage-copy { align-items: flex-start; }
-     (max-width: 760px) {
+    @media (max-width: 760px) {
       .paper-stage-progress::before { right: 10%; }
       .paper-stage-progress .paper-stage-independent { padding-left: 8px; }
     }
+
+/* ==========================================================================
+   手机端响应式改版（<=700px） 2026-09-21
+   用户要求：字体可以缩小，尽量不要有太大的空间浪费，避免一个操作按钮用
+   很大的模块占用。因此手机端把"一步一块大卡片"压成紧凑列表/行内条，
+   并让宽表格变成卡片。所有规则都锁在 max-width:700px 内，
+   桌面（>=1024px）与平板（701px~900px）布局与字号保持原样。
+   ========================================================================== */
+
+/* ---- 0. 说明段落折叠（纯 CSS，不改任何 onclick）----
+   桌面/平板：开关整体隐藏，说明段落照常展开，视觉与改版前一致；
+   手机：默认收起长说明，点“说明”即展开；信息一条没删，只是换了入口。 */
+.rc-fold-toggle { display: none; }
+.rc-fold-label { display: none; }
+
+@media (max-width: 700px) {
+  .rc-fold-toggle {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .rc-fold-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-primary);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1.4;
+    cursor: pointer;
+  }
+  .rc-fold-toggle:not(:checked) ~ .rc-fold-label::before { content: "▸"; font-size: 9px; }
+  .rc-fold-toggle:checked ~ .rc-fold-label::before { content: "▾"; font-size: 9px; }
+  .rc-fold-toggle:not(:checked) ~ .rc-fold-body { display: none; }
+  .rc-fold-toggle:checked ~ .rc-fold-body { display: block; }
+
+  /* ---- 1. 页面骨架收紧 ---- */
+  .shell { padding: 0 8px 8px; }
+  .review-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+  }
+  .review-hero > .btn {
+    justify-self: start;
+    width: auto;
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+  .review-hero h1 { margin: 2px 0 4px; font-size: 17px; line-height: 1.2; }
+  .review-hero p { margin: 2px 0 0; font-size: 11.5px; line-height: 1.5; }
+  .review-eyebrow,
+  .single-paper-kicker { font-size: 10px; letter-spacing: .05em; }
+
+  /* ---- 2. 顶部统计：3 列自适应，单卡片 <=46px，关键数字不截断 ---- */
+  .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .stat {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: center;
+    gap: 1px;
+    min-height: 0;
+    max-height: 46px;
+    padding: 5px 7px;
+    border-radius: 8px;
+  }
+  .stat-icon { display: none; }
+  .stat-label {
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: normal;
+    overflow: hidden;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  .stat-value { font-size: 13px; line-height: 1.1; }
+
+  /* ---- 3. .page-actions / .review-topline：取消固定 720px，允许换行 ---- */
+  .review-topline { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .page-actions {
+    flex: 1 1 auto;
+    width: 100%;
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .page-actions .btn {
+    height: 32px;
+    min-height: 30px;
+    padding: 0 6px;
+    font-size: 12px;
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  /* ---- 4. 单篇论文工作区骨架 ---- */
+  .single-paper-workbench { margin: 8px 0 10px; border-radius: 12px; }
+  .single-paper-empty {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    padding: 10px 12px;
+  }
+  .single-paper-empty strong { font-size: 13px; }
+  .single-paper-empty span { font-size: 11.5px; line-height: 1.45; }
+  .single-paper-content { padding: 10px; gap: 8px; }
+  .single-paper-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding-bottom: 8px;
+    gap: 6px;
+  }
+  .single-paper-head > .btn { justify-self: start; }
+  .single-paper-head h2 { margin: 2px 0 4px; font-size: 15px; line-height: 1.3; }
+  .single-paper-meta { gap: 6px; font-size: 11.5px; }
+  .paper-si-inline { margin-left: 0; padding: 1px 6px; font-size: 10px; }
+  .single-paper-head .btn { min-height: 28px; padding: 3px 9px; font-size: 11.5px; }
+
+  /* ---- 5. 四步进度条 → 纵向列表（每步一行：序号 + 标题 + 状态） ---- */
+  .paper-stage-progress {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 4px 10px;
+    border-radius: 10px;
+  }
+  .paper-stage-progress::before { display: none; }
+  .paper-stage-progress .paper-stage,
+  .paper-stage-progress .paper-stage-independent {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border: 0;
+    border-top: 1px solid var(--color-border);
+    border-radius: 0;
+    text-align: left;
+  }
+  .paper-stage-progress .paper-stage:first-child { border-top: 0; }
+  .paper-stage-progress .paper-stage-number {
+    width: 18px;
+    height: 18px;
+    margin-bottom: 0;
+    border-width: 1.5px;
+    font-size: 10.5px;
+    flex: 0 0 auto;
+    box-shadow: none;
+  }
+  .paper-stage-progress .paper-stage.is-complete .paper-stage-number,
+  .paper-stage-progress .paper-stage.is-blocked .paper-stage-number,
+  .paper-stage-progress .paper-stage:not(.is-complete):not(.is-blocked) .paper-stage-number {
+    box-shadow: none;
+  }
+  .paper-stage-progress .paper-stage-copy {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 1px 6px;
+    width: 100%;
+    text-align: left;
+  }
+  .paper-stage-progress .paper-stage-label { flex: 0 0 auto; font-size: 10px; }
+  .paper-stage-progress .paper-stage-copy > strong {
+    font-size: 12px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .paper-stage-progress .paper-stage-copy > span:last-child {
+    flex: 1 1 100%;
+    font-size: 10.5px;
+    line-height: 1.3;
+  }
+  .paper-stage-progress .paper-stage-independent { padding-left: 0; border-left: 0; }
+  .paper-stage-progress .paper-stage-independent .paper-stage-number { display: none; }
+
+  /* ---- 6. 当前聚焦任务面板 ---- */
+  .current-stage-panel {
+    gap: 8px;
+    padding: 10px;
+    border-radius: 10px;
+    border-top-width: 2px;
+    box-shadow: none;
+  }
+  .current-stage-header { gap: 3px; }
+  .current-stage-header h3 { font-size: 14px; line-height: 1.3; }
+  .current-stage-header p { font-size: 11.5px; line-height: 1.45; }
+  .current-stage-meta-row { gap: 6px; }
+  .current-stage-actions,
+  .current-stage-actions .btn { width: 100%; }
+  .current-stage-actions .btn {
+    min-height: 30px;
+    padding: 4px 10px;
+    border-radius: 7px;
+    font-size: 12px;
+    box-shadow: none;
+  }
+  .current-stage-facts { grid-template-columns: 1fr; gap: 6px; }
+  .stage-fact-item { gap: 1px; padding: 6px 8px; border-radius: 8px; }
+  .stage-fact-item dt { font-size: 10.5px; }
+  .stage-fact-item dd { font-size: 11.5px; line-height: 1.4; }
+  .stage-result-strip { grid-template-columns: 1fr; gap: 6px; padding-top: 8px; }
+  .stage-result-item {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 7px;
+  }
+  .stage-result-text strong { font-size: 11.5px; }
+  .stage-result-text span {
+    font-size: 10.5px;
+    line-height: 1.4;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .stage-result-actions { gap: 4px; }
+  .stage-result-actions .btn { min-height: 28px; padding: 3px 8px; font-size: 11px; }
+
+  /* ---- 7. AI 处理方式（页面上最占地的一块） ---- */
+  .processing-methods { border-radius: 10px; }
+  .processing-methods > summary { gap: 8px; padding: 8px 10px; }
+  .processing-summary-left { gap: 8px; }
+  .processing-icon { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; }
+  .processing-summary-text strong { font-size: 12.5px; }
+  .processing-summary-text small { margin-top: 1px; font-size: 10.5px; line-height: 1.3; }
+  .processing-methods .summary-action { font-size: 10.5px; white-space: nowrap; }
+  .processing-methods-body { gap: 8px; padding: 8px; }
+  .processing-methods-body > p { margin: 0; font-size: 11.5px; line-height: 1.5; }
+  #aiRouteStageNotice { font-size: 11px; line-height: 1.4; }
+  .ai-route-choices { grid-template-columns: 1fr; gap: 5px; }
+  .ai-route-choices .btn {
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+  .method-section { padding: 9px; border-radius: 9px; }
+  .method-section-head { gap: 4px; padding-bottom: 7px; }
+  .method-section-title-wrap { flex-wrap: wrap; gap: 6px; }
+  .method-section-title-wrap h3,
+  .method-section > h3 { margin: 0; font-size: 13px; line-height: 1.3; }
+  .method-tag { padding: 2px 7px; font-size: 10px; }
+  .method-section-head p,
+  .method-section > p { margin: 0; font-size: 11.5px; line-height: 1.5; }
+  .method-steps,
+  .method-steps.compact { grid-template-columns: 1fr; gap: 5px; margin-top: 8px; }
+  .method-steps li {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 8px;
+  }
+  .method-steps li:hover { transform: none; box-shadow: none; }
+  .method-step-badge {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-bottom: 0;
+    border-radius: 5px;
+    font-size: 10px;
+  }
+  .method-step-content { gap: 3px; }
+  .method-step-content strong { font-size: 12px; line-height: 1.3; }
+  .method-step-content p { margin: 0; font-size: 11px; line-height: 1.4; min-height: 0; }
+  .method-step-content .btn,
+  .method-section > .btn,
+  .ai-local-actions .btn {
+    align-self: flex-start;
+    width: auto;
+    min-width: 0;
+    min-height: 28px;
+    margin-top: 2px;
+    padding: 3px 9px;
+    font-size: 11.5px;
+    text-align: left;
+  }
+  .ai-local-actions { flex-wrap: wrap; gap: 5px; }
+  .method-section code { font-size: 10.5px; }
+
+  /* ---- 8. 数据导出面板 ---- */
+  .data-export-panel {
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border-left-width: 3px;
+  }
+  .data-export-panel h3 { margin: 1px 0 3px; font-size: 13px; line-height: 1.3; }
+  .data-export-panel p { font-size: 11px; line-height: 1.45; }
+  .data-export-content { gap: 6px; min-width: 0; }
+  .data-export-property-list { gap: 4px; }
+  .data-export-property-row {
+    grid-template-columns: minmax(90px, 1fr) 46px auto;
+    gap: 5px;
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
+  .data-export-property-name,
+  .data-export-property-count { font-size: 11px; }
+  .data-export-actions { gap: 6px; }
+  .data-export-panel .btn { min-height: 28px; padding: 3px 9px; font-size: 11.5px; }
+  .visually-retained-control { max-width: 100%; }
+
+  /* ---- 9. 其他工具 / 高级范围 / 证据卡片 ---- */
+  .secondary-tools,
+  .review-scope-chooser { margin-bottom: 8px; padding: 8px 10px; border-radius: 10px; }
+  .secondary-tools summary,
+  .review-scope-chooser summary { font-size: 12px; line-height: 1.4; }
+  .secondary-tools summary span { margin-left: 6px; font-size: 11px; }
+  .secondary-tools-bar { gap: 6px; padding-top: 8px; }
+  .secondary-tools-bar select { height: 30px; font-size: 12px; }
+  .manual-review-scope-card {
+    margin: 0 0 8px;
+    padding: 7px 9px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .review-scope-chooser-head { gap: 6px; font-size: 12px; }
+  .review-scope-run-list { gap: 6px; margin-top: 8px; }
+  .review-scope-run-option { padding: 6px 8px; }
+  .review-scope-run-main { font-size: 12px; }
+  .review-scope-run-meta { margin-top: 2px; font-size: 11px; }
+
+  /* ---- 10. 论文列表：手机端卡片式表格（ID/年份/标题/各模块/DFT/操作） ---- */
+  .panel { border-radius: 12px; }
+  .panel-head { padding: 6px 8px; gap: 5px; }
+  #queueMeta { font-size: 11px !important; letter-spacing: 0; }
+  .filterbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 6px;
+  }
+  .filterbar select,
+  .filterbar input {
+    width: 100%;
+    min-width: 0;
+    height: 28px;
+    padding: 0 6px;
+    font-size: 11.5px;
+  }
+  .filterbar input { grid-column: 1 / -1; }
+  /* 卡片模式下不再需要横向滚动的假表头 */
+  .review-table-head-shell { display: none; }
+  .table-wrap { overflow: visible; }
+  table.rc-stack {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    table-layout: auto;
+    border-spacing: 0;
+  }
+  table.rc-stack > thead { display: none; }
+  table.rc-stack > tbody { display: block; }
+  table.rc-stack > tbody > tr {
+    display: block;
+    margin: 0 0 6px;
+    padding: 6px 8px 7px;
+    border: 1px solid var(--color-border);
+    border-radius: 9px;
+    background: var(--color-surface);
+  }
+  table.rc-stack > tbody > tr:last-child { margin-bottom: 0; }
+  table.rc-stack > tbody > tr > td {
+    display: grid;
+    grid-template-columns: 74px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 6px;
+    width: auto !important;
+    max-width: none;
+    padding: 2px 0 !important;
+    border: 0 !important;
+    background: transparent;
+    text-align: left !important;
+    white-space: normal !important;
+  }
+  table.rc-stack > tbody > tr > td::before {
+    color: var(--color-text-muted, var(--color-text-secondary));
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.6;
+  }
+  table.rc-stack > tbody > tr > td:nth-child(1)::before { content: "ID"; }
+  table.rc-stack > tbody > tr > td:nth-child(2)::before { content: "年份"; }
+  table.rc-stack > tbody > tr > td:nth-child(3)::before { content: "文献标题"; }
+  table.rc-stack > tbody > tr > td:nth-child(4)::before { content: "论文各模块"; }
+  table.rc-stack > tbody > tr > td:nth-child(5)::before { content: "DFT 数据状态"; }
+  table.rc-stack > tbody > tr > td:nth-child(6)::before { content: "操作"; }
+  /* ID 与年份并排一行，省一层高度 */
+  table.rc-stack > tbody > tr > td:nth-child(1),
+  table.rc-stack > tbody > tr > td:nth-child(2) {
+    display: inline-grid;
+    grid-template-columns: auto auto;
+    gap: 4px;
+    margin-right: 10px;
+  }
+  /* 标题列与操作列整块显示，标签让位给正文 */
+  table.rc-stack > tbody > tr > td:nth-child(3),
+  table.rc-stack > tbody > tr > td:nth-child(6) {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 4px !important;
+  }
+  table.rc-stack > tbody > tr > td:nth-child(3)::before,
+  table.rc-stack > tbody > tr > td:nth-child(6)::before { display: none; }
+  table.rc-stack .row-select-cell { min-width: 0; }
+  table.rc-stack .paper-title { font-size: 12.5px; -webkit-line-clamp: 3; overflow-wrap: anywhere; }
+  table.rc-stack .paper-meta-line { flex-wrap: wrap; gap: 4px; margin-top: 3px; font-size: 10.5px; }
+  table.rc-stack .paper-doi-inline {
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+  table.rc-stack .status-cluster,
+  table.rc-stack .audit-summary { gap: 4px; }
+  table.rc-stack .chip {
+    min-height: 20px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10.5px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  table.rc-stack .audit-topline { flex-wrap: wrap; gap: 4px; }
+  table.rc-stack .audit-metrics { gap: 4px; font-size: 10.5px; }
+  table.rc-stack .actions { gap: 5px; }
+  table.rc-stack .actions .btn,
+  table.rc-stack .btn.btn-chip { min-height: 26px; padding: 3px 9px; font-size: 11.5px; }
+  /* 空态 / 错误行不要被卡片布局拆散 */
+  table.rc-stack > tbody > tr > td[colspan] { display: block; padding: 0 !important; }
+  table.rc-stack > tbody > tr > td[colspan]::before { display: none; }
+  table.rc-stack .empty,
+  table.rc-stack .error { margin: 0; padding: 10px; }
+  .panel-foot { gap: 6px; padding: 6px 8px; min-height: 0; }
+  .pagination-meta { font-size: 11px; }
+  .pagination-bar { gap: 6px; }
+  .pagination-pages { gap: 4px; }
+  .page-size-box { font-size: 11px; }
+  .page-size-box select { min-width: 62px; height: 26px; padding: 0 5px; font-size: 11px; }
+  .page-indicator { min-width: 30px; height: 26px; padding: 0 6px; font-size: 11.5px; }
+
+  /* ---- 11. 弹窗在手机上全屏时收紧内边距 ---- */
+  .modal-head { gap: 8px; padding: 10px 12px 8px; }
+  .modal-title { font-size: 15px; }
+  .modal-subtitle { margin-top: 3px; font-size: 11px; }
+  .modal-body { padding: 10px 12px 12px; }
+  .modal-footer { gap: 6px; padding: 8px 12px 10px; }
+  .modal-footer .btn { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+  .web-ai-return-textarea { min-height: 160px; font-size: 12px; }
+}
+
+/* ============================================================
+   手机端紧凑化 v2（2026-09-21）
+   只在 <=700px 生效；桌面/平板不受影响。
+   目标：把"空态工作台"和"审核列表卡片"的纵向空间浪费压下来。
+   ============================================================ */
+@media (max-width: 700px) {
+  /* ---------- 1. 空态工作台骨架 ---------- */
+  .single-paper-content { padding: 10px; gap: 8px; }
+  .single-paper-head { gap: 4px; }
+
+  /* 四步进度：竖排大块 -> 紧凑单行列表 */
+  .paper-stage-progress {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 6px 8px;
+    border-radius: 10px;
+  }
+  .paper-stage-progress::before { display: none; }
+  .paper-stage-progress .paper-stage {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    text-align: left;
+  }
+  .paper-stage-progress .paper-stage + .paper-stage {
+    border-top: 1px solid var(--color-border);
+  }
+  .paper-stage-progress .paper-stage-number {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    margin-bottom: 0;
+    border-width: 1.5px;
+    font-size: 10px;
+    box-shadow: none;
+  }
+  .paper-stage-progress .paper-stage-copy {
+    flex-direction: row;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .paper-stage-progress .paper-stage-label { font-size: 10px; }
+  .paper-stage-progress .paper-stage-copy > strong { font-size: 11.5px; }
+  .paper-stage-progress .paper-stage-copy > span:last-child { font-size: 10.5px; }
+
+  /* ---------- 2. 当前聚焦任务 ---------- */
+  .current-stage-panel {
+    gap: 8px;
+    padding: 8px 10px 10px;
+    border-radius: 10px;
+    border-top-width: 2px;
+  }
+  .current-stage-header { gap: 3px; }
+  .current-stage-kicker { font-size: 9.5px; letter-spacing: .04em; }
+  .current-stage-header h3 { font-size: 14px; line-height: 1.25; }
+  .current-stage-header p { font-size: 11px; line-height: 1.4; }
+  .current-stage-meta-row { gap: 6px; }
+  .current-stage-actions .btn {
+    min-height: 28px;
+    padding: 4px 10px;
+    font-size: 11.5px;
+    border-radius: 7px;
+    box-shadow: none;
+  }
+  .current-stage-facts { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .stage-fact-item { padding: 6px 8px; gap: 1px; border-radius: 7px; }
+  .stage-fact-item dt { font-size: 10px; }
+  .stage-fact-item dd { font-size: 11.5px; line-height: 1.35; }
+  .stage-result-strip {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    padding-top: 6px;
+    margin-top: 0;
+  }
+  .stage-result-item { padding: 6px 8px; gap: 6px; border-radius: 7px; }
+  .stage-result-text strong { font-size: 11.5px; }
+  .stage-result-text span { font-size: 10.5px; }
+  .stage-result-actions { gap: 4px; }
+  .stage-result-actions .btn {
+    min-height: 26px;
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  /* ---------- 3. 选择 AI 处理方式（默认折叠由脚本处理） ---------- */
+  .processing-methods { border-radius: 10px; }
+  .processing-methods > summary { padding: 8px 10px; gap: 8px; }
+  .processing-icon { font-size: 14px; }
+  .processing-summary-text strong { font-size: 12.5px; }
+  .processing-summary-text small { font-size: 10.5px; margin-top: 1px; }
+  .processing-methods .summary-action { font-size: 11px; }
+  .processing-methods-body { padding: 8px 10px 10px; gap: 8px; }
+  .ai-route-choices { gap: 5px; }
+  .ai-route-choices .btn {
+    min-height: 0;
+    padding: 7px 9px;
+    font-size: 11.5px;
+    line-height: 1.45;
+  }
+  .method-section { padding: 8px 10px; border-radius: 9px; }
+  .method-section h3 { font-size: 12.5px; margin-bottom: 4px; }
+  /* 步骤卡：一行一条（徽标 + 文字 + 按钮） */
+  .method-steps,
+  .method-steps.compact {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    margin-top: 8px;
+  }
+  .method-steps li {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 3px 8px;
+    padding: 7px 8px;
+    border-radius: 8px;
+  }
+  .method-step-badge {
+    width: 20px;
+    height: 20px;
+    margin-bottom: 0;
+    border-radius: 5px;
+    font-size: 10px;
+    grid-row: 1 / 3;
+  }
+  .method-step-content strong { font-size: 11.5px; }
+  .method-step-content p {
+    min-height: 0;
+    margin: 2px 0 6px;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+  .method-step-content .btn {
+    width: auto;
+    min-height: 26px;
+    padding: 3px 10px;
+    font-size: 11px;
+    align-self: start;
+    justify-self: start;
+  }
+  .method-section code { font-size: 10px; }
+
+  /* ---------- 4. 审核列表卡片再压一档 ---------- */
+  .review-panel-head { padding: 8px 10px; }
+  .table-wrap { padding: 6px 8px 8px; }
+  table.rc-stack > tbody > tr { margin-bottom: 5px; padding: 6px 8px; }
+  table.rc-stack > tbody > tr > td {
+    grid-template-columns: 62px minmax(0, 1fr);
+    gap: 5px;
+    padding: 1px 0 !important;
+  }
+  table.rc-stack > tbody > tr > td::before { font-size: 9.5px; line-height: 1.5; }
+  table.rc-stack > tbody > tr > td:nth-child(3),
+  table.rc-stack > tbody > tr > td:nth-child(6) { padding-top: 3px !important; }
+  table.rc-stack .paper-title { font-size: 12px; line-height: 1.35; }
+  table.rc-stack .paper-meta-line { margin-top: 2px; gap: 3px; font-size: 10px; }
+  table.rc-stack .chip { min-height: 18px; padding: 0 5px; font-size: 10px; }
+  table.rc-stack .audit-metrics { font-size: 10px; }
+  table.rc-stack .actions { gap: 4px; }
+  table.rc-stack .actions .btn,
+  table.rc-stack .btn.btn-chip {
+    min-height: 25px;
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  /* ---------- 5. 数据导出面板 ---------- */
+  .data-export-panel { gap: 8px; padding: 8px 10px; border-radius: 10px; }
+  .data-export-panel h3 { font-size: 12.5px; }
+  .data-export-panel p { font-size: 11px; line-height: 1.4; }
+  .data-export-actions .btn { min-height: 28px; font-size: 11.5px; }
+}

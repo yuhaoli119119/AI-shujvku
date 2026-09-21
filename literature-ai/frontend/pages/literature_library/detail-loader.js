@@ -682,7 +682,7 @@ function loadPaperKnowledgeContext(paperId, options) {
 
 function openPaperDetailPage() {
     if (!state.selectedPaperId) return;
-    window.open("/pages/paper_detail/index.html?paper_id=" + encodeURIComponent(state.selectedPaperId), "_blank");
+    window.open("/pages/paper_detail/index.html?paper_id=" + encodeURIComponent(state.selectedPaperId) + "&from=literature_library", "_blank");
 }
 
 function openSelectedReviewCenter() {

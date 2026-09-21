@@ -15,5 +15,74 @@
 .type-chip,.status-chip{display:inline-flex;align-items:center;border-radius:7px;padding:3px 8px;font-weight:700;font-size:11px;margin:2px 3px 2px 0}.type-chip{background:#eeeaff;color:#5c42d7}.status-chip.ok{background:#e4f8ec;color:#11844c}.status-chip.info{background:#e9f2ff;color:#2167bf}.status-chip.purple{background:#eeeaff;color:#6144dc}.status-chip.warn{background:#fff1df;color:#c66a0a}.status-chip.muted{background:#f0f2f6;color:#7a849d}.empty{text-align:center!important;padding:54px!important;color:#8b94aa!important}
 .pager{min-height:62px;border-top:1px solid var(--lib-line);display:flex;align-items:center;justify-content:space-between;padding:10px 18px;font-size:12px;color:var(--lib-muted)}.pager select{border:1px solid #dce2ef;border-radius:7px;padding:5px;background:#fff}.pager-buttons{display:flex;align-items:center;gap:6px}.pager-buttons button{min-width:32px;height:32px;border:1px solid #dce2ef;border-radius:8px;background:#fff;color:#687391;cursor:pointer}.pager-buttons button.active{background:var(--lib-purple);border-color:var(--lib-purple);color:#fff}.pager-buttons button:disabled{opacity:.4;cursor:default}
 .icon-btn{border:0;background:transparent;font-size:22px;color:#66718f}.mobile-only{display:none}#toast{position:fixed;right:24px;bottom:24px;background:#1d2746;color:#fff;padding:11px 15px;border-radius:9px;opacity:0;transform:translateY(8px);pointer-events:none;transition:.18s;z-index:3000;font-size:13px}#toast.show{opacity:1;transform:none}
-@media(max-width:980px){.library-shell{padding:14px}.library-hero{height:auto;padding:20px}.hero-mark{display:none}.library-layout{grid-template-columns:1fr}.filter-panel{display:none;position:fixed;inset:58px 12px 12px;z-index:2000;overflow:auto;top:58px}.filter-panel.open{display:block}.mobile-only{display:inline-flex}.list-toolbar{flex-wrap:wrap}.search-box{order:3;flex-basis:100%}.paper-table{min-width:970px}}
-@media(max-width:620px){.library-hero h1{font-size:25px}.library-hero p{font-size:12px}.compact{width:145px}.add-link{font-size:12px}.pager{align-items:flex-start;gap:10px;flex-direction:column}}
+@media(max-width:980px){.library-shell{padding:14px}.library-hero{height:auto;padding:20px}.hero-mark{display:none}.library-layout{grid-template-columns:minmax(0,1fr)}.filter-panel{display:none;position:fixed;inset:calc(var(--nav-height,40px) + 8px) 12px 12px;z-index:2000;overflow:auto;padding:15px;border-radius:12px}.filter-panel.open{display:block}.mobile-only{display:inline-flex}.list-toolbar{flex-wrap:wrap}.search-box{order:3;flex-basis:100%}}
+/* 981–1140px（平板横屏 / 小笔记本）：侧栏 + 列表并排时列表区只剩 ~635–794px，标题列被压到 222–338px、行高 125px；这一档把筛选栏收成浮层（与 ≤980px 同一套交互），列表区回到 ~950px，标题列 380px+、行高 78px。 */
+@media(min-width:981px) and (max-width:1140px){.library-layout{grid-template-columns:minmax(0,1fr)}.filter-panel{display:none;position:fixed;inset:calc(var(--nav-height,40px) + 8px) 12px 12px;z-index:2000;overflow:auto;padding:15px;border-radius:12px}.filter-panel.open{display:block}.mobile-only{display:inline-flex}.list-toolbar{flex-wrap:wrap}.search-box{order:3;flex-basis:100%}}
+@media(max-width:620px){.compact{width:116px}.add-link{font-size:12px}.pager{align-items:flex-start;gap:8px;flex-direction:column;width:100%}.pager-buttons{width:100%;justify-content:flex-start}}
+@media(min-width:701px) and (max-width:980px){
+/* 渐隐提示固定在容器右缘（background-attachment:scroll），随内容滚动时也能提示“还能往右滑” */
+.table-wrap.litai-scroll-x{background:linear-gradient(to right,rgba(255,255,255,0) calc(100% - 30px),rgba(255,255,255,.96)) right/30px 100% no-repeat;background-attachment:scroll}
+.paper-table{min-width:0}
+.paper-table th{padding:9px 10px}
+.paper-table td{padding:10px}
+.paper-title{font-size:13px}
+.library-hero{padding:16px 18px}
+.library-hero h1{font-size:24px;margin:3px 0 5px}
+.library-hero p{font-size:12.5px}
+.list-toolbar{padding:12px;gap:8px}
+.list-summary{height:40px}
+}
+/* 平板 / 窄桌面统一收紧固定列宽：基础规则里「来源 / DOI」235px、「状态」230px 会把标题挤到 0 宽，
+   结果右侧状态列被裁掉，必须按窄屏口径重新分配。 */
+@media(min-width:701px) and (max-width:1280px){
+.paper-table{min-width:0}
+.paper-table th:nth-child(1){width:64px}
+.paper-table th:nth-child(2){width:52px}
+.paper-table th:nth-child(3){width:62px}
+.paper-table th:nth-child(4){width:52px}
+.paper-table th:nth-child(6){width:180px}
+.paper-table th:nth-child(7){width:160px}
+}
+/* ≤900px 平板竖屏：表格只剩 ~790px，再留「类型」「IF」会把标题列压到 220px，收起这两列。
+   981–1140px 原先也因为"侧栏 + 列表并排"收起了这两列，但侧栏现已收成浮层，
+   列表区回到 ~966–1082px，标题列仍有 396px+，恢复显示。 */
+@media(min-width:701px) and (max-width:900px){
+.paper-table th:nth-child(3),.paper-table td:nth-child(3),
+.paper-table th:nth-child(4),.paper-table td:nth-child(4){display:none}
+}
+@media(max-width:700px){
+.library-hero{padding:14px 16px;margin-bottom:12px;border-radius:12px}
+.library-hero h1{font-size:22px;margin:2px 0 3px}
+.library-hero p{font-size:12px;line-height:1.45}
+.eyebrow{font-size:10px}
+.table-wrap.litai-scroll-x{background:none}
+.paper-table{min-width:0}
+.paper-table td{padding:9px 8px}
+.paper-table td.empty{padding:24px 8px!important;font-size:12.5px}
+/* 多子元素单元格（来源/DOI、状态）卡片模式下整块显示，避免子元素落进 76px 标签列 */
+table.litai-stack>tbody>tr>td[data-label="来源 / DOI"],
+table.litai-stack>tbody>tr>td[data-label="状态"]{display:block!important;padding-top:2px!important}
+table.litai-stack>tbody>tr>td[data-label="来源 / DOI"]::before,
+table.litai-stack>tbody>tr>td[data-label="状态"]::before{display:block!important;margin-bottom:1px}
+table.litai-stack>tbody>tr>td>.type-chip,
+table.litai-stack>tbody>tr>td>.status-chip{justify-self:start}
+.paper-title{font-size:13px;line-height:1.4;overflow-wrap:anywhere}
+.paper-subtitle{font-size:11px;white-space:normal;overflow:visible;text-overflow:clip}
+.doi-line{white-space:normal;overflow:visible;text-overflow:clip}
+.list-toolbar{padding:9px 10px;gap:6px}
+.list-toolbar .btn,.list-toolbar select,.list-toolbar .control{height:32px;min-height:32px;font-size:12px;padding:0 9px;line-height:1}
+.list-toolbar .compact{width:116px}
+.search-box{height:34px;min-width:0;padding:0 10px;border-radius:9px}
+.search-box input{font-size:12px}
+.add-link{flex:0 0 auto;width:auto;height:32px;font-size:12px}
+.list-summary{height:auto;min-height:36px;padding:8px 12px;font-size:12px}
+.pager{padding:8px 12px;gap:8px;font-size:12px}
+.pager select{height:30px;font-size:12px}
+.pager-buttons button{min-width:30px;height:30px;font-size:12px}
+.control{height:34px;font-size:12.5px}
+.stat-grid{gap:6px;margin:12px 0}
+.stat-grid div{padding:7px}
+.stat-grid strong{font-size:17px}
+.quick-link{height:34px;font-size:12.5px}
+.filter-title{margin:13px 0 2px}
+}

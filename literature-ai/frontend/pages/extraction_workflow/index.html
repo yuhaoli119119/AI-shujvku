@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js"></script>
   <style>
     * { box-sizing: border-box; }
@@ -233,7 +234,7 @@
     /* ===== MCP Tool Grid ===== */
     .tool-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
       gap: 10px;
     }
     .tool-item {
@@ -311,7 +312,7 @@
     /* ===== Pipeline Layout ===== */
     .pipeline-wrap {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr);
+      grid-template-columns: min(260px, 100%) minmax(0, 1fr);
       gap: 16px;
       align-items: stretch;
       height: auto;
@@ -609,22 +610,207 @@
     }
 
     /* ===== Responsive ===== */
+
+    /* 折叠开关：纯 CSS 开关（checkbox + label），桌面/平板完全隐藏，不参与布局 */
+    .lit-exp-toggle { display: none; }
+    .lit-exp-btn { display: none; }
+
+    /* ===== 平板（<=980px）：状态条 2 列、侧栏与内容塌成单列 ===== */
     @media (max-width: 980px) {
-      .status-bar { grid-template-columns: repeat(2, 1fr); }
-      .pipeline-wrap { grid-template-columns: 1fr; height: auto; min-height: 300px; }
+      .status-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .pipeline-wrap { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 300px; }
       .step-timeline { height: auto; }
       .detail-panel { height: auto; }
       .detail-header { flex-wrap: wrap; }
-      .detail-grid { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: minmax(0, 1fr); }
       .hero { padding: 18px 20px; }
       .hero h1 { font-size: 20px; }
+      /* 平板（701-980px）保持 2 列卡片，但压掉多余留白，不让 2 列显得臃肿 */
+      .section-card { padding: 16px 18px; border-radius: 14px; }
+      .advanced-note { padding: 12px 14px; }
+      .stat-card { padding: 12px 14px; gap: 10px; }
+      .tool-grid { gap: 10px; }
+      .tool-item { padding: 12px 14px; }
+      .tool-desc { line-height: 1.6; }
+      .step-timeline { padding: 14px; }
+      .detail-body { padding: 12px 14px; }
+      .check-list li { padding: 7px 9px; }
+      .protocol-list-mini { max-height: 160px; }
     }
-    @media (max-width: 640px) {
-      .status-bar { grid-template-columns: 1fr; }
-      .tool-grid { grid-template-columns: 1fr; }
-      .section-header { flex-direction: column; }
-      .shell { padding: 12px 16px; }
-      .detail-actions { width: 100%; justify-content: flex-end; }
+
+    /* ===== 手机 / 窄屏（<=700px）：紧凑排布，信息一字不删 ===== */
+    @media (max-width: 700px) {
+      .shell { padding: 10px 12px 20px; }
+
+      /* --- Hero 收成紧凑条 --- */
+      .hero { padding: 12px 14px; border-radius: 12px; margin-bottom: 8px; }
+      .hero::before { width: 120px; height: 120px; top: -44px; right: -44px; }
+      .hero::after { display: none; }
+      .hero-eyebrow { font-size: 9px; letter-spacing: 0.3px; margin-bottom: 3px; }
+      .hero-eyebrow .dot { width: 5px; height: 5px; }
+      .hero h1 { font-size: 17px; line-height: 1.2; margin: 0 0 4px; }
+      .hero-desc { font-size: 12px; line-height: 1.45; margin: 0 0 8px; }
+      .hero-actions { gap: 6px; margin: 0; }
+      .hero-action { min-height: 30px; padding: 5px 10px; font-size: 11.5px; border-radius: 7px; }
+      .hero-badges {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        overflow-y: hidden;
+        gap: 5px;
+        margin-top: 8px;
+        padding-bottom: 2px;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .hero-badges::-webkit-scrollbar { display: none; }
+      .hero-badge { flex: 0 0 auto; font-size: 10.5px; padding: 3px 8px; white-space: nowrap; }
+      .hero-badge svg { width: 11px; height: 11px; }
+
+      /* --- 长说明段落：默认折叠 2 行，点按钮展开（文字未删、onclick 未改） --- */
+      /* 折叠段落含 inline <strong>/<code> 时，-webkit-line-clamp 会在第 2 行给出省略号，
+         却又多画出半行第三个行（实测"专用 ai_verify_content 身份完成"被拦腰切断）。
+         裁剪边界只能落在行边界上，否则第 3 行会露出半截字；而 overflow 的裁剪边界是
+         padding box，所以有内边距的 .advanced-note 必须把 2 行高度交给无内边距的
+         .advanced-note-body 去裁（.section-desc 没有内边距，可以直接裁）。 */
+      #exp-note ~ .advanced-note,
+      .lit-exp-toggle ~ .section-header .section-desc {
+        display: block;
+        overflow: hidden;
+        -webkit-line-clamp: unset;
+        line-clamp: unset;
+      }
+      #exp-note ~ .advanced-note > .advanced-note-body {
+        display: block;
+        overflow: hidden;
+        max-height: calc(2 * 1.5em);
+        max-height: calc(2lh);
+      }
+      .lit-exp-toggle ~ .section-header .section-desc { max-height: calc(2 * 1.5em); max-height: calc(2lh); }
+      #exp-note:checked ~ .advanced-note > .advanced-note-body,
+      .lit-exp-toggle:checked ~ .section-header .section-desc {
+        max-height: none;
+        -webkit-mask-image: none;
+        mask-image: none;
+      }
+      /* 工具卡说明：手机上只留 1 行预览，展开后全文 */
+      .lit-exp-toggle ~ .tool-grid .tool-desc {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 1;
+        line-clamp: 1;
+        overflow: hidden;
+      }
+      .lit-exp-toggle:checked ~ .tool-grid .tool-desc {
+        display: block;
+        -webkit-line-clamp: unset;
+        line-clamp: unset;
+      }
+      .lit-exp-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-top: 8px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px dashed var(--color-border);
+        background: var(--color-surface-alt);
+        color: var(--color-primary);
+        font-size: 11.5px;
+        font-weight: 700;
+        cursor: pointer;
+        user-select: none;
+      }
+      .lit-exp-btn .lit-exp-less { display: none; }
+      .lit-exp-toggle:checked ~ .lit-exp-btn .lit-exp-more { display: none; }
+      .lit-exp-toggle:checked ~ .lit-exp-btn .lit-exp-less { display: inline; }
+
+      /* --- 状态条：2 列，单卡 <=48px，数字 <=15px --- */
+      .status-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+      .stat-card { padding: 7px 10px; gap: 8px; border-radius: 10px; }
+      .stat-card:hover { transform: none; box-shadow: none; }
+      .stat-icon { width: 26px; height: 26px; border-radius: 8px; font-size: 13px; }
+      .stat-card .stat-value { font-size: 15px !important; margin-bottom: 1px; }
+      .stat-label { font-size: 11px; line-height: 1.2; }
+
+      /* --- 顶部提示条 --- */
+      .advanced-note { padding: 10px; border-radius: 10px; margin-bottom: 8px; font-size: 12px; line-height: 1.5; }
+      .advanced-note code { font-size: 11px; overflow-wrap: anywhere; }
+
+      /* --- 卡片统一紧凑 --- */
+      .section-card { padding: 10px; border-radius: 12px; margin-bottom: 8px; }
+      .section-header { flex-direction: column; gap: 6px; margin-bottom: 8px; }
+      .section-eyebrow { font-size: 9.5px; margin-bottom: 3px; }
+      .section-title { font-size: 15px; }
+      .section-desc { font-size: 12px; line-height: 1.5; margin-top: 4px; }
+      .tool-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+      .tool-item { padding: 8px 10px; border-radius: 10px; }
+      .tool-item:hover { transform: none; box-shadow: none; }
+      .tool-top { gap: 8px; margin-bottom: 6px; }
+      .tool-icon { width: 26px; height: 26px; border-radius: 8px; font-size: 13px; }
+      .tool-name { font-size: 13px; }
+      .tool-desc { font-size: 12px; line-height: 1.5; }
+      .tool-desc code { font-size: 11px; padding: 1px 4px; overflow-wrap: anywhere; }
+
+      /* --- 协议列表 --- */
+      .protocol-list-mini { max-height: 120px; gap: 4px; margin-top: 8px; }
+      .protocol-mini-item { padding: 5px 8px; border-radius: 7px; font-size: 12px; }
+      .protocol-mini-item .pm-icon { width: 20px; height: 20px; font-size: 9px; }
+      .protocol-mini-item .pm-meta { font-size: 10.5px; }
+
+      /* --- 7 步流程：步骤条横向滑动，省掉 7 行竖排 --- */
+      .pipeline-wrap { gap: 8px; min-height: 0; }
+      .step-timeline { padding: 8px; border-radius: 12px; }
+      .step-timeline-title { font-size: 10px; margin: 0 0 6px; padding-bottom: 6px; }
+      .timeline-list {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 2px;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+      }
+      .timeline-list::-webkit-scrollbar { display: none; }
+      .timeline-item,
+      .timeline-item:hover,
+      .timeline-item.active { flex: 0 0 auto; padding: 6px 8px; gap: 6px; border-radius: 8px; }
+      .timeline-number { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+      .timeline-text { padding-top: 0; }
+      .timeline-text .tl-title { font-size: 12px; line-height: 1.3; white-space: nowrap; }
+      .timeline-text .tl-sub { font-size: 10px; white-space: nowrap; }
+
+      /* --- 步骤详情 --- */
+      .detail-panel { border-radius: 12px; }
+      .detail-header { padding: 8px 10px; gap: 8px; }
+      .detail-kicker { font-size: 9.5px; }
+      .detail-title { font-size: 15px; }
+      .detail-desc {
+        font-size: 12px;
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        overflow: hidden;
+      }
+      .detail-actions { width: 100%; justify-content: flex-start; gap: 6px; }
+      .detail-body { padding: 10px; }
+      .detail-grid { gap: 10px; }
+      .col-header { font-size: 11.5px; margin-bottom: 6px; padding-bottom: 5px; }
+      .check-list { gap: 4px; }
+      .check-list li { padding: 5px 8px; border-radius: 7px; font-size: 12px; line-height: 1.45; }
+      .prompt-section { margin-top: 10px; padding-top: 10px; }
+      .prompt-label { font-size: 11.5px; margin-bottom: 6px; }
+      .prompt-box {
+        padding: 9px 10px;
+        border-radius: 8px;
+        font-size: 11px;
+        line-height: 1.5;
+        max-height: 100px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+      }
+      .prompt-box::before { top: 4px; right: 8px; font-size: 8px; }
     }
   </style>
 </head>
@@ -648,7 +834,7 @@
           <a class="hero-action primary" href="../review_center/index.html">进入审核中心</a>
           <a class="hero-action" href="../settings/index.html#protocol">查看提取协议</a>
         </div>
-        <div class="hero-badges">
+        <div class="hero-badges litai-hscroll">
           <span class="hero-badge">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>
             Scope Gate
@@ -673,10 +859,12 @@
       </div>
     </section>
 
+    <input type="checkbox" id="exp-note" class="lit-exp-toggle">
     <section class="advanced-note">
-      <strong>主流程已经迁移：</strong>
-      普通 <code>import_analysis</code> 只导入候选/审核意见；实际非 DFT 修改使用受控修改工具，DFT 权威自动验收由专用 <code>ai_verify_content</code> 身份完成，exception 才进入 Owner-session 人工处理。这里展示的是底层协议和调试工具，不要求用户逐项操作。
+      <span class="advanced-note-body"><strong>主流程已经迁移：</strong>
+      普通 <code>import_analysis</code> 只导入候选/审核意见；实际非 DFT 修改使用受控修改工具，DFT 权威自动验收由专用 <code>ai_verify_content</code> 身份完成，exception 才进入 Owner-session 人工处理。这里展示的是底层协议和调试工具，不要求用户逐项操作。</span>
     </section>
+    <label for="exp-note" class="lit-exp-btn"><span class="lit-exp-more">展开全部说明</span><span class="lit-exp-less">收起说明</span></label>
 
     <!-- ===== Protocol Status Bar ===== -->
     <section class="status-bar">
@@ -711,6 +899,7 @@
     </section>
 
     <section class="section-card">
+      <input type="checkbox" id="exp-rules" class="lit-exp-toggle">
       <div class="section-header">
         <div class="section-title-wrap">
           <div class="section-eyebrow">规则提示</div>
@@ -718,6 +907,7 @@
           <p class="section-desc">高风险对象只保留三类：DFT 数据、图表、表格。它们都不能只看系统拆解结果，必须先回看原版 PDF，再进入后续 AI 审核。</p>
         </div>
       </div>
+      <label for="exp-rules" class="lit-exp-btn"><span class="lit-exp-more">展开全部说明</span><span class="lit-exp-less">收起说明</span></label>
       <div class="tool-grid">
         <div class="tool-item">
           <div class="tool-top">
@@ -762,6 +952,7 @@
 
     <!-- ===== MCP Tools Section ===== -->
     <section class="section-card">
+      <input type="checkbox" id="exp-tools" class="lit-exp-toggle">
       <div class="section-header">
         <div class="section-title-wrap">
           <div class="section-eyebrow">🔧 On-Demand MCP Tools</div>
@@ -769,6 +960,7 @@
           <p class="section-desc">AI Agent 在提取流程中可随时调用以下工具查证。指定 AI 或其它 AI 的角色可按任务分配，但每次分析、审核、修正和图表判断都必须留下可追溯记录。下方为简化决策指引，完整行为规范见 Agent Behavior Guide。</p>
         </div>
       </div>
+      <label for="exp-tools" class="lit-exp-btn"><span class="lit-exp-more">展开全部说明</span><span class="lit-exp-less">收起说明</span></label>
       <div class="tool-grid">
         <div class="tool-item">
           <div class="tool-top">
@@ -841,7 +1033,7 @@
       <!-- Step Timeline Sidebar -->
       <aside class="step-timeline">
         <div class="step-timeline-title">📌 提取流程</div>
-        <div class="timeline-list" id="stepList"></div>
+        <div class="timeline-list litai-hscroll" id="stepList"></div>
       </aside>
 
       <!-- Step Detail Panel -->
@@ -1032,6 +1224,10 @@
       TopNav.init({ currentPage: "extraction-workflow", mountId: "topnav-mount" });
       renderSteps();
       selectStep("scope");
+      // 步骤条 / hero 徽章在手机上横向可滑（滚动条已藏），补两端渐隐提示。
+      // TopNav.init 已经扫过一次，但那时 #stepList 还是空的，这里再扫一次。
+      TopNav.syncScrollHints();
+      window.addEventListener("load", () => TopNav.syncScrollHints());
       loadProtocols();
       loadAgentGuide();
     });

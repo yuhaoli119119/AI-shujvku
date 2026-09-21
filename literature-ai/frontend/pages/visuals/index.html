@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <link rel="stylesheet" href="./page.css?v=20260913_c1">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
@@ -157,19 +158,19 @@
               <h3>常用关系</h3>
             </div>
             <div class="preset-buttons-stack">
-              <button id="quickAdsorptionDissociation" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="li2s_dissociation_barrier">
+              <button id="quickAdsorptionDissociation" class="preset-btn" type="button" title="吸附能 ↔ 解离能垒" data-x="li2s_adsorption_energy" data-y="li2s_dissociation_barrier">
                 <span class="preset-name">吸附能 ↔ 解离能垒</span>
                 <span class="preset-arrow">›</span>
               </button>
-              <button id="quickChargeBond" class="preset-btn" type="button" data-x="li2s_bader_charge_transfer" data-y="li_s_bond_max">
+              <button id="quickChargeBond" class="preset-btn" type="button" title="电荷转移 ↔ Li–S 键长" data-x="li2s_bader_charge_transfer" data-y="li_s_bond_max">
                 <span class="preset-name">电荷转移 ↔ Li–S 键长</span>
                 <span class="preset-arrow">›</span>
               </button>
-              <button id="quickAdsorptionDband" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="d_band_center">
+              <button id="quickAdsorptionDband" class="preset-btn" type="button" title="吸附能 ↔ d 带中心" data-x="li2s_adsorption_energy" data-y="d_band_center">
                 <span class="preset-name">吸附能 ↔ d 带中心</span>
                 <span class="preset-arrow">›</span>
               </button>
-              <button id="quickAdsorptionRds" class="preset-btn" type="button" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
+              <button id="quickAdsorptionRds" class="preset-btn" type="button" title="吸附能 ↔ RDS ΔG" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
                 <span class="preset-name">吸附能 ↔ RDS ΔG</span>
                 <span class="preset-arrow">›</span>
               </button>
@@ -271,7 +272,7 @@
             </summary>
 
             <div class="table-wrap table-wrapper">
-              <table class="data-table paired-data-table">
+              <table class="data-table paired-data-table litai-stack">
                 <thead>
                   <tr>
                     <th>催化剂</th>

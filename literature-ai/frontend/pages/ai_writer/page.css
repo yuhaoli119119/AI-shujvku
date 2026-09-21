@@ -57,17 +57,126 @@ summary { cursor: pointer; font-weight: 750; }
 .empty-state { text-align: center; color: var(--color-text-secondary); padding: 28px 10px; }
 .toast { display: none; position: fixed; right: 22px; bottom: 22px; z-index: 3000; max-width: min(420px, calc(100vw - 44px)); padding: 12px 16px; border-radius: var(--radius); background: var(--color-primary); color: #fff; box-shadow: var(--shadow-elevated); }
 .btn.small { padding: 8px 10px; }
+
+/* ------------------------------------------------------------
+   说明性段落折叠容器（.fold-exp）：<details> 里放原段落，一字不改。
+   桌面（≥1024px）由 page.js 保持 open 并隐藏 summary，
+   视觉与改版前完全一致；只有 ≤1023px 才显示"展开/收起"把手。
+   ------------------------------------------------------------ */
+.fold-exp { margin-top: 0; }
+.fold-exp > summary { display: none; }
+.hero .fold-exp > p, .notice .fold-exp > p { margin: 0; }
+
 @media (max-width: 1100px) {
-  .workspace { grid-template-columns: 1fr; }
+  .workspace { grid-template-columns: minmax(0, 1fr); }
   .paper-panel { position: static; max-height: none; }
   .paper-list { max-height: 360px; }
-  .metrics { grid-template-columns: repeat(3, 1fr); }
+  .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+
+/* ------------------------------------------------------------
+   平板 / 手机紧凑布局（≤1023px）。
+   桌面（≥1024px）不被任何一条规则影响。
+   ------------------------------------------------------------ */
+@media (max-width: 1023px) {
+  /* 空态结果区：HTML 里已标 hidden，但 page.css:11 的 display:grid 会顶掉
+     [hidden] 的默认 display:none，必须显式收回（否则空态白占 ~770px）。 */
+  #planResults[hidden] { display: none; }
+
+  .shell { padding: 12px 12px 24px; }
+  .hero { gap: 10px; margin-bottom: 10px; }
+  .hero h1 { font-size: 21px; margin: 3px 0 6px; }
+  .hero p { font-size: 13px; line-height: 1.55; }
+  .notice { padding: 8px 10px; margin-bottom: 10px; font-size: 13px; line-height: 1.55; }
+  .workspace { gap: 10px; }
+  .main-column, .results { gap: 10px; }
+
+  .card { padding: 10px 12px; }
+  .section-head { gap: 8px; margin-bottom: 8px; }
+  .section-head h2 { font-size: 15px; margin-bottom: 3px; }
+  .section-head p, .muted { font-size: 12px; line-height: 1.5; }
+  .count-chip, .status { padding: 3px 8px; font-size: 11px; }
+
+  .fold-exp > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 24px;
+    color: var(--color-primary);
+    font-size: 12px;
+    font-weight: 750;
+    cursor: pointer;
+    list-style: none;
+  }
+  .fold-exp > summary::-webkit-details-marker { display: none; }
+  .fold-exp > summary::after { content: "▾"; font-size: 10px; }
+  .fold-exp[open] > summary::after { content: "▴"; }
+  .fold-exp[open] > summary { margin-bottom: 4px; }
+
+  /* 表单：label 11px + 输入框 34px + 字段间距 8px，两列 minmax(0,1fr) 防溢出 */
+  .field label { margin-bottom: 4px; font-size: 11px; }
+  .field.wide { margin-bottom: 8px; }
+  input:not([type="checkbox"]), select {
+    height: 34px;
+    min-height: 34px;
+    padding: 5px 9px;
+    font-size: 13px;
+  }
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .switch-row { min-height: 34px; padding: 4px 8px; gap: 6px; font-size: 12px; }
+  .switch-row input[type="checkbox"] { width: 16px; height: 16px; margin: 0; flex: 0 0 auto; }
+  /* "加入 requested_sections=dft_results" 里的下划线长串不能撑破两列网格 */
+  .switch-row span { min-width: 0; overflow-wrap: anywhere; }
+
+  /* 按钮：同排、34px、13px；整行只留给主操作（生成安全证据计划） */
+  .btn { height: 34px; min-height: 34px; padding: 0 12px; font-size: 13px; }
+  .btn.small { height: 32px; min-height: 32px; padding: 0 10px; font-size: 12px; }
+  .hero-actions, .form-actions, .paper-tools { gap: 6px; }
+  .form-actions { margin-top: 10px; }
+  .paper-tools input { flex: 1 1 auto; }
+  .paper-tools .btn { flex: 0 0 auto; }
+
+  /* 论文列表：去掉 page.css:18 的 320px min-height 硬底与 page.css:13 的 100vh 锁 */
+  .paper-panel { position: static; max-height: none; }
+  .paper-list { min-height: 0; max-height: 260px; margin-top: 8px; gap: 6px; }
+  .paper-item { padding: 7px 8px; gap: 7px; grid-template-columns: 18px minmax(0, 1fr); }
+  .paper-item input[type="checkbox"] { width: 16px; height: 16px; margin: 0; }
+  .paper-title { font-size: 12px; line-height: 1.4; }
+  .paper-meta { font-size: 11px; margin-top: 2px; }
+
+  .empty-plan { padding: 14px 10px; }
+  .empty-plan h2 { font-size: 15px; }
+  .empty-state { padding: 12px 8px; font-size: 12px; }
+  .metrics { gap: 6px; }
+  .metric { padding: 8px 9px; }
+  .metric span { font-size: 11px; }
+  .metric strong { margin-top: 3px; font-size: 16px; }
+  .dft-status { padding: 8px 10px; font-size: 12px; }
+  .warning-list { gap: 6px; margin: 8px 0; }
+  .warning-item { padding: 8px 10px; font-size: 12px; }
+  details { margin-top: 8px; }
+  .coverage-list { gap: 5px; margin-top: 8px; }
+  .coverage-row { grid-template-columns: minmax(0, 1fr) auto; gap: 6px; padding: 7px 9px; font-size: 12px; }
+  .batch-list, .evidence-list { gap: 8px; }
+  .batch-card, .evidence-card { padding: 10px; }
+  .batch-card h3, .evidence-card h3 { font-size: 13px; }
+  /* 长文本块：手机限高 160px 且可纵向拖拽 */
+  .excerpt { font-size: 12px; line-height: 1.55; max-height: 160px; overflow-y: auto; resize: vertical; }
+  .toast { right: 10px; bottom: 10px; max-width: min(420px, calc(100vw - 20px)); padding: 9px 12px; font-size: 12px; }
+}
+
 @media (max-width: 760px) {
-  .shell { padding: 20px 14px 36px; }
   .hero, .section-head, .form-actions { flex-direction: column; }
   .hero-actions, .hero-actions .btn, .form-actions .btn { width: 100%; }
-  .form-grid { grid-template-columns: 1fr; }
-  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .batch-head { flex-direction: column; }
+}
+
+@media (max-width: 560px) {
+  .shell { padding: 10px 10px 20px; }
+  .card { padding: 8px 10px; }
+  .hero h1 { font-size: 19px; }
+  .notice { padding: 7px 9px; }
+  .paper-list { max-height: 220px; }
+  .form-grid { gap: 7px; }
 }

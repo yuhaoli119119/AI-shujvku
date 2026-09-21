@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
+    <link rel="stylesheet" href="../../shared/responsive.css">
     <script src="../../shared/topnav.js"></script>
     <script>ThemeManager.init();</script>
     <style>
@@ -898,6 +899,133 @@
         }
         .toast.show { display: block; animation: fadeIn 0.2s; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* ================= 手机端紧凑改版（<=700px） =================
+           用户要求：字体可以缩小，尽量不要有太大的空间浪费，
+           避免一个操作按钮用很大的模块占用。桌面（>=1024px）保持原样。 */
+        .ws-upload-desc-sm { display: none; } /* 紧凑提示行：仅手机显示 */
+        .ws-swipe-hint { display: none; }     /* 横向滚动提示：仅手机显示 */
+
+        @media (max-width: 980px) and (min-width: 701px) {
+            /* 平板：表格允许横向滚动，由 responsive.css 的 .litai-scroll-x 给出渐隐提示 */
+            .ws-paper-table { min-width: 620px; }
+        }
+
+        @media (max-width: 700px) {
+            /* ---- D. 全局收紧：卡片 padding 10-12px、间距 8-10px、正文 12-13px、次要 11px ---- */
+            .shell { padding: 8px 12px 24px; }
+            .ws-header { padding: 4px 0 10px; gap: 8px; }
+            .ws-header-titles h1 { font-size: 19px; }
+            .ws-header-titles p { font-size: 11px; margin-top: 3px; }
+            .ws-header-widgets { gap: 8px; width: 100%; }
+            .ws-header-card { padding: 6px 10px; gap: 8px; min-height: 0; border-radius: 10px; }
+            .ws-header-card-icon { width: 22px; height: 22px; }
+            .ws-header-card-icon svg { width: 16px; height: 16px; }
+            .ws-header-card-label { font-size: 10px; }
+            .ws-lib-card { min-width: 0; flex: 1 1 auto; }
+            .ws-lib-name { font-size: 12px; max-width: 96px; }
+            .ws-lib-active-tag { font-size: 9px; padding: 0 4px; }
+            .ws-lib-chevron { width: 12px; height: 12px; }
+
+            /* ---- A. 上传卡片：紧凑横条（图标 + 一行说明 + 32px 按钮，总高 <=96px） ---- */
+            .ws-upload-row { gap: 8px; margin-bottom: 10px; }
+            .ws-upload-hero {
+                display: grid;
+                grid-template-columns: 32px minmax(0, 1fr) auto;
+                align-items: center;
+                gap: 10px;
+                padding: 10px 12px;
+                border-width: 1.5px;
+                border-radius: 10px;
+            }
+            .ws-upload-left { display: contents; }
+            .ws-upload-icon-box { width: 32px; height: 32px; border-radius: 9px; }
+            .ws-upload-icon-box svg { width: 17px; height: 17px; }
+            .ws-upload-text { gap: 1px; }
+            .ws-upload-title { font-size: 13.5px; line-height: 1.25; }
+            .ws-upload-desc { display: none; }
+            .ws-upload-desc-sm { display: block; font-size: 11px; color: var(--color-text-muted); line-height: 1.3; }
+            .ws-upload-right { flex-direction: row; align-items: center; gap: 6px; }
+            .ws-upload-sublink { display: none; }
+            .btn-upload-primary { height: 32px; padding: 0 12px; font-size: 12.5px; gap: 4px; box-shadow: none; }
+            .btn-upload-primary svg { width: 13px; height: 13px; }
+            .btn-upload-primary:hover { transform: none; }
+
+            /* 小提示：手机上两列，省一半高度 */
+            .ws-upload-tips { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; padding: 10px 12px; border-radius: 10px; }
+            .ws-tips-header { grid-column: 1 / -1; font-size: 12px; margin-bottom: 0; }
+            .ws-tip-item { font-size: 11px; gap: 5px; align-items: flex-start; line-height: 1.35; }
+
+            /* ---- B. 统计卡：2x2 紧凑网格，单卡 <=56px，数字 17px ---- */
+            .ws-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+            .ws-metric-card { padding: 8px 10px; gap: 8px; border-radius: 10px; }
+            .ws-metric-icon-box { width: 28px; height: 28px; border-radius: 8px; }
+            .ws-metric-icon-box svg { width: 15px; height: 15px; }
+            .ws-metric-content { gap: 0; }
+            .ws-metric-title { font-size: 11px; }
+            .ws-metric-num-row { gap: 4px; }
+            .ws-metric-value { font-size: 17px; }
+            .ws-metric-sub { font-size: 10px; }
+            .ws-metric-arrow { font-size: 13px; }
+
+
+            /* ---- 面板 / 解析任务 / 文献库概况 ---- */
+            .ws-main { gap: 8px; }
+            .ws-sidebar-panels { gap: 8px; }
+            .ws-panel { border-radius: 10px; }
+            .ws-panel-head { padding: 8px 10px; }
+            .ws-panel-head h3 { font-size: 13px; }
+            .ws-panel-link { font-size: 11.5px; }
+            .ws-swipe-hint { display: inline; font-size: 10.5px; color: var(--color-text-muted); font-weight: 500; margin-left: auto; margin-right: 8px; }
+            .ws-empty-hint { padding: 14px 10px; font-size: 12px; }
+            .ws-job-card { padding: 7px 10px; gap: 3px; }
+            .ws-job-left { gap: 7px; }
+            .ws-job-status-icon { width: 18px; height: 18px; }
+            .ws-job-status-icon svg { width: 11px; height: 11px; }
+            .ws-job-title { font-size: 12px; }
+            .ws-job-sub { font-size: 10.5px; }
+            .ws-job-right-state { font-size: 10.5px; }
+            .ws-job-progress-wrapper { margin-top: 0; }
+            .ws-overview-body { padding: 10px 12px; gap: 12px; }
+            .ws-donut-box { width: 76px; height: 76px; }
+            .ws-donut-center-text .num { font-size: 16px; }
+            .ws-donut-center-text .lbl { font-size: 9px; }
+            .ws-donut-legend { gap: 5px; }
+            .ws-legend-item { font-size: 11px; }
+            .toast { left: 12px; right: 12px; max-width: none; font-size: 12px; }
+        }
+
+        /* ================= 最近文献：<=900px 改成"标题整行 + 一行元信息"的紧凑列表 =================
+           横向滚动虽然压得住高度，但标题被截成"Unveiling the…"，手机和平板竖屏（768/820）
+           都认不出是哪一篇。这里每篇占 2 行：标题完整（最多 2 行）+ 年份/类型/状态。
+           来源 / 入库时间在手机上让位（详情页、文献库都有），避免第三行把面板撑高。 */
+        @media (max-width: 900px) {
+            .ws-table-wrap { margin: 0; padding: 0; }
+            .ws-table-wrap.litai-scroll-x { background: none; }
+            .ws-swipe-hint { display: none; }
+            .ws-paper-table { display: block; width: 100%; min-width: 0; font-size: 12px; }
+            .ws-paper-table > thead { display: none; }
+            .ws-paper-table > tbody { display: block; }
+            .ws-paper-table > tbody > tr {
+                display: flex; flex-wrap: wrap; align-items: baseline;
+                gap: 2px 8px; padding: 8px 10px 9px;
+                border-top: 1px solid var(--color-border);
+            }
+            .ws-paper-table > tbody > tr > td { display: block; padding: 0; border: 0; }
+            .ws-paper-table > tbody > tr > td:nth-child(1) { order: 1; flex: 1 0 100%; }
+            .ws-paper-table > tbody > tr > td:nth-child(2) { order: 2; }
+            .ws-paper-table > tbody > tr > td:nth-child(3) { order: 3; }
+            .ws-paper-table > tbody > tr > td:nth-child(5) { order: 4; }
+            .ws-paper-table > tbody > tr > td:nth-child(7) { order: 5; margin-left: auto; }
+            .ws-paper-table > tbody > tr > td:nth-child(4),
+            .ws-paper-table > tbody > tr > td:nth-child(6) { display: none; }
+            .ws-title-cell { max-width: none; gap: 6px; align-items: flex-start; }
+            .ws-title-link { flex: 1; min-width: 0; }
+            .ws-title-icon { width: 13px; height: 13px; flex: 0 0 auto; margin-top: 2px; }
+            .ws-paper-table > tbody > tr > td:nth-child(3) .tag-badge { font-size: 10.5px; padding: 1px 6px; }
+            .ws-paper-table > tbody > tr > td:nth-child(5) .status-dot-cell { font-size: 11px; }
+            .ws-paper-table td.ws-empty-hint { padding: 18px 10px; }
+        }
     </style>
 </head>
 <body>
@@ -992,6 +1120,7 @@
                     <div class="ws-upload-text">
                         <div class="ws-upload-title">拖入 PDF，或点击添加文献</div>
                         <div class="ws-upload-desc">支持单个或批量 PDF 上传，自动完成解析、保存和结构化抽取。单个文件不超过 30 MB。</div>
+                        <div class="ws-upload-desc-sm">支持批量上传 · 单个 ≤ 30 MB</div>
                     </div>
                 </div>
                 <div class="ws-upload-right">
@@ -1040,7 +1169,7 @@
                 <span class="ws-metric-arrow">›</span>
             </div>
 
-            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html'" title="点击查看已解析文献">
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html?quick=parsed'" title="点击查看已解析文献">
                 <div class="ws-metric-icon-box green">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -1057,7 +1186,7 @@
                 <span class="ws-metric-arrow">›</span>
             </div>
 
-            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html'" title="点击查看待处理文献">
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html?quick=review'" title="点击查看待处理文献">
                 <div class="ws-metric-icon-box orange">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10"></circle>
@@ -1099,9 +1228,14 @@
             <div class="ws-panel">
                 <div class="ws-panel-head">
                     <h3>最近文献</h3>
+                    <span class="ws-swipe-hint">← 左右滑动看更多列</span>
                     <a class="ws-panel-link" href="../literature_library/index.html">查看全部 →</a>
                 </div>
-                <div style="overflow-x: auto;">
+                <div class="ws-table-wrap litai-scroll-x" id="recentPapersWrap" title="手机/平板可左右滑动查看全部列">
+                    <!-- 手机端采用"横向滚动 + 首列吸附 + 右侧渐隐提示"（responsive.css 的 .litai-scroll-x）。
+                         备选方案：给下表加 class="litai-stack" 即走 responsive.css 的卡片式，
+                         但实测 390px 下"最近文献"面板会从 439px 涨到 1946px、整页 1384px→2891px，
+                         与"尽量不要有太大的空间浪费"冲突，故未启用；td 的 data-label 已就位可随时切换。 -->
                     <table class="ws-paper-table">
                         <thead>
                             <tr>
@@ -1539,22 +1673,22 @@
 
                 return `
                     <tr>
-                        <td>
+                        <td data-label="">
                             <div class="ws-title-cell">
                                 <svg class="ws-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14 2 14 8 20 8"></polyline>
                                 </svg>
-                                <a class="ws-title-link" href="../paper_detail/index.html?paper_id=${id}" title="${title}">${title}</a>
+                                <a class="ws-title-link" href="../paper_detail/index.html?paper_id=${id}&from=dashboard" title="${title}">${title}</a>
                             </div>
                         </td>
-                        <td style="color:var(--color-text-muted);">${year}</td>
-                        <td><span class="tag-badge ${typeObj.cls}">${typeObj.label}</span></td>
-                        <td style="color:var(--color-text-secondary); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${journal}">${journal}</td>
-                        <td>${statusHtml}</td>
-                        <td style="color:var(--color-text-muted); font-size:11px;">${timeStr}</td>
-                        <td style="text-align:center;">
-                            <button class="btn-more-action" onclick="location.href='../paper_detail/index.html?paper_id=${id}'" title="查看详情">···</button>
+                        <td data-label="年份" style="color:var(--color-text-muted);">${year}</td>
+                        <td data-label="类型"><span class="tag-badge ${typeObj.cls}">${typeObj.label}</span></td>
+                        <td data-label="来源" style="color:var(--color-text-secondary); max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${journal}">${journal}</td>
+                        <td data-label="状态">${statusHtml}</td>
+                        <td data-label="入库时间" style="color:var(--color-text-muted); font-size:11px;">${timeStr}</td>
+                        <td data-label="" style="text-align:center;">
+                            <button class="btn-more-action" onclick="location.href='../paper_detail/index.html?paper_id=${id}&from=dashboard'" title="查看详情">···</button>
                         </td>
                     </tr>
                 `;

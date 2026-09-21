@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
+    <link rel="stylesheet" href="../../shared/responsive.css">
     <script src="../../shared/topnav.js"></script>
     <style>
         * { box-sizing: border-box; }
@@ -81,6 +82,11 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
+        }
+        .panel-actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
         }
         .field label {
             display: block;
@@ -432,6 +438,218 @@
                 grid-template-columns: repeat(2, minmax(0, 1fr));
             }
         }
+
+        @media (max-width: 700px) {
+            .main {
+                padding: 12px 12px 20px;
+            }
+
+            /* A. 顶部 tab：单行横向滚动，隐藏滚动条，禁止换行 */
+            .section-nav {
+                flex-wrap: nowrap;
+                gap: 4px;
+                margin-bottom: 10px;
+                padding-bottom: 6px;
+                overflow-x: auto;
+                overflow-y: hidden;
+                -webkit-overflow-scrolling: touch;
+                overscroll-behavior-x: contain;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+            .section-nav::-webkit-scrollbar { display: none; }
+            .section-nav button {
+                display: inline-flex;
+                align-items: center;
+                flex: 0 0 auto;
+                height: 34px;
+                padding: 0 12px;
+                font-size: 12.5px;
+                line-height: 1;
+                white-space: nowrap;
+            }
+
+            /* B. 卡片：收紧内边距、间距与标题字号 */
+            .panel {
+                padding: 11px 11px 12px;
+                margin-bottom: 9px;
+                border-radius: 10px;
+            }
+            .panel-title {
+                font-size: 14px;
+                line-height: 1.35;
+                margin-bottom: 4px;
+            }
+            .panel-desc {
+                font-size: 12px;
+                line-height: 1.55;
+                margin-bottom: 8px;
+            }
+            .panel-desc:last-child { margin-bottom: 0; }
+
+            /* C. 表单：输入框 32px、label 11.5px、上下间距收紧 */
+            .field { margin-bottom: 8px; }
+            .field-row { gap: 8px; }
+            .field label {
+                font-size: 11.5px;
+                line-height: 1.45;
+                margin-bottom: 3px;
+            }
+            .field input,
+            .field select,
+            .field textarea {
+                height: 32px;
+                padding: 3px 8px;
+                font-size: 12.5px;
+                border-radius: 6px;
+            }
+            .field textarea {
+                height: auto;
+                min-height: 60px;
+                padding: 6px 8px;
+                line-height: 1.5;
+            }
+            .hint { font-size: 10.5px; }
+
+            /* D. 按钮 / 徽标 / 说明卡片 */
+            .btn {
+                height: 32px;
+                min-height: 32px;
+                padding: 0 12px;
+                font-size: 12px;
+                border-radius: 7px;
+            }
+            .actions,
+            .panel-actions {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 6px;
+            }
+            .badge-row { gap: 5px; }
+            .badge {
+                padding: 5px 8px;
+                gap: 4px;
+                font-size: 10.5px;
+                line-height: 1.45;
+            }
+            #ide-status { margin-bottom: 8px !important; }
+
+            /* 代码块 / 提示词气泡 */
+            .code-block {
+                padding: 8px 9px;
+                font-size: 11px;
+                line-height: 1.55;
+                border-radius: 6px;
+            }
+            .prompt-bubble {
+                padding: 10px 11px 12px;
+                border-radius: 12px 12px 12px 5px;
+            }
+            .prompt-bubble-head {
+                margin-bottom: 6px;
+                padding-right: 52px;
+            }
+            .prompt-bubble-title { font-size: 12px; }
+            .prompt-bubble-subtitle { font-size: 10.5px; }
+            .prompt-bubble-text {
+                min-height: 0;
+                font-size: 11px;
+                line-height: 1.6;
+            }
+            .copy-btn {
+                top: 6px;
+                right: 6px;
+                padding: 3px 8px;
+                font-size: 10.5px;
+            }
+
+            /* 提取协议 */
+            .protocol-toolbar { margin-bottom: 8px; gap: 6px; }
+            .protocol-actions { gap: 6px; }
+            .protocol-grid {
+                grid-template-columns: 1fr;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .protocol-card { padding: 9px 10px; }
+            .protocol-card h3 {
+                font-size: 13px;
+                margin-bottom: 4px;
+            }
+            .protocol-meta { margin-top: 6px; gap: 5px; }
+            .protocol-pill { padding: 2px 6px; font-size: 10.5px; }
+            .protocol-text { max-height: 360px; }
+
+            /* 主题外观 */
+            .theme-section,
+            .mode-section { margin-bottom: 12px; }
+            .theme-section h3,
+            .mode-section h3 {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+            .theme-pills { gap: 5px; }
+            .theme-pill {
+                height: 30px;
+                padding: 0 12px;
+                font-size: 12px;
+            }
+            .mode-toggle { padding: 3px; }
+            .mode-btn {
+                height: 30px;
+                padding: 0 8px;
+                font-size: 12px;
+            }
+
+            /* 使用说明：侧栏改单行横向滚动 */
+            .guide-layout { gap: 10px; }
+            .guide-nav {
+                display: flex;
+                flex-wrap: nowrap;
+                gap: 5px;
+                padding-bottom: 4px;
+                overflow-x: auto;
+                overscroll-behavior-x: contain;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+            }
+            .guide-nav::-webkit-scrollbar { display: none; }
+            .guide-nav button {
+                display: inline-flex;
+                align-items: center;
+                flex: 0 0 auto;
+                height: 30px;
+                padding: 0 10px;
+                border-radius: 999px;
+                font-size: 12px;
+                white-space: nowrap;
+            }
+            .guide-section { margin-bottom: 12px; }
+            .guide-section h3 {
+                font-size: 13px;
+                margin-bottom: 6px;
+            }
+            .guide-section p,
+            .guide-section li {
+                font-size: 12px;
+                line-height: 1.6;
+            }
+            .guide-section ul,
+            .guide-section ol { padding-left: 16px; }
+            .guide-section li { margin-bottom: 4px; }
+
+            .toast-container {
+                top: 56px;
+                right: 10px;
+                left: 10px;
+            }
+            .toast {
+                min-width: 0;
+                padding: 9px 11px;
+                font-size: 12px;
+            }
+        }
     </style>
     <script>ThemeManager.init();</script>
 </head>
@@ -439,7 +657,7 @@
     <div id="topnav-mount"></div>
 
     <div class="main">
-        <div class="section-nav">
+        <div class="section-nav litai-hscroll">
             <button class="active" onclick="showSection('api', event)">API 配置</button>
             <button onclick="showSection('ide', event)">IDE 连接</button>
             <button onclick="showSection('protocol', event)">提取协议</button>
@@ -518,7 +736,7 @@
                 </div>
             </div>
 
-            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+            <div class="panel-actions">
                 <button class="btn btn-primary" onclick="saveSettings()">保存配置</button>
                 <button class="btn btn-ghost" onclick="loadSettings()">重新加载</button>
             </div>
@@ -547,7 +765,6 @@
                         <div id="prompt-text" class="prompt-bubble-text">加载中...</div>
                     </div>
                     </div>
-                </div>
                 </div>
 
                 <div class="field">
@@ -772,6 +989,20 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             document.querySelectorAll(".section-nav button").forEach(el => el.classList.remove("active"));
             document.getElementById("section-" + name).classList.add("active");
             if (evt && evt.target) evt.target.classList.add("active");
+            scrollSectionNavIntoView();
+        }
+
+        // 手机上分栏导航是横向可滑的、滚动条已藏：把当前分栏滚进可见区，
+        // 否则点"使用说明"（或带 #guide 打开）时高亮停在右侧被裁掉的位置，看不出在哪一栏。
+        function scrollSectionNavIntoView() {
+            const nav = document.querySelector(".section-nav");
+            if (!nav) return;
+            const active = nav.querySelector("button.active");
+            if (active && active.offsetWidth) {
+                const target = active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2;
+                nav.scrollLeft = Math.max(0, Math.min(target, nav.scrollWidth - nav.clientWidth));
+            }
+            if (window.TopNav && TopNav.syncScrollHints) TopNav.syncScrollHints();
         }
 
         function showGuidePane(name, evt) {
@@ -1024,6 +1255,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                         hash === "guide" ? "使用说明" : ""
                     ));
                 });
+                scrollSectionNavIntoView();
+                if (window.TopNav && TopNav.syncScrollHints) TopNav.syncScrollHints();
             }
         });
     </script>

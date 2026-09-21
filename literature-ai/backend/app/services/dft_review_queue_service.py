@@ -105,7 +105,7 @@ class DFTReviewQueueService:
             paper_meta_by_id[pid] = {
                 "title": paper.title,
                 "doi": paper.doi,
-                "library_detail_url": f"../literature_library/index.html?paper_id={pid}&tab=dft",
+                "library_detail_url": f"../paper_detail/index.html?paper_id={pid}&tab=dft",
                 "review_workbench_url": f"../external_analysis_workbench/index.html?paper_id={pid}",
             }
             parsed_by_paper[pid] += 1
@@ -375,7 +375,7 @@ class DFTReviewQueueService:
                 "primary_locator_status": primary_locator.get("locator_status") if primary_locator else None,
             },
             "paper_detail_url": f"../paper_detail/index.html?paper_id={paper_id}",
-            "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
+            "library_detail_url": f"../paper_detail/index.html?paper_id={paper_id}&tab=dft",
             "codex_item_url": f"/api/papers/{paper_id}/codex-item/dft_result/{result_id}",
             "review_prompt": self._review_prompt(row, paper, gate, issues, locators, figure_reliability),
             "verify_url": f"/api/papers/{paper_id}/dft-results/{result_id}/verify",
@@ -384,7 +384,7 @@ class DFTReviewQueueService:
             "review_workbench_url": (
                 f"../external_analysis_workbench/index.html?paper_id={paper_id}"
                 if {"missing_review", "unsafe_review"} & set(reasons)
-                else f"../literature_library/index.html?paper_id={paper_id}&tab=review"
+                else f"../paper_detail/index.html?paper_id={paper_id}&tab=review"
             ),
         }
 

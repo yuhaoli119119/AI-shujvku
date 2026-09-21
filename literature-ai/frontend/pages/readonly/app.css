@@ -279,4 +279,16 @@ table.mk-table tr:nth-child(even) td{background:#fbfcfe;}
   .field.grow{min-width:140px;}
   .tabs{top:0;position:static;}
   .fig-grid{grid-template-columns:1fr;}
+  /* 手机：顶部筛选区两列时，select/input 的固有最小宽度会把页面撑出横向滚动条
+     （390 视口曾量到 scrollWidth=392）。给 flex 子项与控件放开收缩。 */
+  .field{min-width:0;}
+  .top-controls input,.top-controls select{max-width:100%;}
+}
+
+@media (max-width:560px){
+  .top-controls{gap:8px;}
+  .field{flex:1 1 45%;}
+  .field.grow{min-width:0;flex-basis:100%;}
+  .topbar{padding:8px 10px;gap:8px;}
+  .brand-title{font-size:15px;}
 }

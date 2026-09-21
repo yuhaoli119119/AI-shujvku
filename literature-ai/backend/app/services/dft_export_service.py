@@ -818,11 +818,11 @@ def _dft_quality_row_payload(row: DR, paper: P, gate) -> dict:
         "blocked_reasons": reasons,
         "is_exportable": gate.eligible,
         "paper_detail_url": f"../paper_detail/index.html?paper_id={paper_id}",
-        "library_detail_url": f"../literature_library/index.html?paper_id={paper_id}&tab=dft",
+        "library_detail_url": f"../paper_detail/index.html?paper_id={paper_id}&tab=dft",
         "review_workbench_url": (
             f"../external_analysis_workbench/index.html?paper_id={paper_id}"
             if has_blocking_review_reason
-            else f"../literature_library/index.html?paper_id={paper_id}&tab=review"
+            else f"../paper_detail/index.html?paper_id={paper_id}&tab=review"
         ),
     }
 

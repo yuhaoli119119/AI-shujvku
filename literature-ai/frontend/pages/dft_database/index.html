@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
   <style>
@@ -527,6 +528,152 @@
       .completeness-list { grid-template-columns: 1fr; }
       .fragment-context-grid { grid-template-columns: 1fr; }
     }
+
+    /* ============================================================
+       响应式改版 (2026-09-21) — 只作用于 <=900px，桌面 >=1024px 保持原样
+       A. 解开 100% 视口高度锁，整页可纵向滚动
+       C. 顶部筛选/导出区在手机上换行并压缩高度
+       D. 手机字号/间距整体收紧
+       B. <=700px 主表格转为卡片（依赖 shared/responsive.css 的 table.litai-stack）
+       ============================================================ */
+    .dft-toolbar { flex-wrap: nowrap; }
+    .dft-filter-grid { flex-wrap: nowrap; flex: 1 1 auto; overflow-x: auto; }
+    .dft-export-panel { flex-wrap: nowrap; white-space: nowrap; }
+
+    /* 561–1439px：筛选控件不再被压到比自己的内容还窄。
+       原来 .filter-field{min-width:0} + 整行 nowrap 时，固定宽度的
+       select / #minConfidence / #validationStatus 会溢出自己的盒子、
+       直接压住右边的筛选项（实测重叠：1024×768 11 处压 31–48px、
+       1081 9 处、1280 2 处压 37px、1420 1 处压 18px；>=1440 才有富余）。
+       现在放不下就换行，>=1440px 仍是原来的单行观感。 */
+    @media (min-width: 561px) and (max-width: 1439px) {
+      .dft-toolbar { flex-wrap: wrap; }
+      .dft-filter-grid { flex-wrap: wrap; flex: 1 1 auto; overflow: visible; }
+      .dft-filter-grid .filter-field { min-width: max-content; }
+      .dft-export-panel { flex-wrap: wrap; white-space: normal; row-gap: 8px; }
+    }
+
+    @media (max-width: 900px) {
+      /* --- A. 解除高度锁：html/body/shell/scroll-area/data-panel 不再锁死视口 --- */
+      html { height: auto; }
+      body { height: auto; min-height: 100vh; display: block; font-size: 13px; }
+      .shell { display: block; height: auto; min-height: 0; overflow: visible; padding: 0 12px 10px; }
+      .scroll-area { display: block; flex: none; min-height: 0; overflow: visible; }
+      .data-panel { display: block; flex: none; min-height: 0; overflow: visible; padding: 10px 12px 0; margin-bottom: 10px; }
+      #dftDataCollapse { display: block !important; flex: none !important; min-height: 0 !important; }
+      /* 卡片列表比 2000px 高，必须放开 collapse-body 的 max-height，否则分页被裁掉 */
+      #dftDataCollapse:not(.hidden) { max-height: none; overflow: visible; }
+      .data-panel .table-container.litai-scroll-x { flex: none; min-height: 0; overflow: visible; background: none; }
+
+      /* 分页条：手机上紧凑但仍可点 */
+      .sidebar-pagination { margin: 8px -12px 0; padding: 6px 12px 0; min-height: 32px; gap: 6px; }
+      .pagination-meta { font-size: 11px; }
+      .pagination-bar { width: 100%; justify-content: flex-start; margin-left: 0; gap: 6px; }
+      .sidebar-pagination .btn.small,
+      .sidebar-pagination .page-indicator { height: 28px; min-width: 30px; padding: 0 8px; font-size: 11.5px; }
+      .page-size-box { font-size: 11px; }
+      .page-size-box select { height: 28px; min-width: 64px; font-size: 11.5px; }
+
+      /* --- C. 顶部筛选区不再一行硬挤 --- */
+      .dashboard-panel { padding: 8px 10px !important; margin-bottom: 10px; }
+      .dft-toolbar { flex-wrap: wrap; align-items: stretch; gap: 8px; }
+      .dft-filter-grid { flex: 1 1 100%; flex-wrap: wrap; overflow-x: visible; gap: 6px 8px; }
+      .dft-export-panel { margin-left: 0; flex-wrap: wrap; white-space: normal; }
+      .export-panel .btn,
+      .export-panel .btn-outline,
+      .export-panel .btn-sm { height: 32px; padding: 0 10px; font-size: 12px; border-radius: var(--radius-sm); }
+      .export-panel .export-status { font-size: 11.5px; }
+      .filter-field { gap: 5px; }
+      label { font-size: 11.5px; }
+      .filter-field input, .filter-field select { height: 30px; font-size: 12px; width: 132px; }
+      #minConfidence { width: 76px; }
+      #validationStatus { width: 104px; }
+      .quality-topbar { gap: 8px; padding: 8px; }
+      .quality-topbar .actions-bar { margin-left: 0; }
+      .quality-topbar .actions-bar .btn { height: 30px; font-size: 12px; }
+      .quality-topbar .donut-legend .lg-row { min-width: 88px; }
+
+      /* --- D. 间距收紧 --- */
+      .panel-actions { margin-bottom: 6px; }
+      .btn.small { height: 28px; font-size: 11.5px; }
+      .collapse-body { transition: none; }
+    }
+
+    /* 700~900px：表格仍为网格，允许横向滚动 + 缩小字号兜底 */
+    @media (min-width: 701px) and (max-width: 900px) {
+      .data-panel .table-container.litai-scroll-x { overflow-x: auto; overflow-y: hidden; }
+      #dftTable { min-width: 740px; }
+      #dftTable th, #dftTable td { padding: 4px 6px; }
+      #dftTable th { font-size: 11px; }
+      #dftTable td, #dftTable .cell-primary { font-size: 11.5px; }
+      #dftTable .cell-secondary, #dftTable .dft-table-muted, #dftTable .val-unit { font-size: 10.5px; }
+    }
+
+    /* --- B. <=700px：表格转卡片，先复位桌面列宽百分比 --- */
+    @media (max-width: 700px) {
+      #dftTable { min-width: 0 !important; }
+      #dftTable > thead > tr > th,
+      #dftTable > tbody > tr > td { width: auto !important; }
+      .data-panel .table-container.litai-scroll-x { overflow: visible; }
+      #dftTable > tbody > tr > td[data-label=""] {
+        display: block;
+        padding-right: 0 !important;
+        padding-bottom: 4px !important;
+        margin-bottom: 3px;
+        border-bottom: 1px dashed var(--color-border) !important;
+      }
+      #dftTable .cell-primary { font-size: 12px; }
+      #dftTable td[data-label=""] .cell-primary { font-size: 13.5px; font-weight: 800; }
+      #dftTable .cell-secondary,
+      #dftTable .dft-table-muted,
+      #dftTable .val-unit,
+      #dftTable .status-text,
+      #dftTable .confidence-badge { font-size: 10.5px; }
+      /* 标签固定在左列，其余内容统一落在右列，避免次要信息被自动排版挤到标签列下方 */
+      #dftTable > tbody > tr > td[data-label] > * { grid-column: 2; }
+      #dftTable > tbody > tr > td[data-label] > br { display: none; }
+      #dftTable > tbody > tr > td[data-label]::before { grid-column: 1; grid-row: 1; align-self: start; }
+      /* 数值 + 单位保持同一行 */
+      #dftTable > tbody > tr > td[data-label="数值"] { display: flex !important; align-items: baseline; gap: 6px; }
+      #dftTable > tbody > tr > td[data-label="数值"]::before { flex: 0 0 76px; }
+      #dftTable > tbody > tr > td[data-label="数值"] .val-unit { margin-left: 0; }
+      #dftTable .paper-link-wrap {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+        overflow-wrap: anywhere;
+        font-size: 12px;
+      }
+      /* 证据按钮不要被拉成整行大模块 */
+      #dftTable .evidence-link { justify-self: start; align-self: center; width: auto; height: 24px; padding: 0 8px; font-size: 11px; }
+      /* 手机卡片再压一档：状态/置信度、章节/步骤 各由两行并成一行 */
+      #dftTable > tbody > tr > td[data-label="状态 / 置信度"],
+      #dftTable > tbody > tr > td[data-label="章节 / 步骤"] {
+        display: flex !important; flex-wrap: wrap; align-items: baseline; gap: 2px 6px;
+      }
+      #dftTable > tbody > tr > td[data-label="状态 / 置信度"]::before,
+      #dftTable > tbody > tr > td[data-label="章节 / 步骤"]::before { flex: 0 0 76px; align-self: start; }
+      #dftTable > tbody > tr > td[data-label="状态 / 置信度"] > *,
+      #dftTable > tbody > tr > td[data-label="章节 / 步骤"] > * { grid-column: auto; }
+      /* 来源文献标题只留 1 行（全文在 title 属性和详情页里），DOI 仍完整显示 */
+      #dftTable > tbody > tr > td[data-label="来源文献"] .paper-link-wrap a {
+        display: block; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      #dftTable > tbody > tr > td[data-label="来源文献"] .dft-table-muted { margin-top: 1px; }
+      .empty-state { font-size: 12px; padding: 6px 8px; }
+    }
+
+    /* 极窄手机：筛选控件两列网格排布，避免 6 个控件各占一整行 */
+    @media (max-width: 560px) {
+      .dft-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+      .filter-field { display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 0; }
+      .filter-field input,
+      .filter-field select,
+      #minConfidence,
+      #validationStatus { width: 100% !important; }
+      .filter-field select { text-overflow: ellipsis; }
+      .dft-export-panel { justify-content: flex-start; gap: 6px; }
+    }
   </style>
 </head>
 <body>
@@ -535,8 +682,8 @@
     <section class="dashboard-panel" id="exportSafetyPanel">
       
       <div class="dashboard-body" id="dashboardBody">
-        <div class="dashboard-toolbar" style="flex-wrap: nowrap;">
-          <div class="filter-grid" style="flex-wrap: nowrap; flex: 1 1 auto; overflow-x: auto;">
+        <div class="dashboard-toolbar dft-toolbar">
+          <div class="filter-grid dft-filter-grid">
             <div class="filter-field"><label for="libraryFilter" style="white-space: nowrap;">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
             <div class="filter-field"><label for="propertyType" style="white-space: nowrap;">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="binding_energy">binding_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="li2s_decomposition_barrier">li2s_decomposition_barrier</option><option value="migration_barrier">migration_barrier</option><option value="charge_transfer">charge_transfer</option><option value="formation_energy">formation_energy</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option><option value="overpotential">overpotential</option></select></div>
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
@@ -544,7 +691,7 @@
             <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="未记录者保留">最低置信度</label><input id="minConfidence" type="number" value="0.30" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
             <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子/双金属 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双金属 (bimetallic_lis_ml)</option></select></div>
           </div>
-          <div class="export-panel" style="flex-wrap: nowrap; white-space: nowrap;">
+          <div class="export-panel dft-export-panel">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
             <span id="exportSafetyStatus" class="export-status"></span>
             <button class="btn btn-ghost btn-sm" type="button" onclick="toggleDashboard()" id="dashboardToggleBtnToolbar">数据质量概览</button>
@@ -574,8 +721,8 @@
         <button class="btn btn-ghost btn-sm" onclick="queryDFT()">↻ 刷新</button>
       </div>
       <div class="collapse-body" id="dftDataCollapse" style="flex:1;min-height:0;display:flex;flex-direction:column;">
-        <div class="table-container">
-          <table id="dftTable">
+        <div class="table-container litai-scroll-x">
+          <table id="dftTable" class="litai-stack">
             <thead>
               <tr>
                 <th>催化剂</th><th>吸附物</th><th>能量类型</th><th>数值</th><th>章节 / 步骤</th><th>状态 / 置信度</th><th>证据</th><th>来源文献</th>
@@ -629,6 +776,27 @@
       catalystOptions: [],
     };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+    /* 文献标题里带 <sub>4</sub> 这类下标标记（库里有若干条）。
+       只放行 sub/sup 两个标签、其余一律转义：既不把标记当字面文本显示
+       （"FeN<sub>4</sub>" 直接印出来），也不引入任意 HTML。
+       口径与 review_center / literature_screening 保持一致。 */
+    function titleHtml(value) {
+      const raw = String(value == null ? "" : value);
+      const re = /<\s*(sub|sup)\s*>([^<>]*)<\s*\/\s*\1\s*>/gi;
+      let out = "";
+      let last = 0;
+      let m;
+      while ((m = re.exec(raw)) !== null) {
+        const tag = m[1].toLowerCase();
+        out += esc(raw.slice(last, m.index)) + "<" + tag + ">" + esc(m[2]) + "</" + tag + ">";
+        last = m.index + m[0].length;
+      }
+      return out + esc(raw.slice(last));
+    }
+    /* 同上，但只取纯文本（用于 title 属性 / textContent） */
+    function titleText(value) {
+      return String(value == null ? "" : value).replace(/<\s*(sub|sup)\s*>([^<>]*)<\s*\/\s*\1\s*>/gi, "$2");
+    }
     function toggleDashboard() {
       const panel = document.getElementById("exportSafetyPanel");
       if (!panel) return;
@@ -1553,14 +1721,14 @@
           ? "当前未绑定催化剂样本，名称来自证据中的材料/结构标识。"
           : "已绑定催化剂样本。";
         return `<tr>
-          <td><span class="cell-primary catalyst-name ${catalystColorClass}" data-catalyst-name="${esc(catName)}" title="${esc(catalystHint)}">${esc(catName)}</span></td>
-          <td><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
-          <td><span class="cell-primary" title="${esc(property.secondary)}">${esc(property.primary || "-")}</span></td>
-          <td class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
-          <td><span class="cell-primary">${esc(item.reaction_step || "-")}</span><div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
-          <td><span class="status-text">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}" title="${hasConfidence ? '解析阶段记录的提取置信度' : '历史记录未保存提取置信度；导出资格以审核与证据安全门为准'}">${confidenceLabel}</span></td>
-          <td><button class="evidence-link" onclick="showEvidence(${idx})">证据</button></td>
-          <td><div class="paper-link-wrap"><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}" target="_blank" rel="noopener noreferrer" title="${esc(item.title || '文献')}">${esc(item.title || "文献")}</a></div><div class="dft-table-muted">${esc(item.doi || "无 DOI")}</div></td>
+          <td data-label=""><span class="cell-primary catalyst-name ${catalystColorClass}" data-catalyst-name="${esc(catName)}" title="${esc(catalystHint)}">${esc(catName)}</span></td>
+          <td data-label="吸附物"><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
+          <td data-label="能量类型"><span class="cell-primary" title="${esc(property.secondary)}">${esc(property.primary || "-")}</span></td>
+          <td data-label="数值" class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
+          <td data-label="章节 / 步骤"><span class="cell-primary">${esc(item.reaction_step || "-")}</span><div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
+          <td data-label="状态 / 置信度"><span class="status-text">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}" title="${hasConfidence ? '解析阶段记录的提取置信度' : '历史记录未保存提取置信度；导出资格以审核与证据安全门为准'}">${confidenceLabel}</span></td>
+          <td data-label="证据"><button class="evidence-link" onclick="showEvidence(${idx})">证据</button></td>
+          <td data-label="来源文献"><div class="paper-link-wrap"><a href="../paper_detail/index.html?paper_id=${esc(item.paper_id)}&from=dft_database" target="_blank" rel="noopener noreferrer" title="${esc(titleText(item.title || '文献'))}">${titleHtml(item.title || "文献")}</a></div><div class="dft-table-muted">${esc(item.doi || "无 DOI")}</div></td>
         </tr>`;
       }).join("");
     }
@@ -1589,7 +1757,7 @@
         '</div>' +
         renderFragmentContext(item);
       document.getElementById("validationSummary").textContent = item.evidence_text ? "已显示文章片段证据。" : "这条记录缺少证据原文。";
-      setEvidenceModalHeader(property.primary || "DFT 证据", (item.title || "文献") + (item.doi ? " | " + item.doi : ""));
+      setEvidenceModalHeader(property.primary || "DFT 证据", titleText(item.title || "文献") + (item.doi ? " | " + item.doi : ""));
       revealEvidencePanel();
     }
     function setExportSafetyStatus(message) {

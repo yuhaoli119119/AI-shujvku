@@ -821,8 +821,10 @@
     const xKey = data.x_field || $("xField").value, yKey = data.y_field || $("yField").value;
     const xCol = $("xColumn");
     const yCol = $("yColumn");
-    if (xCol) xCol.textContent = "X：" + (data.x_label || fieldLabel(xKey));
-    if (yCol) yCol.textContent = "Y：" + (data.y_label || fieldLabel(yKey));
+    const xColumnLabel = "X：" + (data.x_label || fieldLabel(xKey));
+    const yColumnLabel = "Y：" + (data.y_label || fieldLabel(yKey));
+    if (xCol) xCol.textContent = xColumnLabel;
+    if (yCol) yCol.textContent = yColumnLabel;
     const points = data.points || [];
     const plottable = points.filter((point) => number(axisValue(point, "x")) !== null && number(axisValue(point, "y")) !== null);
     const tbody = $("detailsBody");
@@ -839,12 +841,12 @@
       const sampleId = point.catalyst_sample_id || "—";
 
       return '<tr' + (plotIdx >= 0 ? ' data-idx="' + plotIdx + '"' : "") + ">"
-        + "<td><strong>" + esc(catalystName) + "</strong></td>"
-        + "<td>" + esc(paperCode) + "</td>"
-        + '<td class="col-num">' + esc(display(axisValue(point, "x"))) + "</td>"
-        + '<td class="col-num">' + esc(display(axisValue(point, "y"))) + "</td>"
-        + '<td><span class="badge-status-valid">有效配对</span></td>'
-        + "<td>"
+        + '<td data-label="催化剂"><strong>' + esc(catalystName) + "</strong></td>"
+        + '<td data-label="文献来源">' + esc(paperCode) + "</td>"
+        + '<td class="col-num" data-label="' + esc(xColumnLabel) + '">' + esc(display(axisValue(point, "x"))) + "</td>"
+        + '<td class="col-num" data-label="' + esc(yColumnLabel) + '">' + esc(display(axisValue(point, "y"))) + "</td>"
+        + '<td data-label="状态"><span class="badge-status-valid">有效配对</span></td>'
+        + '<td data-label="技术溯源与候选路径">'
         +   '<details class="row-tech-detail">'
         +     '<summary class="tech-detail-summary">技术溯源与候选</summary>'
         +     '<div class="tech-detail-content">'
@@ -1225,7 +1227,7 @@
       const journal = p.journal || (p.paper && p.paper.journal);
       const year = p.year || (p.paper && p.paper.year);
       const meta = [journal, year].filter(Boolean).join(", ");
-      const detailLink = paperId ? `<a href="../paper_detail/index.html?paper_id=${encodeURIComponent(paperId)}" class="link-btn">论文详情 ↗</a>` : "";
+      const detailLink = paperId ? `<a href="../paper_detail/index.html?paper_id=${encodeURIComponent(paperId)}&from=visuals" class="link-btn">论文详情 ↗</a>` : "";
       const doiLink = doi ? `<a href="${doi}" target="_blank" rel="noopener" class="link-btn">DOI ↗</a>` : "";
       const links = [detailLink, doiLink].filter(Boolean).join(" · ");
 

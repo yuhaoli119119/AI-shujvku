@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="../../shared/tokens.css">
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js"></script>
   <script>ThemeManager.init();</script>
   <script>
@@ -74,6 +75,98 @@
       .main-grid, .notice-row, .summary-grid, .issue-grid, .count-grid { grid-template-columns: 1fr; }
       .page-head { display: block; }
     }
+    /* 手机端折叠控件：桌面不渲染，手机端用纯 CSS 折叠非关键说明段落（文字一字不删、onclick 不改） */
+    .dac-fold-toggle, .dac-fold-label { display: none; }
+
+    @media (max-width: 980px) and (min-width: 701px) {
+      /* 平板：只把列数密度还回来，字号与间距维持原有 */
+      .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .count-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .issue-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 700px) {
+      .dac-fold-toggle {
+        display: block;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        border: 0;
+        opacity: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
+      .dac-fold-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        color: var(--color-primary);
+        font-size: 11px;
+        font-weight: 800;
+        line-height: 1.35;
+        cursor: pointer;
+      }
+      .dac-fold-toggle:not(:checked) ~ .dac-fold-label::before { content: "▸"; font-size: 9px; }
+      .dac-fold-toggle:checked ~ .dac-fold-label::before { content: "▾"; font-size: 9px; }
+      .dac-fold-toggle:not(:checked) ~ .dac-fold-body { display: none; }
+
+      /* ---- 1. 页面骨架收紧 ---- */
+      body { font-size: 12.5px; }
+      .shell { padding: 0 8px 12px; }
+      .page-head { margin: 8px 0; }
+      h1 { font-size: 17px; line-height: 1.2; }
+      .subtitle { margin: 3px 0 0; font-size: 11.5px; line-height: 1.5; }
+      .notice-row { gap: 6px; margin-bottom: 8px; }
+      .notice { padding: 7px 8px; font-size: 11.5px; line-height: 1.45; }
+
+      /* ---- 2. 顶部统计（.stats 等价物）：3 列自适应、单卡 <=46px、数字不截断 ---- */
+      .summary-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin-bottom: 8px; }
+      .metric { display: grid; align-content: center; gap: 1px; min-height: 0; max-height: 46px; padding: 4px 6px; border-radius: 8px; }
+      .metric .label { font-size: 11px; line-height: 1.15; white-space: normal; overflow: hidden; text-overflow: clip; overflow-wrap: anywhere; }
+      .metric .value { font-size: 13px; line-height: 1.1; margin-top: 0; }
+
+      /* ---- 3. 筛选区（固定宽度等价物）：可换行网格 + 30~34px 按钮 ---- */
+      .filter-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; align-items: end; padding: 8px; margin-bottom: 8px; }
+      .field { min-width: 0; gap: 3px; }
+      .field.paper { grid-column: 1 / -1; }
+      .field label { font-size: 10.5px; }
+      input, select { height: 30px; font-size: 12px; padding: 0 6px; }
+      .btn.local { height: 32px; padding: 0 10px; font-size: 12px; }
+      .filter-panel .btn.local { grid-column: 1 / -1; }
+
+      /* ---- 4. 面板/卡片收紧 ---- */
+      .panel-head { padding: 7px 9px; }
+      .panel-title { font-size: 13px; }
+      .panel-body { padding: 8px; }
+      .count-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+      .count-box { padding: 7px 8px; border-radius: 8px; }
+      .count-box h3 { margin-bottom: 5px; font-size: 11.5px; overflow-wrap: anywhere; }
+      .count-row { gap: 8px; padding: 4px 0; font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; }
+      .copy-hint { font-size: 11px; line-height: 1.5; }
+      .empty, .error { padding: 10px; font-size: 12px; }
+
+      /* ---- 5. issue 卡片：9 格 kv 从 1 列换行改为短行「标签 + 值」 ---- */
+      .main-grid { gap: 8px; }
+      .issue-list { gap: 8px; }
+      .issue-card { padding: 8px; border-radius: 8px; }
+      .issue-top { gap: 6px; margin-bottom: 6px; }
+      .issue-title { gap: 5px; font-size: 12.5px; }
+      .issue-actions { gap: 6px; }
+      .badge { padding: 2px 6px; font-size: 10.5px; }
+      .issue-target-note { font-size: 11px; }
+      .issue-grid { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+      .kv { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; align-items: start; padding: 4px 6px; }
+      .kv .k { margin-bottom: 0; font-size: 10px; line-height: 1.35; }
+      .kv .v { font-size: 11.5px; line-height: 1.4; }
+      .actor-row { margin-bottom: 6px; padding: 6px; font-size: 11px; line-height: 1.45; }
+      details { margin-top: 6px; padding-top: 6px; }
+      summary { font-size: 11.5px; }
+      pre { margin-top: 6px; max-height: 160px; padding: 7px; font-size: 11px; line-height: 1.45; }
+      .warning-list { gap: 6px; }
+      .warning-card { padding: 7px 8px; font-size: 11px; line-height: 1.45; }
+    }
   </style>
 </head>
 <body>
@@ -82,11 +175,15 @@
     <header class="page-head">
       <div>
         <h1>DFT 核验中心</h1>
-        <p class="subtitle">后台诊断只读队列，用于查看 DFT audit issue、修复状态和 repair 审计健康情况；日常 DFT 任务请从审核中心按单篇文献发起。</p>
+        <input type="checkbox" class="dac-fold-toggle" id="dacSubtitleFold">
+        <label class="dac-fold-label" for="dacSubtitleFold">页面说明</label>
+        <p class="subtitle dac-fold-body">后台诊断只读队列，用于查看 DFT audit issue、修复状态和 repair 审计健康情况；日常 DFT 任务请从审核中心按单篇文献发起。</p>
       </div>
     </header>
 
-    <section class="notice-row" aria-label="DFT safety notices">
+    <input type="checkbox" class="dac-fold-toggle" id="dacNoticeFold">
+    <label class="dac-fold-label" for="dacNoticeFold">安全说明（3 条）</label>
+    <section class="notice-row dac-fold-body" aria-label="DFT safety notices">
       <div class="notice"><strong>AI 修复后仍需复核确认。</strong>repair 后必须回读证据和状态。</div>
       <div class="notice"><strong>audit issue 是核验意见/待处理事项。</strong>它不是最终真值。</div>
       <div class="notice"><strong>只读界面。</strong>本页只读取 GET 接口，不执行 DFT 修复或写库。</div>
@@ -164,7 +261,9 @@
         <div class="panel-head"><div class="panel-title">Warnings</div></div>
         <div class="panel-body">
           <div id="warningList" class="warning-list"><div class="empty">暂无 warning。</div></div>
-          <div class="copy-hint" style="margin-top:12px;">本页仅供后台诊断和复制单个 issue_id。日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制；不要从这里发起全库混合处理。</div>
+          <input type="checkbox" class="dac-fold-toggle" id="dacHintFold">
+          <label class="dac-fold-label" for="dacHintFold">使用说明</label>
+          <div class="copy-hint dac-fold-body" style="margin-top:12px;">本页仅供后台诊断和复制单个 issue_id。日常 DFT 审核与入库提示词必须回审核中心选择一篇主文献后复制；不要从这里发起全库混合处理。</div>
         </div>
       </aside>
     </section>
@@ -421,6 +520,7 @@
       if (!paperId) return "";
       const params = new URLSearchParams();
       params.set("paper_id", paperId);
+      params.set("from", "dft_audit_center");
       params.set("tab", "dft");
       params.set("target_type", "dft_results");
       params.set("target_id", item.target_id);
