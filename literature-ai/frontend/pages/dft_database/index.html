@@ -756,12 +756,49 @@
       </div>
     </div>
   </div>
+  <script src="../../shared/view-state.js"></script>
   <script>
     const API_BASE = "/api/papers";
     const DFT_FETCH_LIMIT = 500;
     const DFT_DEFAULT_PAGE_SIZE = 25;
     const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
     const DFT_DASHBOARD_STORAGE_KEY = "litai_dft_hide_dashboard";
+    /* ---- URL 状态同步（shared/view-state.js）：筛选/排序/分页写进地址栏，
+       从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
+    const VIEW_PARAMS = {
+      library_name: { id: "libraryFilter", type: "select", default: "" },
+      energy: { id: "propertyType", type: "select", default: "" },
+      adsorbate: { id: "adsorbate", type: "text", default: "" },
+      catalyst: { id: "catalystName", type: "select", default: "" },
+      min_conf: { id: "minConfidence", type: "text", default: "0.30" },
+      profile: { id: "datasetProfile", type: "select", default: "" },
+      size: { type: "state", default: "25", valid: v => ["25", "50", "100"].includes(v) },
+      page: { type: "state", default: "1", numeric: true }
+    };
+    let viewState = null;
+    /* 把当前筛选/每页/页码快照写回 URL（查询用的就是这几项，跟着 queryDFT 走） */
+    function syncDftUrl() {
+      if (!viewState) return;
+      Object.keys(VIEW_PARAMS).forEach(key => {
+        const spec = VIEW_PARAMS[key];
+        const el = spec.id ? document.getElementById(spec.id) : null;
+        if (el) viewState[key] = String(el.value);
+      });
+      viewState.size = String(getDftPageSize());
+      viewState.page = String(getDftCurrentPage());
+      ViewState.write(viewState, VIEW_PARAMS);
+    }
+    /* 冷启动：读 URL 填控件（此时文献库与催化剂选项都已就绪）再发第一次查询 */
+    function initDftViewState() {
+      if (viewState) return;
+      viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
+      ensureDftPaginationState();
+      const size = Number(viewState.size);
+      state.pagination.pageSize = [25, 50, 100].indexOf(size) >= 0 ? size : DFT_DEFAULT_PAGE_SIZE;
+      state.pagination.page = Math.max(1, Number(viewState.page) || 1);
+      const librarySelect = document.getElementById("libraryFilter");
+      if (librarySelect) state.currentLibrary = librarySelect.value || "";
+    }
     const state = {
       items: [],
       currentLibrary: "",
@@ -1341,6 +1378,7 @@
       const pageSize = getDftPageSize();
       const currentPage = getDftCurrentPage();
       const offset = Math.max(0, (currentPage - 1) * pageSize);
+      syncDftUrl();
       const params = applyLibraryParam(new URLSearchParams());
       params.set("min_confidence", minConf);
       params.set("limit", String(Math.min(pageSize, DFT_FETCH_LIMIT)));
@@ -1953,6 +1991,8 @@
         if (event.key === "Escape") closeEvidenceModal();
       });
       loadLibraries().finally(() => loadCatalystFilterOptions()).finally(() => {
+        initDftViewState();
+        ViewState.bindDetailLinks("dft_database");
         queryDFT();
         scheduleExportSafetyOverview();
       });

@@ -557,9 +557,14 @@
 
     <div class="toast-container" id="toast-container"></div>
 
+    <script src="../../shared/view-state.js"></script>
     <script>
         const API_BASE = "/api/papers";
         const CURRENT_LIBRARY_STORAGE_KEY = "litai_current_library";
+        /* ---- URL 状态同步（shared/view-state.js）：页签写进地址栏，
+           从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
+        const VIEW_PARAMS = { tab: { type: "state", default: "catalysts", valid: v => ["catalysts", "adsorbates", "aliases", "gaps"].includes(v) } };
+        let viewState = null;
         const state = {
             activeTab: "catalysts",
             aggregateData: null,
@@ -644,6 +649,7 @@
 
         function switchTab(tab) {
             state.activeTab = tab;
+            if (viewState) { viewState.tab = tab; ViewState.write(viewState, VIEW_PARAMS); }
             document.querySelectorAll(".tab-btn").forEach(btn => {
                 btn.classList.toggle("active", btn.dataset.tab === tab);
             });
@@ -920,6 +926,10 @@
 
         document.addEventListener("DOMContentLoaded", () => {
             TopNav.init({ currentPage: "mechanism", mountId: "topnav-mount" });
+            /* 先读 URL 决定页签，再发第一次聚合查询（只发一次） */
+            viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
+            if (viewState.tab && viewState.tab !== "catalysts") switchTab(viewState.tab);
+            ViewState.bindDetailLinks("mechanism_knowledge");
             loadAggregationData();
         });
     </script>

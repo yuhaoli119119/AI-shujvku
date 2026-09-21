@@ -43,7 +43,7 @@ case "$mode" in
     ln -sfn "$OUT" "$TMPDIR_UI/full.latest"
     BASE_JSON="${1:-}"
     if [ -z "$BASE_JSON" ]; then
-      BASE_JSON="$(ls -1t "$BASELINE_DIR"/*.json 2>/dev/null | grep -v manifest | head -1 || true)"
+      BASE_JSON="$(ls -1t "$BASELINE_DIR"/*.json 2>/dev/null | grep -v -e manifest -e '\.meta\.json$' | head -1 || true)"
       [ -n "$BASE_JSON" ] && echo "# 未指定基线，使用最新冻结基线：$BASE_JSON"
     fi
     if [ -n "$BASE_JSON" ] && [ -f "$BASE_JSON" ]; then

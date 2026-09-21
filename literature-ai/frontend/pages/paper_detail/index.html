@@ -794,6 +794,7 @@
       translationViewMode: "bilingual",
       deepLink: {},
       returnSource: "",
+      returnTo: "",
       currentTab: "summary",
       fullDetailLoaded: false,
       fullDetailPromise: null,
@@ -1041,6 +1042,7 @@
     function parseParams() {
       const params = new URLSearchParams(window.location.search);
       state.paperId = params.get("id") || params.get("paper_id");
+      state.returnTo = safeReturnTo(params.get("return_to"));
       const rawPage = parseInt(params.get("pdf_page") || "", 10);
       state.deepLink = {
         tab: params.get("tab") || "",
@@ -2663,6 +2665,31 @@
     };
     const RETURN_DEFAULT_SOURCE = "literature_library";
 
+    /* return_to 白名单：只允许回到本工作台的列表页（防开放重定向） */
+    const RETURN_TO_PAGES = /^\/pages\/(literature_library|literature_screening|dft_database|mechanism_knowledge|visuals|review_center)\/index\.html$/;
+    const RETURN_TO_MAX_LENGTH = 512;
+
+    function returnSourceFromPath(value) {
+      let pathname = "";
+      try { pathname = new URL(String(value == null ? "" : value), window.location.href).pathname; } catch (_) { return ""; }
+      const match = pathname.match(/^\/pages\/([a-z0-9_]+)\/index\.html$/i);
+      return match && RETURN_SOURCES[match[1]] ? match[1] : "";
+    }
+
+    /* 校验 URL 里的 return_to：必须同源 + 落在白名单页面 + 不超过 512 字符，
+       顺带剔除嵌套的 return_to 与 hash；不合法一律返回 ""，行为回落到原来的 from。 */
+    function safeReturnTo(raw) {
+      const value = String(raw == null ? "" : raw);
+      if (!value || value.length > RETURN_TO_MAX_LENGTH) return "";
+      let parsed = null;
+      try { parsed = new URL(value, window.location.href); } catch (_) { return ""; }
+      if (parsed.origin !== window.location.origin) return "";
+      if (!RETURN_TO_PAGES.test(parsed.pathname)) return "";
+      parsed.searchParams.delete("return_to");
+      parsed.hash = "";
+      return parsed.pathname + parsed.search;
+    }
+
     function returnSourceFromReferrer() {
       try {
         const raw = document.referrer || "";
@@ -2683,6 +2710,11 @@
         state.returnSource = explicit;
         return explicit;
       }
+      /* from 缺失时才用 return_to 兜底判定来源 */
+      if (state.returnTo) {
+        const fromReturnTo = returnSourceFromPath(state.returnTo);
+        if (fromReturnTo) { state.returnSource = fromReturnTo; return fromReturnTo; }
+      }
       const fromReferrer = returnSourceFromReferrer();
       if (fromReferrer) {
         state.returnSource = fromReferrer;
@@ -2699,8 +2731,14 @@
     }
 
     function returnHref(options) {
-      const def = returnSourceDef();
       const opts = options || {};
+      /* return_to（已校验）指向「进去时的筛选视图」；没有 return_to 时行为与以前完全一致。 */
+      if (state.returnTo) {
+        const target = new URL(state.returnTo, window.location.href);
+        if (opts.includeClosed && state.deepLink && state.deepLink.issueId) target.searchParams.set("include_closed", "true");
+        return target.pathname + (target.search || "");
+      }
+      const def = returnSourceDef();
       const params = new URLSearchParams();
       if (def.paperId && state.paperId) params.set("paper_id", state.paperId);
       const libraryName = state.deepLink && state.deepLink.libraryName;

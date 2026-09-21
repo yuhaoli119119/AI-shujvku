@@ -135,6 +135,32 @@
 
   // DOM 快捷选择器
   const $ = (id) => document.getElementById(id);
+
+  /* ---- URL 状态同步（shared/view-state.js）：文献库/字段/阈值/页签/矩阵筛选写进地址栏，
+     从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
+  const VIEW_PARAMS = {
+    library_name: { id: "librarySelect", type: "select", default: "" },
+    tab: { type: "state", default: "relations", valid: (v) => ["relations", "matrix", "dataset"].includes(v) },
+    x: { id: "xField", type: "select", default: DEFAULTS.x },
+    y: { id: "yField", type: "select", default: DEFAULTS.y },
+    min_n: { id: "minN", type: "text", default: String(DEFAULTS.minN), valid: (v) => Number(v) >= 3 },
+    scope: { id: "matrixScopeSelect", type: "select", default: "core" },
+    reaction: { id: "matrixReactionSelect", type: "select", default: "" },
+    adsorbate: { id: "matrixAdsorbateSelect", type: "select", default: "" },
+    family: { id: "matrixFamilySelect", type: "select", default: "" },
+    matrix_min_n: { id: "matrixMinN", type: "text", default: "3", valid: (v) => Number(v) >= 3 }
+  };
+  let viewState = null;
+  /* 把页面当前的视图快照写回 URL（预设关系按钮 / 切页签 / 阈值被夹取之后也要修正 URL） */
+  function syncVisualUrl() {
+    if (!viewState) return;
+    Object.keys(VIEW_PARAMS).forEach((key) => {
+      const el = VIEW_PARAMS[key].id ? $(VIEW_PARAMS[key].id) : null;
+      if (el) viewState[key] = String(el.value);
+    });
+    viewState.tab = state.currentTab;
+    ViewState.write(viewState, VIEW_PARAMS);
+  }
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const number = (value) => (value === null || value === undefined || value === "")
     ? null
@@ -300,6 +326,7 @@
       panel.hidden = !isActive;
     });
 
+    syncVisualUrl();
     if (targetTab === "relations") {
       if (!state.lastCorrelation) loadCorrelation();
     } else if (targetTab === "matrix") {
@@ -404,6 +431,7 @@
   }
 
   async function loadOverview() {
+    syncVisualUrl();
     const library = state.libraryName;
     const metricsEl = $("metrics");
     if (metricsEl) metricsEl.classList.add("is-loading");
@@ -887,6 +915,7 @@
     if (chartTitleEl) chartTitleEl.textContent = `${xMeta.labelZh} × ${yMeta.labelZh}`;
 
     try {
+      syncVisualUrl();
       const params = visualParams(new URLSearchParams({ x_field: xField, y_field: yField, min_n: String(minN) }));
       const data = await getJSON("/api/visuals/catalyst-correlation?" + params.toString(), correlationController.signal);
       if (requestId !== state.requestId) return;
@@ -1087,6 +1116,7 @@
     if ($("interpretText")) $("interpretText").textContent = "正在读取该物理化学变量对的配对点与文献记录…";
 
     try {
+      syncVisualUrl();
       const params = visualParams(new URLSearchParams({
         target_property: yProp,
         descriptor: xProp,
@@ -1244,6 +1274,7 @@
      TAB 3: ML 数据集 (ML Dataset)
      ============================================================ */
   async function loadDatasetTab() {
+    syncVisualUrl();
     const ticket = ++datasetRequest, library = state.libraryName;
     let diagMap = new Map();
     let totalCats = 44;
@@ -1502,6 +1533,11 @@
 
     try {
       await loadFields();
+      /* 先读 URL 填控件（此时字段下拉已就绪），再用同样的值发第一次查询（只发一次） */
+      viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
+      state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "core";
+      ViewState.bindDetailLinks("visuals");
+      if (viewState.tab && viewState.tab !== "relations") switchTab(viewState.tab);
       await loadCorrelation();
     } catch (error) {
       const statusEl = $("relationStatus");

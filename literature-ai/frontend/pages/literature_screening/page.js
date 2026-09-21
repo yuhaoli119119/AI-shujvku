@@ -1,4 +1,32 @@
 let currentPapers = [];
+/* ---- URL 状态同步（shared/view-state.js）：筛选写进地址栏，
+   从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
+const VIEW_PARAMS = {
+  year_min: { id: 'filterYearMin', default: '' },
+  year_max: { id: 'filterYearMax', default: '' },
+  journal: { id: 'filterJournalInc', default: '' },
+  journal_x: { id: 'filterJournalExc', default: '' },
+  if_min: { id: 'filterIFMin', default: '' },
+  if_max: { id: 'filterIFMax', default: '' },
+  needs_meta: { id: 'filterNeedsMetadata', default: '' },
+  has_pdf: { id: 'filterHasPdf', default: '' },
+  has_parsed: { id: 'filterHasParsedText', default: '' },
+  has_ext: { id: 'filterHasExtractionOutput', default: '' },
+  has_ver: { id: 'filterHasVerifiedEvidence', default: '' },
+  has_sver: { id: 'filterHasSafeVerifiedEvidence', default: '' },
+  excl_cite: { id: 'filterExcludeFromCitation', default: '' },
+  prio: { id: 'filterCitationPriority', default: '' }
+};
+let viewState = null;
+/* 把表单当前值快照写回 URL（Clear Filters / Apply Filters 之后修正 URL） */
+function syncUrl() {
+  if (!viewState) return;
+  Object.keys(VIEW_PARAMS).forEach(key => {
+    const el = document.getElementById(VIEW_PARAMS[key].id);
+    if (el) viewState[key] = el.type === 'checkbox' ? (el.checked ? '1' : '') : String(el.value);
+  });
+  ViewState.write(viewState, VIEW_PARAMS);
+}
 let pendingAction = null;
 let pendingData = null;
 
@@ -21,6 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filtersPanelMq.addEventListener) {
         filtersPanelMq.addEventListener('change', syncFiltersPanel);
     }
+    /* 先读 URL 填控件，再用同样的值发第一次查询（只发一次） */
+    viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
+    ViewState.bindDetailLinks('literature_screening');
     applyFilters();
 });
 
@@ -79,6 +110,7 @@ async function applyFilters() {
     } catch (err) {
         console.error('Error applying filters', err);
     }
+    syncUrl();
 }
 
 function updateResultCount(count) {
