@@ -49,8 +49,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filtersPanelMq.addEventListener) {
         filtersPanelMq.addEventListener('change', syncFiltersPanel);
     }
-    /* 先读 URL 填控件，再用同样的值发第一次查询（只发一次） */
-    viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
+    /* 先读 URL 填控件，再用同样的值发第一次查询（只发一次）。
+       本页是「显式应用」语义（要点 Apply Filters 才查询），所以不接 ViewState.bind 的
+       控件联动：否则地址栏会先于列表更新，出现「URL 说筛了 79 条、列表还是 99 条」，
+       进详情再返回还会拿到用户当时没见过的筛选视图。URL 统一由 applyFilters() 末尾的
+       syncUrl() 写，保证地址栏永远等于当前看到的列表。 */
+    viewState = ViewState.apply(ViewState.read(VIEW_PARAMS), VIEW_PARAMS);
     ViewState.bindDetailLinks('literature_screening');
     applyFilters();
 });
