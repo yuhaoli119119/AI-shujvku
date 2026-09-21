@@ -140,7 +140,10 @@ _PROFILES = {
         # ``S_atom`` 是原子硫（single sulfur atom），``S8`` 是环八硫分子。
         # 两者是不同的中间体，绝不能互相归一化。
         {"S8", "S_atom", "Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S"},
-        {"s8": "S8", "sulfur": "S_atom", "sulphur": "S_atom",
+        # Bare "s" (as stored in the adsorbate column of ACS Li-S papers) is the
+        # atomic sulfur adsorbate, never the S8 ring.  It must stay an exact
+        # match so "s8" and "s atom" keep resolving to their own species.
+        {"s8": "S8", "s": "S_atom", "sulfur": "S_atom", "sulphur": "S_atom",
          "s atom": "S_atom", "single sulfur atom": "S_atom",
          "atomic sulfur": "S_atom", "s_atom": "S_atom",
          "li2s8": "Li2S8", "li2s6": "Li2S6",

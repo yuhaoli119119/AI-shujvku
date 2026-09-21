@@ -181,3 +181,24 @@ def test_unicode_dashes_in_li_s_labels_normalize_to_sulfur_reduction():
     )
     assert classified["reaction_type"] == "SRR_LiS"
     assert classified["reason"] == "reaction_context"
+
+
+def test_bare_s_adsorbate_resolves_to_atomic_sulfur_and_not_s8():
+    """ACS Li-S tables store the atomic sulfur adsorbate as bare ``S``.
+
+    Regression for the B0091 platform defect: the SRR alias table only knew
+    ``sulfur``/``s atom``/``s_atom``, so the stored ``S`` resolved to no
+    intermediate and every single-S-atom binding energy was rejected as
+    ``out_of_scope``.  ``S8`` must keep resolving to the ring molecule.
+    """
+
+    assert normalize_intermediate("SRR_LiS", "S") == "S_atom"
+    assert normalize_intermediate("SRR_LiS", "s8") == "S8"
+    assert normalize_intermediate("SRR_LiS", "s atom") == "S_atom"
+
+    s_binding = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "S", "property_type": "binding energy", "unit": "eV"}
+    )
+    assert s_binding["valid"] is True
+    assert s_binding["intermediate"] == "S_atom"
+    assert s_binding["property_type"] == "binding_energy"
