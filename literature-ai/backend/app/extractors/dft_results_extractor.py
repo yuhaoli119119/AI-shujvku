@@ -343,21 +343,21 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         r"(?:(?:DOS|density\s+of\s+states).{0,40}(?:Fermi|E[_\-\s]?F)|(?:Fermi|E[_\-\s]?F).{0,40}(?:DOS|density\s+of\s+states)).{0,80}?([\-\+]?\d+[.]?\d*)\s*(states?/eV|eV-1|eV\^-1)?",
     ],
     "bond_length_Li-S": [
-        r"(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
-        r"([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm).{0,40}(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S)",
+        r"(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z])",
+        r"([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z]).{0,40}(?:Li\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*Li\s*[-–]?\s*S)",
         ],
     "bond_length_S-S": [
-        r"(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
-        r"([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm).{0,40}(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S)",
+        r"(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S).{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z])",
+        r"([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z]).{0,40}(?:S\s*[-–]\s*S\s*(?:bond\s*)?(?:length|distance)|d\s*S\s*[-–]?\s*S)",
         ],
     "bond_length_M-N": [
-        r"(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        r"(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:N))\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z])",
         ],
     "bond_length_M-S": [
-        r"(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        r"(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:S))\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z])",
         ],
     "bond_length_M-M": [
-        r"(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|A|angstroms?|nm|pm)",
+        r"(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:[A-Z][a-z]?))\s*(?:bond\s*)?(?:length|distance)?.{0,40}?([\-\+]?\d+[.]?\d*)\s*(Å|(?-i:A)|angstroms?|nm|pm)(?![A-Za-z])",
         ],
     "limiting_potential": [
         r"(?:limiting\s+potential|\bU\s*[_\-]\s*L\b|\bU\s+L\b|\bUL\b).{0,80}?([\-\+]?\d+[.]?\d*)\s*(V|eV)",
@@ -482,9 +482,9 @@ for _category, _rules in GRAPHITE_DEFECT_CATEGORY_RULES.items():
 TABLE_HEADER_CATEGORY_RULES.extend(
     [
         (re.compile(r"(?:^|[^A-Za-z])(?:S\s*[-–]\s*S|S-S)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:S\s*[-–]\s*S|S-S)", re.IGNORECASE), "bond_length_S-S", "A"),
-        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|[A-Z][a-z]?\s*[-–]\s*N)", re.IGNORECASE), "bond_length_M-N", "A"),
-        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|[A-Z][a-z]?\s*[-–]\s*S)", re.IGNORECASE), "bond_length_M-S", "A"),
-        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|[A-Z][a-z]?\s*[-–]\s*[A-Z][a-z]?)", re.IGNORECASE), "bond_length_M-M", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:N))(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*N|metal\s*[-–]?\s*N|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:N))", re.IGNORECASE), "bond_length_M-N", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:S))(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*S|metal\s*[-–]?\s*S|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:S))", re.IGNORECASE), "bond_length_M-S", "A"),
+        (re.compile(r"(?:^|[^A-Za-z])(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:[A-Z][a-z]?))(?:[^A-Za-z]|$).*(?:bond\s*)?(?:length|distance)|(?:bond\s*)?(?:length|distance).*(?:M\s*[-–]\s*M|metal\s*[-–]?\s*metal|(?-i:[A-Z][a-z]?)\s*[-–]\s*(?-i:[A-Z][a-z]?))", re.IGNORECASE), "bond_length_M-M", "A"),
         (re.compile(r"(?:li\s*2\s*s.*deposition|deposition.*li\s*2\s*s).*(?:barrier|energy)", re.IGNORECASE), "li2s_deposition_barrier", "eV"),
         (re.compile(r"(?:li\s*2\s*s.*dissociation|dissociation.*li\s*2\s*s).*(?:energy|barrier)", re.IGNORECASE), "li2s_dissociation_energy", "eV"),
         (re.compile(r"(?:li\s*(?:ion)?\s*)?(?:diffusion|migration).*(?:barrier|energy)", re.IGNORECASE), "migration_barrier", "eV"),

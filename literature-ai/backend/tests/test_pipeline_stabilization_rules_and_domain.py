@@ -214,6 +214,18 @@ def test_signs_scientific_notation_and_neighbouring_values(text, expected):
         assert item.value not in {85.0, 45.0, 10.0, 25.0}, [i.value for i in items]
 
 
+def test_reference_title_and_formula_digits_are_not_bond_lengths():
+    text = (
+        "[61] R. Thapa, N. Barman, Electronic descriptor for e-NRR and effect of "
+        "BF3 as electrolyte ion, ChemSusChem (2024), doi:10.1002/cssc.202400902."
+    )
+    items = [item for item in _scan(text) if item.value is not None]
+    assert not [
+        item for item in items
+        if item.value == 3.0 and item.category in {"bond_length_M-N", "bond_length_M-S", "bond_length_M-M"}
+    ]
+
+
 def test_figure_table_and_reference_numbers_are_not_values():
     text = (
         "As seen in Figure 6, the reference 65 and Table S3 report the same trend "
