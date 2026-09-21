@@ -319,6 +319,31 @@ def classify_reaction_record(candidate: Any, paper_context: Any = None) -> dict[
     return {"reaction_type": "UNKNOWN", "status": "ambiguous", "confidence": 0.0, "reason": "insufficient_or_shared_context"}
 
 
+def _property_is_adsorbate_optional(reaction_key: str, property_type: str | None) -> bool:
+    """Whether a registered task profile for this property needs no adsorbate.
+
+    Keeps the reaction validator consistent with the tabular task contract
+    instead of scoring an adsorbate-free record on a column that, for those
+    tables, holds the catalyst metal.
+    """
+
+    if not property_type:
+        return False
+    from app.domain.tabular_task_profiles import list_tabular_task_profiles
+
+    # Every profile that accepts the property must declare it adsorbate-free.
+    # Properties that also serve an adsorbate-bearing task (gibbs free energy
+    # change, adsorption energy, reaction barrier, ...) stay adsorbate-bearing,
+    # so shared electrocatalytic intermediates keep failing the SRR target.
+    profiles = [
+        profile
+        for profile in list_tabular_task_profiles()
+        if profile.reaction_type == reaction_key
+        and property_type in profile.allowed_target_properties
+    ]
+    return bool(profiles) and all(profile.adsorbate_optional for profile in profiles)
+
+
 def validate_reaction_record(reaction_type: Any, candidate: Any) -> dict[str, Any]:
     key = normalize_reaction_type(reaction_type)
     profile = get_reaction_profile(key)
@@ -330,12 +355,21 @@ def validate_reaction_record(reaction_type: Any, candidate: Any) -> dict[str, An
     intermediate = normalize_intermediate(key, raw_intermediate)
     property_type = normalize_property_type(key, raw_property)
     reasons: list[str] = []
-    if raw_intermediate and intermediate is None:
+    # A property whose registered task profile declares no adsorbate (catalyst
+    # formation energies, M-S bond lengths, electronic descriptors, ...) is not
+    # judged on the adsorbate column: in those tables that column carries the
+    # catalyst metal, not an adsorbed species.
+    adsorbate_optional = _property_is_adsorbate_optional(key, property_type)
+    if raw_intermediate and intermediate is None and not adsorbate_optional:
         reasons.append("intermediate_out_of_scope")
     if raw_property and property_type is None:
         reasons.append("property_out_of_scope")
     material_level_properties = {"d_band_center", "bader_charge", "charge_transfer"}
-    if not raw_intermediate and property_type not in material_level_properties:
+    if (
+        not raw_intermediate
+        and property_type not in material_level_properties
+        and not adsorbate_optional
+    ):
         reasons.append("missing_intermediate")
     if not raw_property:
         reasons.append("missing_property_type")

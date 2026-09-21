@@ -23,6 +23,10 @@ class TabularTaskProfile:
     required_features: tuple[str, ...]
     optional_features: tuple[str, ...]
     split_group_keys: tuple[str, ...]
+    # True when the profile's label contract does not involve an adsorbate
+    # (catalyst formation energies, bond lengths, electronic descriptors, ...).
+    # The reaction validator reads this so the two layers cannot disagree.
+    adsorbate_optional: bool = False
 
 
 _COMMON_REQUIRED_FEATURES: tuple[str, ...] = ()
@@ -71,13 +75,22 @@ def _profile(
         required_features=required_features,
         optional_features=_COMMON_OPTIONAL_FEATURES,
         split_group_keys=("paper_id", "catalyst_family"),
+        # Deliberately NOT extended to SRR_LiS:rds_gibbs_free_energy: shared
+        # electrocatalytic intermediates (e.g. *OOH) must stay out_of_scope for
+        # the default sulfur-reduction target.
+        adsorbate_optional=require_adsorbate is False,
     )
 
 
 _PROFILES = MappingProxyType(
     {
+        # ``binding_energy`` is the platform's own historical name for adsorbate
+        # binding (see chemistry_normalizer.property_type_filter_aliases); the
+        # ACS Omega B0091 single-sulfur-atom E_b columns were extracted with that
+        # generic name, so the adsorption task must accept it or those rows can
+        # never satisfy the ML contract.
         "SRR_LiS:adsorption_energy": _profile(
-            "SRR_LiS:adsorption_energy", "adsorption_energy"
+            "SRR_LiS:adsorption_energy", ("adsorption_energy", "binding_energy")
         ),
         "SRR_LiS:reaction_barrier": _profile(
             "SRR_LiS:reaction_barrier", "reaction_barrier"

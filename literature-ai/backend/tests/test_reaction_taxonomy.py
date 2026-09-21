@@ -230,3 +230,29 @@ def test_srr_accepts_formation_energy_and_bond_length_observations():
     )
     assert bond_length["valid"] is True
     assert bond_length["property_type"] == "bond_length"
+
+
+def test_metal_formation_energy_is_not_judged_on_the_adsorbate_column():
+    """Regression for the B0091 defect D.
+
+    Table 1 of the ACS Li-S paper stores the catalyst metal (Li/Sc/Ti/V/Cr/Mn/
+    Fe/Co) in the ``adsorbate`` column of its formation-energy rows.
+    ``SRR_LiS:active_site_stability`` declares ``require_adsorbate=False``, so
+    those rows must be judged without a sulfur adsorbate -- while a shared
+    electrocatalytic intermediate must stay out of scope for the default
+    sulfur-reduction target.
+    """
+
+    for metal in ("Li", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co"):
+        result = validate_reaction_record(
+            "SRR_LiS", {"adsorbate": metal, "property_type": "formation energy", "unit": "eV"}
+        )
+        assert result["valid"] is True, metal
+        assert result["property_type"] == "formation_energy"
+
+    shared = validate_reaction_record(
+        "SRR_LiS", {"adsorbate": "*OOH", "property_type": "gibbs free energy change", "unit": "eV"}
+    )
+    assert shared["valid"] is False
+    assert shared["status"] == "out_of_scope"
+    assert "intermediate_out_of_scope" in shared["reasons"]

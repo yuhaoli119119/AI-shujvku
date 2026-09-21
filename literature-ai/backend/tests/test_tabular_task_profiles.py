@@ -290,3 +290,25 @@ def test_structure_bond_lengths_accepts_the_generic_bond_length_property() -> No
 
     assert result["label_ready"] is True
     assert "target_property_not_allowed" not in result["label_blockers"]
+
+
+def test_adsorption_task_accepts_the_historical_generic_binding_energy_name() -> None:
+    """Regression for the B0091 defect E.
+
+    ``binding_energy`` is the platform's own historical name for adsorbate
+    binding (see ``property_type_filter_aliases``); no task profile accepted it,
+    so every single-sulfur-atom E_b row failed ``no_task_profile_for_property``.
+    The adsorbate must still be required, so adsorption stays strict.
+    """
+
+    profile = get_tabular_task_profile("SRR_LiS:adsorption_energy")
+
+    assert "binding_energy" in profile.allowed_target_properties
+    assert "adsorption_energy" in profile.allowed_target_properties
+    # ``binding_energy`` must not become a loophole: the adsorbate stays required.
+    assert profile.adsorbate_optional is False
+
+    record = _ready_adsorption_record()
+    record["canonical_property_type"] = "binding_energy"
+    result = evaluate_tabular_readiness("SRR_LiS:adsorption_energy", record)
+    assert "target_property_not_allowed" not in result["label_blockers"]

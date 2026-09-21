@@ -16,6 +16,7 @@ from app.domain.reaction_taxonomy import (
 )
 from app.services.paper_workbench_ai_package import SUPPLEMENTARY_RELATIONSHIP_TYPES
 from app.utils.ai_verification import ai_target_fingerprint, cached_read_pdf_page_text, normalize_evidence_text
+from app.utils.dft_candidate_status import DFT_STATUS_FIELD_VERIFIED, DFT_STATUS_READY_AI
 from app.utils.review_safety import is_export_eligible_extraction
 
 
@@ -159,6 +160,9 @@ class DFTReactionLabelService:
                 "reaction_validation_status": new_status,
                 "target_fingerprint": current_fingerprint,
                 "evidence": evidence_check,
+                "candidate_status_refresh": self._refresh_candidate_status_after_label(
+                    row, actor=actor
+                ),
             }
 
         plan: dict[str, Any] = {
@@ -198,9 +202,57 @@ class DFTReactionLabelService:
             )
         )
         self.session.flush()
+        plan["candidate_status_refresh"] = self._refresh_candidate_status_after_label(
+            row, actor=actor
+        )
         plan["status"] = "applied"
         plan["wrote"] = True
         return plan
+
+    def _refresh_candidate_status_after_label(
+        self, row: DFTResult, *, actor: str
+    ) -> dict[str, Any] | None:
+        """Upgrade a verified record to ML-ready once the new label makes it eligible.
+
+        The reaction attribution is part of the ML contract, so writing it can turn
+        a ``field_verified_ml_pending`` record into an exportable one -- and no
+        other entry point recomputes the stored status afterwards.  Upgrade only:
+        this writer never downgrades a record it was not asked to weaken, and it
+        fails closed (an unevaluable record keeps its current label).
+        """
+
+        if str(row.candidate_status or "").strip() != DFT_STATUS_FIELD_VERIFIED:
+            return None
+        from app.services.dft_ml_readiness import evaluate_dft_record_ml_readiness
+
+        try:
+            ready = bool(evaluate_dft_record_ml_readiness(self.session, row).ml_ready)
+        except Exception:  # noqa: BLE001 - never promote a record that cannot be evaluated
+            return None
+        if not ready:
+            return None
+        previous = row.candidate_status
+        row.candidate_status = DFT_STATUS_READY_AI
+        self.session.add(row)
+        self.session.add(
+            AuditLog(
+                paper_id=row.paper_id,
+                action="refresh_dft_candidate_status_after_reaction_label",
+                source=actor,
+                target_type="dft_results",
+                target_id=str(row.id),
+                payload={
+                    "actor": actor,
+                    "previous_candidate_status": str(previous or ""),
+                    "candidate_status": DFT_STATUS_READY_AI,
+                    "reason": "ml_readiness_contract_passed_after_reaction_label",
+                    "reaction_type": row.reaction_type,
+                    "reaction_validation_status": row.reaction_validation_status,
+                },
+            )
+        )
+        self.session.flush()
+        return {"previous": str(previous or ""), "candidate_status": DFT_STATUS_READY_AI, "wrote": True}
 
     def compensate(
         self,
