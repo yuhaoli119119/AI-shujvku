@@ -53,7 +53,15 @@ from app.utils.ai_verification import (
 )
 from app.utils.configuration_index import extract_configuration_index
 from app.services.review_target_resolver import get_dft_catalyst_identity, preload_dft_catalyst_identity
-from app.utils.dft_candidate_status import is_repair_locked
+from app.utils.dft_candidate_status import (
+    DFT_REJECTED_STATUSES,
+    DFT_STATUS_FIELD_VERIFIED,
+    DFT_STATUS_NEEDS_EVIDENCE,
+    DFT_STATUS_READY_AI,
+    DFT_STATUS_TERMINAL_UNUSABLE,
+    is_repair_locked,
+    normalize as normalize_status,
+)
 from app.utils.review_safety import (
     authoritative_gate_scope,
     is_authoritative_verified_review,
@@ -2187,11 +2195,30 @@ class AIVerificationService:
         statuses are returned unchanged.  Returns the resulting candidate_status token.
         """
         if is_repair_locked(row.candidate_status):
-            return str(row.candidate_status or "")
+            # ``ai_verified_ml_ready`` is an *AI* claim about ML readiness, not a
+            # human final decision.  Its justification (field reviews, reaction
+            # contract, unit resolution, export gate) can all change afterwards,
+            # so it must be re-derivable; otherwise a stale readiness claim would
+            # survive forever.  Every other repair-locked token (human decisions,
+            # final submissions) is still left untouched.
+            if normalize_status(row.candidate_status) != DFT_STATUS_READY_AI:
+                return str(row.candidate_status or "")
         self._sync_dft_record_closure(paper_id, row)
         return str(row.candidate_status or "")
 
     def _sync_dft_record_closure(self, paper_id: UUID, row: DFTResult) -> str:
+        # Some batch writers historically called this internal method directly and
+        # bypassed ``sync_dft_record_candidate_status``.  Enforce repair locks here
+        # as well so explicit rejection, terminal unusable, human evidence decisions
+        # and human/final ML-ready decisions cannot be silently overwritten.
+        current_status = normalize_status(row.candidate_status)
+        if is_repair_locked(current_status):
+            if current_status in DFT_REJECTED_STATUSES:
+                return "rejected"
+            if current_status in {DFT_STATUS_TERMINAL_UNUSABLE, DFT_STATUS_NEEDS_EVIDENCE}:
+                return "terminal_unusable"
+            return "accepted"
+
         statuses: dict[str, str] = {}
         for field_name in required_review_fields("dft_results", row):
             review = self._find_review(
@@ -2208,17 +2235,42 @@ class AIVerificationService:
                 review=review,
             ) or "pending"
         record_status = self._dft_record_status(statuses)
-        candidate_status = {
-            "accepted": "ai_verified_ml_ready",
-            "rejected": "Rejected",
-            "terminal_unusable": "ai_terminal_unusable",
-            "pending": "system_candidate",
-        }[record_status]
+        if record_status == "accepted":
+            # "Every required field has authoritative evidence" and "this record
+            # may enter an ML dataset" are two different claims.  The field closure
+            # can only prove the first one, so the ML-ready token is written only
+            # when the shared readiness evaluator -- the same contract the exports
+            # enforce -- also agrees.  Otherwise the honest label is
+            # ``field_verified_ml_pending``.
+            candidate_status = (
+                DFT_STATUS_READY_AI
+                if self._dft_record_is_ml_ready(row)
+                else DFT_STATUS_FIELD_VERIFIED
+            )
+        else:
+            candidate_status = {
+                "rejected": "Rejected",
+                "terminal_unusable": "ai_terminal_unusable",
+                "pending": "system_candidate",
+            }[record_status]
         if str(row.candidate_status or "") != candidate_status:
             row.candidate_status = candidate_status
             self.session.add(row)
             self.session.flush()
         return record_status
+
+    def _dft_record_is_ml_ready(self, row: DFTResult) -> bool:
+        """Whether the shared ML-readiness contract accepts this record.
+
+        Fails closed: an evaluator error leaves the record at the weaker
+        ``field_verified_ml_pending`` label rather than claiming readiness.
+        """
+        try:
+            from app.services.dft_ml_readiness import evaluate_dft_record_ml_readiness
+
+            return bool(evaluate_dft_record_ml_readiness(self.session, row).ml_ready)
+        except Exception:  # noqa: BLE001 - never promote on an unevaluated record
+            return False
 
     def _refresh_verified_dft_sibling_fingerprints(
         self,

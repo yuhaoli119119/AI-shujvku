@@ -705,7 +705,10 @@ def test_dft_review_verify_result_persists_imported_page_anchor_for_export(tmp_p
             stored_row = session.get(DFTResult, row.id)
 
             assert response.headers["x-d1-exported-count"] == "1"
-            assert stored_row.candidate_status == "ML_Ready"
+            # The evidence/export gate is satisfied and the page anchor survived,
+            # but this fixture has no reaction contract, so the record is
+            # "fields verified" -- never the stronger ML-ready claim.
+            assert stored_row.candidate_status == "field_verified_ml_pending"
             assert rows[0]["locator_status"] == "exact_page"
     finally:
         engine.dispose()

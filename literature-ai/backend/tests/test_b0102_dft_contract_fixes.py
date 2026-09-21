@@ -1861,7 +1861,25 @@ def test_complete_human_field_reviews_open_single_and_bulk_dft_gates(setup_test_
         assert single.reasons == bulk.reasons == ()
         assert single.provenance_level == bulk.provenance_level == "exact_pdf_page"
         assert AIVerificationService(session)._sync_dft_record_closure(main.id, row) == "accepted"
-        assert row.candidate_status == "ai_verified_ml_ready"
+        # "Every required field carries authoritative evidence" and "this record
+        # may enter an ML dataset" are two different claims.  This fixture has no
+        # reaction contract (no reaction_type / reaction_validation_status), so
+        # the honest token is "fields verified, ML still pending" -- it must NOT
+        # be promoted to ai_verified_ml_ready.
+        assert row.candidate_status == "field_verified_ml_pending"
+        # It stays there for a second, independent reason: ``binding_energy`` is
+        # not a target of any registered SRR_LiS tabular task profile, so even a
+        # valid reaction label would not make this row ML-ready.  (Asserted by
+        # value so a future profile change is a visible, deliberate edit.)
+        from app.domain.tabular_task_profiles import list_tabular_task_profiles
+
+        ml_targets = {
+            target
+            for profile in list_tabular_task_profiles()
+            if str(profile.key).startswith("SRR_LiS")
+            for target in profile.allowed_target_properties
+        }
+        assert row.property_type not in ml_targets
         session.flush()
 
         # An unrelated paper may not satisfy either the single-row evidence

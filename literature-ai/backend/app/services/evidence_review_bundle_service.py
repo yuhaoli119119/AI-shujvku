@@ -146,6 +146,23 @@ def _utc_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _normalize_progress_entry(progress_source: dict[str, Any], module: str) -> dict[str, Any]:
+    """Normalize one ``manual_review_progress`` module entry.
+
+    Shared by every reader/writer of the compatibility field so that the
+    legacy bool form (``figures: true``) and the current dict form
+    (``figures: {"completed": true, ...}``) are handled identically.
+    """
+    raw = progress_source.get(module) if isinstance(progress_source, dict) else None
+    if isinstance(raw, dict):
+        return {
+            "completed": bool(raw.get("completed")),
+            "updated_at": raw.get("updated_at"),
+            "updated_by": raw.get("updated_by"),
+        }
+    return {"completed": bool(raw), "updated_at": None, "updated_by": None}
+
+
 class EvidenceReviewBundleService:
     """Build, validate, and auto-apply offline figure/table evidence review packages."""
 
@@ -1548,7 +1565,22 @@ class EvidenceReviewBundleService:
         completed_snapshot = self._scope_snapshot(refreshed)
         completed_snapshot_fingerprint = refreshed["bundle_fingerprint"]
         if run_id is None:
-            self._mark_figures_review_completed(paper_id, reviewer)
+            # ``_record_completed_review`` only ever runs for the whole-paper scope
+            # (a run-scoped apply goes through the partial path), and it just
+            # recomputed ``completed_snapshot_fingerprint`` from the live bundle,
+            # so the compatibility flag may be synced here.
+            self._mark_figures_review_completed(
+                paper_id,
+                reviewer,
+                stage_status="completed",
+                unresolved_count=len(unresolved_actions),
+                snapshot_fingerprint_matches=completed_snapshot_fingerprint == refreshed["bundle_fingerprint"],
+                legacy_source_paper_scope=True,
+                # ``_record_completed_review`` has just validated that the whole
+                # paper bundle (every expected figure and table) is applied, so
+                # the scope proof is the caller's own validation here.
+                scope_complete=True,
+            )
         response = {
             **validation,
             "dry_run": False,
@@ -2093,36 +2125,37 @@ class EvidenceReviewBundleService:
             "blocked_reasons": {},
         }
 
-    def _mark_figures_review_completed(self, paper_id: UUID, reviewer: str) -> None:
-        paper = self.session.get(Paper, paper_id)
-        if paper is None:
-            return
-        analysis = dict(paper.comprehensive_analysis or {})
-        raw_progress = analysis.get("manual_review_progress") if isinstance(analysis.get("manual_review_progress"), dict) else {}
+    def _mark_figures_review_completed(
+        self,
+        paper_id: UUID,
+        reviewer: str,
+        *,
+        stage_status: str,
+        unresolved_count: int,
+        snapshot_fingerprint_matches: bool,
+        legacy_source_paper_scope: bool = True,
+        scope_complete: bool | None = None,
+    ) -> None:
+        """Sync the ``manual_review_progress.figures`` compatibility flag.
 
-        def normalize_entry(module: str) -> dict[str, Any]:
-            raw = raw_progress.get(module)
-            if isinstance(raw, dict):
-                return {
-                    "completed": bool(raw.get("completed")),
-                    "updated_at": raw.get("updated_at"),
-                    "updated_by": raw.get("updated_by"),
-                }
-            return {"completed": bool(raw), "updated_at": None, "updated_by": None}
+        ``manual_review_progress`` is a compatibility field, never an authority.
+        It is written only when the authoritative whole-paper task proves the
+        chart stage is complete on a fresh snapshot; a run-scoped
+        ``external_analysis_run`` batch, a stale snapshot, or a task with
+        unresolved actions must not mark the paper complete.
+        """
+        from app.services.chart_review_authority import sync_figures_review_completed
 
-        progress = {
-            "content": normalize_entry("content"),
-            "figures": normalize_entry("figures"),
-            "dft": normalize_entry("dft"),
-        }
-        progress["figures"] = {
-            "completed": True,
-            "updated_at": _utc_iso(),
-            "updated_by": reviewer,
-        }
-        analysis["manual_review_progress"] = progress
-        paper.comprehensive_analysis = analysis
-        self.session.add(paper)
+        sync_figures_review_completed(
+            self.session,
+            paper_id,
+            reviewer=reviewer,
+            stage_status=stage_status,
+            unresolved_count=unresolved_count,
+            snapshot_fingerprint_matches=snapshot_fingerprint_matches,
+            legacy_source_paper_scope=legacy_source_paper_scope,
+            scope_complete=scope_complete,
+        )
 
     @staticmethod
     def _optional_uuid(value: Any) -> UUID | None:

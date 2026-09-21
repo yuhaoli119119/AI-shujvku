@@ -210,6 +210,10 @@ NUMERIC_CATEGORIES = {
     "gibbs_free_energy_change",
     "reaction_energy",
     "reaction_barrier",
+    # 原子硫脱附能垒 / 硫原子结合强度判据：与普通 reaction_barrier、
+    # adsorption_energy 语义不同，必须分开登记。
+    "sulfur_desorption_barrier",
+    "sulfur_desorption_criterion",
     "migration_barrier",
     "permeation_barrier",
     "li2s_decomposition_barrier",
@@ -277,7 +281,7 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
             2,
         ),
         r"(?:E_{?ads}?|E_b?|E_{bind})\s*=?\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
-        r"([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol).{0,40}(?:adsorpt|bind)",
+        r"([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol).{0,40}?(?:adsorpt|bind)",
         ],
     "gibbs_free_energy_change": [
         r"(?:\u0394G|Gibbs\s*free\s*energy(?:\s*change)?|delta\s*G).{0,60}?([\-\+]?\d+[.]?\d*)\s*(eV|kJ/mol|kcal/mol)",
@@ -288,7 +292,19 @@ CATEGORY_RULES: dict[str, list[tuple[str, int, int]]] = {
         r"\bE_a\b\s*[=\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"\bE\s*[_\-\s]?\s*a\b\s*[=＝\u2248]\s*([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
         r"(?:活化能|活化能垒|能垒|反应能垒).{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
-        r"energy\s+barrier.{0,30}([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"energy\s+barrier.{0,30}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        # 原子硫脱附能垒（催化剂再生 / 硫中毒判据）的正向表述。
+        r"desorption\s+(?:process\s+)?(?:of\s+)?(?:a\s+)?(?:single\s+)?(?:sulfur|sulphur|s)\s*(?:atom)?[^.;\n]{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:single\s+)?(?:sulfur|sulphur)\s*atom[^.;\n]{0,60}?desorpt[^.;\n]{0,60}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        ],
+    "sulfur_desorption_barrier": [
+        r"desorption\s+(?:process\s+)?(?:of\s+)?(?:a\s+)?(?:single\s+)?(?:sulfur|sulphur|s)\s*(?:atom)?[^.;\n]{0,80}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:energy\s+)?barrier[^.;\n]{0,60}?desorpt[^.;\n]{0,60}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)[^.;\n]{0,60}?desorption\s+(?:process\s+)?(?:of\s+)?(?:a\s+)?(?:single\s+)?s(?:ulfur|ulphur)?\s*atom",
+        ],
+    "sulfur_desorption_criterion": [
+        r"(?:\bE\s*[_\-\s]?\s*b\b|\bbinding\s+(?:energy|strength)\b)[^.;\n]{0,80}?(?:less|greater|smaller|larger|lower|higher)\s+than\s+([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
+        r"(?:less|greater|smaller|larger|lower|higher)\s+than\s+([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)[^.;\n]{0,80}?\bbinding\s+of\s+a\s+(?:single\s+)?s(?:ulfur|ulphur)?\s*atom\b",
         ],
     "li2s_decomposition_barrier": [
         r"(?:(?:decompos|breakdown|oxidation).{0,20}(?:of\s+)?Li2S|Li2S.{0,20}(?:decompos|breakdown|oxidation)).{0,60}?([\-\+]?\d+[.]?\d*)\s*(eV|meV|kJ/mol|kcal/mol)",
@@ -606,6 +622,7 @@ def _fact_family_for_category(category: str) -> str:
         return "reaction_free_energy_table"
     if category in {
         "reaction_barrier",
+        "sulfur_desorption_barrier",
         "activation_energy",
         "migration_barrier",
         "li2s_decomposition_barrier",
@@ -817,6 +834,126 @@ def _match_crosses_sentence(match_text: str) -> bool:
     if re.search(r";\s+[A-Z]", inner):
         return True
     return False
+
+
+def _number_is_fragment(text: str, start: int, end: int) -> bool:
+    """检测捕获到的数值是否是「更长数字的一部分」(小数尾数/指数尾数).
+
+    ``2.13 eV`` 里绝不能额外产出一个 ``3 eV``，``4.99`` 里也不能产出 ``9``。
+    只要捕获片段满足下面任意一条，就说明它只是邻位数字的碎片，必须丢弃：
+
+    * 片段首字符紧跟在数字或小数点之后（``2.13`` 中的 ``3``、``13``）；
+    * 片段带符号且符号紧跟在指数标记 ``e``/``E``/``^`` 之后（``1.5e-3`` 中的 ``-3``）；
+    * 片段后面还紧跟着数字或 ``.数字``（``1.5`` 被截成 ``1``）。
+
+    该判断只依赖局部字符，与物理量类型、单位以及论文身份无关，因此对所有
+    类别和所有论文一致生效，不是针对某一篇文献的特例。
+    """
+    if start < 0 or end > len(text) or start >= end:
+        return False
+    signed = text[start] in "+-\u2212"
+    previous_index = start - 1
+    if previous_index >= 0:
+        previous = text[previous_index]
+        if previous.isdigit() or previous == ".":
+            return True
+        # An exponent tail is a fragment with or without an explicit sign:
+        # ``1e3``, ``1e+3``, ``1e-3`` and ``1.5×10^3`` must never yield 3.
+        if previous in "eE^\u00d7":
+            return True
+    if end < len(text):
+        following = text[end]
+        if following.isdigit():
+            return True
+        if following == "." and end + 1 < len(text) and text[end + 1].isdigit():
+            return True
+    return False
+
+
+SULFUR_DESORPTION_BARRIER = "sulfur_desorption_barrier"
+SULFUR_DESORPTION_CRITERION = "sulfur_desorption_criterion"
+
+# 「单原子硫」的表述集合：single sulfur atom / S atom / atomic sulfur。
+# 这些文本描述的是原子硫 S_atom，绝不能被归一化为分子硫 S8。
+_SULFUR_ATOM_PATTERN = (
+    r"(?:single[\s\-]+sulfur[\s\-]+atom|sulphur[\s\-]+atom|sulfur[\s\-]+atom|"
+    r"atomic[\s\-]+sulfur|single[\s\-]+s[\s\-]+atom|\bs[\s\-]+atom\b)"
+)
+_DESORPTION_PATTERN = (
+    r"(?:desorpt\w*|de[\s\-]?sorpt\w*|detach\w*|break(?:s|ing)?[\s\-]+away|"
+    r"regenerat\w*|poison\w*)"
+)
+_BOUND_CRITERION_PATTERN = (
+    r"(?:less[\s\-]+than|greater[\s\-]+than|smaller[\s\-]+than|larger[\s\-]+than|"
+    r"lower[\s\-]+than|higher[\s\-]+than|below|above|at[\s\-]+least|at[\s\-]+most|"
+    r"no[\s\-]+more[\s\-]+than|up[\s\-]+to)"
+)
+_BINDING_STRENGTH_PATTERN = r"(?:\be\s*[_\-\s]?\s*b\b|\bbinding\s+(?:energy|strength)\b)"
+
+
+def _match_number_is_fragment(text: str, match: "re.Match[str]", group_index: int) -> bool:
+    """Fragment check that tolerates a declared group index that is absent.
+
+    ``CATEGORY_RULES`` holds a few *claim* patterns (``dos_claim``,
+    ``charge_density_difference_claim``) that intentionally have no capturing
+    group; their declared value-group index is therefore out of range.  The
+    legacy parser relied on the surrounding ``except IndexError`` for those, so
+    the guard only runs when the group really exists and otherwise reports "not
+    a fragment" and lets the original code path decide.
+    """
+    if not group_index or group_index > (match.re.groups or 0):
+        return False
+    try:
+        return _number_is_fragment(text, match.start(group_index), match.end(group_index))
+    except IndexError:  # pragma: no cover - defensive, mirrors the legacy except
+        return False
+
+
+def _context_is_atomic_sulfur_desorption(text: str) -> bool:
+    """上下文是否在描述「原子硫从催化剂表面脱附」这一过程."""
+    normalized = _normalize_chem_label(text or "").lower()
+    if not normalized:
+        return False
+    if not re.search(_SULFUR_ATOM_PATTERN, normalized):
+        return False
+    return re.search(_DESORPTION_PATTERN, normalized) is not None
+
+
+def _context_is_atomic_sulfur_binding_threshold(text: str) -> bool:
+    """上下文是否是「硫原子结合强度阈值/判据」，而不是一次具体吸附能测量.
+
+    典型表述: ``E b values of less than 4.53 eV for the binding of a single S atom``。
+    这是一个用来判断 M-S 键能否在充电/脱锂过程中解离的判据阈值，不是
+    ``adsorption_energy`` 的一次测量值。
+    """
+    normalized = _normalize_chem_label(text or "").lower()
+    if not normalized:
+        return False
+    if not re.search(_SULFUR_ATOM_PATTERN, normalized):
+        return False
+    if not re.search(_BOUND_CRITERION_PATTERN, normalized):
+        return False
+    return re.search(_BINDING_STRENGTH_PATTERN, normalized) is not None
+
+
+def _refine_category_semantics(category: str, context: str) -> str:
+    """把规则类别细化成与局部物理量语义绑定的规范性质.
+
+    规则抽取只按「关键词 + 数值 + 单位」匹配，容易把语义不同的量塞进同一个
+    粗类别。这里按局部上下文把两类硫相关物理量区分出来：
+
+    * 原子硫脱附能垒 -> ``sulfur_desorption_barrier``
+    * 原子硫结合强度判据阈值 -> ``sulfur_desorption_criterion``
+
+    判定只看局部句子的科学表述，不看 DOI / paper_id / 固定整句。
+    """
+    if category == "reaction_barrier" and _context_is_atomic_sulfur_desorption(context):
+        return SULFUR_DESORPTION_BARRIER
+    if category in {"adsorption_energy", "binding_energy", "metal_support_binding_energy_Eb"} and (
+        _context_is_atomic_sulfur_binding_threshold(context)
+    ):
+        return SULFUR_DESORPTION_CRITERION
+    return category
 
 
 def _parse_scientific_notation(text: str) -> float | None:
@@ -1170,6 +1307,8 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
             else:
                 pattern, vg, ug = pat_tuple, 1, 2
             for m in re.finditer(pattern, combined, re.IGNORECASE):
+                if _match_number_is_fragment(combined, m, vg):
+                    continue
                 try:
                     val = _parse_match_float(m, vg) if vg else None
                     raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
@@ -1187,18 +1326,19 @@ def _scan_tables_for_category(tables: list[Any], category: str) -> list[DFTResul
                 quality_evidence = _extract_sentence_around_match(combined, m.start(), m.end())
                 if category not in GRAPHITE_DEFECT_CATEGORY_RULES:
                     quality_evidence = evidence
-                if not _should_keep_result(category, adsorbate, val, quality_evidence):
+                refined_category = _refine_category_semantics(category, quality_evidence or evidence)
+                if not _should_keep_result(refined_category, adsorbate, val, quality_evidence):
                     continue
                 results.append(DFTResultItem(
-                    category=category,
+                    category=refined_category,
                     adsorbate=adsorbate,
                     value=val,
                     unit=unit,
                     evidence_text=evidence,
                     source_location=loc,
                     confidence=0.75 if val is not None else 0.45,
-                    fact_family=_fact_family_for_category(category),
-                    atom_pair=_category_atom_pair(category, evidence),
+                    fact_family=_fact_family_for_category(refined_category),
+                    atom_pair=_category_atom_pair(refined_category, evidence),
                     source_table_id=str(getattr(tbl, "id", "") or getattr(tbl, "table_id", "") or caption or "table"),
                     source_table_caption=caption or None,
                 ))
@@ -1897,6 +2037,7 @@ class DFTResultsExtractor:
         evidence = str(payload.get("evidence_text") or "").strip()
         if not evidence:
             return None
+        category = _refine_category_semantics(category, evidence)
         value = payload.get("value")
         if category in NUMERIC_CATEGORIES and value is None:
             return None
@@ -1960,6 +2101,9 @@ class DFTResultsExtractor:
                 # 匹配文本天然跨越多句，不做跨句过滤
                 if category not in NON_NUMERIC_DFT_CLAIM_CATEGORIES and _match_crosses_sentence(m.group(0)):
                     continue
+                # 小数/指数尾数防护：2.13 不得再额外产出 3，4.99 不得再额外产出 9
+                if _match_number_is_fragment(text, m, vg):
+                    continue
                 try:
                     val = _parse_match_float(m, vg) if vg else None
                     raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
@@ -1987,18 +2131,20 @@ class DFTResultsExtractor:
                     and not _category_should_default_null_adsorbate(category)
                 ):
                     adsorbate = _resolve_adsorbate(evidence)
-                if not _should_keep_result(category, adsorbate, val, local_evidence or evidence):
+                # 数值必须与局部物理量语义绑定：同一段文本里的粗类别要按上下文细化
+                refined_category = _refine_category_semantics(category, local_evidence or evidence)
+                if not _should_keep_result(refined_category, adsorbate, val, local_evidence or evidence):
                     continue
                 results.append(DFTResultItem(
-                    category=category,
+                    category=refined_category,
                     adsorbate=adsorbate,
                     value=val,
                     unit=unit,
                     evidence_text=evidence,
                     source_location=loc,
-                    confidence=self._calc_confidence(val, unit, evidence, category),
-                    fact_family=_fact_family_for_category(category),
-                    atom_pair=_category_atom_pair(category, evidence),
+                    confidence=self._calc_confidence(val, unit, evidence, refined_category),
+                    fact_family=_fact_family_for_category(refined_category),
+                    atom_pair=_category_atom_pair(refined_category, evidence),
                 ))
         return results
 
@@ -2019,6 +2165,8 @@ class DFTResultsExtractor:
                     else:
                         pattern, vg, ug = pat_tuple, 1, 2
                     for m in re.finditer(pattern, cap, re.IGNORECASE):
+                        if _match_number_is_fragment(cap, m, vg):
+                            continue
                         try:
                             val = _parse_match_float(m, vg) if vg else None
                             raw_unit_value = m.group(ug) if ug and ug < len(m.groups()) + 1 else None
@@ -2032,19 +2180,20 @@ class DFTResultsExtractor:
                         )
                         evidence = _extract_context_around_match(cap, m.start(), m.end())
                         adsorbate = _resolve_adsorbate(m.group(0)) or _resolve_adsorbate(evidence)
-                        if not _should_keep_result(cat, adsorbate, val, evidence):
+                        refined_cat = _refine_category_semantics(cat, evidence)
+                        if not _should_keep_result(refined_cat, adsorbate, val, evidence):
                             continue
                         figure_had_result = True
                         results.append(DFTResultItem(
-                            category=cat,
+                            category=refined_cat,
                             adsorbate=adsorbate,
                             value=val,
                             unit=unit,
                             evidence_text=evidence,
                             source_location=loc,
                             confidence=0.7,
-                            fact_family=_fact_family_for_category(cat),
-                            atom_pair=_category_atom_pair(cat, evidence),
+                            fact_family=_fact_family_for_category(refined_cat),
+                            atom_pair=_category_atom_pair(refined_cat, evidence),
                         ))
             if not figure_had_result and re.search(
                 r"(?:DFT|adsorption\s+energy|free\s+energy|reaction\s+barrier|DOS|Bader|COHP|bond\s+length)",

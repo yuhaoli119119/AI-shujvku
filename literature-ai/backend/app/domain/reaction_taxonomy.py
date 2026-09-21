@@ -9,6 +9,38 @@ from app.normalizers.chemistry_normalizer import ChemistryNormalizer, canonicali
 PROFILE_VERSION = "reaction_profiles_v1"
 REACTION_TYPES = ("SRR_LiS", "HER", "OER", "ORR", "CO2RR", "UNKNOWN")
 
+# 材料 / 载体维度。石墨炔(graphdiyne)、石墨烯(graphene)、C2N 等是催化剂的
+# 材料身份，永远不能被当成 reaction_type；它们只能出现在 material_identity /
+# support / structure_context 这些维度里。
+MATERIAL_DIMENSION_TERMS = frozenset(
+    {
+        "graphdiyne",
+        "gdy",
+        "graphyne",
+        "graphene",
+        "c2n",
+        "c3n4",
+        "gcn",
+        "carbon nanotube",
+        "cnt",
+        "mxene",
+        "n-doped carbon",
+        "n doped carbon",
+        "defective graphene",
+        "nitrogen-doped graphene",
+    }
+)
+
+
+def is_material_dimension_term(text: Any) -> bool:
+    """判断一个词是否是材料/载体维度而不是反应类型."""
+    cleaned = _clean(text)
+    if not cleaned:
+        return False
+    if cleaned in MATERIAL_DIMENSION_TERMS:
+        return True
+    return any(cleaned == term or cleaned.startswith(f"{term} ") for term in MATERIAL_DIMENSION_TERMS)
+
 
 @dataclass(frozen=True)
 class ReactionProfile:
@@ -37,6 +69,16 @@ _COMMON_ENERGY_ALIASES = {
 
 _SRR_PROPERTIES = {
     **_COMMON_ENERGY_ALIASES,
+    # 原子硫脱附能垒 / 原子硫结合强度判据：硫中毒与催化剂再生描述量，
+    # 语义上区别于一般 reaction_barrier 与 adsorption_energy，单独登记。
+    "sulfur desorption barrier": "sulfur_desorption_barrier",
+    "sulfur atom desorption barrier": "sulfur_desorption_barrier",
+    "desorption barrier of sulfur": "sulfur_desorption_barrier",
+    "s desorption barrier": "sulfur_desorption_barrier",
+    "sulfur desorption criterion": "sulfur_desorption_criterion",
+    "sulfur binding criterion": "sulfur_desorption_criterion",
+    "sulfur atom binding criterion": "sulfur_desorption_criterion",
+    "desorption criterion": "sulfur_desorption_criterion",
     "li2s decomposition barrier": "li2s_decomposition_barrier",
     "li2s decomposition energy barrier": "li2s_decomposition_barrier",
     "decomposition barrier of li2s": "li2s_decomposition_barrier",
@@ -95,8 +137,13 @@ def _profile(
 _PROFILES = {
     "SRR_LiS": _profile(
         "SRR_LiS", "production",
-        {"S8", "Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S"},
-        {"s8": "S8", "sulfur": "S8", "li2s8": "Li2S8", "li2s6": "Li2S6",
+        # ``S_atom`` 是原子硫（single sulfur atom），``S8`` 是环八硫分子。
+        # 两者是不同的中间体，绝不能互相归一化。
+        {"S8", "S_atom", "Li2S8", "Li2S6", "Li2S4", "Li2S2", "Li2S"},
+        {"s8": "S8", "sulfur": "S_atom", "sulphur": "S_atom",
+         "s atom": "S_atom", "single sulfur atom": "S_atom",
+         "atomic sulfur": "S_atom", "s_atom": "S_atom",
+         "li2s8": "Li2S8", "li2s6": "Li2S6",
          "li2s4": "Li2S4", "li2s2": "Li2S2", "li2s": "Li2S"},
         _SRR_PROPERTIES,
         {"li-s", "lithium sulfur", "lithium-sulfur", "polysulfide", "sulfur reduction", "srr"},
@@ -151,6 +198,10 @@ def _value(candidate: Any, *names: str) -> Any:
 
 
 def normalize_reaction_type(text: Any) -> str:
+    # 材料/载体维度不是反应类型（例如石墨炔 graphdiyne 是催化剂材料，
+    # 不是 reaction_type）。显式挡在这里，避免材料名被误分类成 HER/OER 等。
+    if is_material_dimension_term(text):
+        return "UNKNOWN"
     cleaned = re.sub(r"[^a-z0-9]", "", _clean(text))
     aliases = {
         "srrlis": "SRR_LiS", "lis": "SRR_LiS", "lithiumsulfur": "SRR_LiS",
@@ -280,7 +331,8 @@ def validate_reaction_record(reaction_type: Any, candidate: Any) -> dict[str, An
 
 
 __all__ = [
-    "PROFILE_VERSION", "REACTION_TYPES", "ReactionProfile", "classify_reaction_record",
-    "get_reaction_profile", "normalize_intermediate", "normalize_property_type",
-    "normalize_reaction_type", "validate_reaction_record",
+    "PROFILE_VERSION", "REACTION_TYPES", "MATERIAL_DIMENSION_TERMS", "ReactionProfile",
+    "classify_reaction_record", "get_reaction_profile", "is_material_dimension_term",
+    "normalize_intermediate", "normalize_property_type", "normalize_reaction_type",
+    "validate_reaction_record",
 ]

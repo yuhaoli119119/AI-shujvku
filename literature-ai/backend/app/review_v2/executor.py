@@ -183,4 +183,23 @@ class PaperReviewV2Service:
         authoritative = {"paper_id": str(paper_id), "task_fingerprint": readback_task["task_fingerprint"], "stage_status": stage, "unresolved_count": unresolved, "chart_review_status": stage, "asset_status": readback_task["status"]["asset_status"], "missing_image_count": readback_task["status"]["missing_image_count"], "missing_image_labels": readback_task["status"]["missing_image_labels"], "invalid_image_count": readback_task["status"]["invalid_image_count"], "invalid_image_labels": readback_task["status"]["invalid_image_labels"], "subfigure_empty_description_count": readback_task["status"]["subfigure_empty_description_count"], "subfigure_description_issues": readback_task["status"]["subfigure_description_issues"], "stale_figure_reading_count": readback_task["status"]["stale_figure_reading_count"], "stale_figure_reading_labels": readback_task["status"]["stale_figure_reading_labels"], "dft_gate_allowed": stage in {"completed", "completed_with_issues"} and unresolved == 0, "figure_reading_coverage": readback_task["status"]["figure_reading_coverage"], "legacy_issue_count": unresolved, "figures": [x for x in readback_task["figures"] if x["figure_id"] in touched_ids], "tables": [x for x in readback_task["tables"] if x["table_id"] in touched_ids], "active_figure_order": [x["figure_id"] for x in readback_task["figures"]], "active_table_order": [x["table_id"] for x in readback_task["tables"]]}
         response = {"schema_version": "paper_review_batch_receipt_v2", "paper_id": str(paper_id), "request_id": request.request_id, "request_payload_hash": payload_hash, "idempotent_replay": False, "applied": applied, "unchanged": unchanged, "held": held, "rejected": rejected, "authoritative_readback": authoritative}
         receipt = AuditLog(paper_id=paper_id, action=RECEIPT_ACTION, source=request.reviewer_label[:64], target_type="paper_review_v2", target_id=request.request_id, payload={"payload_hash": payload_hash, "task_fingerprint": request.task_fingerprint, "post_apply_task_fingerprint": readback_task["task_fingerprint"], "response": response}, created_at=utcnow())
-        self.session.add(receipt); self.session.flush(); response["receipt_audit_id"] = str(receipt.id); receipt.payload = {**receipt.payload, "response": response}; flag_modified(receipt, "payload"); return response
+        self.session.add(receipt); self.session.flush(); response["receipt_audit_id"] = str(receipt.id); receipt.payload = {**receipt.payload, "response": response}; flag_modified(receipt, "payload")
+        # Keep the legacy ``manual_review_progress.figures`` compatibility field in
+        # sync.  V2 is the authoritative state machine, but the compatibility flag
+        # used to be written by the legacy apply path only, so papers finished here
+        # kept an empty flag and the review-center list read them as unfinished.
+        # The flag is synced only for a completed whole-paper scope on the snapshot
+        # that was just recorded, never for ``completed_with_issues``/``stale``.
+        from app.services.chart_review_authority import sync_figures_review_completed
+        sync_figures_review_completed(
+            self.session,
+            paper_id,
+            reviewer=request.reviewer_label[:64],
+            stage_status=stage,
+            unresolved_count=unresolved,
+            # The receipt just recorded ``post_apply_task_fingerprint`` from this
+            # same readback, so the completed snapshot is the current snapshot.
+            snapshot_fingerprint_matches=True,
+            legacy_source_paper_scope=True,
+        )
+        return response

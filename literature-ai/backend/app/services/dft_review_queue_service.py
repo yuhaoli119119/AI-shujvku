@@ -24,8 +24,10 @@ from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.external_analysis_identity import review_submission_identity
 from app.services.review_conflict_service import ReviewConflictAggregationService
 from app.utils.dft_candidate_status import (
+    DFT_STATUS_FIELD_VERIFIED,
     DFT_STATUS_PENDING,
     display_label,
+    is_status_ready,
     is_terminal as is_dft_terminal,
 )
 from app.utils.library_names import build_library_name_clause, normalize_library_name
@@ -292,6 +294,13 @@ class DFTReviewQueueService:
         candidate_status = row.candidate_status or "system_candidate"
         if not gate.eligible and candidate_status == "ML_Ready":
             candidate_status = "blocked_from_export"
+        # Read-time overlay, in the same spirit as ``blocked_from_export`` above.
+        # A recorded ML-ready token is only credible while the reaction contract
+        # still holds; ``out_of_scope`` (or an UNKNOWN reaction) can never back an
+        # ML-readiness claim, so it is shown as the weaker, honest token instead of
+        # being counted as ready by the queue, the UI, or a reviewer.
+        if is_status_ready(candidate_status) and not self._reaction_semantics_valid(row):
+            candidate_status = DFT_STATUS_FIELD_VERIFIED
         workflow_state = self.build_dft_workflow_state(
             gate=gate,
             object_review_audits=object_review_audits or [],
@@ -387,6 +396,13 @@ class DFTReviewQueueService:
                 else f"../paper_detail/index.html?paper_id={paper_id}&tab=review"
             ),
         }
+
+    @staticmethod
+    def _reaction_semantics_valid(row: Any) -> bool:
+        """Whether the record's reaction labelling can back an ML-readiness claim."""
+        reaction_type = str(getattr(row, "reaction_type", "") or "").strip().lower()
+        validation_status = str(getattr(row, "reaction_validation_status", "") or "").strip().lower()
+        return bool(reaction_type) and reaction_type != "unknown" and validation_status == "valid"
 
     def _bulk_catalyst_payloads(self, paper_ids: set[UUID]) -> dict[str, list[dict[str, Any]]]:
         if not paper_ids:

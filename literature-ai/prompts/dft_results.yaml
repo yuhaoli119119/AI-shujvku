@@ -1,5 +1,5 @@
 name: dft_results_extraction
-version: 0.3
+version: 0.4
 stage: mvp
 
 description: >
@@ -60,6 +60,8 @@ categories:
   - adsorption_energy
   - gibbs_free_energy_change
   - reaction_barrier
+  - sulfur_desorption_barrier
+  - sulfur_desorption_criterion
   - li2s_decomposition_barrier
   - li2s_nucleation_barrier
   - bader_charge
@@ -70,14 +72,36 @@ categories:
 
 adsorbate_mapping:
   s8: S8
+  # sulfur / S atom 一律是原子硫 S_atom；只有显式 S8 / cyclo-S8 / 分子硫才是 S8。
+  # 绝不能把 "single sulfur atom" 归一化成 S8。
+  sulfur: S_atom
+  sulphur: S_atom
+  s atom: S_atom
+  single sulfur atom: S_atom
+  atomic sulfur: S_atom
   li2s8: Li2S8
   li2s6: Li2S6
   li2s4: Li2S4
   li2s2: Li2S2
   li2s: Li2S
-  sulfur: S8
   polysulfide: LiPS(generic)
   lips: LiPS(generic)
+
+semantic_binding_rules:
+  numeric_token_boundary: >
+    A numeric capture must be a complete number token. Never emit the trailing
+    digits of a longer decimal as a separate candidate: "2.13 eV" must not also
+    yield 3 eV and "4.99 eV" must not also yield 9 eV. Reject a capture whose
+    first character follows a digit or a decimal point, or that follows a
+    scientific-notation exponent marker.
+  sulfur_desorption_barrier: >
+    A barrier for the desorption of a single sulfur atom from the catalyst
+    surface (catalyst regeneration / sulfur-poisoning descriptor) is
+    `sulfur_desorption_barrier`, not a generic reaction_barrier.
+  sulfur_desorption_criterion: >
+    A threshold/criterion form such as "E_b values of less than X eV for the
+    binding of a single S atom" is a poisoning/desorption criterion
+    (`sulfur_desorption_criterion`), never a measured adsorption_energy.
 
 strategy:
   - keyword_pre_screening: false

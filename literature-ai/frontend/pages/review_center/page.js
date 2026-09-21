@@ -576,6 +576,113 @@
       return updated;
     }
 
+    // Authoritative whole-paper chart stage, keyed by main paper id.
+    //
+    // The list must know the chart state on first load, without the user having
+    // to select a paper first: the only other source, ``manual_review_progress``,
+    // is a compatibility field written by a single legacy writer, so a paper
+    // finished through the V2 pipeline keeps it empty forever.  The stage is read
+    // from /api/workbench/review-center/chart-stages, which projects the same
+    // whole-paper task that /chart-review-task returns.
+    const authoritativeChartStages = {};
+    const queuedChartStagePaperIds = {};
+    const CHART_STAGE_BATCH_LIMIT = 50;
+    let chartStageFlushInFlight = null;
+
+    function chartStagePaperIdForRow(row) {
+      const group = supplementaryGroup(row);
+      return String(group && group.main_paper_id || row && row.paper_id || "");
+    }
+
+    function visibleRowsMissingChartStage(rows) {
+      const ids = [];
+      (rows || currentVisibleRows()).forEach(function (row) {
+        const paperId = chartStagePaperIdForRow(row);
+        if (!paperId) return;
+        if (Object.prototype.hasOwnProperty.call(authoritativeChartStages, paperId)) return;
+        if (ids.indexOf(paperId) !== -1) return;
+        ids.push(paperId);
+      });
+      return ids.slice(0, CHART_STAGE_BATCH_LIMIT);
+    }
+
+    // The endpoint reports the authoritative stage plus the evidence behind it.
+    // A ``completed`` task is only a completion claim when the whole-paper scope
+    // is complete, the snapshot has not moved and nothing is unresolved -- so the
+    // chip is derived from the conjunctive answer, never from the bare stage
+    // token.  This is what stops a stale paper from rendering as finished.
+    function authoritativeDisplayStage(entry) {
+      const stage = String(entry && entry.stage_status || "unknown");
+      if (!["completed", "not_required"].includes(stage)) return stage;
+      if (entry && entry.figures_completed) return stage;
+      if (entry && entry.snapshot_fingerprint_matches === false) return "stale";
+      if (Number(entry && entry.unresolved_count || 0) > 0) return "completed_with_issues";
+      return "incomplete";
+    }
+
+    function applyAuthoritativeChartStages(stages) {
+      let updated = false;
+      Object.keys(stages || {}).forEach(function (paperId) {
+        const entry = stages[paperId];
+        if (!entry || typeof entry !== "object" || !entry.authoritative) return;
+        authoritativeChartStages[paperId] = entry;
+        if (applyLiveChartStageToSupplementaryGroup(paperId, authoritativeDisplayStage(entry))) updated = true;
+      });
+      return updated;
+    }
+
+    async function flushAuthoritativeChartStages() {
+      let updatedAny = false;
+      try {
+        for (;;) {
+          const batch = Object.keys(queuedChartStagePaperIds).slice(0, CHART_STAGE_BATCH_LIMIT);
+          if (!batch.length) break;
+          batch.forEach(function (paperId) { delete queuedChartStagePaperIds[paperId]; });
+          let data = null;
+          try {
+            data = await fetchJSON(
+              "/api/workbench/review-center/chart-stages?paper_ids=" + encodeURIComponent(batch.join(","))
+            );
+          } catch (error) {
+            console.warn("审核中心权威图表状态读取失败，保留当前显示", error);
+            continue;
+          }
+          if (applyAuthoritativeChartStages(data && data.stages)) updatedAny = true;
+        }
+      } finally {
+        chartStageFlushInFlight = null;
+      }
+      if (updatedAny) renderRows();
+      if (Object.keys(queuedChartStagePaperIds).length) {
+        chartStageFlushInFlight = flushAuthoritativeChartStages();
+      }
+      return updatedAny;
+    }
+
+    function queueAuthoritativeChartStages(paperIds) {
+      let queued = 0;
+      (paperIds || []).forEach(function (paperId) {
+        const key = String(paperId || "");
+        if (!key) return;
+        queuedChartStagePaperIds[key] = true;
+        queued += 1;
+      });
+      if (!queued) return Promise.resolve(false);
+      if (chartStageFlushInFlight) return chartStageFlushInFlight;
+      chartStageFlushInFlight = flushAuthoritativeChartStages();
+      return chartStageFlushInFlight;
+    }
+
+    function refreshAuthoritativeChartStages(rows) {
+      return queueAuthoritativeChartStages(visibleRowsMissingChartStage(rows));
+    }
+
+    function clearAuthoritativeChartStages() {
+      Object.keys(authoritativeChartStages).forEach(function (paperId) {
+        delete authoritativeChartStages[paperId];
+      });
+    }
+
     function supplementaryGroupLabel(row) {
       const group = supplementaryGroup(row);
       if (!group) return "";
@@ -866,6 +973,9 @@
         const pendingSupportingFigures = Number(summary.pending_supporting_figures || 0);
         const gateStage = String(dftReviewPreview.review_gate && dftReviewPreview.review_gate.stage_status || "unknown");
         const chartStageUpdated = applyLiveChartStageToSupplementaryGroup(target.paper_id, gateStage);
+        // The DFT preview gate is only a secondary opinion about the chart
+        // stage; the authoritative whole-paper task always wins for the chip.
+        void queueAuthoritativeChartStages([target.paper_id]);
         const supportingEvidence = [];
         if (supportingFigures) supportingEvidence.push("SI " + supportingFigures + " 图");
         if (supportingTables) supportingEvidence.push("SI " + supportingTables + " 表");
@@ -2176,6 +2286,7 @@
         DB_Ready: { label: "可入库", tip: "已达到正式数据库入库条件。" },
         Codex_Candidate: { label: "系统候选", tip: "旧状态，仅作为审核线索，不代表最终结论。" },
         ai_verified_ml_ready: { label: "已审核可用", tip: "性质类型和数值已由权威 AI 审核收口，可进入机器学习；可选元数据缺失不阻塞。" },
+        field_verified_ml_pending: { label: "字段已核验，待 ML 就绪", tip: "必要字段已核验，但反应语义、任务画像或导出安全门尚未满足机器学习条件。" },
         ai_terminal_unusable: { label: "已终止不可用", tip: "性质含义或数值无法确认，已经收口，不再自动转交其他 AI。" },
         ai_rejected: { label: "已拒绝", tip: "权威 AI 已判定该数据不应入库，当前为终态。" },
         Gemini_Verified: { label: "AI 已核验", tip: "AI 已核验证据，但仍不等于最终正式确认。" },
@@ -4417,6 +4528,10 @@
         '</tr>';
       }).join("");
       updateStickyLayout();
+      // Whatever ends up on screen gets the authoritative stage, so paging,
+      // filtering and sorting can never leave a row showing the compatibility
+      // field.  Rows already resolved in this session are skipped.
+      void refreshAuthoritativeChartStages(rows);
     }
 
     async function loadReviewCenter(options) {
@@ -4424,6 +4539,9 @@
       if (reviewCenterLoadInFlight) return false;
       reviewCenterLoadInFlight = true;
       try {
+        // A user-visible reload must re-read the authoritative stages; the
+        // background auto-refresh keeps them so the chips do not flicker.
+        if (!silent) clearAuthoritativeChartStages();
         const library = getValue("libraryFilter");
         let data = null;
         let lastError = null;

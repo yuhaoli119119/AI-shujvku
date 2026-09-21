@@ -30,6 +30,7 @@ from typing import Any, Iterable
 # stored lower-case even though some writers persist mixed case, e.g. ML_Ready).
 # --------------------------------------------------------------------------- #
 
+DFT_STATUS_FIELD_VERIFIED = "field_verified_ml_pending"
 DFT_STATUS_PENDING = "system_candidate"
 DFT_STATUS_UNVERIFIED = "candidate_unverified"
 DFT_STATUS_PRIMARY_APPLIED = "ai_primary_applied"
@@ -59,6 +60,12 @@ DFT_ACTIVE_STATUSES = frozenset(
         DFT_STATUS_UNVERIFIED,
         DFT_STATUS_PRIMARY_APPLIED,
         DFT_STATUS_NEEDS_HUMAN,
+        # "Every required field has authoritative evidence" is NOT the same claim
+        # as "this record may enter an ML dataset" (reaction contract, task
+        # profile, unit resolution and the export gate all still have to agree).
+        # A record that only satisfies the field-evidence half stays here: still
+        # active, still visible, still reviewable, and never counted as ready.
+        DFT_STATUS_FIELD_VERIFIED,
     }
 )
 
@@ -95,13 +102,17 @@ DFT_READY_STATUSES = frozenset(
     }
 )
 
-# Human-final decisions that automatic repair must not overwrite.
-# Deliberately not the same as terminal: ``ai_terminal_unusable`` is terminal but
-# repair is still free to revisit it.
+# Recorded decisions that automatic field-review reconciliation must not overwrite.
+# Only ``ai_verified_ml_ready`` is intentionally re-derivable: it is an AI claim
+# whose export contract can become stale.  Explicit rejection, terminal unusable,
+# human evidence decisions and human/final ready decisions are repair locks.
 DFT_REPAIR_LOCKED_STATUSES = frozenset(
     {
         DFT_STATUS_READY_EXPORT,
+        DFT_STATUS_TERMINAL_UNUSABLE,
+        DFT_STATUS_NEEDS_EVIDENCE,
         DFT_STATUS_FINAL_SUBMITTED,
+        *DFT_REJECTED_STATUSES,
         "human_verified",
         "verified",
     }
@@ -127,6 +138,7 @@ DFT_UNKNOWN_STATUS_LABEL = "未识别状态，需人工复核"
 # Display labels (zh-Hans).  Unknown tokens fall back to DFT_UNKNOWN_STATUS_LABEL so
 # a raw database token is never shown to a user.
 DFT_STATUS_LABELS: dict[str, str] = {
+    DFT_STATUS_FIELD_VERIFIED: "字段已核验，待 ML 就绪",
     DFT_STATUS_PENDING: "系统候选",
     DFT_STATUS_UNVERIFIED: "未审核候选",
     DFT_STATUS_PRIMARY_APPLIED: "AI 修复结果已应用，待验证",

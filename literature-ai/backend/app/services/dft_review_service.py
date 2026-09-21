@@ -36,6 +36,7 @@ from app.services.dft_review_imported import DFTImportedOpinionMixin
 from app.services.dft_review_materials import DFTMaterialBindingMixin
 from app.services.review_service import ReviewService
 from app.utils.evidence_anchors import first_pdf_evidence_anchor, has_evidence_anchor
+from app.utils.dft_candidate_status import DFT_STATUS_FIELD_VERIFIED
 from app.utils.review_safety import DFT_REJECTED_STATUSES, is_export_eligible_extraction
 
 
@@ -182,8 +183,25 @@ class DFTResultReviewService(
                     eligible=False,
                     reasons=tuple(dict.fromkeys([*gate.reasons, identity_block_reason])),
                 )
-        if gate.eligible:
+        # The evidence gate alone does not make a record ML-ready: the reaction
+        # contract, the task profile and the unit resolution have to agree too.
+        # ``ML_Ready`` therefore requires both, exactly like the AI path and like
+        # the ML export, instead of claiming readiness the export would drop.
+        from app.services.dft_ml_readiness import evaluate_dft_record_ml_readiness
+
+        readiness = evaluate_dft_record_ml_readiness(
+            self.session,
+            row,
+            extra_reasons=() if identity_block_reason is None else (identity_block_reason,),
+        )
+        if gate.eligible and readiness.ml_ready:
             row.candidate_status = "ML_Ready"
+        elif gate.eligible:
+            # The human closed every required field and the evidence gate passed,
+            # so the honest label is "fields verified, still not ML ready" --
+            # NOT "needs evidence", which would blame the reviewer for a missing
+            # reaction contract / task profile they never controlled.
+            row.candidate_status = DFT_STATUS_FIELD_VERIFIED
         else:
             row.candidate_status = "human_reviewed_needs_evidence"
         self.session.add(row)

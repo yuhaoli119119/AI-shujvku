@@ -22,6 +22,7 @@ from app.schemas.workbench import (
     VerificationSessionSettleRequest,
     WorkbenchPrepareRequest,
 )
+from app.services.chart_review_authority import ChartReviewAuthority
 from app.services.dft_audit_service import DFTCompletenessAuditor
 from app.services.artifact_reliability_audit_service import ArtifactReliabilityAuditService
 from app.services.gemini_audit_service import GeminiAuditService
@@ -54,6 +55,51 @@ def review_center(
         summary_only=summary_only,
         paper_ids=[paper_id] if paper_id else None,
     )
+
+
+@router.get("/review-center/chart-stages")
+def review_center_chart_stages(
+    paper_ids: str = Query(
+        ...,
+        description=(
+            "Comma-separated paper ids. Returns the authoritative whole-paper chart-review "
+            "stage for each; capped at 50 ids per call."
+        ),
+    ),
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, Any]:
+    """Authoritative whole-paper chart stage for a bounded set of papers.
+
+    The review-center list needs the authoritative stage on first paint instead
+    of only after a paper is selected.  Computing it for every row of a
+    5000-row listing is far too expensive, so the caller asks for the rows it
+    actually renders and this endpoint caps the batch size.
+    """
+    parsed: list[UUID] = []
+    for token in str(paper_ids or "").split(","):
+        candidate = token.strip()
+        if not candidate:
+            continue
+        try:
+            parsed.append(UUID(candidate))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"invalid_paper_id:{candidate}") from exc
+    if not parsed:
+        raise HTTPException(status_code=422, detail="paper_ids_required")
+    if len(set(parsed)) > ChartReviewAuthority.MAX_BATCH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"too_many_paper_ids:max={ChartReviewAuthority.MAX_BATCH}",
+        )
+    result = ChartReviewAuthority(session, settings).read_many(parsed)
+    return {
+        "schema_version": "review_center_chart_stages_v1",
+        "scope_type": "paper",
+        "max_batch": ChartReviewAuthority.MAX_BATCH,
+        "stages": result.stages,
+        "errors": result.errors,
+    }
 
 
 @router.get("/review-conflicts")
