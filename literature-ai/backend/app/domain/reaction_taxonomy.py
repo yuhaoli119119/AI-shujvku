@@ -181,8 +181,19 @@ _PROFILES = {
 }
 
 
+_DASH_EQUIVALENTS = {
+    "−": "-",  # MINUS SIGN
+    "–": "-",  # EN DASH
+    "—": "-",  # EM DASH
+    "‐": "-",  # HYPHEN
+    "‑": "-",  # NON-BREAKING HYPHEN
+}
+
+
 def _clean(text: Any) -> str:
     value = str(text or "").strip().lower().replace("∗", "*").replace("＊", "*")
+    for source, target in _DASH_EQUIVALENTS.items():
+        value = value.replace(source, target)
     value = value.replace("Δ", "delta ").replace("δ", "delta ").replace("_", " ")
     return re.sub(r"\s+", " ", value)
 

@@ -217,6 +217,15 @@ class VerificationSessionDFTCandidateMixin:
                         candidate_payload_snapshot=payload,
                     )
                     if issue_lifecycle.is_terminal_issue(issue):
+                        # The audit issue is already terminal, but a candidate
+                        # whose row is the very row that closed issue points at
+                        # still has to record its own materialization.  Leaving it at
+                        # ``pending_ai_verification`` makes the completeness gate
+                        # report the candidate as unhandled and blocks the run.
+                        if existing is not None and issue_lifecycle.terminal_issue_binds_result(
+                            issue, existing
+                        ):
+                            issue_lifecycle.bind_candidate_to_result(candidate, existing)
                         outcome = {
                             "skipped": "terminal_dft_audit_issue",
                             "issue_id": str(issue.id),
@@ -305,6 +314,15 @@ class VerificationSessionDFTCandidateMixin:
                         candidate_payload_snapshot=payload,
                     )
                     if issue_lifecycle.is_terminal_issue(issue):
+                        # The audit issue is already terminal, but a candidate
+                        # whose row is the very row that closed issue points at
+                        # still has to record its own materialization.  Leaving it at
+                        # ``pending_ai_verification`` makes the completeness gate
+                        # report the candidate as unhandled and blocks the run.
+                        if existing is not None and issue_lifecycle.terminal_issue_binds_result(
+                            issue, existing
+                        ):
+                            issue_lifecycle.bind_candidate_to_result(candidate, existing)
                         outcome = {
                             "skipped": "terminal_dft_audit_issue",
                             "issue_id": str(issue.id),

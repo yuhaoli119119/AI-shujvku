@@ -1599,10 +1599,27 @@ class DFTReviewBundleService:
                 run_id=None,
                 actions={"offline_evidence_review_applied"},
             )
+            # V2 completion is authoritative; do not require a second legacy review.
+            v2_receipt = self.session.scalar(
+                select(AuditLog.id)
+                .where(
+                    AuditLog.paper_id == source_paper.id,
+                    AuditLog.action == "paper_review_v2_receipt",
+                )
+                .limit(1)
+            )
             paper_task = options.get("paper_scope") if isinstance(options.get("paper_scope"), dict) else {}
             if paper_task:
                 if paper_task.get("stage_status") in FIGURE_TABLE_REVIEW_READY_STATUSES:
-                    if paper_audit is not None:
+                    current_fingerprint = paper_task.get("current_snapshot_fingerprint")
+                    v2_scope_is_current = (
+                        v2_receipt is not None
+                        and bool(current_fingerprint)
+                        and paper_task.get("completed_snapshot_fingerprint") == current_fingerprint
+                        and int(paper_task.get("unresolved_count") or 0) == 0
+                        and bool((paper_task.get("scope_completion") or {}).get("complete"))
+                    )
+                    if paper_audit is not None or v2_scope_is_current:
                         completed_scopes.append((None, paper_task))
                 elif paper_task.get("completed_snapshot_fingerprint"):
                     blocked_completed_scopes.append(paper_task)

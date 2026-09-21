@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Callable
 from uuid import UUID
 
 from sqlalchemy import or_, select
@@ -411,8 +411,17 @@ class DFTAuditIssueLifecycleService:
             candidate_payload_snapshot=candidate_payload_snapshot,
         )
         if self.is_terminal_issue(locked_issue):
+            # A terminal issue normally stays untouched on re-import.  The one
+            # exception is a candidate whose DFT row is the very row the already
+            # closed issue authoritatively points at: the candidate's own
+            # materialization fact was never written, so it stays stuck at
+            # pending_ai_verification/candidate and the completeness gate reports
+            # it as unhandled forever.  Terminal issues that are not bound to this
+            # row keep the historical no-op contract.
+            if self.terminal_issue_binds_result(locked_issue, row):
+                self.bind_candidate_to_result(locked_candidate, row)
+            self.session.flush()
             return locked_candidate, locked_issue
-        self.bind_candidate_to_result(locked_candidate, row)
         self.bind_missing_issue_to_result(
             locked_issue,
             row,
@@ -719,6 +728,71 @@ class DFTAuditIssueLifecycleService:
         self.session.flush()
         return True
 
+    def close_repair_issue(
+        self,
+        *,
+        issue_id: UUID,
+        reviewer: str,
+        export_gate_resolver: Callable[[Any], Any],
+        expected_paper_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        """Close one repair issue whose bound record passes the live export gate.
+
+        Contract used by :class:`DFTRecordFinalizationService`: the issue is re-read
+        under a row lock, the record gate is resolved from freshly read rows, and
+        nothing is written when the gate fails or the issue is already terminal.
+        """
+        try:
+            wanted = issue_id if isinstance(issue_id, UUID) else UUID(str(issue_id))
+        except (TypeError, ValueError):
+            return {"issue_id": str(issue_id), "closed": False, "reason": "invalid_issue_id"}
+        issue = self.session.scalar(
+            select(DFTAuditIssue).where(DFTAuditIssue.id == wanted).with_for_update()
+        )
+        if issue is None:
+            return {"issue_id": str(wanted), "closed": False, "reason": "issue_not_found"}
+        if expected_paper_id is not None and issue.paper_id != expected_paper_id:
+            return {"issue_id": str(wanted), "closed": False, "reason": "paper_mismatch"}
+        if self.is_terminal_issue(issue):
+            return {
+                "issue_id": str(wanted),
+                "closed": False,
+                "reason": "already_terminal",
+                "status": issue.status,
+                "result_id": str(issue.result_id) if issue.result_id else None,
+            }
+        result_id = issue.result_id
+        if result_id is None:
+            try:
+                result_id = UUID(str(issue.target_id))
+            except (TypeError, ValueError):
+                result_id = None
+        row = self.session.get(DFTResult, result_id) if result_id else None
+        if row is None or row.paper_id != issue.paper_id:
+            return {"issue_id": str(wanted), "closed": False, "reason": "result_missing"}
+        gate = export_gate_resolver(row)
+        if not getattr(gate, "eligible", False):
+            return {
+                "issue_id": str(wanted),
+                "closed": False,
+                "reason": "export_gate_failed",
+                "result_id": str(row.id),
+                "gate_reasons": list(getattr(gate, "reasons", ()) or ()),
+            }
+        closed = self.close_issue(
+            issue,
+            resolved_by=reviewer,
+            resolution_note="ai_verified_record_gate_passed",
+            resolution_code=DFT_RESOLUTION_CODES["verified"],
+        )
+        return {
+            "issue_id": str(wanted),
+            "closed": bool(closed),
+            "result_id": str(row.id),
+            "status": issue.status if closed else None,
+            "reason": None if closed else "close_refused",
+        }
+
     def apply_verify(
         self,
         *,
@@ -964,3 +1038,18 @@ class DFTAuditIssueLifecycleService:
     @staticmethod
     def is_terminal_issue(issue: DFTAuditIssue) -> bool:
         return str(issue.status or "").strip().lower() in DFT_AUDIT_ISSUE_TERMINAL_STATUSES
+
+    @staticmethod
+    def terminal_issue_binds_result(issue: DFTAuditIssue, row: DFTResult) -> bool:
+        """True when a terminal issue authoritatively points at this exact row.
+
+        Used only to finish the candidate-side bookkeeping (status
+        ``materialized`` plus the ``dft_results`` target) that a closed issue
+        prevented from ever being written.  The issue itself is never mutated.
+        """
+
+        if issue.result_id is not None and str(issue.result_id) == str(row.id):
+            return True
+        target_type = str(issue.target_type or "").strip().lower()
+        target_id = str(issue.target_id or "").strip()
+        return target_type == "dft_results" and target_id == str(row.id)

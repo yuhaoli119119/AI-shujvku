@@ -162,3 +162,22 @@ def test_profile_statuses_and_version_are_stable():
         assert profile.version == PROFILE_VERSION == "reaction_profiles_v1"
     assert get_reaction_profile("UNKNOWN").status == "quarantine"
     assert normalize_reaction_type("not enough context") == "UNKNOWN"
+
+
+def test_unicode_dashes_in_li_s_labels_normalize_to_sulfur_reduction():
+    """ACS PDFs typeset ``Li-S`` with U+2212/U+2013/U+2014 minus/dash glyphs.
+
+    Regression for the B0091 platform defect: ``_clean`` only handled ASCII
+    hyphens, so the printed ``Li−S`` label matched no profile and the record was
+    quarantined as UNKNOWN.
+    """
+
+    for label in ["Li\u2212S", "Li\u2013S", "Li\u2014S", "Li\u2010S", "Li\u2011S"]:
+        assert normalize_reaction_type(label) == "SRR_LiS", label
+    assert normalize_reaction_type("lithium\u2212sulfur") == "SRR_LiS"
+    classified = classify_reaction_record(
+        {"reaction_step": "discharge step 1"},
+        paper_context="Li\u2212S battery sulfur reduction",
+    )
+    assert classified["reaction_type"] == "SRR_LiS"
+    assert classified["reason"] == "reaction_context"

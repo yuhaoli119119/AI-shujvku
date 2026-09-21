@@ -340,6 +340,62 @@ def test_terminal_bind_is_true_noop_for_issue_and_source_relation(setup_test_db,
         assert session.scalar(sa.select(sa.func.count()).select_from(DFTAuditIssueSource)) == 0
 
 
+def test_terminal_issue_bound_to_row_finishes_candidate_materialization(setup_test_db):
+    """A closed issue already bound to the row must not strand the candidate.
+
+    Regression for the B0091 platform defect: the issue was closed before the
+    candidate binding was written, so the candidate stayed at
+    ``pending_ai_verification`` and the completeness gate reported
+    ``unhandled_dft_candidates`` forever, blocking the whole run.
+    """
+
+    with Session(setup_test_db) as session:
+        paper = _paper(session, "Terminal bound materialization")
+        candidate = _candidate(
+            session,
+            paper,
+            corrected={
+                "material": "Fe-GDY",
+                "adsorbate": "Li2S4",
+                "property_type": "adsorption_energy",
+                "value": -1.2,
+                "unit": "eV",
+            },
+        )
+        row = _v2_row(session, paper)
+        issue = DFTAuditIssue(
+            paper_id=paper.id,
+            target_type="dft_results",
+            target_id=str(row.id),
+            result_id=row.id,
+            issue_type="missing_dft_result",
+            severity="high",
+            status="closed",
+            source_candidate_ids=[str(candidate.id)],
+            fingerprint=uuid4().hex,
+            resolution_note="closed_before_candidate_binding",
+        )
+        session.add(issue)
+        session.flush()
+
+        lifecycle = DFTAuditIssueLifecycleService(session)
+        lifecycle.reconcile_candidate_binding(
+            candidate=candidate,
+            issue=issue,
+            row=row,
+            identity=lifecycle.identity_for_result(row),
+            repaired_by="pytest",
+            resolution_note="materialized_dft_result",
+        )
+
+        assert candidate.status == "materialized"
+        assert candidate.materialized_target_type == "dft_results"
+        assert candidate.materialized_target_id == str(row.id)
+        # The terminal issue itself stays untouched.
+        assert issue.status == "closed"
+        assert issue.result_id == row.id
+
+
 def test_materialization_terminal_issue_skips_all_entrypoint_side_effects(setup_test_db):
     with Session(setup_test_db) as session:
         paper = _paper(session, "Terminal materialize no-op")
