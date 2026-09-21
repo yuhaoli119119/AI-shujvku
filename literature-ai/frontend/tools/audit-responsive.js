@@ -179,6 +179,15 @@ async function measureOne(browser, { size, page }) {
   if (OUT) {
     fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     console.log('WROTE ' + OUT);
+    /* 结果数组旁边的 sidecar 元数据：冻结基线时要连"当时的量法"一起存，
+       否则以后拿不同 SETTLE 的结果去对比会得出假差异。 */
+    const meta = {
+      base: BASE, settle: SETTLE, stable: STABLE, stableMax: STABLE_MAX, workers: WORKERS,
+      extra: EXTRA, sizes: SIZES, pages: PAGES, count: results.length,
+      finishedAt: new Date().toISOString(), totalMs: total,
+      problems: { ovf: results.filter(r => r.hOverflow).length, errs: results.filter(r => (r.errors || []).length).length, bad: results.filter(r => (r.bad || []).length).length, fail: results.filter(r => !r.ok).length },
+    };
+    fs.writeFileSync(OUT.replace(/\.json$/, '') + '.meta.json', JSON.stringify(meta, null, 1));
   }
   process.exit(problems.length ? 1 : 0);
 })().catch(e => { console.error('AUDIT-ERROR', e && e.stack || e); process.exit(2); });

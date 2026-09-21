@@ -1,0 +1,59 @@
+{
+ "baselines": [
+  {
+   "name": "frozen-2026-09-21a",
+   "frozenAt": "2026-09-21T05:09:17.167Z",
+   "records": 102,
+   "meta": null
+  },
+  {
+   "name": "ui-2026-09-21",
+   "frozenAt": "2026-09-21T05:13:25.141Z",
+   "records": 102,
+   "meta": {
+    "base": "http://172.18.0.6:8000",
+    "settle": 6000,
+    "stable": 2500,
+    "stableMax": 20000,
+    "workers": 8,
+    "extra": "",
+    "sizes": [
+     "390x844",
+     "768x1024",
+     "820x1180",
+     "1024x768",
+     "1280x900",
+     "1440x900"
+    ],
+    "pages": [
+     "ai_writer",
+     "content_knowledge",
+     "dashboard",
+     "dft_audit_center",
+     "dft_database",
+     "external_analysis_workbench",
+     "extraction_workflow",
+     "ingestion",
+     "literature_library",
+     "literature_screening",
+     "mechanism_knowledge",
+     "paper_detail",
+     "review_center",
+     "settings",
+     "visuals",
+     "readonly",
+     "share"
+    ],
+    "count": 102,
+    "finishedAt": "2026-09-21T05:12:36.587Z",
+    "totalMs": 193013,
+    "problems": {
+     "ovf": 0,
+     "errs": 0,
+     "bad": 0,
+     "fail": 0
+    }
+   }
+  }
+ ]
+}
