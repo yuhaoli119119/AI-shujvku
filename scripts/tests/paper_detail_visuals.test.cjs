@@ -23,7 +23,7 @@ test('same PDF, full figure and page display one clean crop; alternate remains a
  const s=sandbox(), inv=s.inventory();assert.equal(inv.figures.length,1);assert.equal(inv.figures[0].image_path,'clean.png');assert.equal(inv.alternateFigures[0]._currentAsset.id,'current');
 });
 test('matching number never merges another PDF edition, SI, page, subfigure or paper',()=>{
- for(const mutate of [s=>s.state.rebuildFiles[0].sha256='other',s=>s.state.rebuildFiles[0].role='si',s=>s.asset.page_numbers=[4],s=>s.asset.subfigure_label='a',s=>s.asset.paper_id='foreign',s=>s.original.paper_id='foreign',s=>s.state.paper.source_pdf_sha256=null]) {
+ for(const mutate of [s=>s.state.rebuildFiles[0].sha256='other',s=>s.state.rebuildFiles[0].role='si',s=>s.asset.page_numbers=[4],s=>s.asset.subfigure_label='a',s=>s.asset.paper_id='foreign',s=>s.original.paper_id='foreign',s=>delete s.original.paper_id,s=>s.state.paper.source_pdf_sha256=null]) {
   const s=sandbox(); mutate(s);const inv=s.inventory();assert.equal(inv.figures.length,2);assert.equal(inv.alternateFigures.length,0);
  }
 });

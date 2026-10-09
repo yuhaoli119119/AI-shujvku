@@ -108,6 +108,7 @@ class PaperTableResponse(BaseModel):
 
 class PaperFigureResponse(BaseModel):
     id: UUID
+    paper_id: UUID | None = None
     caption: str | None = None
     image_path: str | None = None
     asset_url: str | None = None
