@@ -6,6 +6,24 @@ spec=importlib.util.spec_from_file_location('github_deploy',Path(__file__).paren
 deploy=importlib.util.module_from_spec(spec);spec.loader.exec_module(deploy)
 
 class DeploymentBoundaryTests(unittest.TestCase):
+    def test_repository_root_layout_is_supported(self):
+        checkout=Path('/opt/literature-ai/releases')/('a'*40)
+        files={checkout/'docker-compose.yml',checkout/'backend/app/main.py'}
+        with patch.object(Path,'is_file',lambda p:p in files):
+            self.assertEqual(deploy.application_root(checkout),checkout)
+
+    def test_frozen_nested_layout_remains_deployable(self):
+        checkout=Path('/opt/literature-ai/releases')/('a'*40)
+        app=checkout/'literature-ai'
+        files={app/'docker-compose.yml',app/'backend/app/main.py'}
+        with patch.object(Path,'is_file',lambda p:p in files):
+            self.assertEqual(deploy.application_root(checkout),app)
+
+    def test_missing_application_cannot_be_deployed(self):
+        with patch.object(Path,'is_file',return_value=False):
+            with self.assertRaisesRegex(RuntimeError,'does not contain'):
+                deploy.application_root(Path('/opt/literature-ai/releases')/('a'*40))
+
     def test_code_and_build_come_from_release_while_data_and_credentials_stay(self):
         runtime=Path('/opt/literature-ai');app=runtime/'releases'/('a'*40)/'literature-ai'
         cfg={'services':{'backend':{'build':{'context':str(runtime),'dockerfile':'backend/Dockerfile'},'volumes':[

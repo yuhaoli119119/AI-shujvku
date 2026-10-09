@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
-TASK_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "$TASK_ROOT/literature-ai/deploy/scripts/github_deploy.py" ]]; then
-  exec python3 "$TASK_ROOT/literature-ai/deploy/scripts/github_deploy.py" "$@"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ $# -gt 0 ]]; then
+  exec python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" "$@"
 fi
-if [[ -f "$TASK_ROOT/github_deploy.py" ]]; then
-  exec python3 "$TASK_ROOT/github_deploy.py" "$@"
-fi
-exec python3 /opt/literature-ai/deploy/scripts/github_deploy.py "$@"
+COMMIT="$(git -C "$PROJECT_DIR" rev-parse HEAD)"
+PLAN="$(python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" plan "$COMMIT")"
+PLAN_SHA="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["plan_sha256"])' <<< "$PLAN")"
+exec python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" apply "$COMMIT" --plan-sha256 "$PLAN_SHA"

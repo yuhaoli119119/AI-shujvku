@@ -12,6 +12,12 @@ def write_private(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     with os.fdopen(fd,'w') as f:f.write(data)
+def application_root(checkout):
+    # Support both the single-directory repository and older frozen commits.
+    for app in (checkout,checkout/'literature-ai'):
+        if (app/'docker-compose.yml').is_file() and (app/'backend/app/main.py').is_file():
+            return app
+    raise RuntimeError('GitHub commit does not contain a Literature AI application')
 def fetch(runtime,sha):
     checkout=runtime/'releases'/sha
     if not checkout.exists():
@@ -26,7 +32,7 @@ def fetch(runtime,sha):
     if head is None:run(['git','-C',str(checkout),'checkout','--detach','--quiet',sha])
     elif head!=sha:raise RuntimeError('Release directory belongs to another commit')
     if run(['git','-C',str(checkout),'status','--porcelain','--untracked-files=all']):raise RuntimeError('Release checkout is dirty')
-    return checkout/'literature-ai'
+    return application_root(checkout)
 def configuration(runtime,app,sha):
     raw=run(['docker','compose','-p','literature-ai','--project-directory',str(runtime),'--env-file',str(runtime/'.env'),'-f',str(app/'docker-compose.yml'),'config','--format','json'],stderr=subprocess.PIPE)
     cfg=json.loads(raw)
@@ -61,7 +67,7 @@ def verify(runtime,sha):
         if info['Config']['Labels'].get('org.opencontainers.image.revision')!=sha:raise RuntimeError('Container revision mismatch: '+name)
         for mount in info['Mounts']:
             if mount['Destination'] in {'/app','/frontend','/prompts'}:
-                expected=str(runtime/'releases'/sha/'literature-ai')+'/'
+                expected=str(application_root(runtime/'releases'/sha))+'/'
                 if not mount['Source'].startswith(expected) or mount['RW']:raise RuntimeError('Uncontrolled source mount: '+name)
     result=json.loads(run(['docker','exec','literature-ai-backend-1','python','-c',"import json,urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').read().decode())"]))
     if result.get('git_commit')!=sha:raise RuntimeError('Backend health revision mismatch')

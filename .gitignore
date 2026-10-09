@@ -6,101 +6,76 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
-literature-ai/backend/.pytest-tmp/
 .venv/
 venv/
+*.class
 
 # Environment configurations
 .env
-.mcp.json
-literature-ai/.env
 
-# Node modules
-node_modules/
+# Gateway basic-auth credential files (never commit password hashes)
+*.htpasswd
+deploy/nginx/*.htpasswd
 
-# Local agent and test-run artifacts
-.reasonix/
-literature-ai/test-results/
-literature-ai/backend/scratch/**
-!literature-ai/backend/scratch/
-!literature-ai/backend/scratch/.gitkeep
-literature-ai/outputs/tmp/**
-!literature-ai/outputs/tmp/
-!literature-ai/outputs/tmp/.gitkeep
-literature-ai/outputs/exports/**
-!literature-ai/outputs/exports/
-!literature-ai/outputs/exports/.gitkeep
-literature-ai/outputs/B*.json
-literature-ai/outputs/B*.zip
-literature-ai/tmp/
-/local/**
-!/local/
-!/local/README.md
-
-# Root-level ad-hoc analysis previews and temp outputs
-/_*.png
-/_*.jpg
-/_*.jpeg
-/_*.webp
-/_*.gif
-/_*.bmp
-/_*.svg
-/tmp_*
-/tmp*.json
-/tmp*.js
-/page*_analysis.txt
-/page*_blocks.txt
-/page*_blocks.json
-/page*.json
-/paper_detail.json
-/figs_analysis.json
-/reasonix.toml
-/[ab][0-9][0-9][0-9][0-9]_*.json
-/C*temp_page*_analysis.txt
-literature-ai/ctx.json
-literature-ai/paper.json
-test-results/
-
-# Local run metadata
 *#U*
 D#Uf03a*
-literature-ai/backend/D*/
-config.json
+backend/D*/
 
-# Literature AI storage and data directories (untracked)
-literature-ai/storage/
-literature-ai/data/
-literature-ai/backend/data/
-literature-ai/backend/tests/data/
-literature-ai/storage/docling_cache/
+# Literature AI storage and data directories
+storage/
+data/
+backend/data/
+backend/tests/data/
+storage/docling_cache/
 **/storage/
 **/data/
 **/docling_cache/
 
-# Document parsing and metadata files (exclude intermediates)
+# Document parsing and metadata files
 *.pdf
 *.docling.json
 *.tei.xml
 
-# Local backup & patches
-*backup*/
-literature-ai/backend/reports/*backup*/
-literature-ai_code_backup_*
-patch*.py
-diff.txt
-fix.py
-.workbuddy/
-111/
-backend.log
+# Frontend test artifacts
+frontend/test-results/
+frontend/pw-out-*/
+frontend/playwright-report/
+backend/outputs/tmp/
 
-# Local audit, benchmark, and browser artifacts
-/outputs/
-/output/
-/temp/
+# Database dumps
+*.dump
+
+# Server-only state; never upload business data, secrets or historical workspaces
+.env.*
+!.env.example
+.mcp.json
+node_modules/
+outputs/
+deliverables/
+artifacts/
+backend/reports/
+backend/outputs/
+backend/scratch/
+releases/
+deploy-state/
+DEPLOYED_GITHUB_COMMIT*
+.history/
+.browser-runtime/
+source/
+si_rows/
+results_cell*.txt
+/debug-figure.png
+*.dump
+*.sql.gz
 *.tgz
 *.tar.gz
-/.playwright-cli/
-literature-ai/backend/outputs/exports/
-literature-ai/frontend/debug.log
-literature-ai/frontend/baseline*.json
+*.zip
+*.log
+*.key
+*.pem
+*.sqlite
+*.sqlite3
 
+# Existing local IDE guidance and one-off operations scripts
+/GEMINI.md
+/backend/.review_v2_prod_apply.py

@@ -2,7 +2,7 @@
 
 本文把"总指挥在外部派任务、Codex-web 在服务器上执行"这条流程固化下来，并提供可复用脚本。
 
-- 脚本：`/opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs`（运行目录同名副本：`/opt/literature-ai/scripts/codex_web_dispatch.cjs`）
+- 脚本：`/opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs`（运行目录同名副本：`/opt/literature-ai/scripts/codex_web_dispatch.cjs`）
 - 通道：复用**现有** Codex-web 服务的本机 IPC 桥，**不修改、不重启、不新起独立 app-server 冒充它**。
 
 ## 1. 通道原理（已实测）
@@ -79,7 +79,7 @@ thread/start  →  thread/goal/set {objective, status:"active"}  →  turn/start
 
 ```bash
 # 验收通过后再执行（脚本会先打印提醒）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs goal \
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs goal \
   --thread <threadId> --complete
 ```
 
@@ -104,7 +104,7 @@ thread/start  →  thread/goal/set {objective, status:"active"}  →  turn/start
 若总指挥不在服务器上，就通过 SSH 在服务器内调用（别名按本机 `~/.ssh/config` 实际配置，例如 `ai-shujvku-cf`）：
 
 ```bash
-ssh ai-shujvku-cf 'cd /opt/ai-shujvku-src && /opt/node22/bin/node scripts/codex_web_dispatch.cjs models'
+ssh ai-shujvku-cf 'cd /opt/AI-shujvku/literature-ai && /opt/node22/bin/node scripts/codex_web_dispatch.cjs models'
 ```
 
 服务器侧可核验的事实（2026-09-22 实测）：sshd 监听 `0.0.0.0:22`；账号 `2401liyuhao` 属于 `wheel` + `docker` 组且 `sudo` 免密；
@@ -114,43 +114,43 @@ ssh ai-shujvku-cf 'cd /opt/ai-shujvku-src && /opt/node22/bin/node scripts/codex_
 
 ```bash
 # 只读：列出模型（最轻量的连通性自检）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs models
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs models
 
 # 新建任务 + 目标模式 + 首轮指令（cwd 必须在白名单内）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs create \
-  --cwd /opt/ai-shujvku-src --prompt "任务文本" --objective "完成标准"
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs create \
+  --cwd /opt/AI-shujvku/literature-ai --prompt "任务文本" --objective "完成标准"
 
 # 用服务器上的文件当 prompt（长任务建议这样）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs create \
-  --cwd /opt/ai-shujvku-src --prompt-file /opt/literature-ai/outputs/dispatch-tasks/task-001.md
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs create \
+  --cwd /opt/AI-shujvku/literature-ai --prompt-file /opt/literature-ai/outputs/dispatch-tasks/task-001.md
 
 # 读状态（同时打印 goal 与 turn；断线后也用这个）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs summary --thread <threadId>
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs status --thread <threadId> --json
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs summary --thread <threadId>
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs status --thread <threadId> --json
 
 # 完整 JSON（显式要求时才回传完整 turn/tool 数据）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs read --thread <threadId> --json
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs read --thread <threadId> --json
 
 # 只查目标
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs goal --thread <threadId>
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs goal --thread <threadId>
 
 # 改目标 / 暂停 / 验收完成
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs goal --thread <threadId> --objective "新目标" --status active
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs goal --thread <threadId> --complete
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs goal --thread <threadId> --objective "新目标" --status active
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs goal --thread <threadId> --complete
 
 # 同一任务追加指令（不是新建、不是 fork）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs followup \
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs followup \
   --thread <threadId> --prompt "补充要求" --objective "新的明确完成标准"
 
 # 阻塞等待 goal 与 turn 达到可停止状态（超时不重发，只提示继续 read）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs wait \
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs wait \
   --thread <threadId> --timeout 1800 --interval 5
 
 # 中断正在跑的一轮（派错了、跑偏了、要止损时用；不影响其它线程）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs interrupt --thread <threadId>
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs interrupt --thread <threadId>
 
 # 暂停目标（不再围绕目标自动续跑）
-/opt/node22/bin/node /opt/ai-shujvku-src/scripts/codex_web_dispatch.cjs goal --thread <threadId> --status paused
+/opt/node22/bin/node /opt/AI-shujvku/literature-ai/scripts/codex_web_dispatch.cjs goal --thread <threadId> --status paused
 ```
 
 - `create` / `followup` 会打印并保存 `threadId`、`turnId`、`objective`；state 默认落在
@@ -166,7 +166,7 @@ ssh ai-shujvku-cf 'cd /opt/ai-shujvku-src && /opt/node22/bin/node scripts/codex_
 - `wait` 同时观察 goal 与最后 turn。turn 已结束但 goal 仍为 `active` 时继续观察；`failed/interrupted`
   turn 如实输出并退出，不会无限空转；等待到时仍活跃则以超时退出且不重发。
 - **超时不盲目重发 `create`/`turn/start`**：脚本会打印已拿到的 ID，让你改用 `read` 跟踪，避免重复任务。
-- `cwd` 只允许 `/opt/ai-shujvku-src` 或 `/opt/literature-ai`；不传 `--cwd` 时默认 `/opt/ai-shujvku-src`。
+- `cwd` 只允许 `/opt/AI-shujvku/literature-ai` 或 `/opt/literature-ai`；不传 `--cwd` 时默认 `/opt/AI-shujvku/literature-ai`。
 - `interrupt` 只中断该线程当前这一轮，不删线程、不影响其它任务；派错任务时优先用它止损，不要用新建任务"覆盖"。
 
 ### 退出码

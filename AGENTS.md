@@ -23,10 +23,8 @@
    - 在服务器本地：可直接操作运行目录、容器、数据库，但仍遵守"改数据先备份、删除先列名确认"等安全规则。
    - 在远程电脑：禁止本地创建/缓存项目代码与产物，所有代码修改、测试、数据操作一律通过 SSH 在服务器执行；SSH 连不上时停止依赖服务器的工作，不降级为本地处理（见顶部"仅服务器执行"守卫段）。
   - 必须如实报告实际位置，不得假设、不得谎报。
-2. **GitHub 是代码版本与部署来源（用户明确要求，2026-10-09）。** 代码仓库 `yuhaoli119119/AI-shujvku` 的明确 commit 是发布依据。运行目录 `/opt/literature-ai` 是部署与持久数据位置；服务器手工修改不能作为发布版本。业务数据真源仍为 PostgreSQL，服务器执行限定保持有效。新流程见 `literature-ai/docs/GITHUB_DEPLOYMENT.md`（运行目录内为 `docs/GITHUB_DEPLOYMENT.md`）。源码提交、发布回执与真实域名页面分别核验，不能仅凭提交宣称上线。
-3. **两个目录可能不一致，不得假设一致。** 判断版本必须实测
-  `git -C /opt/ai-shujvku-src rev-parse HEAD`、`git -C /opt/ai-shujvku-src status` 并对比运行目录里的实际文件；
-  有差异要**如实报告**，禁止写成"两处完全相同、已部署同一版本"。
+2. **GitHub 是代码版本与部署来源（用户明确要求，2026-10-09）。** 代码仓库 `yuhaoli119119/AI-shujvku` 的明确 commit 是发布依据。运行目录 `/opt/literature-ai` 是部署与持久数据位置；服务器手工修改不能作为发布版本。业务数据真源仍为 PostgreSQL，服务器执行限定保持有效。唯一开发、提交与部署入口为 `/opt/AI-shujvku/literature-ai`（别名 `/opt/literature-ai`），本目录本身是 Git 工作树。新流程见 `docs/GITHUB_DEPLOYMENT.md`。源码提交、发布回执与真实域名页面分别核验，不能仅凭提交宣称上线。
+3. **只在一个项目目录开发（用户明确要求，2026-10-09）。** 在 `/opt/AI-shujvku/literature-ai` 修改代码、Git 提交与上传。禁止再用 `/opt/ai-shujvku-src` 或另建 source 开发目录。`data/`、`outputs/`、`deliverables/`、`.env`、凭据、`.history/`、`releases/` 和 `deploy-state/` 保留在服务器且不提交。网站只运行从 GitHub 指定提交生成的内部只读发布目录；它是部署产物，不是第二个开发项目。核验 `git rev-parse HEAD`、`git status`、`DEPLOYED_GITHUB_COMMIT` 与真实页面，未提交修改不代表已经上线。
 4. **用户实际看到的页面是前端验收的最高标准。** 用户说不对就是不对，不得用"本地改了""测试过了""接口 200"反驳。
 5. 未完成服务器验证与真实页面验证时，只能报告“已完成本地部分，服务器/用户侧尚未验收”；
    **禁止**使用“已完成”“已闭环”“已交付”。
@@ -39,7 +37,7 @@
 - **总指挥**：在外部，负责分派任务、验收、决定目标是否完成。额度有限，因此任务应尽量一次派清、让执行方自行持续推进。
 - **Codex-web**：在服务器上执行被派发的任务，只做本轮任务范围内的事。
 - 派发通道与脚本：`scripts/codex_web_dispatch.cjs`，用法与边界见
-  [`literature-ai/docs/CODEX_WEB_DISPATCH.md`](literature-ai/docs/CODEX_WEB_DISPATCH.md)。
+  [`docs/CODEX_WEB_DISPATCH.md`](docs/CODEX_WEB_DISPATCH.md)。
 - **派发默认使用目标模式**（`thread/start` → `thread/goal/set(active)` → `turn/start`）；
   goal 只有在**验收齐全**后才置 `complete`，不得自行提前标记完成。
 - **每次派发后必须设置回查机制**（例如总指挥侧每 10 分钟回查本任务与验收任务：无变化静默、完成或失败才通知）。
@@ -48,7 +46,7 @@
 ### 任务隔离（硬规则）
 
 1. 一个任务只在一个 Codex-web 线程里做；**不分叉**（禁用 `thread/fork`），不加载其它会话历史，不创建子任务。
-   - **文献批次协调的精准例外（2026-10-03，本对话授权）**：当前协调对话可按冻结文献清单串行创建每篇独立任务，至多一篇实际执行中。每篇执行任务只处理自身 paper_id，不再创建子任务、不 fork、不共享其他会话历史，不并行写同一篇；仅恢复/续接该批创建的同篇任务。源码开发本轮仍禁止创建子代理或真实任务。其他任务及服务器执行、删除授权、凭据和生产真源规则不变。操作见 [`literature-ai/docs/BATCH_COORDINATION.md`](literature-ai/docs/BATCH_COORDINATION.md)。
+   - **文献批次协调的精准例外（2026-10-03，本对话授权）**：当前协调对话可按冻结文献清单串行创建每篇独立任务，至多一篇实际执行中。每篇执行任务只处理自身 paper_id，不再创建子任务、不 fork、不共享其他会话历史，不并行写同一篇；仅恢复/续接该批创建的同篇任务。源码开发本轮仍禁止创建子代理或真实任务。其他任务及服务器执行、删除授权、凭据和生产真源规则不变。操作见 [`docs/BATCH_COORDINATION.md`](docs/BATCH_COORDINATION.md)。
 2. `thread/resume` 只允许恢复**你自己创建的同一任务**，不是 fork、不是借用别人的会话。
 3. 派发出去的子代理看不到本对话，任务提示必须自包含；**绝不允许两个执行单元同时改同一个文件**。
 4. 并行度默认 2～4 个，按互相独立的文件拆分；不要"为了十几个小活开十几个代理"。
@@ -86,8 +84,8 @@
 ## 五、当前状态与重建计划
 
 - **目标流程**：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析。
-  规范见 [`literature-ai/docs/PIPELINE_TARGET.md`](literature-ai/docs/PIPELINE_TARGET.md) 与
-  [`literature-ai/docs/DATA_RULES.md`](literature-ai/docs/DATA_RULES.md)。
+  规范见 [`docs/PIPELINE_TARGET.md`](docs/PIPELINE_TARGET.md) 与
+  [`docs/DATA_RULES.md`](docs/DATA_RULES.md)。
 - **重建计划核心已实现并上线**（2026-09-23）：新上传不触发旧自动解析链；一键 AI 提取（目标模式）派发 Codex-web 线程，任务完成后自动写回旧详情页图片与解读；新流程四页（AI 提取、图表资料、数据表、汇总分析）已上线。
 - 旧审核链路代码（`review_center`、`dft-workflow`、`content_knowledge`、`verification`）仍保留，但导航入口已隐藏，不再对新上传触发。
 - A0019 已验证：37 子图、58 数据行、75 数值、105 来源，6 张整图写回旧详情页。
@@ -95,7 +93,7 @@
 
 ## 六、文档、历史产物与备份
 
-- 现行文档入口：[`literature-ai/docs/README.md`](literature-ai/docs/README.md)。
+- 现行文档入口：[`docs/README.md`](docs/README.md)。
 - **历史产物**（`backend/reports/`、`deliverables/`、`outputs/` 中的报告与导出快照）保留但**不是当前规范**。
 - **被清洗的旧文档**（`plans/`、`audits/`、`mcp/`、`schema/`、`schemas/`、`ui/` 等 51 个文件 + 根入口文件旧版）
   已随 2026-09-22 备份移出，可用以下方式找回：
@@ -108,14 +106,14 @@ cd /home/2401liyuhao/backups/literature-ai/docs-cleanup-<UTCtimestamp> && sha256
   `MANIFEST.tsv` 记录 `sha256 / 字节数 / 相对路径`，`DELETED-files-list.txt` 是本轮移出的精确文件清单，
   `README-restore.md` 写恢复方式。**旧审计与旧工具手册只能当历史材料，不得当现行规范。**
 
-- 已存在的未提交改动（`literature-ai/backend/app/services/ide_prompt_service.py`、
-  `literature-ai/backend/tests/test_ide_prompt_service.py`、`literature-ai/frontend/pages/review_center/page.js`）
+- 已存在的未提交改动（`backend/app/services/ide_prompt_service.py`、
+  `backend/tests/test_ide_prompt_service.py`、`frontend/pages/review_center/page.js`）
   与未跟踪目录 `.openhands/` 是**有意保留**的工作状态，不要在无关任务里回滚或清理。
 
 ## 七、接手第一步（任何 AI）
 
 1. 读本文件（含顶部守卫段）→ 再读 [`SERVER_ACCESS.md`](SERVER_ACCESS.md) → 再读
-   [`literature-ai/docs/README.md`](literature-ai/docs/README.md)。
+   [`docs/README.md`](docs/README.md)。
 2. 判断任务类型：改数据/迁移/清理 → 先备份并取得同意；改代码 → 明确影响范围与生效方式；只读查询 → 不动数据。
 3. 数据真源只有服务器 PostgreSQL `literature_ai` 库；文件、向量、PDF 都是派生。
 4. 开工前发现现状与本文件不符，**以服务器实际状态为准并回头修订本文件**，不要凭文档臆测。

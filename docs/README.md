@@ -20,8 +20,7 @@
 | [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md) | 工作台真实登录（2026-09-21 上线）；**现行且保持不动** |
 
 上游规则（先读）：`AGENTS.md`（协作规则、角色与派发、安全与删除边界）、`README.md`（仓库/目录入口）、
-`SERVER_ACCESS.md`（服务器接入事实）。这三份在源码工作区 `/opt/ai-shujvku-src/` 与运行目录 `/opt/literature-ai/` 下同名存在；
-本目录内另有 `../AGENTS.md` 与 `../README.md` 作为上一级入口。
+`SERVER_ACCESS.md`（服务器接入事实）。这三份均在唯一项目目录 `/opt/AI-shujvku/literature-ai/`；`/opt/literature-ai/` 是同一目录别名。
 
 ## 当前状态（必须如实转述）
 

@@ -14,8 +14,8 @@
  *
  * 用法：
  *   node codex_web_dispatch.cjs models   # 只读连通性自检
- *   node codex_web_dispatch.cjs create   --cwd /opt/ai-shujvku-src --prompt "任务文本" [--objective "..."]
- *   node codex_web_dispatch.cjs create   --cwd /opt/ai-shujvku-src --prompt-file /tmp/task.md
+ *   node codex_web_dispatch.cjs create   --cwd /opt/AI-shujvku/literature-ai --prompt "任务文本" [--objective "..."]
+ *   node codex_web_dispatch.cjs create   --cwd /opt/AI-shujvku/literature-ai --prompt-file /tmp/task.md
  *   node codex_web_dispatch.cjs read     --thread <threadId> [--json]
  *   node codex_web_dispatch.cjs summary  --thread <threadId>
  *   node codex_web_dispatch.cjs status   --thread <threadId>
@@ -40,11 +40,11 @@ const HOST_ID = process.env.CODEX_WEB_HOST_ID || "local";
 const CHANNEL_FROM_VIEW = "codex_desktop:message-from-view";
 const CHANNEL_FOR_VIEW = "codex_desktop:message-for-view";
 
-const CWD_WHITELIST = ["/opt/ai-shujvku-src", "/opt/literature-ai"];
-const DEFAULT_CWD = "/opt/ai-shujvku-src";
+const CWD_WHITELIST = ["/opt/AI-shujvku/literature-ai", "/opt/literature-ai"];
+const DEFAULT_CWD = "/opt/AI-shujvku/literature-ai";
 const DEFAULT_STATE_DIR =
   process.env.CODEX_WEB_DISPATCH_STATE ||
-  path.join(os.homedir(), ".local", "state", "codex-web-dispatch");
+  "/opt/AI-shujvku/literature-ai/outputs/codex-web-dispatch";
 
 const GOAL_STATUSES = [
   "active",
@@ -841,7 +841,7 @@ async function main() {
       default:
         console.log(
           "用法: codex_web_dispatch.cjs <models|create|read|status|summary|goal|followup|interrupt|wait> [选项]\n" +
-            "  create   --cwd /opt/ai-shujvku-src --prompt \"...\" | --prompt-file <path> [--objective \"...\"] [--model <id>]\n" +
+            "  create   --cwd /opt/AI-shujvku/literature-ai --prompt \"...\" | --prompt-file <path> [--objective \"...\"] [--model <id>]\n" +
             "  read     --thread <threadId> [--json]（默认摘要；--json 为完整 JSON）\n" +
             "  summary  --thread <threadId>（低输出摘要）\n" +
             "  goal     --thread <threadId> [--objective \"...\"] [--status active|paused|blocked|complete] [--complete]\n" +
