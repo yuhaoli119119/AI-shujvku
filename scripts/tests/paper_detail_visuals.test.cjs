@@ -45,3 +45,23 @@ test('stored and bound readings keep core and evidence inside collapsed details'
  const current={type:'current_scientific',asset:s.asset,summary:'SHORT',core:'LONG CURRENT',subfigures:[],locators:[],uncertainties:[],chinese:true};s.context.reading=current;
  result=vm.runInContext('renderFigureReadingHtml(reading)',s.context);assert(result.indexOf('LONG CURRENT')>result.indexOf('<details'));assert(!/<details[^>]*\bopen\b/.test(result));
 });
+function renderSandbox(s) {
+ const elements=new Map();
+ s.context.document={getElementById:id=>{if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',dataset:{}});return elements.get(id);}};
+ s.context.API_BASE='/api/papers';s.state.rebuildStatus='ready';
+ s.context.renderFigureDetailCard=(figure,index)=>`<div class="pd-figure-card" data-figure-index="${index}"><img src="${figure.image_path || figure.asset_url}"></div>`;
+ s.context.renderCurrentData=()=>{};
+ for(const name of ['validPdfPage','renderPipeTable','currentResultsPresent','currentScientificReading','renderStoredPaperTable','renderCurrentFigures'])vm.runInContext(functionSource(name),s.context);
+ vm.runInContext('renderCurrentFigures()',s.context);
+ return elements;
+}
+test('final reader has one figure gallery and displays table cells and footnotes without screenshots',()=>{
+ const s=sandbox();s.state.paper.tables=[{id:'t',paper_id:'paper',caption:'Table 1 Comparison of Eb (eV)',page:6,markdown_content:'| Material | Eb (eV) |\n| --- | --- |\n| WN4@G/TiS2 | 0.41 a |\n\na NEB method; b predicted value.'}];
+ s.state.rebuildAssets.push({...s.asset,id:'t-current',asset_type:'table',figure_label:'Table 1',page_numbers:[6]}, {...s.asset,id:'t-old',asset_type:'table',provenance:{lifecycle:'superseded'}});
+ const els=renderSandbox(s),fig=els.get('figuresList').innerHTML,tables=els.get('tablesList').innerHTML;
+ assert.equal(s.state.galleryFigures.length,1);assert(!fig.includes('其他裁剪版本'));assert(!fig.includes('历史'));assert(!tables.includes('<img'));assert(!tables.includes('pd-table-transcription'));assert.match(tables,/<table/);assert(tables.includes('0.41 a'));assert(tables.includes('a NEB method; b predicted value.'));
+});
+test('table without stored cells gives its PDF source and an explicit missing-text message',()=>{
+ const s=sandbox();s.state.rebuildAssets.push({...s.asset,id:'t-current',asset_type:'table',figure_label:'Table 1',page_numbers:[6]});
+ const tables=renderSandbox(s).get('tablesList').innerHTML;assert(tables.includes('尚未保存表格文本'));assert(!tables.includes('<img'));
+});

@@ -3143,22 +3143,24 @@
       const paper = state.paper, list = document.getElementById('figuresList'), tableList = document.getElementById('tablesList');
       const hasCurrent = currentResultsPresent(), inventory = visualInventory();
       state.galleryFigures = []; state.galleryGroups = [];
-      const cards = (figures, label, tableTexts = []) => {
+      const cards = (figures, label) => {
         const start = state.galleryFigures.length;
         state.galleryFigures.push(...figures);
         state.galleryGroups.push({start, length:figures.length, label});
         return '<div class="pd-figure-gallery">' + figures.map((figure, index) =>
-          '<div>' + renderFigureDetailCard(figure, start + index) + (tableTexts[index] ? `<details class="pd-table-transcription"><summary>已存表格文本（需与原表核对）</summary>${renderStoredPaperTable(tableTexts[index])}</details>` : '') + '</div>').join('') + '</div>';
+          renderFigureDetailCard(figure, start + index)).join('') + '</div>';
       };
       const status = state.rebuildStatus === 'failed' ? `<p class="warning">当前图表读取失败，未确认是否完整：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前图表…</p>' : '';
-      list.innerHTML = status + (inventory.figures.length ? cards(inventory.figures, '图片') : '<div class="empty-state">未保存图片。</div>') +
-        (inventory.alternateFigures.length ? `<details id="pdAlternateFigures"><summary>其他裁剪版本（${inventory.alternateFigures.length}）</summary>${cards(inventory.alternateFigures, '其他裁剪版本')}</details>` : '') +
-        (inventory.historicalFigures.length ? `<details id="pdRebuildHistory"><summary>历史图片版本（${inventory.historicalFigures.length}）</summary>${cards(inventory.historicalFigures, '历史图片版本')}</details>` : '');
-      tableList.innerHTML = status +
-        (inventory.tables.length ? cards(inventory.tables.map(item => item.figure), '表格', inventory.tables.map(item => item.text)) : '') +
-        inventory.remainingTables.map(renderStoredPaperTable).join('') +
-        (!inventory.tables.length && !inventory.remainingTables.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '') +
-        (inventory.historicalTables.length ? `<details id="pdHistoricalTables"><summary>历史表格版本（${inventory.historicalTables.length}）</summary>${cards(inventory.historicalTables, '历史表格版本')}</details>` : '');
+      list.innerHTML = status + (inventory.figures.length ? cards(inventory.figures, '图片') : '<div class="empty-state">未保存图片。</div>');
+      tableList.innerHTML = status + inventory.tables.map(item => {
+        const asset = item.figure._currentAsset;
+        const content = item.text ? renderStoredPaperTable(item.text) :
+          `<section class="section-item pd-paper-table" data-current-asset="${esc(asset.id)}"><div class="section-title">${esc(item.figure.figure_label)}${item.figure.page ? `<span class="pd-figure-page-badge">Page ${esc(item.figure.page)}</span>` : ''}</div>
+            <div class="muted prewrap">${esc(asset.caption || '未保存表题')}</div>${currentPdfLinks(asset.file_id, asset.page_numbers)}
+            ${typeof asset.provenance?.table_markdown === 'string' && asset.provenance.table_markdown.trim() ? renderPipeTable(asset.provenance.table_markdown) : '<p class="muted">尚未保存表格文本，请查看来源 PDF 核对。</p>'}</section>`;
+        return `<div class="pd-final-table" data-current-asset="${esc(asset.id)}">${content}${renderFigureReadingHtml(currentScientificReading(asset, false))}</div>`;
+      }).join('') + inventory.remainingTables.map(renderStoredPaperTable).join('') +
+        (!inventory.tables.length && !inventory.remainingTables.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
       document.getElementById('cntFigures').textContent = inventory.figures.length + inventory.tables.length + inventory.remainingTables.length;
       document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${inventory.tables.length + inventory.remainingTables.length} 表（含已关联 SI 表格）`;
       const historyMode = hasCurrent || state.rebuildStatus !== 'ready';
