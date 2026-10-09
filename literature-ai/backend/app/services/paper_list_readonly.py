@@ -87,7 +87,7 @@ class PaperListReadonlyService:
                 (p.title, p.paper_code, p.doi, p.journal, p.abstract, cast(p.authors, String),
                  p.comprehensive_analysis["title_zh"].as_string(), p.comprehensive_analysis["abstract_zh"].as_string())), section))
         # Compatibility filters mean stored DFT/content rows, not review approval.
-        for attr, model in (("has_dft_results", models.DFTResult), ("has_writing_cards", models.WritingCard)):
+        for attr, model in (("has_dft_results", models.DFTResult),):
             if (expected := getattr(filters, attr)) is not None:
                 query = query.where(select(model.id).where(model.paper_id == p.id).exists().is_(expected))
         query = query.order_by(*_ordering(filters))

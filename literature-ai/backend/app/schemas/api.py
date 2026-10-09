@@ -30,7 +30,6 @@ class PaperListFilterParams(BaseModel):
     year: int | None = None
     journal: str | None = None
     has_dft_results: bool | None = None
-    has_writing_cards: bool | None = None
     has_pdf: bool | None = None
     paper_type: str | None = None
     sort_by: str = Field(default="year_serial", pattern="^(year_serial|created_at|title|serial_number|paper_code|paper_code_numeric)$")
