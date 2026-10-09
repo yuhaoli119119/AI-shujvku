@@ -624,7 +624,8 @@
           <div class="tabs">
             <button class="tab-btn active" onclick="switchDetailTab('summary', event)">概览</button>
             <button class="tab-btn" onclick="switchDetailTab('sections', event)">章节</button>
-            <button class="tab-btn" onclick="switchDetailTab('figures', event)">图表</button>
+            <button class="tab-btn" onclick="switchDetailTab('figures', event)">图片</button>
+            <button class="tab-btn" onclick="switchDetailTab('tables', event)">表格</button>
             <button class="tab-btn" onclick="switchDetailTab('dft', event)"><span id="pdDftTabLabel">DFT 候选与性能</span></button>
           </div>
 
@@ -647,7 +648,8 @@
             </div>
           </div>
           <div id="tab-sections" class="tab-pane"><div class="panel-card"><div class="panel-title">解析章节</div><div id="sectionsList"></div></div></div>
-          <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图表内容</div><div id="figuresList"></div><div id="tablesList" style="margin-top:12px;"></div></div></div>
+          <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图片</div><div id="figuresList"></div></div></div>
+          <div id="tab-tables" class="tab-pane"><div class="panel-card"><div class="panel-title">表格</div><div id="tablesList"></div></div></div>
           <div id="tab-dft" class="tab-pane">
             <div id="pdCurrentData"></div>
             <details id="pdLegacyData" open><summary id="pdLegacyDataLabel" hidden>历史解析 DFT 与性能资料（保留原编辑功能）</summary>
@@ -2233,7 +2235,7 @@
       };
     }
 
-    function renderFigureReadingHtml(readingData, options = {}) {
+    function renderFigureReadingHtml(readingData) {
       if (readingData?.type === "current_scientific" || readingData?.type === "current_incomplete") return renderCurrentScientificReading(readingData);
       if (!readingData || readingData.type === "none") {
         return `
@@ -2301,7 +2303,7 @@
           </div>`
         : "";
 
-      const hasDetails = Boolean(subfigHtml || locatorsHtml || uncertaintiesHtml);
+      const hasDetails = Boolean(readingData.core || subfigHtml || locatorsHtml || uncertaintiesHtml);
 
       return `
         <div class="pd-figure-reading-block">
@@ -2316,11 +2318,11 @@
             </div>
           </div>
           ${readingData.summary ? `<div class="pd-reading-summary">${esc(readingData.summary)}</div>` : ""}
-          ${readingData.core ? `<div class="pd-reading-core">${esc(readingData.core)}</div>` : ""}
           ${hasDetails ? `
-            <details class="pd-reading-details"${options.defaultOpen ? " open" : ""}>
+            <details class="pd-reading-details">
               <summary>查看详细解读 (子图拆解与证据定位)</summary>
               <div class="pd-reading-details-content">
+                ${readingData.core ? `<div class="pd-reading-core prewrap">${esc(readingData.core)}</div>` : ""}
                 ${subfigHtml}
                 ${locatorsHtml}
                 ${uncertaintiesHtml}
@@ -2387,7 +2389,7 @@
             <div>${pdfPageAction}</div>
 
             <!-- 图片解读模块 -->
-            ${renderFigureReadingHtml(readingData, {defaultOpen: readingData.type === "ai_reading"})}
+            ${renderFigureReadingHtml(readingData)}
 
             <!-- 原文图注 (折叠保留) -->
             ${caption ? `
@@ -2442,7 +2444,8 @@
     const DEEP_LINK_TAB_LABELS = {
       summary: "概览",
       sections: "章节",
-      figures: "图表",
+      figures: "图片",
+      tables: "表格",
       dft: "DFT 候选与性能",
     };
 
@@ -2451,7 +2454,7 @@
     const DETAIL_TAB_ALIASES = {
       review: "summary", overview: "summary", abstract: "summary", info: "summary", basic: "summary",
       section: "sections", content: "sections", contents: "sections", parsed: "sections", text: "sections",
-      figure: "figures", table: "figures", tables: "figures", charts: "figures", visuals: "figures",
+      figure: "figures", table: "tables", charts: "figures", visuals: "figures",
       dft_result: "dft", dft_results: "dft", dft_setting: "dft", dft_settings: "dft",
       catalyst_sample: "dft", catalyst_samples: "dft",
       electrochemical_performance: "dft", performance: "dft",
@@ -2698,15 +2701,15 @@
         return;
       }
 
-      if (tab === "figures" && link.pdfPage) {
-        const cards = Array.from(pane.querySelectorAll(".pd-figure-card"));
+      if (["figures", "tables"].includes(tab) && link.pdfPage) {
+        const cards = Array.from(pane.querySelectorAll(".pd-figure-card, .pd-paper-table"));
         const target = cards.find(card => {
           const badge = card.querySelector(".pd-figure-page-badge");
           const m = badge && String(badge.textContent).match(/(\d+)/);
           return m && Number(m[1]) === Number(link.pdfPage);
         });
-        if (highlightDeepLinkTarget(target, "#tab-figures")) return;
-        setDeepLinkNotice("已切到「图表」。没有找到与 PDF 第 " + link.pdfPage + " 页对应的图，已列出全部图表供核对。");
+        if (highlightDeepLinkTarget(target, "#tab-" + tab)) return;
+        setDeepLinkNotice("已切到「" + DEEP_LINK_TAB_LABELS[tab] + "」。没有找到与 PDF 第 " + link.pdfPage + " 页对应的对象，请结合原 PDF 核对。");
         return;
       }
 
@@ -2933,13 +2936,14 @@
       const short = asset.explanation;
       const supplement = short !== null && short !== undefined && String(short).trim() ? `<details class="pd-reading-short"><summary>补充短说明</summary><div class="prewrap">${esc(storedText(short))}</div></details>` : '';
       const content = data.type === 'current_scientific' ? `<div class="pd-reading-summary">${esc(data.summary)}</div>
+        <details class="pd-reading-details"><summary>查看详细解读（子图拆解与证据定位）</summary>
         <div class="pd-reading-core prewrap">${esc(data.core)}</div>
         ${data.subfigures.length ? `<section class="pd-reading-subfig-list"><h4>逐子图解读</h4>${data.subfigures.map(sub => `<div class="pd-reading-subfig-item"><strong class="pd-reading-subfig-label">${esc(sub.label)}</strong><div class="prewrap">${esc(sub.description)}</div>
           ${sub.methods ? `<div class="prewrap"><strong>方法：</strong>${esc(storedText(sub.methods))}</div>` : ''}
           ${sub.findings ? `<div class="prewrap"><strong>发现：</strong>${esc(storedText(sub.findings))}</div>` : ''}</div>`).join('')}</section>` : ''}
         <section class="pd-reading-evidence"><h4>原文证据与位置</h4>${data.locators.map(loc => `<div class="pd-current-source">${currentPdfLinks(loc.file_id,[loc.page])}
           <div class="muted">${esc(loc.section || '')}${loc.evidence_type ? ' · ' + esc(loc.evidence_type) : ''}</div>${typeof loc.quote === 'string' && loc.quote.trim() ? `<blockquote class="prewrap">${esc(loc.quote)}</blockquote>` : ''}${loc.evidence_type === 'visual' && loc.visual_observation ? `<div class="prewrap"><strong>图中观察：</strong>${esc(loc.visual_observation)}</div>` : ''}</div>`).join('')}</section>
-        <section class="pd-reading-uncertainty"><strong>不确定项 / 缺失证据</strong>${data.uncertainties.length ? `<ul>${data.uncertainties.map(text=>`<li class="prewrap">${esc(text)}</li>`).join('')}</ul>` : '<div>未记录不确定项</div>'}</section>` : `<div class="muted pd-reading-incomplete">${esc(data.reason)}，请结合原文图注和 PDF 阅读。</div>`;
+        <section class="pd-reading-uncertainty"><strong>不确定项 / 缺失证据</strong>${data.uncertainties.length ? `<ul>${data.uncertainties.map(text=>`<li class="prewrap">${esc(text)}</li>`).join('')}</ul>` : '<div>未记录不确定项</div>'}</section></details>` : `<div class="muted pd-reading-incomplete">${esc(data.reason)}，请结合原文图注和 PDF 阅读。</div>`;
       return `<div class="pd-figure-reading-block" data-scientific-reading="${data.type === 'current_scientific' ? 'bound' : 'incomplete'}">
         <div class="pd-reading-badge-row"><strong>${data.historical ? '历史图表 · ' : ''}${data.chinese ? '中文图表解读' : '已有图表解读'}</strong>${data.type === 'current_scientific' ? `<span class="muted">${data.incompleteContent ? '详细内容待补充' : data.reviewStatus === 'pending' ? '待独立审核' : data.reviewStatus ? '已存审核状态：' + esc(data.reviewStatus) : '已存解读'}</span>` : ''}</div>
         ${content}${supplement}${data.historical ? '<div class="muted">历史图表版本</div>' : ''}
@@ -3073,26 +3077,90 @@
         }).join('')}
         <a href="../data_table/index.html?paper_id=${encodeURIComponent(state.paperId)}">打开完整数据表与纠正工具</a></div>`;
     }
+    function visualLabelKey(label, type) {
+      const prefix = type === 'table' ? /^(?:table|表)[\s_.-]*(s?\d+[a-z]?)(?=$|[\s:：])/i : /^(?:fig(?:ure)?|图)[\s_.-]*(s?\d+[a-z]?)$/i;
+      const match = String(label || '').trim().match(prefix);
+      return match ? match[1].toLowerCase() : null;
+    }
+    function sameMainVisual(asset, original, type) {
+      const file = currentSourceFile(asset.file_id), paper = state.paper;
+      // Matching labels alone must never merge different PDF editions or SI.
+      return file?.role === 'main' && file.paper_id === state.paperId && asset.paper_id === state.paperId &&
+        paper.source_pdf_sha256 && file.sha256 === paper.source_pdf_sha256 &&
+        original.paper_id === state.paperId && !asset.subfigure_label &&
+        visualLabelKey(asset.figure_label, type) &&
+        visualLabelKey(asset.figure_label, type) === visualLabelKey(type === 'table' ? original.caption : original.figure_label, type) &&
+        Number.isSafeInteger(original.page) && (asset.page_numbers || []).includes(original.page);
+    }
+    function originalFigureUsable(figure) {
+      return (figure.asset_url || figure.image_path) &&
+        !(figure.flags || []).some(flag => ['missing_image_file', 'invalid_image_file'].includes(flag)) &&
+        !figure.reading_explanation?.is_stale &&
+        (hasEstablishedReading(figure) || ['recropped', 'ai_created_crop', 'validated_crop'].includes(figure.crop_status));
+    }
+    function visualInventory() {
+      const originals = state.paper.figures || [], originalTables = state.paper.tables || [];
+      const active = state.rebuildAssets.filter(asset => !supersededCurrentAsset(asset));
+      const history = state.rebuildAssets.filter(supersededCurrentAsset);
+      const figures = [...originals], alternateFigures = [];
+      active.filter(asset => asset.asset_type !== 'table').forEach(asset => {
+        const match = originals.find(figure => sameMainVisual(asset, figure, 'figure'));
+        const current = currentAssetFigure(asset, false);
+        if (match && originalFigureUsable(match)) alternateFigures.push(current);
+        else if (match && !figures[originals.indexOf(match)]._currentAsset) {
+          alternateFigures.push(match);
+          figures[originals.indexOf(match)] = current;
+        } else if (match) alternateFigures.push(current);
+        else figures.push(current);
+      });
+      const tables = active.filter(asset => asset.asset_type === 'table').map(asset => ({
+        figure: currentAssetFigure(asset, false),
+        text: originalTables.find(table => sameMainVisual(asset, table, 'table')) || null
+      }));
+      const remainingTables = originalTables.filter(table => !tables.some(item => item.text === table)).sort((a,b) =>
+        Number(a.paper_id !== state.paperId) - Number(b.paper_id !== state.paperId) ||
+        String(a.related_paper_code || '').localeCompare(String(b.related_paper_code || ''), 'en', {numeric:true}) ||
+        String(visualLabelKey(a.caption, 'table') || '').localeCompare(String(visualLabelKey(b.caption, 'table') || ''), 'en', {numeric:true}));
+      figures.sort((a,b) => (a.page || 0) - (b.page || 0) ||
+        String(a.figure_label || '').localeCompare(String(b.figure_label || ''), 'en', {numeric:true}));
+      return {figures, alternateFigures, tables, remainingTables,
+        historicalFigures: history.filter(asset => asset.asset_type !== 'table').map(asset => currentAssetFigure(asset, true)),
+        historicalTables: history.filter(asset => asset.asset_type === 'table').map(asset => currentAssetFigure(asset, true))};
+    }
+    function renderStoredPaperTable(table) {
+      const sourceId = table.related_paper_id || table.paper_id;
+      const supplementary = sourceId !== state.paperId;
+      const label = visualLabelKey(table.caption, 'table');
+      const title = (supplementary ? 'SI' + (table.related_paper_code ? ' · ' + table.related_paper_code : '') : '正文') + ' · ' + (label ? 'Table ' + label.toUpperCase() : '表格');
+      const page = validPdfPage(table.page);
+      return `<section class="section-item pd-paper-table" data-table-id="${esc(table.id)}">
+        <div class="section-title">${esc(title)}${page ? `<span class="pd-figure-page-badge">Page ${page}</span>` : ''}</div>
+        <div class="muted prewrap">${esc(table.caption || '未保存表题')}</div>
+        ${sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${page ? '#page=' + page : ''}" target="_blank" rel="noopener">查看${supplementary ? ' SI' : '正文'}原 PDF${page ? ' 第 ' + page + ' 页' : ''}</a>` : ''}
+        ${renderPipeTable(table.markdown_content || '')}</section>`;
+    }
     function renderCurrentFigures() {
-      const paper = state.paper, list = document.getElementById('figuresList');
-      const legacy = paper.figures || [], hasCurrent = currentResultsPresent();
-      if (!hasCurrent && state.rebuildStatus === 'ready') {
-        state.galleryFigures = legacy; state.galleryGroups = [{start:0,length:legacy.length,label:'原解析图表'}];
-        list.innerHTML = legacy.length ? '<div class="pd-figure-gallery">' + legacy.map(renderFigureDetailCard).join('') + '</div>' : '<div class="empty-state">暂无图表</div>';
-      } else {
-        const current = state.rebuildAssets.filter(asset => !supersededCurrentAsset(asset)).map(asset => currentAssetFigure(asset, false));
-        const history = state.rebuildAssets.filter(supersededCurrentAsset).map(asset => currentAssetFigure(asset, true));
-        state.galleryFigures = [...legacy, ...current, ...history];
-        state.galleryGroups = [{start:0,length:legacy.length,label:'原文图表'},
-          {start:legacy.length,length:current.length,label:'当前提取图表'},
-          {start:legacy.length+current.length,length:history.length,label:'历史提取版本'}];
-        const cards = (figures, offset) => '<div class="pd-figure-gallery">' + figures.map((figure, index) => renderFigureDetailCard(figure, offset + index)).join('') + '</div>';
-        const originalHtml = legacy.length ? `<section id="pdOriginalFigures"><h3>原文图表与已有解读</h3>${cards(legacy,0)}</section>` : '';
-        const richCurrent = current.some(figure => buildFigureReadingData(figure).type === 'current_scientific');
-        list.innerHTML = `${originalHtml}<details id="pdCurrentFigures"${!legacy.length || richCurrent ? ' open' : ''}><summary>当前提取图表${state.rebuildStatus === 'ready' ? ' · ' + current.length : ''}</summary>
-          ${state.rebuildStatus === 'failed' ? `<p class="warning">当前结果读取失败，未确认是否为空：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前结果…</p>' : !current.length ? '<p class="muted">当前没有已保存图表。</p>' : cards(current,legacy.length)}</details>
-          ${history.length ? `<details id="pdRebuildHistory"><summary>历史提取版本（${history.length}）</summary>${cards(history,legacy.length+current.length)}</details>` : ''}`;
-      }
+      const paper = state.paper, list = document.getElementById('figuresList'), tableList = document.getElementById('tablesList');
+      const hasCurrent = currentResultsPresent(), inventory = visualInventory();
+      state.galleryFigures = []; state.galleryGroups = [];
+      const cards = (figures, label, tableTexts = []) => {
+        const start = state.galleryFigures.length;
+        state.galleryFigures.push(...figures);
+        state.galleryGroups.push({start, length:figures.length, label});
+        return '<div class="pd-figure-gallery">' + figures.map((figure, index) =>
+          '<div>' + renderFigureDetailCard(figure, start + index) + (tableTexts[index] ? `<details class="pd-table-transcription"><summary>已存表格文本（需与原表核对）</summary>${renderStoredPaperTable(tableTexts[index])}</details>` : '') + '</div>').join('') + '</div>';
+      };
+      const status = state.rebuildStatus === 'failed' ? `<p class="warning">当前图表读取失败，未确认是否完整：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前图表…</p>' : '';
+      list.innerHTML = status + (inventory.figures.length ? cards(inventory.figures, '图片') : '<div class="empty-state">未保存图片。</div>') +
+        (inventory.alternateFigures.length ? `<details id="pdAlternateFigures"><summary>其他裁剪版本（${inventory.alternateFigures.length}）</summary>${cards(inventory.alternateFigures, '其他裁剪版本')}</details>` : '') +
+        (inventory.historicalFigures.length ? `<details id="pdRebuildHistory"><summary>历史图片版本（${inventory.historicalFigures.length}）</summary>${cards(inventory.historicalFigures, '历史图片版本')}</details>` : '');
+      tableList.innerHTML = status +
+        (inventory.tables.length ? cards(inventory.tables.map(item => item.figure), '表格', inventory.tables.map(item => item.text)) : '') +
+        inventory.remainingTables.map(renderStoredPaperTable).join('') +
+        (!inventory.tables.length && !inventory.remainingTables.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '') +
+        (inventory.historicalTables.length ? `<details id="pdHistoricalTables"><summary>历史表格版本（${inventory.historicalTables.length}）</summary>${cards(inventory.historicalTables, '历史表格版本')}</details>` : '');
+      document.getElementById('cntFigures').textContent = inventory.figures.length + inventory.tables.length + inventory.remainingTables.length;
+      document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${inventory.tables.length + inventory.remainingTables.length} 表（含已关联 SI 表格）`;
       const historyMode = hasCurrent || state.rebuildStatus !== 'ready';
       const legacyData = document.getElementById('pdLegacyData');
       if (legacyData && legacyData.dataset.history !== String(historyMode)) {
@@ -3104,8 +3172,6 @@
       document.getElementById('pdDftTabLabel').textContent = hasCurrent ? '当前数据与历史性能' : 'DFT 候选与性能';
       document.getElementById('cntDftDesc').textContent = '吸附能、能垒、PDOS 等';
       if (hasCurrent) {
-        document.getElementById('cntFigures').textContent = state.rebuildAssets.filter(asset => !supersededCurrentAsset(asset)).length;
-        document.getElementById('cntFiguresDesc').textContent = '当前图表 · 历史版本另列';
         document.getElementById('cntDFT').textContent = state.rebuildRows.length;
         document.getElementById('cntDftDesc').textContent = '当前提取数据行（原解析另列）';
       }
@@ -3255,24 +3321,10 @@
           `).join("")
         : '<div class="empty-state">暂无解析章节。</div>';
 
-      document.getElementById("tablesList").innerHTML = (paper.tables || []).length
-        ? (paper.tables || []).map((table, index) => `
-            <div class="section-item">
-              <div class="section-title">表 ${index + 1}</div>
-              <div class="muted">${esc(table.caption || "暂无说明")}</div>
-              ${renderPipeTable(table.markdown_content || "")}
-            </div>
-          `).join("")
-        : "";
-
       document.getElementById("dftSettings").innerHTML = renderDftSettingsList(paper.dft_settings_items || []);
       document.getElementById("dftResults").innerHTML = deepLinkIssueContextHtml() + renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
       document.getElementById("electrochemicalPerformance").innerHTML = renderStructuredCollection(paper.electrochemical_performance_items || [], "暂无电化学性能数据。");
       renderCurrentFigures();
-      if (currentResultsPresent() && document.getElementById("tablesList").innerHTML) {
-        const tables = document.getElementById("tablesList");
-        tables.innerHTML = '<details><summary>历史解析表格</summary>' + tables.innerHTML + '</details>';
-      }
       renderDeepLinkBar();
       applyDftDeepLink();
       applyStructuredDeepLink();
@@ -3454,7 +3506,7 @@
       ].filter(row => row[1] !== "" && row[1] !== 0);
 
       readingContainer.innerHTML = `
-        ${renderFigureReadingHtml(readingData, { defaultOpen: true })}
+        ${renderFigureReadingHtml(readingData)}
         ${caption ? `
           <details class="pd-figure-caption-details" open style="margin-top:10px;">
             <summary>原文图注</summary>

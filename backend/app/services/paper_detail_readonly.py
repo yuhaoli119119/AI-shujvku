@@ -6,6 +6,9 @@ retain their actual status and are never promoted to approved scientific data.
 """
 from __future__ import annotations
 
+import hashlib
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import quote
 from uuid import UUID
 
@@ -16,7 +19,7 @@ from app.config import get_settings
 from app.db import models
 from app.schemas import api
 from app.services.paper_list_readonly import COUNT_MODELS
-from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
+from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_paper_pdf_path
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.library_names import normalize_library_name
 
@@ -26,6 +29,24 @@ def _stored(row, schema):
     columns = {column.key for column in row.__table__.columns}
     return schema(**{name: getattr(row, name) for name, field in schema.model_fields.items()
                      if name in columns and not (getattr(row,name) is None and field.default_factory is not None)})
+
+
+@lru_cache(maxsize=128)
+def _pdf_digest(path: str, size: int, mtime_ns: int, ctime_ns: int) -> str:
+    # File metadata keys invalidate the cache when the persisted PDF changes.
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def source_pdf_digest(paper, settings):
+    try:
+        path = resolve_paper_pdf_path(paper.pdf_path, settings.storage_root)
+        if path is not None:
+            stat = path.stat()
+            return _pdf_digest(str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    except OSError:
+        pass
+    return None
 
 
 class PaperDetailReadonlyService:
@@ -53,6 +74,7 @@ class PaperDetailReadonlyService:
                       for key, model in COUNT_MODELS.items()}
             counts['comprehensive_analysis'] = int(bool(analysis))
             status = build_paper_artifact_status(paper, settings=get_settings())
+            base['source_pdf_sha256'] = source_pdf_digest(paper, get_settings())
             base.update(counts=counts, artifact_status=status, pdf_artifact_status=status,
                         pdf_exists=status['pdf_exists'], pdf_size=status['pdf_file_size'],
                         pdf_file_size=status['pdf_file_size'], pdf_path_kind=status['pdf_path_kind'],

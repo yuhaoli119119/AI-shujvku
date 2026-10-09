@@ -351,6 +351,7 @@ class PaperListItemResponse(BaseModel):
 
 
 class PaperDetailResponse(PaperListItemResponse):
+    source_pdf_sha256: str | None = None
     sections: list[PaperSectionResponse] = Field(default_factory=list)
     tables: list[PaperTableResponse] = Field(default_factory=list)
     figures: list[PaperFigureResponse] = Field(default_factory=list)
