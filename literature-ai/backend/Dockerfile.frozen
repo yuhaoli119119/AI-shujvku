@@ -1,0 +1,11 @@
+# The deployer checks this tag against the exact image ID in deploy/runtime-image.json.
+FROM literature-ai-runtime-freeze:20261009
+USER root
+RUN python -c "import shutil; from pathlib import Path; [shutil.rmtree(p) for p in ('/app','/frontend','/prompts') if Path(p).exists()]"
+COPY backend /app
+COPY frontend /frontend
+COPY prompts /prompts
+RUN chown -R litai:litai /app /frontend /prompts
+WORKDIR /app
+USER litai
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

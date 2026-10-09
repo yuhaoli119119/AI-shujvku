@@ -1,0 +1,7 @@
+{
+  "image_id": "sha256:7b1f9638808fd2f187aa314885110b3d9ff4a4bf4c75954c17db2d052323c936",
+  "local_tag": "literature-ai-runtime-freeze:20261009",
+  "requirements_sha256": "9db215aea1c2f6e54b5926d7b6856b65279646e7661dc16d89d7fda0d7ab58e8",
+  "dependency_check": "all pinned runtime requirements matched the running container",
+  "frozen_source_commit": "6864d3a31ea3440007ca5b2a4d49bad151a218f0"
+}

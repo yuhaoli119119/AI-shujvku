@@ -30,8 +30,16 @@ def fetch(runtime,sha):
 def configuration(runtime,app,sha):
     raw=run(['docker','compose','-p','literature-ai','--project-directory',str(runtime),'--env-file',str(runtime/'.env'),'-f',str(app/'docker-compose.yml'),'config','--format','json'],stderr=subprocess.PIPE)
     cfg=json.loads(raw)
+    frozen_image=app/'deploy/runtime-image.json'
+    if frozen_image.is_file():
+        image=json.loads(frozen_image.read_text())
+        actual=run(['docker','image','inspect',image['local_tag'],'--format','{{.Id}}'])
+        if actual!=image['image_id']:raise RuntimeError('Frozen dependency image changed; refuse server image drift')
+        if digest(app/'backend/requirements.txt')!=image['requirements_sha256']:raise RuntimeError('Requirements changed without updating the pinned dependency image')
     for name,service in cfg['services'].items():
-        if 'build' in service:service['build']['context']=str(app)
+        if 'build' in service:
+            service['build']['context']=str(app)
+            if frozen_image.is_file():service['build']['dockerfile']='backend/Dockerfile.frozen'
         if name not in SERVICES:continue
         service.setdefault('labels',{})['org.opencontainers.image.revision']=sha
         if name in {'backend','worker','worker-pdf'}:service.setdefault('environment',{})['LITAI_GIT_COMMIT']=sha
