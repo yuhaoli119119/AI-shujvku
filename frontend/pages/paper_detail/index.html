@@ -3078,18 +3078,21 @@
         <a href="../data_table/index.html?paper_id=${encodeURIComponent(state.paperId)}">打开完整数据表与纠正工具</a></div>`;
     }
     function visualLabelKey(label, type) {
-      const prefix = type === 'table' ? /^(?:table|表)[\s_.-]*(s?\d+[a-z]?)(?=$|[\s:：])/i : /^(?:fig(?:ure)?|图)[\s_.-]*(s?\d+[a-z]?)$/i;
+      const prefix = type === 'table'
+        ? /^(?:table|表)[\s_.-]*(s?\d+[a-z]?)(?=$|[\s:：.)\-—,，;；])/i
+        : /^(?:fig(?:ure)?|图)[\s_.-]*(s?\d+[a-z]?)(?=$|[\s:：.)\-—,，;；])/i;
       const match = String(label || '').trim().match(prefix);
       return match ? match[1].toLowerCase() : null;
     }
     function sameMainVisual(asset, original, type) {
       const file = currentSourceFile(asset.file_id), paper = state.paper;
+      const assetLabel = visualLabelKey(asset.figure_label, type) || visualLabelKey(asset.caption, type) || visualLabelKey(asset.asset_key, type);
+      const originalLabel = visualLabelKey(type === 'table' ? original.caption : original.figure_label, type);
       // Matching labels alone must never merge different PDF editions or SI.
       return file?.role === 'main' && file.paper_id === state.paperId && asset.paper_id === state.paperId &&
         paper.source_pdf_sha256 && file.sha256 === paper.source_pdf_sha256 &&
         original.paper_id === state.paperId && !asset.subfigure_label &&
-        visualLabelKey(asset.figure_label, type) &&
-        visualLabelKey(asset.figure_label, type) === visualLabelKey(type === 'table' ? original.caption : original.figure_label, type) &&
+        assetLabel && assetLabel === originalLabel &&
         Number.isSafeInteger(original.page) && (asset.page_numbers || []).includes(original.page);
     }
     function originalFigureUsable(figure) {
