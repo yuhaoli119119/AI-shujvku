@@ -144,7 +144,6 @@ def _lightweight_paper_detail(detail: PaperDetailResponse) -> PaperDetailRespons
             "sections": [],
             "paper_notes": [],
             "references": [],
-            "full_translation_zh": None,
         },
     )
 
@@ -1376,8 +1375,6 @@ def _build_extraction_run_response(paper_id: UUID, summary: dict) -> ExtractionR
         catalyst_samples=summary.get("catalyst_samples", 0),
         dft_results=summary.get("dft_results", 0),
         electrochemical_performance=summary.get("electrochemical_performance", 0),
-        mechanism_claims=summary.get("mechanism_claims", 0),
-        writing_cards=summary.get("writing_cards", 0),
     )
 
 
@@ -1445,8 +1442,6 @@ async def reparse_existing_paper(
         "catalyst_samples": detail.counts.catalyst_samples,
         "dft_results": detail.counts.dft_results,
         "electrochemical_performance": detail.counts.electrochemical_performance,
-        "mechanism_claims": detail.counts.mechanism_claims,
-        "writing_cards": detail.counts.writing_cards,
     }
     return _build_extraction_run_response(paper_id, summary)
 

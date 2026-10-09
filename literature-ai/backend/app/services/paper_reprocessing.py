@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.db.models import EvidenceSpan, Paper, PaperFigure, PaperSection, PaperTable, WritingCard
+from app.db.models import EvidenceSpan, Paper, PaperFigure, PaperSection, PaperTable
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_codes import ensure_paper_codes

@@ -62,8 +62,6 @@ class ExtractionRunResponse(BaseModel):
     catalyst_samples: int = 0
     dft_results: int = 0
     electrochemical_performance: int = 0
-    mechanism_claims: int = 0
-    writing_cards: int = 0
     comprehensive_analysis: int = 0
 
 
@@ -240,28 +238,6 @@ class DFTResultResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class MechanismClaimResponse(BaseModel):
-    id: UUID
-    catalyst_sample_id: UUID | None = None
-    claim_type: str | None = None
-    claim_text: str
-    evidence_types: list[Any] = Field(default_factory=list)
-    confidence: float | None = None
-    evidence_text: str | None = None
-    candidate_status: str = "candidate_unverified"
-    review_status: str = "missing"
-    can_use_for_writing: bool = False
-    can_use_for_citation: bool = False
-    evidence_status: str = "missing"
-    locator_status: str = "missing_locator"
-    confidence_status: str = "missing"
-    object_review_audit_count: int = 0
-    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
-    latest_object_review_audit: dict[str, Any] | None = None
-    conflict_count: int = 0
-    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
-
-    model_config = {"from_attributes": True}
 
 
 class ElectrochemicalPerformanceResponse(BaseModel):
@@ -279,32 +255,6 @@ class ElectrochemicalPerformanceResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class WritingCardResponse(BaseModel):
-    id: UUID
-    paper_type: str | None = None
-    research_gap: str | None = None
-    proposed_solution: str | None = None
-    core_hypothesis: str | None = None
-    evidence_chain: dict[str, Any] | list[Any] | None = None
-    section_strategy: dict[str, Any] | None = None
-    figure_logic: Any = None
-    abstract_logic: str | None = None
-    introduction_logic: str | None = None
-    discussion_logic: str | None = None
-    evidence_chain_status: str = "missing"
-    candidate_status: str = "candidate_unverified"
-    review_status: str = "missing"
-    review_gate_status: str = "blocked"
-    can_use_for_writing: bool = False
-    blocked_reasons: list[str] = Field(default_factory=list)
-    evidence_status: str = "missing"
-    safety_status: str = "blocked"
-    safe_verified: bool = False
-    object_review_audit_count: int = 0
-    object_review_audits: list[dict[str, Any]] = Field(default_factory=list)
-    latest_object_review_audit: dict[str, Any] | None = None
-    conflict_count: int = 0
-    field_conflicts: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class FigureDataPointResponse(BaseModel):
@@ -328,8 +278,6 @@ class PaperCountsResponse(BaseModel):
     catalyst_samples: int = 0
     dft_results: int = 0
     electrochemical_performance: int = 0
-    mechanism_claims: int = 0
-    writing_cards: int = 0
     comprehensive_analysis: int = 0
     figure_data_points: int = 0
 
@@ -363,7 +311,6 @@ class PaperListItemResponse(BaseModel):
     authors: list = Field(default_factory=list)
     abstract: str | None = None
     abstract_zh: str | None = None
-    full_translation_zh: str | None = None
     pdf_path: str
     pdf_size: int | None = None
     oa_status: str | None = None
@@ -415,8 +362,6 @@ class PaperDetailResponse(PaperListItemResponse):
     dft_results_items: list[DFTResultResponse] = Field(default_factory=list)
     dft_results_page: dict[str, Any] = Field(default_factory=dict)
     electrochemical_performance_items: list[ElectrochemicalPerformanceResponse] = Field(default_factory=list)
-    mechanism_claims_items: list[MechanismClaimResponse] = Field(default_factory=list)
-    writing_cards_items: list[WritingCardResponse] = Field(default_factory=list)
     figure_data_points_items: list[FigureDataPointResponse] = Field(default_factory=list)
     outgoing_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
     incoming_relationships: list[PaperRelationshipItemResponse] = Field(default_factory=list)
@@ -424,7 +369,6 @@ class PaperDetailResponse(PaperListItemResponse):
     artifact_status: PaperArtifactStatusResponse = Field(default_factory=PaperArtifactStatusResponse)
     abstract_review_status: str = "missing"
     sections_review_status: str = "missing"
-    writing_cards_review_status: str = "missing"
     figures_review_status: str = "missing"
     dft_review_status: str = "missing"
     translation_review_status: str = "missing"
