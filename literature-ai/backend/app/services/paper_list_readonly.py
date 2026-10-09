@@ -20,7 +20,6 @@ COUNT_MODELS = {
     "figures": models.PaperFigure, "dft_settings": models.DFTSetting,
     "catalyst_samples": models.CatalystSample, "dft_results": models.DFTResult,
     "electrochemical_performance": models.ElectrochemicalPerformance,
-    "mechanism_claims": models.MechanismClaim, "writing_cards": models.WritingCard,
     "figure_data_points": models.FigureDataPoint,
 }
 

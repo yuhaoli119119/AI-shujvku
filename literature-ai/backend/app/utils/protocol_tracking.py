@@ -16,9 +16,7 @@ PROTOCOL_FILES: dict[str, str] = {
     "dft_ai_protocol": "prompts/dft_ai_protocol.yaml",
     "gemini_audit_protocol": "prompts/gemini_audit_protocol.yaml",
     "dft_settings": "prompts/dft_settings.yaml",
-    "mechanism_claims": "prompts/mechanism_claims.yaml",
     "paper_writer": "prompts/paper_writer.yaml",
-    "writing_card": "prompts/writing_card.yaml",
 }
 
 

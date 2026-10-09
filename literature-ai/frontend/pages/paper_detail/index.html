@@ -156,7 +156,7 @@
     }
 
     /* ---- Compact Metric Cards (90–105px) ---- */
-    .pd-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 14px; }
+    .pd-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
     @media (max-width: 880px) { .pd-metrics { grid-template-columns: repeat(2, 1fr); } }
     .pd-metric { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px; padding: 12px 14px; min-height: 82px; }
     .pd-metric-label { font-size: 12px; color: var(--color-text-secondary); font-weight: 600; display: flex; align-items: center; gap: 6px; }
@@ -176,8 +176,8 @@
     .tab-pane { display: none; }
     .tab-pane.active { display: block; }
 
-    /* ---- Main layout: left tabs+content / right sticky evidence ---- */
-    .layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+    /* ---- Paper contents ---- */
+    .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
     /* minmax(0,1fr) 而不是 1fr：否则内部 nowrap 的标签条/表格会把栅格撑出视口 */
     @media (max-width: 980px) { .layout { grid-template-columns: minmax(0, 1fr); } }
 
@@ -243,26 +243,7 @@
     .tag { display: inline-flex; align-items: center; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); padding: 3px 9px; font-size: 11.5px; font-weight: 600; margin-right: 6px; margin-top: 6px; }
 
     /* ---- Evidence Panel: sticky + own scroll ---- */
-    .pd-evidence-aside { position: sticky; top: calc(var(--nav-height, 50px) + 12px); max-height: calc(100vh - var(--nav-height, 50px) - 24px); overflow-y: auto; padding-right: 4px; scrollbar-width: thin; scrollbar-color: var(--color-border-strong) transparent; }
-    .pd-evidence-aside::-webkit-scrollbar { width: 5px; }
-    .pd-evidence-aside::-webkit-scrollbar-track { background: transparent; }
-    .pd-evidence-aside::-webkit-scrollbar-thumb { background: var(--color-border-strong); border-radius: 3px; }
 
-    .pd-evidence-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); padding: 12px 14px; margin-bottom: 8px; cursor: pointer; transition: all var(--transition); }
-    .pd-evidence-card:hover { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-bg); }
-    .pd-evidence-card.is-active { border-color: var(--color-primary); background: var(--color-primary-bg); }
-    .pd-evidence-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
-    .pd-evidence-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--color-primary-bg); color: var(--color-primary); white-space: nowrap; }
-    .pd-evidence-status.confirmed { background: rgba(22, 163, 74, 0.10); color: #16A34A; }
-    .pd-evidence-status.pending, .pd-evidence-status.needs_review { background: var(--color-warning-bg); color: var(--color-warning); }
-    .pd-evidence-status.conflict { background: rgba(220, 38, 38, 0.10); color: #DC2626; }
-    .pd-evidence-confidence { font-size: 11px; color: var(--color-text-muted); font-weight: 600; }
-    .pd-evidence-claim { font-size: 13px; color: var(--color-text); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-    .pd-evidence-source { font-size: 11px; color: var(--color-text-muted); margin-top: 4px; }
-    .pd-evidence-detail { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); padding: 14px 16px; margin-bottom: 14px; }
-    .pd-evidence-detail-row { font-size: 13px; line-height: 1.7; margin-bottom: 6px; color: var(--color-text); }
-    .pd-evidence-detail-row strong { color: var(--color-text); font-weight: 600; }
-    .pd-evidence-detail-text { white-space: pre-wrap; font-size: 13px; line-height: 1.75; color: var(--color-text); margin-top: 8px; padding: 10px 12px; background: var(--color-surface-alt); border-radius: var(--radius); border-left: 3px solid var(--color-primary); }
 
     /* ---- Figure Gallery & Modern Reading Block ---- */
     .pd-figure-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; }
@@ -300,14 +281,6 @@
     .pd-figure-caption-text { margin-top: 6px; font-size: 12px; line-height: 1.6; color: var(--color-text-secondary); white-space: pre-wrap; word-break: break-word; }
 
     /* ---- Mechanism Claim Card ---- */
-    .pd-mechanism-card { padding: 14px 16px; }
-    .pd-mechanism-claim { font-size: 14px; color: var(--color-text); line-height: 1.7; margin: 8px 0; }
-    .pd-mechanism-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--color-text-secondary); }
-    .pd-mechanism-conf { font-weight: 600; }
-    .pd-mechanism-source { color: var(--color-text-muted); }
-    .pd-mechanism-evidence { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--color-border); }
-    .pd-mechanism-evidence-label { font-size: 12px; color: var(--color-text-secondary); font-weight: 600; margin-bottom: 4px; }
-    .pd-mechanism-evidence-text { font-size: 13px; color: var(--color-text); line-height: 1.7; padding: 8px 12px; background: var(--color-surface-alt); border-radius: 6px; border-left: 3px solid var(--color-primary); }
 
     /* ---- DFT record ---- */
     .dft-compact-card { padding: 0; margin-bottom: 0; overflow: hidden; background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 8px; transition: border-color 0.15s ease, box-shadow 0.15s ease; }
@@ -388,24 +361,6 @@
     .deep-link-target { scroll-margin-top: calc(var(--nav-height, 40px) + 56px); }
 
     /* ---- Translation tab ---- */
-    .translation-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-    .translation-actions p { margin: 0; color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
-    .translation-controls { display: grid; gap: 12px; margin-bottom: 14px; }
-    .translation-control-grid { display: grid; grid-template-columns: 1fr 220px; gap: 12px; align-items: start; }
-    @media (max-width: 720px) { .translation-control-grid { grid-template-columns: 1fr; } }
-    .translation-checklist { border: 1px solid var(--color-border); background: var(--color-surface-alt); border-radius: var(--radius); padding: 10px; display: grid; gap: 6px; max-height: 170px; overflow: auto; }
-    .translation-checkitem { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; font-size: 13px; }
-    .translation-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .translation-toolbar-group { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    .translation-view-btn.is-active { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-bg); }
-    .translation-card { border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface-alt); padding: 14px 16px; margin-bottom: 12px; }
-    .translation-card-title { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 14px; }
-    .translation-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    @media (max-width: 720px) { .translation-grid { grid-template-columns: 1fr; } }
-    .translation-grid.translation-only { grid-template-columns: 1fr; }
-    .translation-block { border: 1px solid var(--color-border); background: var(--color-surface); border-radius: 8px; padding: 12px 14px; min-width: 0; }
-    .translation-block h4 { margin: 0 0 8px; font-size: 12px; color: var(--color-text-secondary); font-weight: 600; }
-    .translation-status { border: 1px solid var(--color-warning); background: color-mix(in srgb, var(--color-warning) 14%, var(--color-surface)); border-radius: 8px; color: var(--color-text); padding: 12px 14px; line-height: 1.7; font-size: 13px; }
 
     /* ---- DFT Edit modal ---- */
     .dft-edit-overlay { position: fixed; inset: 0; z-index: 1800; display: none; align-items: center; justify-content: center; padding: 18px; background: rgba(15, 23, 42, 0.48); }
@@ -471,7 +426,6 @@
     @media (max-width: 980px) {
       /* minmax(0,1fr)：1fr 的最小值是 auto，会被内部 nowrap 内容撑出视口 */
       .layout { grid-template-columns: minmax(0, 1fr); }
-      .pd-evidence-aside { position: static; max-height: none; }
     }
 
     /* ---- DFT 催化剂分组（按 CatalystSample 身份聚合，复用原分组模块口径） ---- */
@@ -582,7 +536,6 @@
       .empty-state { padding: 24px 12px; font-size: 12.5px; }
 
       /* 右侧证据面板在窄屏落到文档流末尾，限制高度避免拖出超长页面 */
-      .pd-evidence-aside { position: static; max-height: none; overflow: visible; }
       .pd-analysis-item { padding: 10px; }
       .pd-analysis-item .pd-analysis-text { font-size: 12.5px; line-height: 1.6; }
     }
@@ -663,11 +616,7 @@
           <div class="pd-metric-value" id="cntDFT">0</div>
           <div class="pd-metric-desc" id="cntDftDesc">吸附能、能垒、PDOS 等</div>
         </div>
-        <div class="pd-metric">
-          <div class="pd-metric-label"><svg class="pd-metric-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.4 7.4H22l-6 4.6 2.3 7.4-6.3-4.6L5.7 21l2.3-7.4-6-4.6h7.6z"/></svg>机理论断</div>
-          <div class="pd-metric-value" id="cntMechanism">0</div>
-          <div class="pd-metric-desc" id="cntMechanismDesc">关键机理与构效关系</div>
-        </div>
+
       </div>
 
       <section class="layout">
@@ -677,8 +626,6 @@
             <button class="tab-btn" onclick="switchDetailTab('sections', event)">章节</button>
             <button class="tab-btn" onclick="switchDetailTab('figures', event)">图表</button>
             <button class="tab-btn" onclick="switchDetailTab('dft', event)"><span id="pdDftTabLabel">DFT 候选与性能</span></button>
-            <button class="tab-btn" onclick="switchDetailTab('cards', event)">机理与写作</button>
-            <button class="tab-btn" onclick="switchDetailTab('translation', event)">中文译文</button>
           </div>
 
           <div id="tab-summary" class="tab-pane active">
@@ -708,46 +655,11 @@
             <div class="panel-card"><div class="panel-title">AI 候选 DFT 数据</div><div id="dftResults"></div></div>
             <div class="panel-card"><div class="panel-title">电化学性能</div><div id="electrochemicalPerformance"></div></div>
           </details></div>
-          <div id="tab-cards" class="tab-pane">
-            <div class="panel-card"><div class="panel-title">机理论断</div><div id="mechanismClaims"></div></div>
-            <div class="panel-card"><div class="panel-title">写作卡片</div><div id="writingCards"></div></div>
-          </div>
-          <div id="tab-translation" class="tab-pane">
-            <div class="panel-card">
-              <div class="panel-title">中文译文预览</div>
-              <div class="translation-actions">
-                <p>生成摘要和前几段解析章节的中文译文，仅供阅读理解；不会写入数据库，也不会改变原始解析结果。</p>
-                <button class="btn primary" id="translationBtn" type="button" onclick="generateTranslationPreview()">生成中文译文预览</button>
-              </div>
-              <div class="translation-controls">
-                <label class="translation-checkitem">
-                  <input type="checkbox" id="translationIncludeAbstract" checked>
-                  <span>包含摘要</span>
-                </label>
-                <div class="translation-control-grid">
-                  <div>
-                    <div class="muted" style="margin-bottom:6px;">选择要翻译的章节</div>
-                    <div id="translationSections" class="translation-checklist">
-                      <div class="empty-state" style="padding:18px 12px;">正在加载章节列表...</div>
-                    </div>
-                  </div>
-                  <div>
-                    <label for="translationMaxChars">单段最大字符数</label>
-                    <input id="translationMaxChars" type="number" min="300" max="8000" value="3500">
-                  </div>
-                </div>
-              </div>
-              <div id="translationPanel" class="empty-state is-small">暂无译文预览<br><small style="color:var(--color-text-muted);font-size:12px;">选择内容后点击"生成中文译文"</small></div>
-            </div>
-          </div>
+
+
         </div>
 
-        <aside class="panel-card pd-evidence-aside">
-          <div class="panel-title"><span id="pdEvidenceTitle">证据面板</span> <span class="panel-title-meta" id="evidenceCount"></span></div>
-          <div id="evidencePanel"><div class="empty-state">正在加载证据...</div></div>
-          <div class="panel-title" style="margin-top:18px;">证据详情</div>
-          <div id="evidenceDetail"><div class="empty-state">点击论断查看证据详情。</div></div>
-        </aside>
+
       </section>
     </div>
   </main>
@@ -813,9 +725,6 @@
     const state = {
       paperId: null,
       paper: null,
-      claims: [],
-      translation: null,
-      translationViewMode: "bilingual",
       deepLink: {},
       returnSource: "",
       returnTo: "",
@@ -2501,157 +2410,6 @@
         </div>
       `;
     }
-    function renderTranslationSectionOptions() {
-      const container = document.getElementById("translationSections");
-      const sections = (state.paper && state.paper.sections) || [];
-      if (!sections.length) {
-        container.innerHTML = '<div class="empty-state" style="padding:18px 12px;">暂无可选章节。</div>';
-        return;
-      }
-      container.innerHTML = sections.map((section, index) => `
-        <label class="translation-checkitem">
-          <input type="checkbox" class="translation-section-checkbox" value="${esc(section.id)}" ${index < 3 ? "checked" : ""}>
-          <span>${esc(section.section_title || section.section_type || "未命名章节")}<span class="muted" style="display:block;margin-top:4px;">页码 ${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</span></span>
-        </label>
-      `).join("");
-    }
-
-    function getSelectedTranslationSectionIds() {
-      return Array.from(document.querySelectorAll(".translation-section-checkbox:checked")).map(item => item.value);
-    }
-
-    function getTranslationRequestPayload() {
-      return {
-        include_abstract: Boolean(document.getElementById("translationIncludeAbstract")?.checked),
-        section_ids: getSelectedTranslationSectionIds(),
-        max_sections: 8,
-        max_chars_per_item: Number(document.getElementById("translationMaxChars")?.value || 3500)
-      };
-    }
-
-    function buildTranslationClipboardText(items) {
-      return items.map(item => {
-        const pageText = item.page_start || item.page_end ? `页码：${item.page_start || "-"} - ${item.page_end || "-"}` : "摘要";
-        return `${item.title}\n${pageText}\n\n${item.translated_text || ""}`;
-      }).join("\n\n====================\n\n");
-    }
-
-    async function copyTranslationText() {
-      const items = state.translation && state.translation.items ? state.translation.items : [];
-      if (!items.length) {
-        showToast("请先生成中文译文预览。");
-        return;
-      }
-      try {
-        await navigator.clipboard.writeText(buildTranslationClipboardText(items));
-        showToast("译文已复制。");
-      } catch (error) {
-        showToast("复制失败：" + error.message);
-      }
-    }
-
-    function setTranslationViewMode(mode) {
-      state.translationViewMode = mode === "translation" ? "translation" : "bilingual";
-      document.querySelectorAll(".translation-view-btn").forEach(btn => {
-        btn.classList.toggle("is-active", btn.dataset.viewMode === state.translationViewMode);
-      });
-      if (state.translation) renderTranslationPreview(state.translation);
-    }
-
-    function setTranslationLoading(isLoading) {
-      const button = document.getElementById("translationBtn");
-      if (!button) return;
-      button.disabled = isLoading;
-      button.textContent = isLoading ? "正在生成译文..." : "生成中文译文预览";
-    }
-
-    function renderTranslationPreview(data) {
-      const panel = document.getElementById("translationPanel");
-      const items = data && data.items ? data.items : [];
-      if (!items.length) {
-        panel.innerHTML = '<div class="empty-state">暂无可显示的中文译文。</div>';
-        return;
-      }
-      const translationOnly = state.translationViewMode === "translation";
-      const status = data.llm_status || "preview";
-      const statusBanner = status === "preview" ? "" : `
-        <div class="translation-status" style="margin-bottom:12px;">
-          当前译文状态：${esc(status)}。如果显示 source-only，占位内容不是正式中文译文；配置 Writer LLM 后可重新生成。
-        </div>
-      `;
-      const toolbar = `
-        <div class="translation-toolbar">
-          <div class="translation-toolbar-group">
-            <button class="btn ghost small translation-view-btn ${translationOnly ? "" : "is-active"}" type="button" data-view-mode="bilingual" onclick="setTranslationViewMode('bilingual')">中英对照</button>
-            <button class="btn ghost small translation-view-btn ${translationOnly ? "is-active" : ""}" type="button" data-view-mode="translation" onclick="setTranslationViewMode('translation')">仅看译文</button>
-          </div>
-          <div class="translation-toolbar-group">
-            <button class="btn ghost small" type="button" onclick="copyTranslationText()">复制译文</button>
-          </div>
-        </div>
-      `;
-      const cards = items.map(item => {
-        const pageText = item.page_start || item.page_end
-          ? `页码：${esc(item.page_start || "-")} - ${esc(item.page_end || "-")}`
-          : "摘要";
-        return `
-          <article class="translation-card">
-            <div class="translation-card-title">
-              <span>${esc(item.title || "未命名片段")}</span>
-              <span class="muted">${pageText}</span>
-            </div>
-            <div class="translation-grid ${translationOnly ? "translation-only" : ""}">
-              ${translationOnly ? "" : `
-                <div class="translation-block">
-                  <h4>原文</h4>
-                  <div class="prewrap">${esc(item.source_text || "")}</div>
-                </div>
-              `}
-              <div class="translation-block">
-                <h4>中文译文</h4>
-                <div class="prewrap">${esc(item.translated_text || "")}</div>
-              </div>
-            </div>
-          </article>
-        `;
-      }).join("");
-      panel.innerHTML = statusBanner + toolbar + cards;
-    }
-
-    async function generateTranslationPreview() {
-      const paperId = state.paperId, generation = state.detailGeneration;
-      if (!state.paperId) return showToast("请先从文献库选择一篇文献。");
-      const panel = document.getElementById("translationPanel");
-      const payload = getTranslationRequestPayload();
-      if (!payload.include_abstract && !payload.section_ids.length) {
-        showToast("请至少选择摘要或一个章节。");
-        return;
-      }
-      panel.innerHTML = '<div class="empty-state">正在生成中文译文预览...</div>';
-      setTranslationLoading(true);
-      try {
-        const translation = await fetchJSON(`${API_BASE}/${paperId}/translation/preview`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
-        });
-        if (!currentDetailIs(paperId, generation)) return;
-        state.translation = translation;
-        renderTranslationPreview(state.translation);
-        showToast("中文译文预览已生成。");
-      } catch (error) {
-        if (!currentDetailIs(paperId, generation)) return;
-        panel.innerHTML = `
-          <div class="translation-status">
-            中文译文生成失败：${esc(error.message)}
-            <div style="margin-top:10px;"><a class="btn primary" href="../settings/index.html">打开设置页</a></div>
-          </div>
-        `;
-      } finally {
-        if (currentDetailIs(paperId, generation)) setTranslationLoading(false);
-      }
-    }
-
     function viewPaperPdf() {
       if (!state.paperId) { showToast("未选择文献。"); return; }
       // 从审核中心/DFT 数据库跳转过来时会带 pdf_page，直接落到证据页。
@@ -2669,10 +2427,6 @@
     const DEEP_LINK_TARGET_LABELS = {
       section: "章节",
       sections: "章节",
-      writing_card: "写作卡",
-      writing_cards: "写作卡",
-      mechanism_claim: "机理论断",
-      mechanism_claims: "机理论断",
       dft_setting: "DFT 设置",
       dft_settings: "DFT 设置",
       catalyst_sample: "催化剂样本",
@@ -2690,8 +2444,6 @@
       sections: "章节",
       figures: "图表",
       dft: "DFT 候选与性能",
-      cards: "机理与写作",
-      translation: "中文译文"
     };
 
     /* 旧链接 / 外部页面用过 writing、mechanism、content 等 tab 命名，
@@ -2700,14 +2452,9 @@
       review: "summary", overview: "summary", abstract: "summary", info: "summary", basic: "summary",
       section: "sections", content: "sections", contents: "sections", parsed: "sections", text: "sections",
       figure: "figures", table: "figures", tables: "figures", charts: "figures", visuals: "figures",
-      writing: "cards", "writing-card": "cards", "writing-cards": "cards",
-      writing_card: "cards", writing_cards: "cards",
-      mechanism: "cards", claim: "cards", claims: "cards",
-      mechanism_claim: "cards", mechanism_claims: "cards",
       dft_result: "dft", dft_results: "dft", dft_setting: "dft", dft_settings: "dft",
       catalyst_sample: "dft", catalyst_samples: "dft",
       electrochemical_performance: "dft", performance: "dft",
-      translate: "translation", zh: "translation", translation_preview: "translation"
     };
 
     function resolveDetailTab(tab) {
@@ -3062,15 +2809,13 @@
     async function loadPaperData() {
       const paperId = state.paperId, generation = ++state.detailGeneration;
       closeFigureLightbox(); closeDftEditDialog();
-      state.paper = null; state.claims = []; state.translation = null;
+      state.paper = null;
       state.fullDetailLoaded = false; state.fullDetailPromise = null;
       state.dftResultsPromise = null; state.dftResultsError = null;
       state.rebuildAssets = []; state.rebuildFiles = []; state.rebuildRows = [];
       state.galleryFigures = []; state.rebuildTemplates = null; state.rebuildAssetFilter = null;
       state.rebuildStatus = "loading"; state.rebuildError = ""; state.rebuildPromise = null;
       state.citationPreviewLoaded = false;
-      document.getElementById("evidencePanel").innerHTML = "";
-      document.getElementById("evidenceDetail").innerHTML = "";
       document.getElementById("figuresList").innerHTML = "";
       document.getElementById("pdCurrentData").innerHTML = "";
       if (!paperId) return showFallback("请先从文献库选择一篇文献查看详情。");
@@ -3085,7 +2830,6 @@
         renderPaperDetails();
         loadRebuildAssets();
         switchDetailTab(state.currentTab);
-        loadEvidenceClaims();
       } catch (error) {
         if (!currentDetailIs(paperId, generation)) return;
         showFallback("论文详情加载失败：" + error.message + "。可重试，或返回文献库选择其他文献。", error.status === 404 ? "未找到这篇文献" : "文献暂时无法加载", true);
@@ -3355,8 +3099,6 @@
         legacyData.dataset.history = String(historyMode); legacyData.open = !historyMode;
         document.getElementById('pdLegacyDataLabel').hidden = !historyMode;
       }
-      const title = document.getElementById('pdEvidenceTitle');
-      if (title) title.textContent = historyMode ? '历史解析证据 · 非当前提取结果' : '证据面板';
       renderCurrentData();
       document.getElementById('pdDftMetricLabel').textContent = hasCurrent ? '当前数据' : 'DFT 候选';
       document.getElementById('pdDftTabLabel').textContent = hasCurrent ? '当前数据与历史性能' : 'DFT 候选与性能';
@@ -3366,19 +3108,6 @@
         document.getElementById('cntFiguresDesc').textContent = '当前图表 · 历史版本另列';
         document.getElementById('cntDFT').textContent = state.rebuildRows.length;
         document.getElementById('cntDftDesc').textContent = '当前提取数据行（原解析另列）';
-      }
-    }
-
-    async function loadEvidenceClaims() {
-      const paperId = state.paperId, generation = state.detailGeneration;
-      try {
-        const claims = await fetchJSON(`/api/evidence/claims?paper_id=${encodeURIComponent(paperId)}&include_derived=true&limit=80`);
-        if (!currentDetailIs(paperId, generation)) return;
-        state.claims = claims;
-        renderEvidencePanel();
-      } catch (error) {
-        if (!currentDetailIs(paperId, generation)) return;
-        document.getElementById("evidencePanel").innerHTML = `<div class="empty-state warning">证据加载失败：${esc(error.message)}</div>`;
       }
     }
 
@@ -3462,8 +3191,6 @@
       document.getElementById("cntFigures").textContent = figCount;
       document.getElementById("cntFiguresDesc").textContent = (paper.figures || []).length + " 图 · " + (paper.tables || []).length + " 表";
       document.getElementById("cntDFT").textContent = paper.counts?.dft_results || (paper.dft_results_items || []).length || 0;
-      document.getElementById("cntMechanism").textContent = paper.counts?.mechanism_claims || (paper.mechanism_claims_items || []).length || 0;
-      renderTranslationSectionOptions();
 
       const abstractEl = document.getElementById("paperAbstract");
       const abstractToggle = document.getElementById("abstractLanguageBtn");
@@ -3541,154 +3268,14 @@
       document.getElementById("dftSettings").innerHTML = renderDftSettingsList(paper.dft_settings_items || []);
       document.getElementById("dftResults").innerHTML = deepLinkIssueContextHtml() + renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });
       document.getElementById("electrochemicalPerformance").innerHTML = renderStructuredCollection(paper.electrochemical_performance_items || [], "暂无电化学性能数据。");
-      document.getElementById("mechanismClaims").innerHTML = renderMechanismClaims(paper.mechanism_claims_items || []);
-      document.getElementById("writingCards").innerHTML = renderStructuredCollection(paper.writing_cards_items || [], "暂无写作卡片。");
       renderCurrentFigures();
       if (currentResultsPresent() && document.getElementById("tablesList").innerHTML) {
         const tables = document.getElementById("tablesList");
         tables.innerHTML = '<details><summary>历史解析表格</summary>' + tables.innerHTML + '</details>';
       }
-      document.getElementById("mechanismClaims").previousElementSibling.textContent = currentResultsPresent() ? "历史解析机理论断" : "机理论断";
       renderDeepLinkBar();
       applyDftDeepLink();
       applyStructuredDeepLink();
-    }
-
-    function formatEvidenceText(text) {
-      if (!text) return "";
-      let s = String(text);
-      // Replace known property_type keys with display labels (word-boundary match)
-      const propMap = PROPERTY_TYPE_DISPLAY || {};
-      for (const key of Object.keys(propMap)) {
-        const re = new RegExp("\\b" + key.replace(/_/g, "\\_") + "\\b", "g");
-        s = s.replace(re, propMap[key]);
-      }
-      // Format chemical formulas: Li2S6 → Li₂S₆, FeN4 → FeN₄, S8 → S₈
-      // Pattern: element symbol (capital + optional lowercase) followed by digits
-      s = s.replace(/\b([A-Z][a-z]?)(\d+)\b/g, function(_, elt, digits) {
-        const subMap = { "0":"₀","1":"₁","2":"₂","3":"₃","4":"₄","5":"₅","6":"₆","7":"₇","8":"₈","9":"₉" };
-        // Only format if it looks like a chemical formula (not a year or random number)
-        // Check: element must be a known chemical element symbol
-        const elements = ["Li","Na","K","Rb","Cs","Be","Mg","Ca","Sr","Ba","B","Al","Ga","In","Tl","C","Si","Ge","Sn","Pb","N","P","As","Sb","Bi","O","S","Se","Te","F","Cl","Br","I","He","Ne","Ar","Kr","Xe","H","Fe","Cu","Zn","Co","Ni","Mn","Cr","V","Ti","Sc","Mo","W","Ru","Rh","Pd","Pt","Au","Ag","Ir","Os"];
-        if (elements.includes(elt)) {
-          return elt + [...digits].map(d => subMap[d] || d).join("");
-        }
-        return _;
-      });
-      return s;
-    }
-
-    function renderMechanismClaims(items) {
-      if (!items || !items.length) return '<div class="empty-state is-small">暂无机理论断。</div>';
-      return items.map((item, idx) => {
-        item = item || {};
-        const claimText = item.claim_text || item.claim || "";
-        const claimType = claimTypeLabel(item.claim_type || item.type || "");
-        const status = item.validation_status || item.review_status || "unknown";
-        const statusLabel = formatValidationStatus(status);
-        const statusCls = ["confirmed", "safe_verified", "supported"].includes(status) ? "confirmed"
-          : (["pending", "needs_review"].includes(status) ? "needs_review" : "");
-        const conf = item.confidence == null ? null : (Number(item.confidence) <= 1 ? Math.round(Number(item.confidence) * 100) + "%" : String(item.confidence));
-        const evidence = (item.evidence || [])[0] || {};
-        const sourceBits = [
-          evidence.figure || evidence.source_figure || "",
-          evidence.page ? "Page " + evidence.page : "",
-          evidence.section || evidence.source_section || ""
-        ].filter(Boolean);
-        const sourceText = sourceBits.join(" · ");
-        const evidenceText = evidence.evidence_text || evidence.text || "";
-        // Tech info: ID, candidate status, review status, can_use_for_writing, evidence types
-        const techRows = [
-          ["ID", item.id || ""],
-          ["候选状态", dftCandidateStatusLabel(item.candidate_status)],
-          ["审核状态", statusLabel],
-          ["可用于写作", item.can_use_for_writing === true ? "是" : (item.can_use_for_writing === false ? "否" : "")],
-          ["证据类型", Array.isArray(item.evidence_types) && item.evidence_types.length ? item.evidence_types.join(", ") : ""]
-        ].filter(r => r[1]);
-        return `
-          <div class="structured-card pd-mechanism-card" data-collection="mechanism_claims" data-record-id="${esc(item.id || "")}" data-record-index="${esc(idx)}">
-            <div class="structured-card-title">
-              <span>${esc(claimType || "机理论断")}</span>
-              <span class="dft-status-chip ${esc(statusCls)}">${esc(statusLabel)}</span>
-            </div>
-            <div class="pd-mechanism-claim">${esc(claimText || "暂无论断文本")}</div>
-            <div class="pd-mechanism-meta">
-              ${conf ? '<span class="pd-mechanism-conf">置信度 ' + esc(conf) + '</span>' : ""}
-              ${sourceText ? '<span class="pd-mechanism-source">来源：' + esc(sourceText) + '</span>' : ""}
-            </div>
-            ${evidenceText ? '<div class="pd-mechanism-evidence"><div class="pd-mechanism-evidence-label">证据原文</div><div class="pd-mechanism-evidence-text">' + esc(evidenceText) + '</div></div>' : ""}
-            ${techRows.length ? '<details class="raw-data-toggle"><summary>技术信息</summary><div class="kv-grid" style="margin-top:8px;">' + techRows.map(r => '<div class="kv-item"><div class="kv-label">' + esc(r[0]) + '</div><div class="kv-value">' + esc(r[1]) + '</div></div>').join("") + '</div></details>' : ""}
-          </div>
-        `;
-      }).join("");
-    }
-
-    function renderEvidencePanel() {
-      const panel = document.getElementById("evidencePanel");
-      const countEl = document.getElementById("evidenceCount");
-      if (!state.claims.length) {
-        if (countEl) countEl.textContent = "";
-        panel.innerHTML = '<div class="empty-state is-small">暂无证据支撑的论断。</div>';
-        return;
-      }
-      if (countEl) countEl.textContent = state.claims.length + " 条";
-      panel.innerHTML = state.claims.map((claim, idx) => {
-        const evidence = (claim.evidence || [])[0] || {};
-        const status = claim.validation_status || "unknown";
-        const statusLabel = formatValidationStatus(status);
-        const statusCls = ["confirmed", "safe_verified", "supported"].includes(status) ? "confirmed"
-          : (["pending", "needs_review"].includes(status) ? "needs_review" : "");
-        const claimTextRaw = (claim.claim_text || "").slice(0, 120);
-        const claimText = formatEvidenceText(claimTextRaw);
-        const conf = claim.confidence == null ? null : (Number(claim.confidence) <= 1 ? Math.round(Number(claim.confidence) * 100) + "%" : String(claim.confidence));
-        const sourceBits = [
-          evidence.figure || evidence.source_figure || "",
-          evidence.page ? "Page " + evidence.page : "",
-          evidence.section || evidence.source_section || ""
-        ].filter(Boolean);
-        const sourceText = sourceBits.join(" · ");
-        return `
-          <div class="pd-evidence-card" onclick="showClaim(${idx})">
-            <div class="pd-evidence-top">
-              <span class="pd-evidence-status ${esc(statusCls)}">${esc(statusLabel)}</span>
-              ${conf ? '<span class="pd-evidence-confidence">置信度 ' + esc(conf) + '</span>' : ""}
-            </div>
-            <div class="pd-evidence-claim">${esc(claimText)}</div>
-            ${sourceText ? '<div class="pd-evidence-source">来源：' + esc(sourceText) + '</div>' : ""}
-          </div>
-        `;
-      }).join("");
-    }
-
-    function showClaim(index) {
-      const claim = state.claims[index];
-      const evidence = (claim && claim.evidence || [])[0] || {};
-      const status = claim && claim.validation_status || "unknown";
-      const statusLabel = formatValidationStatus(status);
-      const conf = claim && claim.confidence == null ? "-" : (Number(claim.confidence) <= 1 ? Math.round(Number(claim.confidence) * 100) + "%" : String(claim.confidence));
-      const sourceBits = [
-        evidence.figure || evidence.source_figure || "",
-        evidence.page ? "Page " + evidence.page : "",
-        evidence.section || evidence.source_section || ""
-      ].filter(Boolean);
-      const sourceText = sourceBits.join(" · ");
-      const evidenceText = evidence.evidence_text || evidence.text || "暂无证据文本";
-      document.getElementById("evidenceDetail").innerHTML = `
-        <div class="pd-evidence-detail">
-          <div class="pd-evidence-detail-row"><strong>论断：</strong>${formatEvidenceText(claim && claim.claim_text || "-")}</div>
-          <div class="pd-evidence-detail-row"><strong>验证状态：</strong>${esc(statusLabel)}</div>
-          <div class="pd-evidence-detail-row"><strong>置信度：</strong>${esc(conf)}</div>
-          ${sourceText ? '<div class="pd-evidence-detail-row"><strong>来源：</strong>' + esc(sourceText) + '</div>' : ""}
-          <div class="pd-evidence-detail-text">${formatEvidenceText(evidenceText)}</div>
-          <details class="raw-data-toggle" style="margin-top:12px;">
-            <summary>技术信息</summary>
-            <div class="kv-grid" style="margin-top:8px;">
-              <div class="kv-item"><div class="kv-label">paper_id</div><div class="kv-value" style="font-family:var(--font-mono);font-size:11px;word-break:break-all;">${esc(evidence.paper_id || "-")}</div></div>
-              <div class="kv-item"><div class="kv-label">chunk_id</div><div class="kv-value" style="font-family:var(--font-mono);font-size:11px;word-break:break-all;">${esc(evidence.chunk_id || "-")}</div></div>
-            </div>
-          </details>
-        </div>
-      `;
     }
 
     function switchDetailTab(tab, event) {
@@ -3761,7 +3348,7 @@
       const warningsHtml = (data.missing_metadata_warnings || []).map(w => `<div class="warning" style="margin-bottom:4px;">⚠️ ${esc(w)}</div>`).join("");
       const bibtex = esc(data.bibtex_draft || "");
       const csl = esc(JSON.stringify(data.csl_json_draft || {}, null, 2));
-      
+
       container.innerHTML = `
         <div style="margin-bottom:12px;">
           <span class="tag" style="background:var(--color-warning);color:#fff;">${esc(data.warning_banner)}</span>
@@ -3797,7 +3384,7 @@
         showFallback("请先从文献库选择一篇文献查看详情。");
       }
     });
-  
+
     state.lightboxFigureIndex = -1;
 
     function openFigureLightbox(index) {

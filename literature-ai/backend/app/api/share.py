@@ -167,7 +167,6 @@ def get_paper(
             compact=False,
             include_expensive_status=True,
             include_dft_payload=True,
-            include_mechanism_claims_payload=True,
         )
         if not detail:
             raise HTTPException(status_code=404, detail="Paper not found")

@@ -11,7 +11,6 @@ from app.api.analysis_readonly import router as analysis_readonly_router
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.website_jobs import router as website_jobs_router
-from app.api.website_evidence import router as website_evidence_router
 from app.api.impact_metadata import router as impact_metadata_router
 from app.api.libraries import router as libraries_router
 from app.api.library_filter import router as library_filter_router
@@ -79,7 +78,6 @@ async def no_cache_frontend_assets(request, call_next):
 app.include_router(analysis_readonly_router, prefix="/api", tags=["analysis-readonly"])
 app.include_router(health_router, prefix="/api")
 app.include_router(website_jobs_router, prefix="/api/jobs", tags=["jobs"])
-app.include_router(website_evidence_router, prefix="/api/evidence", tags=["evidence"])
 app.include_router(auth_router, prefix="/api")
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])

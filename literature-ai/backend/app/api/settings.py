@@ -64,22 +64,10 @@ _PROTOCOL_FILES = [
         "scope": "软件、泛函、赝势/基组、截断能、k 点、收敛、真空层等",
     },
     {
-        "key": "mechanism_claims",
-        "title": "机理声明提取",
-        "path": "prompts/mechanism_claims.yaml",
-        "scope": "多硫化物吸附、LiPS 转化、Li2S 成核/分解、穿梭抑制等机理",
-    },
-    {
         "key": "paper_writer",
         "title": "论文写作协议",
         "path": "prompts/paper_writer.yaml",
         "scope": "写作引用、证据约束、段落生成和不可引用/未核验内容的阻断规则",
-    },
-    {
-        "key": "writing_card",
-        "title": "写作卡提取",
-        "path": "prompts/writing_card.yaml",
-        "scope": "论文类型、研究空白、解决方案、证据链、图逻辑与段落策略",
     },
 ]
 

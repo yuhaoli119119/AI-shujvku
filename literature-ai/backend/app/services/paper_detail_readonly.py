@@ -36,8 +36,7 @@ class PaperDetailReadonlyService:
         return list(self.session.scalars(select(model).where(model.paper_id == paper_id).order_by(model.id)))
 
     def get_paper_detail(self, paper_id: UUID, *, compact=False, chart_run_id=None,
-                         include_expensive_status=True, include_dft_payload=True,
-                         include_mechanism_claims_payload=True):
+                         include_expensive_status=True, include_dft_payload=True):
         with self.session.no_autoflush:
             paper = self.session.get(models.Paper, paper_id)
             if paper is None:
@@ -99,14 +98,7 @@ class PaperDetailReadonlyService:
                 base['references'] = [_stored(row, api.ReferenceEntryResponse) for row in self._rows(models.ReferenceEntry, paper_id)]
                 notes = list(self.session.scalars(select(models.PaperNote).where(models.PaperNote.paper_id == paper_id).order_by(models.PaperNote.created_at.desc(), models.PaperNote.id).limit(30)))
                 base['paper_notes'] = [{c.key: getattr(n,c.key) for c in n.__table__.columns} for n in notes if n.source != 'translation_preview']
-                translation = self.session.scalar(select(models.PaperNote.content).where(models.PaperNote.paper_id == paper_id,
-                    models.PaperNote.source == 'translation_preview', models.PaperNote.field_name == 'full_translation_preview').order_by(models.PaperNote.created_at.desc()).limit(1))
-                base['full_translation_zh'] = translation
-                for field, model, schema in [('writing_cards_items',models.WritingCard,api.WritingCardResponse),
-                    ('figure_data_points_items',models.FigureDataPoint,api.FigureDataPointResponse)]:
-                    base[field] = [_stored(row,schema) for row in self._rows(model,paper_id)]
-                if include_mechanism_claims_payload:
-                    base['mechanism_claims_items'] = [_stored(row, api.MechanismClaimResponse) for row in self._rows(models.MechanismClaim,paper_id)]
+                base['figure_data_points_items'] = [_stored(row,api.FigureDataPointResponse) for row in self._rows(models.FigureDataPoint,paper_id)]
                 if include_dft_payload:
                     for field, model, schema in [('dft_settings_items',models.DFTSetting,api.DFTSettingResponse),
                         ('catalyst_samples_items',models.CatalystSample,api.CatalystSampleResponse),
@@ -118,7 +110,7 @@ class PaperDetailReadonlyService:
             return api.PaperDetailResponse(**base)
 
     def get_paper_dft_detail(self, paper_id):
-        return self.get_paper_detail(paper_id, include_mechanism_claims_payload=False)
+        return self.get_paper_detail(paper_id)
 
     def get_dft_results_page(self, paper_id, *, offset=0, limit=50, result_id=None):
         with self.session.no_autoflush:

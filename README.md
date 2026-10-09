@@ -1,3 +1,5 @@
+> 2026-10-09：代码版本和部署以 GitHub 的明确提交为准。新流程见 [GitHub 部署规范](literature-ai/docs/GITHUB_DEPLOYMENT.md)；旧部署说明不再作为发布依据。
+
 # AI-shujvku
 
 这是个人科研工具仓库。目前只保留一个活跃系统：`literature-ai`（文献 AI 工具台）。本文件是仓库唯一主 README，也是新协作者的默认入口。

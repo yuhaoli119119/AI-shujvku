@@ -1,3 +1,5 @@
+> 2026-10-09：代码版本和部署以 GitHub 的明确提交为准。新流程见 [GitHub 部署规范](docs/GITHUB_DEPLOYMENT.md)；旧部署说明不再作为发布依据。
+
 # AI-shujvku
 
 个人科研仓库，唯一活跃系统是 `literature-ai`（本地文献 AI 系统）。数据真源只有一个：服务器 PostgreSQL `literature_ai` 库。

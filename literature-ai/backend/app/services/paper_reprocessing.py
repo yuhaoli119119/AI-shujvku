@@ -129,48 +129,7 @@ class PaperReprocessingService:
             "skipped_quality_blocked": 1 if workspace_summary.get("workflow_status") == "Needs_Human_Confirmation" else 0,
         }
 
-    def rebuild_writing_card(self, paper_id: UUID) -> dict[str, Any]:
-        """Atomically replace only WritingCard/EvidenceSpan data for one paper."""
-        return self._run_exclusive_rebuild(paper_id, "rebuild_writing_card", self._rebuild_writing_card)
 
-    def _rebuild_writing_card(self, paper_id: UUID) -> dict[str, Any]:
-        paper = self.session.get(Paper, paper_id)
-        if not paper:
-            raise ValueError("Paper not found")
-        document = self._rebuild_document(paper)
-        payload = self.pipeline._refine_writing_card(self.pipeline.writing_card_extractor.extract(document))
-        if not payload:
-            raise ValueError("WritingCard extraction returned no payload")
-
-        with self.session.begin_nested():
-            old_ids = [
-                str(value) for value in self.session.scalars(
-                    select(WritingCard.id).where(WritingCard.paper_id == paper_id)
-                ).all()
-            ]
-            if old_ids:
-                self.session.execute(
-                    delete(EvidenceSpan).where(
-                        EvidenceSpan.paper_id == paper_id,
-                        EvidenceSpan.object_type.in_(["writing_card", "writing_cards"]),
-                        EvidenceSpan.object_id.in_(old_ids),
-                    )
-                )
-            self.session.execute(delete(WritingCard).where(WritingCard.paper_id == paper_id))
-            created = self.pipeline._persist_writing_card(paper_id, payload)
-            if created != 1:
-                raise RuntimeError("WritingCard replacement did not create exactly one card")
-
-        self.session.commit()
-        card = self.session.scalar(select(WritingCard).where(WritingCard.paper_id == paper_id))
-        gate = writing_card_content_gate(card) if card is not None else None
-        return {
-            "paper_id": str(paper_id),
-            "status": "completed",
-            "writing_cards": created,
-            "rag_eligible": bool(gate and gate.can_use_for_writing),
-            "blocked_reasons": list(gate.blocked_reasons) if gate else ["missing_rebuilt_card"],
-        }
 
     def _run_exclusive_rebuild(self, paper_id: UUID, operation: str, callback) -> dict[str, Any]:
         owner = f"paper_operation:{operation}:{uuid4().hex}"

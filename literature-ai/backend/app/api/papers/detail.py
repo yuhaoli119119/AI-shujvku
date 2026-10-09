@@ -11,7 +11,6 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.settings import sync_writer_settings_from_session
 from app.config import Settings, get_settings
 from app.db.models import (
     AuditLog,
@@ -44,9 +43,6 @@ from app.schemas.api import (
     ExtractionRunResponse,
     PaperDetailResponse,
     PaperKnowledgeContextResponse,
-    PaperTranslationItemResponse,
-    PaperTranslationPreviewRequest,
-    PaperTranslationPreviewResponse,
 )
 from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code
 from pydantic import BaseModel, Field
@@ -125,7 +121,6 @@ class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
 from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
 from app.schemas.evidence import EvidenceLocatorResponse
 from app.services.evidence_locator_service import EvidenceLocatorService
-from app.services.llm_service import LLMService
 from app.services.pdf_image_extractor import PdfImageExtractor
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.domain.catalyst_basic_info import catalyst_basic_info_payload
@@ -154,75 +149,14 @@ def _lightweight_paper_detail(detail: PaperDetailResponse) -> PaperDetailRespons
     )
 
 
-TRANSLATION_SYSTEM_PROMPT = (
-    "你是严谨的科研论文中文翻译助手。请将用户提供的英文论文片段翻译为简体中文。"
-    "要求：保留化学式、材料名称、缩写、单位、数值、引用编号和专有名词；"
-    "不要新增原文没有的结论；不要生成参考文献；只输出译文。"
-)
 
 
-def _trim_translation_source(text: str, max_chars: int) -> str:
-    text = (text or "").strip()
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars].rstrip() + "\n\n[原文过长，已截取前段用于预览]"
 
 
-def _build_translation_prompt(title: str, text: str) -> str:
-    return (
-        f"片段标题：{title}\n\n"
-        "请翻译下面的论文片段为简体中文，保持科研表达准确、克制：\n\n"
-        f"{text}"
-    )
 
 
-def _source_only_translation_notice(text: str) -> str:
-    return (
-        "【网页端翻译 LLM 已停用，当前显示原文占位而非正式译文。"
-        "如需中文译文，请在 IDE AI 中基于原文和证据链整理。】\n\n"
-        + text
-    )
 
 
-def _collect_translation_sources(
-    detail: PaperDetailResponse,
-    payload: PaperTranslationPreviewRequest,
-) -> list[dict]:
-    selected_section_ids = {str(item) for item in payload.section_ids}
-    items: list[dict] = []
-    if payload.include_abstract and detail.abstract:
-        items.append(
-            {
-                "source_type": "abstract",
-                "section_id": None,
-                "title": "摘要",
-                "page_start": None,
-                "page_end": None,
-                "text": _trim_translation_source(detail.abstract, payload.max_chars_per_item),
-            }
-        )
-
-    sections = detail.sections or []
-    if selected_section_ids:
-        sections = [section for section in sections if str(section.id) in selected_section_ids]
-    else:
-        sections = sections[: payload.max_sections]
-
-    for section in sections:
-        text = _trim_translation_source(section.text, payload.max_chars_per_item)
-        if not text:
-            continue
-        items.append(
-            {
-                "source_type": "section",
-                "section_id": section.id,
-                "title": section.section_title or section.section_type or "未命名章节",
-                "page_start": section.page_start,
-                "page_end": section.page_end,
-                "text": text,
-            }
-        )
-    return items
 
 
 def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, settings: Settings) -> str | None:
@@ -269,7 +203,6 @@ def get_paper(
             chart_run_id=chart_run_id,
             include_expensive_status=(mode == "full"),
             include_dft_payload=(mode == "full"),
-            include_mechanism_claims_payload=(mode in {"content", "full"}),
         )
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
@@ -1300,75 +1233,6 @@ async def revoke_dft_result_review(
     return DFTResultVerifyResponse.model_validate(result)
 
 
-@router.post("/{paper_id}/translation/preview", response_model=PaperTranslationPreviewResponse)
-async def preview_paper_translation(
-    paper_id: UUID,
-    payload: PaperTranslationPreviewRequest,
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> PaperTranslationPreviewResponse:
-    detail = PaperDetailReadonlyService(session).get_paper_detail(paper_id)
-    if not detail:
-        raise HTTPException(status_code=404, detail="Paper not found")
-
-    sources = _collect_translation_sources(detail, payload)
-    if not sources:
-        raise HTTPException(status_code=400, detail="暂无可翻译的摘要或章节内容。")
-
-    sync_writer_settings_from_session(session, settings)
-    llm = LLMService(settings)
-    if not llm.is_configured():
-        return PaperTranslationPreviewResponse(
-            paper_id=paper_id,
-            title=detail.title,
-            backend_used="local_fallback",
-            llm_status="source_only_writer_llm_not_configured",
-            items=[
-                PaperTranslationItemResponse(
-                    source_type=item["source_type"],
-                    section_id=item["section_id"],
-                    title=item["title"],
-                    page_start=item["page_start"],
-                    page_end=item["page_end"],
-                    source_text=item["text"],
-                    translated_text=_source_only_translation_notice(item["text"]),
-                )
-                for item in sources
-            ],
-        )
-
-    translated_items: list[PaperTranslationItemResponse] = []
-    used_fallback = False
-    for item in sources:
-        try:
-            translated_text = llm.complete_text(
-                TRANSLATION_SYSTEM_PROMPT,
-                _build_translation_prompt(item["title"], item["text"]),
-            )
-        except Exception:
-            translated_text = None
-        if not translated_text:
-            used_fallback = True
-            translated_text = _source_only_translation_notice(item["text"])
-        translated_items.append(
-            PaperTranslationItemResponse(
-                source_type=item["source_type"],
-                section_id=item["section_id"],
-                title=item["title"],
-                page_start=item["page_start"],
-                page_end=item["page_end"],
-                source_text=item["text"],
-                translated_text=translated_text,
-            )
-        )
-
-    return PaperTranslationPreviewResponse(
-        paper_id=paper_id,
-        title=detail.title,
-        backend_used="writer_llm" if not used_fallback else "writer_llm_with_source_fallback",
-        llm_status="preview" if not used_fallback else "partial_source_only_fallback",
-        items=translated_items,
-    )
 
 
 @router.delete("/{paper_id}")
