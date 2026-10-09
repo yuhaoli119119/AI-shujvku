@@ -23,11 +23,8 @@ from app.db.models import (
     WorkflowJob,
 )
 from app.db.session import get_db_session
-from app.services.dft_export_service import build_dft_ml_dataset
-from app.services.catalyst_analysis_service import CatalystAnalysisService
 from app.utils.artifact_status import build_paper_pdf_status
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results
 from app.utils.text_cleaning import repair_mojibake_text
 
 router = APIRouter()

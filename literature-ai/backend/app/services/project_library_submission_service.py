@@ -14,9 +14,6 @@ from app.db.models import AuditLog, CatalystSample, DFTResult, DFTSetting, Exter
 from app.domain.project_library_context import get_project_library_context
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
 from app.normalizers.unit_normalizer import UnitNormalizer
-from app.schemas.project_library import ProjectLibraryUserSubmitRequest
-from app.services.project_library_bundle_service import ProjectLibraryBundleService
-from app.services.dft_rescan_policy import normalize_dft_reaction_step_for_identity
 
 
 class ProjectLibrarySubmissionBlockedError(ValueError):

@@ -10,7 +10,6 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, PaperFigure, PaperSection, PaperTable
-from app.services.dft_rescan_policy import _row_signature
 
 
 DFT_SIGNAL_PATTERNS = (

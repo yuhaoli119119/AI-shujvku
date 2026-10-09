@@ -151,6 +151,13 @@ class Settings(BaseSettings):
     impact_factor_lookup_timeout_seconds: float = 8.0
     workflow_fallback_max_workers: int = 2
 
+    # Codex-web IPC bridge for one-click AI extract dispatch.
+    codex_web_ipc_uri: str = "ws://172.18.0.1:8214/__backend/ipc"
+    codex_web_default_model: str = "cn:deepseek-v4.1-flash"
+    codex_web_fallback_model: str = "cn:glm-5.3-flash"
+    codex_web_cwd: str = "/opt/literature-ai"
+    codex_web_dispatch_timeout_seconds: float = 30.0
+
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
         env_prefix="LITAI_",

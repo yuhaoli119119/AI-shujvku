@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI 提取工作台 · Literature AI</title>
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <script src="../../shared/topnav.js?v=20261003-original-design"></script>
+  <script>ThemeManager.init();</script>
+</head>
+<body>
+<div id="topnav-mount"></div>
+<main class="rebuild-shell">
+  <section class="rebuild-hero" aria-labelledby="pageTitle">
+    <div>
+      <div class="rebuild-eyebrow">LITERATURE LIBRARY</div>
+      <h1 id="pageTitle">AI 提取工作台</h1>
+      <p>选择文献，查看已整理图表与模板数据；需要更新时可手动启动 AI 提取。打开页面、选择文献及上传文件不会启动提取。</p>
+    </div>
+    <button class="rebuild-btn ghost" id="refreshBtn" type="button">刷新</button>
+  </section>
+  <div class="rebuild-layout">
+    <aside class="rebuild-panel" aria-label="选择论文">
+      <h2>选择论文</h2>
+      <label class="rebuild-field" for="searchInput">标题 / DOI / 期刊 / 摘要</label>
+      <input id="searchInput" class="rebuild-control" type="search" placeholder="输入关键词">
+      <div class="rebuild-actions"><button class="rebuild-btn" id="searchBtn" type="button">搜索</button></div>
+      <div id="resultSummary" class="rebuild-hint" role="status"></div>
+      <div id="searchResults" class="rebuild-result-list"></div>
+      <h3 class="rebuild-subhead">选中论文</h3>
+      <div id="selectedPaper" class="rebuild-empty">请选择一篇论文</div>
+      <div id="statusArea" class="rebuild-status-area"></div>
+    </aside>
+    <section class="rebuild-main" aria-label="一键 AI 提取">
+      <div class="ai-extract-zone" id="aiExtractZone">
+        <div class="ai-extract-placeholder" id="aiPlaceholder">请在左侧选择一篇文献，然后点击下方按钮</div>
+        <div style="width:min(100%,420px);margin:0 auto 12px;text-align:left">
+          <label class="rebuild-field" for="aiExtractModel">提取模型与模式</label>
+          <select class="rebuild-control" id="aiExtractModel" style="width:100%;max-width:100%;box-sizing:border-box" disabled>
+            <option value="gpt-6-luna" selected>Luna · 普通任务（无目标）</option>
+            <option value="cn:deepseek-v4.1-flash">DeepSeek V4.1 flash · 目标任务</option>
+          </select>
+        </div>
+        <button class="ai-extract-btn" id="aiExtractBtn" type="button" disabled>让 AI 提取这篇文献</button>
+        <div class="ai-extract-status" id="aiExtractStatus" hidden></div>
+        <div class="ai-extract-result" id="aiExtractResult" hidden></div>
+      </div>
+      <details class="advanced-tools" id="advancedTools">
+        <summary class="advanced-tools-summary">图表整理与模板数据 / 手动工具</summary>
+        <p class="advanced-tools-note">查看源 PDF、整理图表、按反应模板填表并汇总分析；各步可独立使用。</p>
+        <div class="rebuild-steps" aria-label="AI 提取四步流程">
+          <article class="rebuild-step" data-step="1" id="step1">
+            <header class="rebuild-step-head">
+              <span class="rebuild-step-no" aria-hidden="true">①</span>
+              <h2 class="rebuild-step-title">文件关联</h2>
+              <span class="rebuild-badge" id="step1Status">先选择论文</span>
+            </header>
+            <p class="rebuild-step-desc">正文 PDF / SI 只保存关联，不启动旧解析链。</p>
+            <div class="rebuild-step-actions">
+              <button class="rebuild-btn" id="uploadToggle" type="button" aria-expanded="false" disabled>上传文件</button>
+            </div>
+            <form id="uploadForm" class="rebuild-upload" hidden>
+              <label class="rebuild-field" for="uploadRole">文件类型</label>
+              <select id="uploadRole" class="rebuild-control">
+                <option value="main">正文 PDF</option>
+                <option value="si">SI PDF</option>
+              </select>
+              <label class="rebuild-field" for="uploadFile">选择 PDF</label>
+              <input id="uploadFile" class="rebuild-control" type="file" accept="application/pdf" required>
+              <p class="rebuild-step-note">上传只保存文件关联，不启动自动解析。</p>
+              <div class="rebuild-step-actions"><button class="rebuild-btn" id="uploadBtn" type="submit">保存关联</button></div>
+            </form>
+          </article>
+          <article class="rebuild-step" data-step="2" id="step2">
+            <header class="rebuild-step-head">
+              <span class="rebuild-step-no" aria-hidden="true">②</span>
+              <h2 class="rebuild-step-title">AI 图表整理</h2>
+              <span class="rebuild-badge" id="step2Status">先选择论文</span>
+            </header>
+            <p class="rebuild-step-desc">从真实 PDF 裁图，逐个子图写中文解释，保留页码与来源。</p>
+            <div class="rebuild-step-actions">
+              <a class="rebuild-btn" id="figureLink" href="../figure_assets/index.html" aria-disabled="true">前往 AI 图表整理</a>
+              <button class="rebuild-btn ghost" id="copyPackage" type="button" aria-disabled="true">复制 AI 工作包地址</button>
+            </div>
+          </article>
+          <article class="rebuild-step" data-step="3" id="step3">
+            <header class="rebuild-step-head">
+              <span class="rebuild-step-no" aria-hidden="true">③</span>
+              <h2 class="rebuild-step-title">AI 按反应模板填表</h2>
+              <span class="rebuild-badge" id="step3Status">先选择论文</span>
+            </header>
+            <p class="rebuild-step-desc">按 SRR/HER/OER/ORR/CO2RR 模板分行填写，实验与 DFT 分开，缺失留空。</p>
+            <div class="rebuild-step-actions">
+              <a class="rebuild-btn" id="dataLink" href="../data_table/index.html" aria-disabled="true">前往 AI 数据表</a>
+            </div>
+          </article>
+          <article class="rebuild-step" data-step="4" id="step4">
+            <header class="rebuild-step-head">
+              <span class="rebuild-step-no" aria-hidden="true">④</span>
+              <h2 class="rebuild-step-title">汇总分析</h2>
+              <span class="rebuild-badge" id="step4Status">先选择论文</span>
+            </header>
+            <p class="rebuild-step-desc">基于已填数据做相关性与回归，条件不一致不混合。</p>
+            <div class="rebuild-step-actions">
+              <a class="rebuild-btn" id="analysisLink" href="../summary_analysis/index.html" aria-disabled="true">前往汇总分析</a>
+            </div>
+          </article>
+        </div>
+      </details>
+    </section>
+  </div>
+</main>
+<script src="./rebuild.js?v=20261009-effective-model" defer></script>
+</body>
+</html>

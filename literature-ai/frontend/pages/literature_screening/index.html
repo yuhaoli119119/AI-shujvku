@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Literature Screening - Literature AI</title>
+    <title>文献筛选 - Literature AI</title>
     <link rel="stylesheet" href="../../shared/fonts.css">
     <link rel="stylesheet" href="../../shared/tokens.css">
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
     <link rel="stylesheet" href="../../shared/responsive.css">
     <link rel="stylesheet" href="./page.css">
-    <script src="../../shared/topnav.js"></script>
+    <script src="../../shared/topnav.js?v=20261003-original-design"></script>
     <script>ThemeManager.init();</script>
 </head>
 <body>
@@ -18,9 +18,9 @@
     <div class="shell">
         <div class="toolbar">
             <div class="toolbar-row title-row">
-                <h2>Literature Screening</h2>
+                <h2>文献筛选</h2>
                 <span id="resultCount" class="result-count" aria-live="polite"></span>
-                <button class="btn primary" onclick="openImportPanel()">Import Impact Metadata</button>
+                <button class="btn primary" onclick="openImportPanel()">导入影响因子信息</button>
             </div>
             <!-- 筛选区：桌面默认展开；手机（<=700px）由 page.js 默认折叠，信息一字不删 -->
             <details id="filtersPanel" class="filters-panel" open>
@@ -30,20 +30,20 @@
             </summary>
             <div class="toolbar-row filters-row filters-grid">
                 <!-- Filters -->
-                <input id="filterYearMin" class="small-input" type="number" placeholder="Year Min">
-                <input id="filterYearMax" class="small-input" type="number" placeholder="Year Max">
-                <input id="filterJournalInc" class="small-input" type="text" placeholder="Journal Include">
-                <input id="filterJournalExc" class="small-input" type="text" placeholder="Journal Exclude">
-                <input id="filterIFMin" class="small-input" type="number" step="0.1" placeholder="IF Min">
-                <input id="filterIFMax" class="small-input" type="number" step="0.1" placeholder="IF Max">
+                <input id="filterYearMin" class="small-input" type="number" placeholder="年份下限">
+                <input id="filterYearMax" class="small-input" type="number" placeholder="年份上限">
+                <input id="filterJournalInc" class="small-input" type="text" placeholder="包含期刊">
+                <input id="filterJournalExc" class="small-input" type="text" placeholder="排除期刊">
+                <input id="filterIFMin" class="small-input" type="number" step="0.1" placeholder="IF 下限">
+                <input id="filterIFMax" class="small-input" type="number" step="0.1" placeholder="IF 上限">
             </div>
             <div class="toolbar-row filters-row filters-checks">
-                <label><input type="checkbox" id="filterNeedsMetadata"> needs_metadata</label>
-                <label><input type="checkbox" id="filterHasPdf"> has_pdf</label>
-                <label><input type="checkbox" id="filterHasParsedText"> has_parsed_text</label>
-                <label><input type="checkbox" id="filterHasExtractionOutput"> has_extraction_output</label>
-                <label><input type="checkbox" id="filterHasVerifiedEvidence"> has_verified_evidence</label>
-                <label><input type="checkbox" id="filterHasSafeVerifiedEvidence"> has_safe_verified_evidence</label>
+                <label><input type="checkbox" id="filterNeedsMetadata"> 待补元数据</label>
+                <label><input type="checkbox" id="filterHasPdf"> 有 PDF</label>
+                <label><input type="checkbox" id="filterHasParsedText"> 有全文</label>
+                <label><input type="checkbox" id="filterHasExtractionOutput"> 有提取结果</label>
+                <label><input type="checkbox" id="filterHasVerifiedEvidence"> 有核验证据</label>
+                <label><input type="checkbox" id="filterHasSafeVerifiedEvidence"> 有安全核验证据</label>
             </div>
             <div class="toolbar-row filters-row filters-actions">
                 <select id="filterExcludeFromCitation" class="small-input">
@@ -58,20 +58,20 @@
                     <option value="low">Low</option>
                     <option value="exclude">Exclude</option>
                 </select>
-                <button class="btn primary" onclick="applyFilters()">Apply Filters</button>
-                <button class="btn ghost" onclick="clearFilters()">Clear Filters</button>
-                <button class="btn ghost" onclick="applyFilters()">Refresh</button>
+                <button class="btn primary" onclick="applyFilters()">应用筛选</button>
+                <button class="btn ghost" onclick="clearFilters()">重置筛选</button>
+                <button class="btn ghost" onclick="applyFilters()">刷新</button>
             </div>
             </details>
             <div class="toolbar-row actions-row">
-                <button class="btn danger" onclick="markSelectedDoNotCite()">Mark selected as Do Not Cite</button>
+                <button class="btn danger" onclick="markSelectedDoNotCite()">将选中文献设为不引用</button>
                 <select id="bulkPrioritySelect" class="small-input">
                     <option value="high">High</option>
                     <option value="medium">Medium</option>
                     <option value="low">Low</option>
                     <option value="exclude">Exclude</option>
                 </select>
-                <button class="btn primary" onclick="setPriorityForSelected()">Set selected priority</button>
+                <button class="btn primary" onclick="setPriorityForSelected()">设置引用优先级</button>
             </div>
         </div>
 
@@ -81,10 +81,10 @@
                     <thead>
                         <tr>
                             <th><input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll()"></th>
-                            <th>Title</th>
-                            <th>Year</th>
-                            <th>Journal</th>
-                            <th>Impact Factor</th>
+                            <th>标题</th>
+                            <th>年份</th>
+                            <th>期刊</th>
+                            <th>影响因子</th>
                             <th>IF Year</th>
                             <th>IF Source</th>
                             <th>IF Status</th>
@@ -94,8 +94,8 @@
                             <th>Verified Ev. Count</th>
                             <th>Safe Ver. Ev. Count</th>
                             <th>Exclude Citation</th>
-                            <th>Priority</th>
-                            <th>User Note</th>
+                            <th>优先级</th>
+                            <th>备注</th>
                         </tr>
                     </thead>
                     <tbody id="resultsTableBody">
@@ -109,11 +109,11 @@
     <!-- Import Panel Overlay -->
     <div id="importPanelOverlay" class="modal-overlay" style="display:none;">
         <div class="modal" style="width: 600px;">
-            <h3>Import Impact Metadata</h3>
-            <p class="subtle">Paste CSV or JSON text to update impact factors.</p>
-            <textarea id="importTextarea" rows="10" placeholder="Paste CSV/JSON here..." style="width: 100%; margin-bottom: 12px; font-family: monospace;"></textarea>
+            <h3>导入影响因子信息</h3>
+            <p class="subtle">粘贴 CSV 或 JSON，以预览方式核对影响因子更新。</p>
+            <textarea id="importTextarea" rows="10" placeholder="粘贴 CSV / JSON…" style="width: 100%; margin-bottom: 12px; font-family: monospace;"></textarea>
             <label style="display: block; margin-bottom: 12px;">
-                <input type="checkbox" id="importDryRun" checked> dry_run (Simulate only)
+                <input type="checkbox" id="importDryRun" checked> 仅预览，不保存
             </label>
             <div id="importResults" style="display: none; background: var(--color-surface-alt); padding: 12px; border-radius: 4px; margin-bottom: 12px;">
                 <h4>Import Results</h4>
@@ -122,11 +122,11 @@
                 <div>Matched Papers: <span id="importResMatched"></span></div>
                 <div>Unmatched Items: <span id="importResUnmatched"></span></div>
                 <div>Invalid Items: <span id="importResInvalid"></span></div>
-                <div>needs_metadata remaining: <span id="importResNeedsMetadata"></span></div>
+                <div>待补元数据 remaining: <span id="importResNeedsMetadata"></span></div>
             </div>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="closeImportPanel()">Cancel</button>
-                <button class="btn primary" onclick="executeImport()">Execute Import</button>
+                <button class="btn ghost" onclick="closeImportPanel()">取消</button>
+                <button class="btn primary" onclick="executeImport()">执行导入</button>
             </div>
         </div>
     </div>
@@ -134,16 +134,16 @@
     <!-- Confirm Modal Overlay -->
     <div id="confirmModalOverlay" class="modal-overlay" style="display:none;">
         <div class="modal">
-            <h3 id="confirmModalTitle">Confirm Action</h3>
+            <h3 id="confirmModalTitle">确认操作</h3>
             <p id="confirmModalMessage" class="subtle" style="margin-top: 8px; margin-bottom: 16px;"></p>
             <div class="modal-actions">
-                <button class="btn ghost" onclick="closeConfirmModal()">Cancel</button>
-                <button id="confirmModalActionBtn" class="btn primary" onclick="executeConfirmedAction()">Confirm</button>
+                <button class="btn ghost" onclick="closeConfirmModal()">取消</button>
+                <button id="confirmModalActionBtn" class="btn primary" onclick="executeConfirmedAction()">确认</button>
             </div>
         </div>
     </div>
 
     <script src="../../shared/view-state.js"></script>
-    <script src="./page.js"></script>
+    <script src="./page.js?v=20261003-recovery"></script>
 </body>
 </html>

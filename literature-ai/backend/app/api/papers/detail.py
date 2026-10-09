@@ -122,26 +122,15 @@ class CatalystBasicInfoUpdateRequest(BaseModel):
 class CatalystBasicInfoCreateFromDFTRequest(CatalystBasicInfoUpdateRequest):
     dft_result_ids: list[UUID] = Field(min_length=1)
 
-from app.services.codex_context_service import CodexContextService
 from app.services.active_site_enrichment_service import ActiveSiteEnrichmentService
-from app.services.dft_review_service import DFTResultReviewService
 from app.schemas.evidence import EvidenceLocatorResponse
-from app.services.paper_query import PaperQueryService
 from app.services.evidence_locator_service import EvidenceLocatorService
-from app.services.evidence_review_bundle_service import EvidenceReviewBundleService
-from app.services.external_analysis_candidate_retention_service import (
-    ExternalAnalysisCandidateRetentionService,
-)
 from app.services.llm_service import LLMService
-from app.services.manual_review_progress import normalize_manual_review_progress
-from app.services.paper_ingestion import PaperIngestionService
-from app.services.paper_reprocessing import PaperReprocessingService
-from app.services.paper_knowledge_service import PaperKnowledgeService
 from app.services.pdf_image_extractor import PdfImageExtractor
-from app.services.review_service import ReviewService
-from app.services.verification_session_service import VerificationSessionService
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.domain.catalyst_basic_info import catalyst_basic_info_payload
+
+from app.services.paper_detail_readonly import PaperDetailReadonlyService
 
 router = APIRouter()
 
@@ -159,8 +148,6 @@ def _lightweight_paper_detail(detail: PaperDetailResponse) -> PaperDetailRespons
         {
             "sections": [],
             "paper_notes": [],
-            "outgoing_relationships": [],
-            "incoming_relationships": [],
             "references": [],
             "full_translation_zh": None,
         },
@@ -272,7 +259,7 @@ def get_paper(
     chart_run_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ) -> PaperDetailResponse:
-    service = PaperQueryService(session)
+    service = PaperDetailReadonlyService(session)
     if mode == "dft":
         detail = service.get_paper_dft_detail(paper_id)
     else:
@@ -299,7 +286,7 @@ def get_paper_dft_results(
     result_id: UUID | None = Query(default=None),
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
-    payload = PaperQueryService(session).get_dft_results_page(
+    payload = PaperDetailReadonlyService(session).get_dft_results_page(
         paper_id,
         offset=offset,
         limit=limit,
@@ -1320,7 +1307,7 @@ async def preview_paper_translation(
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> PaperTranslationPreviewResponse:
-    detail = PaperQueryService(session).get_paper_detail(paper_id)
+    detail = PaperDetailReadonlyService(session).get_paper_detail(paper_id)
     if not detail:
         raise HTTPException(status_code=404, detail="Paper not found")
 
@@ -1566,7 +1553,7 @@ async def reparse_existing_paper(
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    detail = PaperQueryService(session).get_paper_detail(paper_id)
+    detail = PaperDetailReadonlyService(session).get_paper_detail(paper_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Paper not found after reparse")
     summary = {
@@ -1735,8 +1722,10 @@ async def create_paper_relationship(
     paper_id: UUID,
     payload: RelationshipCreateRequest,
     session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
 ):
     from app.db.models import PaperRelationship
+    from app.services.rebuild_workflow_service import register_paper_source_files
     source = session.get(Paper, paper_id)
     if not source:
         raise HTTPException(status_code=404, detail="Paper not found")
@@ -1783,6 +1772,13 @@ async def create_paper_relationship(
     if target.id == source.id:
         raise HTTPException(status_code=400, detail="A paper cannot be related to itself")
 
+    # Shared SI ownership is checked only after both paper rows are locked.
+    # Stable UUID order avoids deadlocks when two requests reference the same pair.
+    locked = session.scalars(select(Paper).where(Paper.id.in_([source.id, target.id]))
+        .order_by(Paper.id).with_for_update().execution_options(populate_existing=True)).all()
+    locked_by_id = {paper.id: paper for paper in locked}
+    source, target = locked_by_id[source.id], locked_by_id[target.id]
+
     relationship_type = payload.relationship_type.strip().lower()
     if not relationship_type:
         raise HTTPException(status_code=422, detail="relationship_type must not be empty")
@@ -1790,6 +1786,18 @@ async def create_paper_relationship(
     if relationship_type not in supplementary_types:
         raise HTTPException(status_code=400, detail="Only supplementary relationships are supported")
     relationship_type = "supplementary"
+
+    if str(source.paper_type or "").lower() in supplementary_types:
+        raise HTTPException(status_code=400, detail="source_must_be_main_paper")
+    if source.library_name != target.library_name:
+        raise HTTPException(status_code=400, detail="supplementary_must_be_in_same_library")
+    other_main = session.scalar(select(PaperRelationship).where(
+        PaperRelationship.target_paper_id == target.id,
+        PaperRelationship.source_paper_id != source.id,
+        PaperRelationship.relationship_type.in_(supplementary_types),
+    ))
+    if other_main is not None:
+        raise HTTPException(status_code=409, detail="supplementary_already_belongs_to_other_paper")
 
     existing = session.scalar(
         select(PaperRelationship).where(
@@ -1815,6 +1823,13 @@ async def create_paper_relationship(
         except ValueError as exc:
             if str(exc) != "supplementary_code_requires_main_code_or_serial":
                 raise
+
+    # Explicit association also registers source identities, including old relations.
+    try:
+        register_paper_source_files(session, source, target, settings)
+    except ValueError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if existing is not None:
         session.commit()

@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from app.db.models import Paper, PaperCitationEligibility, PaperImpactMetadata
 from app.db.session import get_db_session
 from app.services.citation_eligibility_service import CitationEligibilityService, CitationEligibilityUpdate
-from app.services.paper_filter_service import PaperFilterCriteria, PaperFilterService
+
+from app.services.paper_filter_readonly import PaperFilterCriteria, PaperFilterReadonlyService
 
 router = APIRouter()
 
@@ -73,9 +74,15 @@ def filter_papers(
         limit=limit,
         offset=offset,
     )
-    rows = PaperFilterService(session).filter(criteria)
+    if has_safe_verified_evidence is not None:
+        raise HTTPException(422, detail="历史安全审核投影未启用；请使用来源化数据表核对来源，或移除此筛选条件。")
+    if year_min is not None and year_max is not None and year_min > year_max:
+        raise HTTPException(422, detail="year_min must not exceed year_max")
+    with session.no_autoflush:
+        rows = PaperFilterReadonlyService(session).filter(criteria)
     return {
         "total": len(rows),
+        "projection_warnings": ["has_safe_verified_evidence unavailable; historical verified flags are stored status only"],
         "items": [row.__dict__ for row in rows],
         "safety": {
             "read_only": True,

@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
     <link rel="stylesheet" href="../../shared/responsive.css">
-    <script src="../../shared/topnav.js"></script>
+    <script src="../../shared/topnav.js?v=20261003-original-design"></script>
     <script>ThemeManager.init();</script>
     <style>
         * { box-sizing: border-box; }
@@ -1115,7 +1115,7 @@
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
                                 </div>
                                 <h3>拖放 PDF 到这里，或点击选择文件</h3>
-                                <p>支持单个 PDF 上传，后端会完成保存、解析和结构化抽取。当前后端限制约 30 MB，超出时会给出明确错误。</p>
+                                <p>支持单个 PDF 上传，仅保存并创建文献记录，不会自动启动解析或抽取。当前后端限制约 30 MB，超出时会给出明确错误。</p>
                                 <input id="pdfInput" type="file" accept=".pdf" style="display:none;" onchange="handlePDFUpload(this)">
                             </div>
                         </div>
@@ -1469,18 +1469,18 @@
             }
 
             const libraryName = state.currentLibrary || "";
-            showToast("正在上传并创建后台解析任务。");
+            showToast("正在上传并保存 PDF。");
 
             try {
                 const formData = new FormData();
                 formData.append("file", file);
                 formData.append("library_name", libraryName);
                 const job = await fetchJSON(`${API_BASE}/ingest/upload/jobs`, { method: "POST", body: formData });
-                showToast(`后台任务已创建：${job && job.job_id ? job.job_id.slice(0, 8) : "queued"}`);
+                showToast(`上传完成：PDF 已保存，未启动自动解析（${job && job.job_id ? job.job_id.slice(0, 8) : "saved"}）`);
                 await pollJobs();
             } catch (error) {
                 const failureMsg = error.detail && error.detail.message ? error.detail.message : error.message;
-                showToast(`上传或解析失败：${failureMsg}`, "error");
+                showToast(`上传失败：${failureMsg}`, "error");
             } finally {
                 input.value = "";
             }

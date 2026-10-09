@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>数据表 · Literature AI</title>
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <script src="../../shared/topnav.js?v=20261003-original-design"></script>
+  <script>ThemeManager.init();</script>
+  <style>
+    #identityForm, #identityForm > *, #identityForm label { min-width: 0; }
+    #identityForm .rebuild-control { box-sizing: border-box; min-width: 0; max-width: 100%; width: 100%; }
+    #identityForm > div[style*="grid-template-columns"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  </style>
+</head>
+<body>
+<div id="topnav-mount"></div>
+<main class="rebuild-shell">
+  <section class="rebuild-hero" aria-labelledby="pageTitle">
+    <div>
+      <div class="rebuild-eyebrow">REACTION DATA</div>
+      <h1 id="pageTitle">数据表</h1>
+      <p>实验与 DFT 分行记录，值保留原精度；每格可回看来源，冲突不静默覆盖。</p>
+    </div>
+    <button class="rebuild-btn ghost" id="refreshBtn" type="button">刷新</button>
+  </section>
+  <div class="rebuild-layout">
+    <aside class="rebuild-panel" aria-label="筛选">
+      <h2>筛选</h2>
+      <label class="rebuild-field" for="reactionFilter">反应</label>
+      <select id="reactionFilter" class="rebuild-control"></select>
+      <p id="reactionHint" style="font-size:12px;color:var(--text-secondary,#64748b);margin:6px 0 0">全部反应：只显示公共字段，具体反应见「反应」列；选中某个反应后可看它的专属字段。</p>
+      <label class="rebuild-field" for="materialFilter">材料</label>
+      <input id="materialFilter" class="rebuild-control" placeholder="例如 Fe-N4-C">
+      <label class="rebuild-field" for="activeSiteFilter">活性中心</label>
+      <select id="activeSiteFilter" class="rebuild-control"></select>
+      <label class="rebuild-field" for="dataTypeFilter">数据类型</label>
+      <select id="dataTypeFilter" class="rebuild-control">
+        <option value="">全部</option>
+        <option value="experimental">实验</option>
+        <option value="dft">DFT</option>
+      </select>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="applyBtn" type="button">应用</button></div>
+      <h3 style="margin-top:22px">批量导入</h3>
+      <p style="font-size:13px;color:var(--text-secondary,#64748b)">粘贴符合 /api/rebuild/rows/import 的 JSON。来源必须写到页码/图表/表格位置，估读最多两位小数。</p>
+      <textarea id="importJson" class="rebuild-control" spellcheck="false" placeholder='{"paper_id":"...","rows":[]}'></textarea>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="importBtn" type="button">幂等导入</button></div>
+    </aside>
+    <section class="rebuild-panel" aria-label="数据行">
+      <div class="rebuild-actions" style="justify-content:space-between;align-items:center;margin-bottom:12px">
+        <strong id="rowSummary">正在读取数据…</strong>
+        <span id="pager" class="rebuild-actions"></span>
+      </div>
+      <div id="statusArea"></div>
+      <div class="rebuild-table-wrap"><table class="rebuild-table"><thead id="tableHead"></thead><tbody id="tableBody"></tbody></table></div>
+    </section>
+  </div>
+</main>
+<div class="rebuild-modal" id="sourceModal">
+  <div class="rebuild-modal-panel">
+    <div class="rebuild-actions" style="justify-content:space-between"><h2 id="sourceTitle">来源</h2><button class="rebuild-btn ghost" id="closeModal" type="button">关闭</button></div>
+    <div id="sourceBody"></div>
+    <form id="correctionForm" class="rebuild-actions" style="display:grid;gap:10px;margin-top:18px" data-row-id="" data-field-name="">
+      <h3 style="margin:0">修正当前值</h3>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+        <label class="rebuild-field">原值<textarea id="correctionRawValue" class="rebuild-control"></textarea></label>
+        <label class="rebuild-field">数值<input id="correctionNumericValue" class="rebuild-control" type="number" step="any"></label>
+        <label class="rebuild-field">单位<input id="correctionUnit" class="rebuild-control"></label>
+        <label class="rebuild-field">取值方式
+          <select id="correctionValueType" class="rebuild-control">
+            <option value="explicit">原文明确值</option>
+            <option value="estimated">图形估读</option>
+            <option value="derived">推导</option>
+            <option value="missing">缺失/留空</option>
+          </select>
+        </label>
+        <label class="rebuild-field">有效位数字<input id="correctionPrecision" class="rebuild-control" type="number" min="0" max="12"></label>
+      </div>
+      <label class="rebuild-field">缺失原因<input id="correctionMissingReason" class="rebuild-control"></label>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+        <label class="rebuild-field">来源文件<select id="correctionSourceFile" class="rebuild-control"></select></label>
+        <label class="rebuild-field">来源类型<input id="correctionSourceKind" class="rebuild-control" placeholder="table / figure / text"></label>
+        <label class="rebuild-field">页码<input id="correctionPageNumber" class="rebuild-control" type="number" min="1"></label>
+        <label class="rebuild-field">图表号/表号<input id="correctionSourceLabel" class="rebuild-control"></label>
+      </div>
+      <label class="rebuild-field">原文/依据<textarea id="correctionQuote" class="rebuild-control"></textarea></label>
+      <label class="rebuild-field">修正说明<input id="correctionReason" class="rebuild-control"></label>
+      <div class="rebuild-actions" style="justify-content:flex-end"><button class="rebuild-btn" id="correctionSubmit" type="submit">保存修正</button></div>
+      <div id="correctionStatus" aria-live="polite"></div>
+    </form>
+  </div>
+</div>
+<div class="rebuild-modal" id="identityModal">
+  <div class="rebuild-modal-panel">
+    <div class="rebuild-actions" style="justify-content:space-between"><h2 id="identityTitle">更正身份与条件</h2><button class="rebuild-btn ghost" id="identityClose" type="button">关闭</button></div>
+    <p>更正当前行的活性中心类型或完整条件，所有数值与来源保持原样。请先核对关联 PDF，并说明依据。</p>
+    <div id="identityBefore" class="rebuild-panel" style="box-shadow:none;overflow-wrap:anywhere"></div>
+    <form id="identityForm" style="display:grid;gap:10px;margin-top:16px">
+      <label class="rebuild-field">活性中心类型<select id="identitySiteType" class="rebuild-control"></select></label>
+      <label class="rebuild-field">完整条件（JSON 对象）<textarea id="identityCondition" class="rebuild-control" spellcheck="false" rows="6" required></textarea></label>
+      <p style="margin:0;font-size:13px">保留仍适用的条件键。缺失条件可留空对象 {}，不要用 0 表示未知。</p>
+      <label class="rebuild-field">依据文件<select id="identityFile" class="rebuild-control" required></select></label>
+      <label class="rebuild-field">依据位置类型<select id="identitySourceKind" class="rebuild-control"><option value="text">正文</option><option value="figure">图</option><option value="table">表</option></select></label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="rebuild-field">页码<input id="identityPage" class="rebuild-control" type="number" min="1" step="1" required></label>
+        <label class="rebuild-field">图表号 / 表号<input id="identityLabel" class="rebuild-control"></label>
+      </div>
+      <label class="rebuild-field">原文依据<textarea id="identityQuote" class="rebuild-control"></textarea></label>
+      <label class="rebuild-field">更正理由<textarea id="identityReason" class="rebuild-control" required maxlength="4000"></textarea></label>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="identitySubmit" type="submit">保存身份与条件</button></div>
+      <div id="identityStatus" role="status" aria-live="polite"></div>
+    </form>
+  </div>
+</div>
+<script src="./page.js?v=20261008-identity-editor-r1" defer></script>
+</body>
+</html>

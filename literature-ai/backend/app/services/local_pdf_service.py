@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import AuditLog, Paper, ParseJob
-from app.services.paper_ingestion import PaperIngestionService
 from app.security.files import validate_local_ingest_directory
 
 

@@ -21,15 +21,14 @@ from app.schemas.api import (
     PaperListFilterParams,
     PaperListItemResponse,
 )
-from app.services.paper_query import PaperQueryService
-from app.services.paper_reprocessing import PaperReprocessingService
-from app.services.workflow_jobs import DEFAULT_LIBRARY_NAME
+from app.services.paper_list_readonly import PaperListReadonlyService, readonly_library_clause
+from app.utils.library_names import DEFAULT_LIBRARY_NAME
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 
 router = APIRouter()
 
 
-@router.get("/", response_model=list[PaperListItemResponse])
+@router.get("/", response_model=list[PaperListItemResponse], response_model_exclude_unset=True)
 def list_papers(
     q: str | None = Query(default=None, description="Keyword search across title, DOI, journal, abstract, authors, and sections"),
     library_name: str | None = Query(default=None, description="Filter by literature library"),
@@ -38,7 +37,7 @@ def list_papers(
     journal: str | None = Query(default=None, description="Filter by journal name (fuzzy)"),
     paper_type: str | None = Query(default=None, description="Filter by paper type (A/B/C/R etc)"),
     has_dft_results: bool | None = Query(default=None, description="Only papers with/without DFT results"),
-    has_writing_cards: bool | None = Query(default=None, description="Only papers with/without reviewed writing cards"),
+    has_writing_cards: bool | None = Query(default=None, description="Only papers with/without stored writing cards (not review approval)"),
     has_pdf: bool | None = Query(default=None, description="Only papers with/without an uploaded PDF"),
     sort_by: str = Query(default="year_serial", description="Sort papers by year+serial, created_at, or title"),
     sort_order: str = Query(default="desc", description="Sort direction: asc or desc"),
@@ -61,7 +60,7 @@ def list_papers(
         limit=limit,
         offset=offset,
     )
-    return PaperQueryService(session).list_papers(filters=filters)
+    return PaperListReadonlyService(session).list_papers(filters=filters)
 
 
 @router.get("/libraries", response_model=list[PaperLibraryResponse])
@@ -160,7 +159,7 @@ async def stream_papers(
             max_created_stmt = select(func.max(Paper.created_at))
             max_serial_stmt = select(func.max(Paper.serial_number))
             if library_name is not None:
-                clause = build_library_name_clause(Paper.library_name, library_name)
+                clause = readonly_library_clause(library_name)
                 total_stmt = total_stmt.where(clause)
                 max_created_stmt = max_created_stmt.where(clause)
                 max_serial_stmt = max_serial_stmt.where(clause)
@@ -188,12 +187,12 @@ async def stream_papers(
                 limit=limit,
                 offset=offset,
             )
-            papers = PaperQueryService(poll_session).list_papers(filters=filters)
+            papers = PaperListReadonlyService(poll_session).list_papers(filters=filters)
             total_stmt = select(func.count(Paper.id))
             if library_name is not None:
-                total_stmt = total_stmt.where(build_library_name_clause(Paper.library_name, library_name))
+                total_stmt = total_stmt.where(readonly_library_clause(library_name))
             total_papers = poll_session.scalar(total_stmt) or 0
-            return [paper.model_dump(mode="json") for paper in papers], total_papers
+            return [paper.model_dump(mode="json", exclude_unset=True) for paper in papers], total_papers
 
     async def event_generator():
         last_snapshot = None

@@ -20,11 +20,7 @@ function paperStatusChip(paper) {
     if (paper.oa_status === "failed" || paper.oa_status === "extraction_failed" || paper.oa_status === "error") {
         return '<span class="status-chip failed">解析失败</span>';
     }
-    // 4. parsed
-    if (paperHasPdf(paper) && (paper.tei_path || paper.markdown_path || (paper.counts && paper.counts.sections > 0))) {
-        return '<span class="status-chip parsed">已解析</span>';
-    }
-    // 5. pdf_available
+    // 4. pdf_available
     if (paperHasPdf(paper)) {
         return '<span class="status-chip pdf-available">PDF已上传</span>';
     }

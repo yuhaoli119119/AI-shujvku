@@ -5,9 +5,6 @@ from app.api.settings import apply_persisted_settings_to_runtime
 from app.config import get_settings
 from app.db.models import Paper
 from app.db.session import session_scope
-from app.services.paper_ingestion import PaperIngestionService
-from app.services.paper_reprocessing import PaperReprocessingService
-from app.services.workflow_jobs import run_workflow_job_by_id
 from app.workers.celery_app import celery_app
 
 

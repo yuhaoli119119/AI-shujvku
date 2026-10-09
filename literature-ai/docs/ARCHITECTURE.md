@@ -1,60 +1,86 @@
-# Literature AI 当前架构
+# 现行系统结构（2026-09-23 实测）
 
-本文只描述当前长期有效的模块边界。阶段计划、历史验收数字和一次性迁移记录留在 `plans/`、`audits/`，不在这里重复。
+> 本文只描述**当前实际运行**的系统。目标流程见 `PIPELINE_TARGET.md`，两者不要混读。
 
-## 运行拓扑
+## 1. 运行位置
 
-- `owner-gateway:8000`：Owner API、页面与带认证的 MCP 入口。
-- `share-gateway:8080`：只读分享面。
-- `backend`：FastAPI API、业务服务、数据库会话与 MCP server。
-- `worker` / `worker-pdf`：异步通用任务和 PDF 任务。
-- `postgres` + pgvector：唯一业务真源。
-- `redis`：任务队列。
-- `minio`：对象存储。
-- `grobid`：PDF 结构解析依赖。
+| 项目 | 值（2026-09-22 实测） |
+|---|---|
+| 服务器 | `192.168.110.229`（Rocky Linux 9.4） |
+| 运行目录 | `/opt/literature-ai` → 软链 `/opt/AI-shujvku/literature-ai`（**不是 git 仓库**） |
+| 源码工作区 | `/opt/ai-shujvku-src`（git 工作树） |
+| 数据真源 | 服务器 PostgreSQL 库 `literature_ai` |
+| 公网入口 | `https://dft.researchlife.top`（cloudflared 隧道 → 本机 Owner 网关） |
 
-Compose 中核心依赖均有健康检查。后端和 worker 等待依赖健康后启动；网关等待后端健康。不要通过删除 volume 处理普通启动问题。
+### 源码目录 vs 运行目录：可能不一致
 
-## 后端边界
+- 运行目录没有 `.git`；源码工作区有自己的 git 历史与工作树状态。
+- 2026-09-22 实测：源码工作区分支 `codex/figure-library-recovery-20260915-061500`，
+  HEAD `e440e03e`，工作树有 3 个未提交修改文件 + 1 个未跟踪目录（git status 见仓库根 `AGENTS.md`）。
+- 运行目录的对应文件**不保证**与源码工作区相同。要判断"服务器跑的是什么"，必须直接看运行目录里的文件与运行态，
+  不能拿工作区文件代替；有差异要如实报告，不允许写成"两处完全相同、已部署"。
+- 更新链路存在（`/opt/ai-shujvku-src/update.sh`：git pull → rsync 到运行目录 → 重建部分容器），
+  但它会重建容器、造成短暂中断，只在确实需要且经用户同意时才执行；2026-09-22 本轮**未执行**。
 
-- `app/api/`：HTTP 路由、请求校验和响应组装；不承载大型领域算法。
-- `app/services/`：工作流编排和领域服务。`ai_verification_service.py` 负责专用单 AI 验收及确定性门禁；`evidence_page_recovery.py` 负责从真实 PDF 恢复页证据；`section_page_fragment_materialization_service.py` 只将通过服务端复核的页片段物化为未审核候选。`app/rag/multi_paper_evidence_plan.py` 生成有界、只读的多论文证据计划。跨 DFT/图表 bundle 的公共逻辑在 `review_bundle_shared.py`，人工复核进度兼容逻辑在 `manual_review_progress.py`。
-- `app/db/`：模型、会话和启动初始化。`bootstrap.py` 负责启动锁与结果契约；初始化只有完全成功后才缓存 URL。数据库 bootstrap/DDL 只由 backend lifespan 执行，worker 在 Compose 中等待 backend 健康，Celery import 不执行迁移。
-- `app/mcp/`：认证后的 MCP 工具面。HTTP MCP 必须使用服务配置中的 Bearer key。
-- `app/security/`、`app/utils/`：安全边界与无状态公共函数。
+## 2. 服务（Docker Compose，10 个）
 
-同步导入的事务规则是：业务写入失败后先 `rollback()`，重新读取 workflow job，记录原始错误，再返回 API 错误。不要在 failed transaction 上继续查询或提交。
+2026-09-22 实测状态：
 
-## 内容审核与写作边界
+| 服务 | 状态 | 说明 |
+|---|---|---|
+| `backend` | healthy | FastAPI 后端；挂载 `./backend:/app`、`./frontend:/frontend`、`./prompts:/prompts:ro` |
+| `worker` | up | 异步任务 |
+| `worker-pdf` | up | PDF 解析任务 |
+| `postgres` | healthy | 业务数据真源 |
+| `redis` | healthy | 队列/缓存/会话吊销名单 |
+| `minio` | healthy | 对象存储 |
+| `grobid` | healthy | PDF 结构解析 |
+| `owner-gateway` | up | 对内主网关（会话鉴权） |
+| `public-gateway` | up | 公网入口 |
+| `share-gateway` | up | 只读分享网关 |
 
-- 普通 `import_analysis` 只导入候选或审核意见。非 DFT 候选保留为 `authenticated_human_review_required` / `no_ai_overwrite`，不会覆盖既有正式对象；DFT `new_candidate` 可被受控物化，但仍是未验证候选。
-- 自动权威验收仅由具有 `ai_verify_content` 的身份调用 `get_ai_verification_record_tasks`（DFT 记录级）或 `get_ai_verification_tasks`（内容字段级）读取任务，再经 `apply_ai_verification_batch` 正式落库（`submit_ai_verification_batch(dry_run=true)` 仅作可选预校验）。该路径可写 `ai_verified`，不能伪造人工 `verified`；确定性门禁仍无法解决的对象才进入 Owner-session 异常处理。
-- 对非受信任的 `propose_correction` 直接写入，服务端强制模块锁的范围仅为顶层 `abstract`，以及结构化 `sections`、`mechanism_claims`、`writing_cards`。`title`、`year`、`journal`、`authors` 等其他允许字段不应描述为服务端必然强制锁；表格和图像遵守各自专用工具的 capability/evidence 契约。锁不把 `import_analysis` 变成非 DFT 覆盖通道。
-- Content web review bundle v1 已废弃。v2 只校验 proposal，没有直接 apply 路径；history 展示生命周期。retention 默认 dry-run，候选删除的共同安全前提是状态为 `generated`/`stale`、`proposal_payload IS NULL` 且无本地结果，并始终排除 `exclude_bundle_ids`（包括当前 active bundle）。duplicate 路径为每组保留一个可复用 keeper、删除其余重复包且不要求年龄阈值；expired 路径则要求达到 `older_than_days` 且当前 scope fingerprint 与包 snapshot 不同。`limit=100` 是单次扫描、处理及删除上限，不是保留数量。
-- AI Writer 只调用 `/api/content-knowledge/writing-plan`，每批最多 10 篇；`can_use_for_writing` 与 `can_use_for_citation` 分开，blocked 内容不进入上下文，也不调用 `/api/writer/draft`。
+改后端 Python 后需要重启对应容器；改 `frontend/` 下的静态页面即时生效（不重建容器）。
 
-## 前端边界
+## 3. 数据资产（一律保留）
 
-前端是静态多页面应用。页面 HTML 保留结构，页面级 CSS/JS 放在同目录的 `page.css` / `page.js`；共享样式和导航位于 `frontend/shared/`。Review Center 是正式的单篇 AI 提示词入口，图表流程默认一次覆盖主文全部图表与 DFT 相关 SI 图表，避免拆成多个互相阻塞的入口。
+| 内容 | 位置 | 实测 |
+|---|---|---|
+| 数据库（真源） | PostgreSQL `literature_ai` | 99 篇论文 |
+| 文献库配置 | `/opt/literature-ai/data/libraries` + `data/library_registry.json` | 4 个库：默认文献库 / 石墨炔 / 双原子催化剂 / 锂硫双原子（激活：锂硫双原子） |
+| PDF 原文（含 SI） | `/opt/literature-ai/data/storage` | 约 1.9G |
+| docling 解析模型 | `/opt/literature-ai/data/docling_cache` | 约 506M |
+| 数据库备份 | `/home/2401liyuhao/backups/literature-ai/`（`database/` 下为 pg_dump） | 按需新增，不覆盖 |
 
-## 数据与产物边界
+`outputs/`、`deliverables/`、`backend/reports/` 中的历史报告是**历史产物，不是当前规范**（见 `README.md`）。
 
-- PostgreSQL 是事实源；测试不得使用真实业务 schema。
-- `storage/`、`data/`、`outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 是运行产物。
-- 数据库清理备份和大型恢复 JSON 放在根目录 `local/backups/`，不进入 Git。
-- `deliverables/` 只放明确需要版本化的交付快照。
+## 4. 访问与鉴权
 
-## 验证
+- 工作台登录（会话 Cookie + `auth_request` 网关）见 [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md)，
+  2026-09-22 复核：页面未登录 → `302 /login`；`/api/*` → `401`；`/login`、`/api/health`、`/.well-known/*` → `200`；
+  `/docs`、`/redoc`、`/openapi.json`、外部 `/api/auth/verify` → `404`；`/mcp` 不带 key → `401`。
+- MCP 接入见 [`MCP_ACCESS.md`](MCP_ACCESS.md)。
 
-从仓库根目录运行：
+## 5. 脚本
 
-```bash
-python scripts/verify.py fast
-python scripts/verify.py full
-```
+- 仓库级脚本在源码工作区 `/opt/ai-shujvku-src/scripts/`（含 `verify.py`、派发脚本 `codex_web_dispatch.cjs`）。
+- 运行目录 `/opt/literature-ai/scripts/` 只放运行期需要的脚本（如 `litai_auth_user.py`），
+  不含仓库验证脚本；两处脚本集合不同属正常现象，不要互相覆盖。
+- 派发脚本在运行目录有同名副本，便于服务器内直接调用：
+  `/opt/literature-ai/scripts/codex_web_dispatch.cjs`。
 
-后端数据库测试自动创建 `pytest_<uuid>` schema 并在结束后删除。前端 Playwright 在 `127.0.0.1:4173` 启动独立静态服务，`reuseExistingServer=false`，因此不会把正在运行的 Owner 网关误当成测试服务。
+## 6. 其他已运行的本地服务（不属于 literature-ai）
 
-## 仍需持续小步拆分的热点
+- Codex-web（本机 `127.0.0.1:8214`；后端容器通过 `litai-codex-web-bridge.service` 桥接 `172.18.0.1:8214` 访问，派发通道见 `CODEX_WEB_DISPATCH.md`）。
+- Agent Canvas / OpenHands 容器（Agent Canvas 的 `127.0.0.1:8000` 是它自己的 API，**不是** Literature AI 的 Owner 网关）。
+- 这些服务与本项目共用一台机器，但**不要**把它们当成 literature-ai 的一部分去改。
 
-`app/db/session.py` 的历史迁移编排、两个 review bundle service、`paper_workbench_service.py`、`paper_query.py` 和部分前端 `page.js` 仍然偏大。后续拆分应遵循：一次只移动一个稳定职责，保留兼容入口，先补回归再移动，不同时改变数据库语义和 API 契约。
+## 7. 现状 vs 目标（2026-09-23 实测）
+
+**现状（新流程已跑通，旧流程保留但入口隐藏）**
+- 新上传：只保存 PDF/SI 关联，不启动旧自动解析链（`ingestion.py` 明确 `automatic_parsing_started=false`）。
+- 一键 AI 提取：`POST /api/rebuild/papers/{paper_id}/ai-extract/jobs` 派发 Codex-web 目标模式线程；任务完成后自动把 `rebuild_visual_assets` 子图合成整图写回 `paper_figures`，旧详情页直接可见。
+- 新流程四页已上线：AI 提取、AI 图表整理、AI 数据表、AI 汇总分析；主导航"更多"菜单列出。
+- 旧审核链路代码（`review_center`、`dft-workflow`、`content_knowledge`、`verification`）仍保留，但导航入口已隐藏；旧自动解析不再对新上传触发。
+- A0019 已验证：37 子图、58 数据行、75 数值、105 来源；6 张整图已写回旧详情页。
+
+**目标**：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析（见 `PIPELINE_TARGET.md`，**核心链路已实现，独立验收进行中**）。

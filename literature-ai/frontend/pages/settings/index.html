@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
     <link rel="stylesheet" href="../../shared/responsive.css">
-    <script src="../../shared/topnav.js"></script>
+    <script src="../../shared/topnav.js?v=20261003-original-design"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -1175,7 +1175,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 document.getElementById("ide-mcp-url").textContent = data.mcp_url || "-";
                 document.getElementById("ide-local-ip").textContent = data.local_ip || "-";
                 document.getElementById("ide-hostname").textContent = data.hostname || "-";
-                document.getElementById("ide-status").innerHTML = `<span class="badge badge-ok">服务已就绪 · ${data.base_url || "-"}</span>`;
+                const ready = data.mcp_available !== false;
+                const status = document.getElementById("ide-status");
+                status.textContent = data.status_message || (ready ? "服务已就绪" : "网站可用；旧 MCP 服务未启用");
+                status.className = ready ? "badge badge-ok" : "badge";
             } catch (e) {
                 document.getElementById("ide-status").innerHTML = '<span class="badge badge-err">无法获取 IDE 连接信息</span>';
             }

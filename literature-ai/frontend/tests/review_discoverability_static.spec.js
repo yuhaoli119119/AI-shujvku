@@ -47,7 +47,7 @@ test('detail review entrypoints use paper_code and keep manual progress separate
   expect(status).not.toContain("esc(status ? '取消已完成' : '标记已完成')");
 });
 
-test('primary navigation and legacy review URLs converge on review center', () => {
+test('primary navigation drops the review center entry while legacy review URLs stay reachable', () => {
   const topnav = read('shared/topnav.js');
   const dashboard = read('pages/dashboard/index.html');
   const library = read('pages/literature_library/index.html');
@@ -61,7 +61,7 @@ test('primary navigation and legacy review URLs converge on review center', () =
   expect(topnav).toContain('id: "dashboard"');
   expect(topnav).not.toContain('id: "ingestion"');
   expect(topnav).toContain('id: "literature"');
-  expect(topnav).toContain('id: "review-center"');
+  expect(topnav).not.toContain('id: "review-center"');
   expect(topnav).toContain('id: "dft-database"');
   expect(topnav).not.toContain('id: "content-knowledge"');
   expect(topnav).not.toContain('id: "dft-audit-center"');

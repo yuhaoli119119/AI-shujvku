@@ -162,7 +162,6 @@ def get_paper(
     if mode == "full":
         # 完整详情（章节/图表/DFT/机理/译文/批注等），与 /api/papers/{id}?mode=full 同构，
         # 但受 token scope 限定，仅可访问 token 授权范围内的文献。
-        from app.services.paper_query import PaperQueryService
         detail = PaperQueryService(session).get_paper_detail(
             _paper_uuid(paper_id),
             compact=False,

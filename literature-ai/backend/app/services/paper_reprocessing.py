@@ -11,14 +11,11 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models import EvidenceSpan, Paper, PaperFigure, PaperSection, PaperTable, WritingCard
 from app.schemas.documents import UnifiedFigure, UnifiedPaperDocument, UnifiedSection, UnifiedTable
-from app.services.extraction_pipeline import ExtractionPipelineService
 from app.services.module_write_lock_service import ModuleWriteLockService
 from app.services.paper_codes import ensure_paper_codes
-from app.services.paper_workbench_service import PaperWorkbenchService
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.utils.workbench_status import HUMAN_FINAL_WORKFLOW_STATUSES
-from app.utils.review_safety import writing_card_content_gate
 
 
 class PaperReprocessingService:

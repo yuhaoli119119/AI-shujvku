@@ -1,7 +1,6 @@
 from celery import Celery
 
 from app.config import get_settings
-from app.services.workflow_jobs import WORKFLOW_QUEUE_DEFAULT
 
 # Database schema bootstrap is owned by the backend lifespan. Compose waits for
 # that service to become healthy before starting workers, so importing the

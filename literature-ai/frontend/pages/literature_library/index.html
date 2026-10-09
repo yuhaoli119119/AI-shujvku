@@ -5,18 +5,18 @@
   <title>文献库 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css"><link rel="stylesheet" href="../../shared/tokens.css"><link rel="stylesheet" href="../../shared/components.css"><link rel="stylesheet" href="../../shared/topnav.css">
 <link rel="stylesheet" href="../../shared/responsive.css"><link rel="stylesheet" href="./page.css?v=20260921-responsive">
-  <script src="../../shared/topnav.js?v=20260904-core-nav"></script><script>ThemeManager.init();</script>
+  <script src="../../shared/topnav.js?v=20261003-original-design"></script><script>ThemeManager.init();</script>
 </head>
 <body>
 <div id="topnav-mount"></div>
 <main class="library-shell">
-<section class="library-hero" aria-labelledby="libraryTitle"><div><div class="eyebrow">LITERATURE COLLECTION</div><h1 id="libraryTitle">文献库</h1><p>从服务器真实文献数据中检索、筛选并进入独立详情页。</p></div><div class="hero-mark" aria-hidden="true">▱</div></section>
+<section class="library-hero" aria-labelledby="libraryTitle"><div><div class="eyebrow">LITERATURE COLLECTION</div><h1 id="libraryTitle">文献库</h1><p>检索、筛选并查看文献与关联资料。</p></div><div class="hero-mark" aria-hidden="true">▱</div></section>
 <section class="library-layout">
 <aside class="filter-panel" id="filterPanel">
 <div class="panel-heading"><div><span class="panel-kicker">当前文献库</span><strong id="activeLibraryName">加载中…</strong></div><button class="icon-btn mobile-only" type="button" id="filterCloseBtn" aria-label="收起筛选">×</button></div>
 <label class="field-label" for="librarySelect">切换文献库</label><select id="librarySelect" class="control"></select>
-<div class="stat-grid" aria-label="文献库统计"><div><strong id="statTotal">—</strong><span>文献总数</span></div><div><strong id="statParsed">—</strong><span>已解析</span></div><div><strong id="statReview">—</strong><span>待审核</span></div><div><strong id="statPdf">—</strong><span>有 PDF</span></div></div>
-<nav class="quick-links" aria-label="快捷筛选"><button class="quick-link active" type="button" data-quick="all"><span>全部文献</span><b id="quickAll">0</b></button><button class="quick-link" type="button" data-quick="parsed"><span>已解析</span><b id="quickParsed">0</b></button><button class="quick-link" type="button" data-quick="review"><span>待审核</span><b id="quickReview">0</b></button><button class="quick-link" type="button" data-quick="pdf"><span>有 PDF</span><b id="quickPdf">0</b></button></nav>
+<div class="stat-grid" aria-label="文献库统计"><div><strong id="statTotal">—</strong><span>文献总数</span></div><div><strong id="statPdf">—</strong><span>有 PDF</span></div></div>
+<nav class="quick-links" aria-label="快捷筛选"><button class="quick-link active" type="button" data-quick="all"><span>全部文献</span><b id="quickAll">0</b></button><button class="quick-link" type="button" data-quick="pdf"><span>有 PDF</span><b id="quickPdf">0</b></button></nav>
 <div class="filter-title"><span>快速筛选</span><button type="button" id="resetFiltersBtn">重置</button></div>
 <label class="field-label" for="yearFilter">年份</label><select id="yearFilter" class="control"><option value="">全部</option></select>
 <label class="field-label" for="journalFilter">期刊</label><select id="journalFilter" class="control"><option value="">全部</option></select>
@@ -26,9 +26,9 @@
 <label class="field-label" for="pdfFilter">PDF 状态</label><select id="pdfFilter" class="control"><option value="">全部</option><option value="true">有 PDF</option><option value="false">无 PDF</option></select>
 </aside>
 <section class="list-panel">
-<div class="list-toolbar"><button class="btn ghost mobile-only" id="filterOpenBtn" type="button">筛选</button><label class="search-box" for="searchInput"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、DOI、作者、摘要、关键词…"></label><select id="sortSelect" class="control compact" aria-label="排序"><option value="year_desc">年份：新到旧</option><option value="year_asc">年份：旧到新</option><option value="code_asc">编号顺序</option><option value="title_asc">标题顺序</option></select><a class="btn primary add-link" href="../ingestion/index.html">＋ 添加文献 / PDF</a></div>
+<div class="list-toolbar"><button class="btn ghost mobile-only" id="filterOpenBtn" type="button">筛选</button><label class="search-box" for="searchInput"><span aria-hidden="true">⌕</span><input id="searchInput" type="search" placeholder="搜索标题、DOI、作者、摘要、关键词…"></label><select id="sortSelect" class="control compact" aria-label="排序"><option value="year_desc">年份：新到旧</option><option value="year_asc">年份：旧到新</option><option value="code_asc">编号顺序</option><option value="title_asc">标题顺序</option></select><a class="btn primary add-link" href="../ingestion/index.html">＋ 添加文献 / PDF</a><a class="btn ghost" href="./rebuild.html">AI 提取</a></div>
 <div class="list-summary"><div><strong id="resultCount">0</strong> 篇结果 <span id="loadMeta"></span></div><button class="btn ghost small" type="button" id="refreshBtn">刷新</button></div>
 <div class="table-wrap litai-scroll-x"><table class="paper-table litai-stack"><thead><tr><th>编号</th><th>年份</th><th>类型</th><th>IF</th><th class="title-col">标题</th><th>来源 / DOI</th><th>状态</th></tr></thead><tbody id="paperRows"><tr><td colspan="7" class="empty">正在读取服务器文献数据…</td></tr></tbody></table></div>
 <footer class="pager"><div>共 <strong id="footerTotal">0</strong> 篇 · 每页 <select id="pageSizeSelect" aria-label="每页数量"><option>10</option><option selected>20</option><option>50</option></select></div><div class="pager-buttons"><button type="button" id="prevPageBtn" aria-label="上一页">‹</button><span id="pageButtons"></span><button type="button" id="nextPageBtn" aria-label="下一页">›</button></div></footer>
-</section></section></main><div id="toast" role="status" aria-live="polite"></div><script src="../../shared/view-state.js"></script><script src="./page.js?v=20260921-responsive" defer></script>
+</section></section></main><div id="toast" role="status" aria-live="polite"></div><script src="../../shared/view-state.js"></script><script src="./page.js?v=20261003-recovery-r3" defer></script>
 </body></html>

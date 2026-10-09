@@ -4,13 +4,13 @@ async function uploadPDF(input) {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("library_name", getCurrentLibraryName());
-    showProgress("正在上传并加入后台队列：" + file.name);
+    showProgress("正在保存 PDF：" + file.name);
     try {
         const job = await fetchJSON(API_BASE + "/ingest/upload/jobs", {
             method: "POST",
             body: formData
         });
-        showToast("上传成功，已进入后台解析队列。", "success");
+        showToast("上传成功，已保存文件，未启动自动解析。", "success");
         renderQueuedIngestJob(job);
         pollWorkflowIngestJob(job.job_id);
     } catch (error) {
@@ -58,13 +58,13 @@ async function uploadSupplementaryPDF(input) {
     }
     const formData = new FormData();
     formData.append("file", file);
-    showProgress("正在上传支撑文献 / SI：" + file.name);
+    showProgress("正在保存支撑文献 / SI：" + file.name);
     try {
         const job = await fetchJSON(API_BASE + "/" + encodeURIComponent(mainPaperId) + "/supplementary/upload/jobs", {
             method: "POST",
             body: formData
         });
-        showToast("SI 上传成功，已进入后台解析队列。", "success");
+        showToast("SI 上传成功，已保存并关联，未启动自动解析。", "success");
         renderQueuedIngestJob(job);
         pollWorkflowIngestJob(job.job_id, { mainPaperId: mainPaperId });
     } catch (error) {
@@ -296,7 +296,7 @@ async function attachPDFToPaperFile(paperId, file, confirmIdentityMismatch) {
     formData.append("file", file);
     formData.append("confirm_identity_mismatch", confirmIdentityMismatch ? "true" : "false");
 
-    showProgress("正在上传并关联 PDF：" + file.name);
+    showProgress("正在保存并关联 PDF：" + file.name);
     let keepProgress = false;
     try {
         const data = await fetchJSON(API_BASE + "/" + paperId + "/attach-pdf/jobs", {
@@ -305,9 +305,9 @@ async function attachPDFToPaperFile(paperId, file, confirmIdentityMismatch) {
         });
         const jobId = data && data.job_id ? String(data.job_id).slice(0, 8) : "queued";
         if (confirmIdentityMismatch) {
-            showToast("确认绑定任务已进入后台队列：" + jobId, "success");
+            showToast("确认绑定完成，已保存文件，未启动自动解析：" + jobId, "success");
         } else {
-            showToast("PDF 关联任务已进入后台队列：" + jobId, "success");
+            showToast("PDF 关联完成，已保存文件，未启动自动解析：" + jobId, "success");
         }
         renderQueuedIngestJob(data);
         pollWorkflowIngestJob(data.job_id, { paperId: paperId, file: file });

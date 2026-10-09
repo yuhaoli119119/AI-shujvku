@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
   <link rel="stylesheet" href="./page.css?v=20260913_c1">
-  <script src="../../shared/topnav.js"></script>
+  <script src="../../shared/topnav.js?v=20261004-original-v2"></script>
   <script>ThemeManager.init();</script>
 </head>
 <body>
@@ -41,6 +41,8 @@
           </select>
         </div>
 
+        <div class="library-select-wrapper"><label for="sourceSelect" class="library-select-label">数据来源：</label><select id="sourceSelect" class="header-library-select"><option value="legacy">历史 DFT 记录</option><option value="rebuild">AI 整理数据</option></select></div>
+        <button id="refreshAnalysis" class="btn btn-secondary btn-compact" type="button">刷新分析</button>
         <!-- Export Buttons (Visible & compact to satisfy Playwright contract while visually grouped) -->
         <div class="header-export-group">
           <button id="exportCatalystCsv" class="btn btn-secondary btn-compact" type="button" title="导出催化剂宽表 CSV (pandas/XGBoost)">
@@ -386,7 +388,7 @@
               <div class="matrix-meta-badges">
                 <span class="meta-badge" id="badgeVarCount">6 个变量</span>
                 <span class="meta-badge" id="badgeCellCount">0 / 15 变量对可分析</span>
-                <span class="meta-badge">已审核数据</span>
+                <span class="meta-badge">探索性数据 · 审核未知</span>
               </div>
             </div>
 
@@ -499,9 +501,9 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
           </div>
           <div class="metric-text-box">
-            <span class="metric-title">通过导出门记录</span>
+            <span class="metric-title">有数值记录</span>
             <strong id="metricExportEligible" class="metric-number">—</strong>
-            <span class="metric-sub">已通过安全闸门初步检验</span>
+            <span class="metric-sub">仅统计当前来源的有限数值</span>
           </div>
         </div>
 
@@ -510,9 +512,9 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
           </div>
           <div class="metric-text-box">
-            <span class="metric-title">V2 行级数值可用</span>
+            <span class="metric-title">可探索数值</span>
             <strong id="metricV2Numeric" class="metric-number">—</strong>
-            <span id="dsNumericRatio" class="metric-sub">同时满足身份、审核与规范化</span>
+            <span id="dsNumericRatio" class="metric-sub">单位可识别的有限数值</span>
           </div>
         </div>
 
@@ -523,7 +525,7 @@
           <div class="metric-text-box">
             <span class="metric-title">催化剂样品数</span>
             <strong id="metricCatalysts" class="metric-number">—</strong>
-            <span class="metric-sub">具备唯一样品身份 (catalyst_sample_id)</span>
+            <span class="metric-sub">当前来源内按催化剂归组</span>
           </div>
         </div>
 
@@ -534,7 +536,7 @@
           <div class="metric-text-box">
             <span class="metric-title">贡献论文</span>
             <strong id="metricPapers" class="metric-number">—</strong>
-            <span class="metric-sub">来自经审核的高质量文献</span>
+            <span class="metric-sub">当前来源内贡献数值的论文</span>
           </div>
         </div>
       </section>
@@ -588,7 +590,7 @@
               <h3 class="chart-title">数据导出</h3>
               <span id="exportPolicyBadge" class="policy-badge">策略检查中…</span>
             </div>
-            <p class="card-desc">导出已清洗的科学数据，供后续机器学习或复现分析使用：</p>
+            <p class="card-desc">导出当前来源的探索性数据；审核状态未知，使用前需核对来源与适用范围：</p>
 
             <div class="export-options">
               <button id="exportCsvCardBtn" class="export-action-card" type="button">
@@ -632,7 +634,7 @@
                 <span class="quality-step-num">2</span>
                 <div>
                   <strong>安全闸门筛选</strong>
-                  <p>仅允许审核通过且候选状态合规的数据进入分析，自动过滤缺少位点、状态模糊或冲突记录。</p>
+                  <p>展示数值、单位与来源的可用情况；当前探索统计不代表审核通过。冲突值保留并排除统计。</p>
                 </div>
               </li>
               <li>
@@ -659,7 +661,7 @@
         <div class="features-card-header">
           <div>
             <h3 class="chart-title">催化剂宽表数据预览</h3>
-            <p class="card-desc">展示当前文献库前 5 条标准化催化剂宽表记录（仅在内部支持水平滚动，页面无横向滚动条）</p>
+            <p class="card-desc">展示当前文献库前 10 条催化剂宽表记录（仅在内部支持水平滚动，页面无横向滚动条）</p>
           </div>
           <button id="downloadFullCsvBtn" class="link-btn" type="button">导出全部宽表数据 →</button>
         </div>
@@ -691,6 +693,6 @@
   </main>
 
   <script src="../../shared/view-state.js"></script>
-  <script src="./page.js?v=20260913"></script>
+  <script src="./page.js?v=20261004-original-v2"></script>
 </body>
 </html>

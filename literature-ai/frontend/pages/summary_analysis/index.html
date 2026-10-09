@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>汇总分析 · Literature AI</title>
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <script src="../../shared/topnav.js?v=20261003-original-design"></script>
+  <script>ThemeManager.init();</script>
+</head>
+<body>
+<div id="topnav-mount"></div>
+<main class="rebuild-shell">
+  <section class="rebuild-hero" aria-labelledby="pageTitle">
+    <div>
+      <div class="rebuild-eyebrow">ANALYSIS</div>
+      <h1 id="pageTitle">汇总分析</h1>
+      <p>筛选材料与反应，选择数值字段生成真实配对样本；控制条件、构型与具体位点不一致不混合。</p>
+    </div>
+    <div class="rebuild-actions">
+      <button class="rebuild-btn ghost" id="refreshBtn" type="button">刷新</button>
+      <a class="rebuild-btn ghost" id="csvLink" href="#" style="display:none">导出 CSV</a>
+    </div>
+  </section>
+  <div class="rebuild-layout">
+    <aside class="rebuild-panel" aria-label="分析设置">
+      <h2>样本筛选</h2>
+      <p id="paperScopeHint" style="font-size:13px"></p>
+      <label class="rebuild-field" for="reactionFilter">反应</label>
+      <select id="reactionFilter" class="rebuild-control"></select>
+      <label class="rebuild-field" for="materialFilter">材料包含</label>
+      <input id="materialFilter" class="rebuild-control">
+      <label class="rebuild-field" for="activeSiteFilter">活性中心</label>
+      <select id="activeSiteFilter" class="rebuild-control"></select>
+      <label class="rebuild-field" for="dataTypeFilter">数据类型</label>
+      <select id="dataTypeFilter" class="rebuild-control">
+        <option value="">实验 + DFT 分行</option>
+        <option value="experimental">仅实验</option>
+        <option value="dft">仅 DFT</option>
+      </select>
+      <label class="rebuild-field" for="requiredConditionKeys">必须一致的条件键（逗号分隔）</label>
+      <input id="requiredConditionKeys" class="rebuild-control" placeholder="electrolyte,ph">
+      <label class="rebuild-field" for="comparisonConditionKeys">允许变化的比较键（逗号分隔）</label>
+      <input id="comparisonConditionKeys" class="rebuild-control" placeholder="model,site">
+      <label class="rebuild-field" for="comparisonFields">允许变化的行字段（逗号分隔）</label>
+      <input id="comparisonFields" class="rebuild-control" value="material" placeholder="material,active_site,configuration">
+      <label class="rebuild-field" for="xField">X 字段</label>
+      <select id="xField" class="rebuild-control"></select>
+      <label class="rebuild-field" for="yField">Y 字段</label>
+      <select id="yField" class="rebuild-control"></select>
+      <label class="rebuild-field" for="includeEstimated"><input id="includeEstimated" type="checkbox" style="margin-right:8px">包含估读值</label>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="analyzeBtn" type="button">生成分析</button></div>
+    </aside>
+    <section class="rebuild-panel" aria-label="分析结果">
+      <h2>结果</h2>
+      <div id="statusArea"></div>
+      <div id="resultArea"></div>
+    </section>
+  </div>
+</main>
+<script src="./page.js?v=20261003-recovery" defer></script>
+</body>
+</html>

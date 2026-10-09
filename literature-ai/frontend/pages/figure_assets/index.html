@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>图表资料 · Literature AI</title>
+  <link rel="stylesheet" href="../../shared/tokens.css">
+  <link rel="stylesheet" href="../../shared/components.css">
+  <link rel="stylesheet" href="../../shared/responsive.css">
+  <link rel="stylesheet" href="../../shared/topnav.css">
+  <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <script src="../../shared/topnav.js?v=20261003-original-design"></script>
+  <script>ThemeManager.init();</script>
+<style>
+.rebuild-context-dialog { width:min(960px,92vw); max-height:90vh; box-sizing:border-box; overflow:auto; border:1px solid var(--color-border-strong,#94a3b8); border-radius:12px; padding:18px; background:var(--color-surface,#fff); color:var(--color-text,#172033); }
+.rebuild-context-dialog::backdrop { background:rgba(15,23,42,.5); }
+.rebuild-context-header { display:flex; justify-content:space-between; align-items:start; gap:12px; }
+.rebuild-context-header h2 { margin:0; min-width:0; overflow-wrap:anywhere; }
+.rebuild-context-warning { color:var(--color-warning,#9a3412); font-size:.9rem; line-height:1.5; }
+.rebuild-context-stage { position:relative; width:100%; line-height:0; }
+.rebuild-context-stage[hidden] { display:none; }
+.rebuild-context-stage img { display:block; width:100%; height:auto; max-height:none; }
+.rebuild-context-stage svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+#contextRoi { stroke:var(--color-danger,#c62828); }
+.rebuild-context-caption { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.6; }
+.rebuild-context-links a { color:var(--color-text,#172033); text-decoration:underline; }
+.rebuild-context-links { display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; line-height:1.6; }
+</style>
+</head>
+<body>
+<div id="topnav-mount"></div>
+<main class="rebuild-shell">
+  <section class="rebuild-hero" aria-labelledby="pageTitle">
+    <div>
+      <div class="rebuild-eyebrow">VISUAL EVIDENCE</div>
+      <h1 id="pageTitle">图表资料</h1>
+      <p>查看、解释和纠正从真实 PDF 裁出的图表；跨页表合并保留全部页码来源。</p>
+    </div>
+    <button class="rebuild-btn ghost" id="refreshBtn" type="button">刷新</button>
+  </section>
+  <div class="rebuild-layout">
+    <aside class="rebuild-panel" aria-label="论文与裁图工具">
+      <h2>选择论文</h2>
+      <select id="paperSelect" class="rebuild-control" aria-label="选择论文"></select>
+      <h3 style="margin-top:18px">关联文件</h3>
+      <div id="fileList" class="rebuild-empty">请选择论文</div>
+      <h3 style="margin-top:18px">PDF 裁图</h3>
+      <form id="cropForm">
+        <label class="rebuild-field" for="cropFile">来源文件</label>
+        <select id="cropFile" class="rebuild-control" required></select>
+        <label class="rebuild-field" for="assetKey">对象 key</label>
+        <input id="assetKey" class="rebuild-control" required placeholder="fig-1-a">
+        <label class="rebuild-field" for="assetType">类型</label>
+        <select id="assetType" class="rebuild-control">
+          <option value="figure">图</option>
+          <option value="table">表</option>
+          <option value="subfigure">子图</option>
+        </select>
+        <label class="rebuild-field" for="figureLabel">图表号</label>
+        <input id="figureLabel" class="rebuild-control" placeholder="Figure 1">
+        <label class="rebuild-field" for="subfigureLabel">子图标号</label>
+        <input id="subfigureLabel" class="rebuild-control" placeholder="a">
+        <label class="rebuild-field" for="regions">裁剪区域 JSON</label>
+        <textarea id="regions" class="rebuild-control" required placeholder='[{"page_number":1,"bbox":[0.1,0.1,0.9,0.6]}]'></textarea>
+        <label class="rebuild-field" for="caption">图注 / 表题</label>
+        <textarea id="caption" class="rebuild-control"></textarea>
+        <label class="rebuild-field" for="explanation">中文解释</label>
+        <textarea id="explanation" class="rebuild-control"></textarea>
+        <div class="rebuild-actions"><button class="rebuild-btn" id="cropBtn" type="submit">生成裁图</button></div>
+      </form>
+      <h3 style="margin-top:22px">纠正选中对象</h3>
+      <form id="editForm">
+        <label class="rebuild-field" for="editCaption">图注 / 表题</label>
+        <textarea id="editCaption" class="rebuild-control"></textarea>
+        <label class="rebuild-field" for="editExplanation">中文解释</label>
+        <textarea id="editExplanation" class="rebuild-control"></textarea>
+        <label class="rebuild-field" for="editContext">上下文</label>
+        <textarea id="editContext" class="rebuild-control"></textarea>
+        <label class="rebuild-field" for="editXUnit">X 单位</label>
+        <input id="editXUnit" class="rebuild-control">
+        <label class="rebuild-field" for="editYUnit">Y 单位</label>
+        <input id="editYUnit" class="rebuild-control">
+        <label class="rebuild-field" for="editStatus">状态</label>
+        <select id="editStatus" class="rebuild-control">
+          <option value="draft">草稿</option>
+          <option value="reviewed">已核对</option>
+          <option value="corrected">已纠正</option>
+          <option value="unreadable">局部不可读</option>
+        </select>
+        <div class="rebuild-actions"><button class="rebuild-btn" id="editBtn" type="submit" disabled>保存纠正</button></div>
+      </form>
+    </aside>
+    <section class="rebuild-panel" aria-label="图表对象">
+      <div class="rebuild-actions" style="justify-content:space-between;align-items:center;margin-bottom:12px">
+        <strong id="assetSummary">请选择论文</strong>
+        <label class="rebuild-field" style="display:inline-flex;align-items:center;gap:8px"><input type="checkbox" id="showSuperseded">显示历史版本</label>
+        <span id="aiHint" class="rebuild-tag">AI 读写工具：/api/rebuild</span>
+      </div>
+      <div id="statusArea"></div>
+      <div id="assetGrid" class="rebuild-card-grid"></div>
+    </section>
+  </div>
+</main>
+<dialog id="contextViewer" class="rebuild-context-dialog" aria-labelledby="contextTitle">
+  <div class="rebuild-context-header"><h2 id="contextTitle">整图上下文＋子图位置</h2><button id="contextClose" class="rebuild-btn ghost" type="button">关闭</button></div>
+  <p class="rebuild-context-warning">这是用于定位的完整上下文整图，不是独立子图裁图；原裁图未通过核对的结论保持不变。</p>
+  <p id="contextReason"></p><p id="contextLoadStatus" role="status"></p>
+  <div id="contextStage" class="rebuild-context-stage" hidden><img id="contextImage" alt="完整上下文整图"><svg id="contextOverlay" aria-hidden="true" preserveAspectRatio="none"><rect id="contextRoi" fill="none" stroke="#c62828" stroke-width="3" vector-effect="non-scaling-stroke"></rect></svg></div>
+  <section aria-labelledby="contextCaptionLabel"><h3 id="contextCaptionLabel">整图图注</h3><p id="contextCaption" class="rebuild-context-caption"></p><p class="rebuild-context-warning">图注文字来自整图资料记录，不表示图注包含在原 PNG 像素内。</p></section>
+  <div class="rebuild-context-links"><a id="contextOriginal" target="_blank" rel="noopener">查看原子图裁图</a><a id="contextWhole" target="_blank" rel="noopener">查看整图原文件</a><a id="contextPdf" target="_blank" rel="noopener">查看来源 PDF</a></div>
+</dialog>
+<script src="./page.js?v=20261009-context-roi-r4" defer></script>
+</body>
+</html>

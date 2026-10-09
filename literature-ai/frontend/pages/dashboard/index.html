@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="../../shared/components.css">
     <link rel="stylesheet" href="../../shared/topnav.css">
     <link rel="stylesheet" href="../../shared/responsive.css">
-    <script src="../../shared/topnav.js"></script>
+    <script src="../../shared/topnav.js?v=20261003-original-design"></script>
     <script>ThemeManager.init();</script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1119,7 +1119,7 @@
                     </div>
                     <div class="ws-upload-text">
                         <div class="ws-upload-title">拖入 PDF，或点击添加文献</div>
-                        <div class="ws-upload-desc">支持单个或批量 PDF 上传，自动完成解析、保存和结构化抽取。单个文件不超过 30 MB。</div>
+                        <div class="ws-upload-desc">支持单个或批量 PDF 上传，仅保存并创建文献记录，不会自动启动解析或抽取。单个文件不超过 30 MB。</div>
                         <div class="ws-upload-desc-sm">支持批量上传 · 单个 ≤ 30 MB</div>
                     </div>
                 </div>
@@ -1142,8 +1142,8 @@
                     小提示
                 </div>
                 <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>支持 PDF 格式文献</span></div>
-                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>自动提取标题、作者、摘要等信息</span></div>
-                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>解析后可进入审核中心查看结果</span></div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>上传只保存原文件与文献记录</span></div>
+                <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>上传只保存文件，可在「AI 提取」按反应模板整理数据</span></div>
                 <div class="ws-tip-item"><span class="ws-tip-check">✓</span><span>可批量上传，提升效率</span></div>
             </div>
         </section>
@@ -1169,7 +1169,7 @@
                 <span class="ws-metric-arrow">›</span>
             </div>
 
-            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html?quick=parsed'" title="点击查看已解析文献">
+            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html?quick=pdf'" title="点击查看有 PDF 的文献">
                 <div class="ws-metric-icon-box green">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
@@ -1177,27 +1177,10 @@
                     </svg>
                 </div>
                 <div class="ws-metric-content">
-                    <span class="ws-metric-title">已解析</span>
+                    <span class="ws-metric-title">有 PDF</span>
                     <div class="ws-metric-num-row">
-                        <span class="ws-metric-value" id="metricParsed">0</span>
-                        <span class="ws-metric-sub" id="metricParsedPct">0%</span>
-                    </div>
-                </div>
-                <span class="ws-metric-arrow">›</span>
-            </div>
-
-            <div class="ws-metric-card" onclick="location.href='../literature_library/index.html?quick=review'" title="点击查看待处理文献">
-                <div class="ws-metric-icon-box orange">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="10"></circle>
-                        <polyline points="12 6 12 12 16 14"></polyline>
-                    </svg>
-                </div>
-                <div class="ws-metric-content">
-                    <span class="ws-metric-title">待处理</span>
-                    <div class="ws-metric-num-row">
-                        <span class="ws-metric-value" id="metricPending">0</span>
-                        <span class="ws-metric-sub" id="metricPendingPct">0%</span>
+                        <span class="ws-metric-value" id="metricPdf">0</span>
+                        <span class="ws-metric-sub" id="metricPdfSub">基于近期样本</span>
                     </div>
                 </div>
                 <span class="ws-metric-arrow">›</span>
@@ -1215,7 +1198,7 @@
                     <span class="ws-metric-title">DFT 数据</span>
                     <div class="ws-metric-num-row">
                         <span class="ws-metric-value" id="metricDft">0</span>
-                        <span class="ws-metric-sub" id="metricDftPct">已抽取</span>
+                        <span class="ws-metric-sub" id="metricDftPct">基于近期样本</span>
                     </div>
                 </div>
                 <span class="ws-metric-arrow">›</span>
@@ -1262,7 +1245,7 @@
                 <!-- Parsing Tasks -->
                 <div class="ws-panel">
                     <div class="ws-panel-head">
-                        <h3>解析任务</h3>
+                        <h3>上传任务</h3>
                         <a class="ws-panel-link" href="../literature_library/index.html" id="jobsViewAll">查看全部 →</a>
                     </div>
                     <div class="ws-job-list" id="jobsList">
@@ -1299,11 +1282,21 @@
             papers: [],
             typeStats: { items: [] },
             pollTimer: null,
-            loadSeq: 0
+            loadSeq: 0,
+            switchingLibrary: false
         };
 
         function esc(value) {
             return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+        }
+
+        /* 与文献库列表同一口径：只看 PDF 是否存在，不掺入旧解析/审核状态。 */
+        function paperHasPdf(p) {
+            if (!p) return false;
+            const status = (p.pdf_artifact_status && typeof p.pdf_artifact_status === "object") ? p.pdf_artifact_status : {};
+            if (p.pdf_exists === true || status.pdf_exists === true) return true;
+            if (p.pdf_exists === false || status.pdf_exists === false) return false;
+            return Boolean(p.pdf_path && p.oa_status !== "metadata_only" && p.oa_status !== "needs_upload");
         }
 
         function showToast(msg) {
@@ -1469,19 +1462,34 @@
         });
 
         /* ---- Libraries Data Loading ---- */
-        async function loadLibraries() {
+        async function loadLibraries(preferServerActive = false) {
+            const seq = ++state.loadSeq;
             const select = document.getElementById('librarySelect');
             try {
                 const libs = await fetchJSON(LIB_API);
+                if (seq !== state.loadSeq) return;
                 state.libraries = Array.isArray(libs) ? libs : [];
                 if (!state.libraries.length) {
                     if (select) select.innerHTML = '<option value="">无可用文献库</option>';
                     state.currentLibrary = "";
+                    localStorage.removeItem('litai_current_library');
+                    const params = new URLSearchParams(location.search);
+                    if (params.has('library_name')) {
+                        params.delete('library_name');
+                        const query = params.toString();
+                        history.replaceState(history.state, '', location.pathname + (query ? '?' + query : '') + location.hash);
+                    }
                     renderCustomLibraryDropdown();
-                    await refreshData();
+                    await refreshData(seq);
                     return;
                 }
-                const active = state.libraries.find(l => l.is_active) || state.libraries[0];
+                const params = new URLSearchParams(location.search);
+                const requested = params.get('library_name');
+                const saved = localStorage.getItem('litai_current_library');
+                const valid = name => state.libraries.find(l => l.name === name);
+                const active = (preferServerActive ? null : valid(requested)) ||
+                    (preferServerActive ? null : valid(saved)) ||
+                    state.libraries.find(l => l.is_active) || state.libraries[0];
                 if (select) {
                     select.innerHTML = state.libraries.map(l =>
                         `<option value="${esc(l.name)}" ${l.name === active.name ? 'selected' : ''}>${esc(l.name)}${l.is_active ? ' (当前)' : ''}</option>`
@@ -1489,24 +1497,39 @@
                     select.value = active.name || "";
                 }
                 state.currentLibrary = active.name || "";
+                localStorage.setItem('litai_current_library', state.currentLibrary);
+                if (params.has('library_name') && requested !== state.currentLibrary) {
+                    params.set('library_name', state.currentLibrary);
+                    history.replaceState(history.state, '', location.pathname + '?' + params + location.hash);
+                }
                 renderCustomLibraryDropdown();
-                await refreshData();
+                await refreshData(seq);
             } catch (e) {
+                if (seq !== state.loadSeq) return;
                 if (select) select.innerHTML = '<option value="">加载失败</option>';
                 showToast("加载文献库失败：" + e.message);
             }
         }
 
         async function switchLibrary(name) {
-            if (!name || name === state.currentLibrary) {
+            if (!name || name === state.currentLibrary || state.switchingLibrary ||
+                !state.libraries.some(l => l.name === name)) {
                 closeLibraryDropdown();
                 return;
             }
+            state.switchingLibrary = true;
             state.loadSeq++;
             const seq = state.loadSeq;
             try {
                 await fetchJSON(`${LIB_API}/${encodeURIComponent(name)}/activate`, { method: "POST" });
+                if (seq !== state.loadSeq) return;
                 state.currentLibrary = name;
+                localStorage.setItem('litai_current_library', name);
+                const params = new URLSearchParams(location.search);
+                if (params.has('library_name')) {
+                    params.set('library_name', name);
+                    history.replaceState(history.state, '', location.pathname + '?' + params + location.hash);
+                }
                 state.libraries.forEach(l => {
                     l.is_active = (l.name === name);
                 });
@@ -1517,8 +1540,11 @@
                 closeLibraryDropdown();
                 await refreshData(seq);
             } catch (e) {
+                if (seq !== state.loadSeq) return;
                 showToast("切换文献库失败：" + e.message);
-                await loadLibraries();
+                await loadLibraries(true);
+            } finally {
+                state.switchingLibrary = false;
             }
         }
 
@@ -1535,8 +1561,14 @@
         /* ---- Type Stats (Donut Chart) ---- */
         async function loadTypeStats(seq) {
             const el = document.getElementById('libraryOverview');
+            if (!state.currentLibrary) {
+                state.typeStats = { items: [] };
+                el.innerHTML = '<div class="ws-empty-hint">暂无可用文献库</div>';
+                renderMetrics();
+                return;
+            }
             try {
-                const query = state.currentLibrary ? `?library_name=${encodeURIComponent(state.currentLibrary)}` : "";
+                const query = `?library_name=${encodeURIComponent(state.currentLibrary)}`;
                 const data = await fetchJSON(`${API_BASE}/type-stats${query}`);
                 if (seq !== state.loadSeq) return;
                 state.typeStats = data || { items: [] };
@@ -1631,8 +1663,14 @@
         /* ---- Recent Papers Table ---- */
         async function loadRecentPapers(seq) {
             const tbody = document.getElementById('recentPapersTableBody');
+            if (!state.currentLibrary) {
+                state.papers = [];
+                tbody.innerHTML = '<tr><td colspan="7" class="ws-empty-hint">暂无可用文献库</td></tr>';
+                renderMetrics();
+                return;
+            }
             try {
-                const query = state.currentLibrary ? `?limit=8&library_name=${encodeURIComponent(state.currentLibrary)}` : "?limit=8";
+                const query = `?limit=8&library_name=${encodeURIComponent(state.currentLibrary)}`;
                 const data = await fetchJSON(`${API_BASE}/${query}`);
                 if (seq !== state.loadSeq) return;
                 state.papers = Array.isArray(data) ? data : (data && data.items ? data.items : []);
@@ -1666,10 +1704,9 @@
                 const typeObj = resolvePaperType(p.paper_type);
                 const timeStr = p.created_at ? formatDateTime(p.created_at) : "-";
 
-                let statusHtml = '<span class="status-dot-cell"><span class="status-dot completed"></span>已完成</span>';
-                if (!p.pdf_path && !p.parsed_at) {
-                    statusHtml = '<span class="status-dot-cell"><span class="status-dot pending"></span>待处理</span>';
-                }
+                const statusHtml = paperHasPdf(p)
+                    ? '<span class="status-dot-cell"><span class="status-dot completed"></span>有 PDF</span>'
+                    : '<span class="status-dot-cell"><span class="status-dot pending"></span>无 PDF</span>';
 
                 return `
                     <tr>
@@ -1702,38 +1739,24 @@
             document.getElementById('metricTotal').textContent = total;
 
             const papers = state.papers || [];
-            let parsedCount = 0;
-            let pendingCount = 0;
+            let pdfCount = 0;
             let dftCount = 0;
 
+            // 副指标只统计当前已加载的近期样本，不做全库外推，也不编造数字。
             papers.forEach(p => {
-                if (p.pdf_path || p.parsed_at) parsedCount++;
-                else pendingCount++;
+                if (paperHasPdf(p)) pdfCount++;
                 if (p.counts && p.counts.dft_results) dftCount += p.counts.dft_results;
             });
 
-            const parsedDisplay = total > 0 ? (total >= papers.length ? (total - (total > 20 ? 4 : 1)) : parsedCount) : 0;
-            const pendingDisplay = Math.max(0, total - parsedDisplay);
-            const parsedPct = total > 0 ? ((parsedDisplay / total) * 100).toFixed(1) + "%" : "0%";
-            const pendingPct = total > 0 ? ((pendingDisplay / total) * 100).toFixed(1) + "%" : "0%";
-
-            document.getElementById('metricParsed').textContent = parsedDisplay;
-            document.getElementById('metricParsedPct').textContent = parsedPct;
-            document.getElementById('metricPending').textContent = pendingDisplay;
-            document.getElementById('metricPendingPct').textContent = pendingPct;
-
-            document.getElementById('metricDft').textContent = dftCount > 0 ? dftCount : (total > 0 ? Math.round(total * 1.5) : 0);
+            document.getElementById('metricPdf').textContent = pdfCount;
+            document.getElementById('metricDft').textContent = dftCount;
         }
 
         /* ---- Jobs List ---- */
         async function fetchIngestionJobs(libraryName) {
             const requests = INGESTION_JOB_TYPES.map(async jobType => {
-                try {
-                    const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(libraryName)}&type=${encodeURIComponent(jobType)}&limit=10`);
-                    return Array.isArray(data) ? data : (data && data.items ? data.items : []);
-                } catch (_) {
-                    return [];
-                }
+                const data = await fetchJSON(`${JOBS_API}?library_name=${encodeURIComponent(libraryName)}&type=${encodeURIComponent(jobType)}&limit=10`);
+                return Array.isArray(data) ? data : (data && data.items ? data.items : []);
             });
             const groups = await Promise.all(requests);
             const merged = [];
@@ -1779,11 +1802,11 @@
                                     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                                 </div>
                                 <div class="ws-job-info">
-                                    <div class="ws-job-title">系统解析通道就绪</div>
-                                    <div class="ws-job-sub">暂无进行中的异步解析任务</div>
+                                    <div class="ws-job-title">暂无上传任务</div>
+                                    <div class="ws-job-sub">暂无进行中的上传任务</div>
                                 </div>
                             </div>
-                            <div class="ws-job-right-state">已就绪</div>
+                            <div class="ws-job-right-state">无活动任务</div>
                         </div>
                     </div>
                 `;
@@ -1791,7 +1814,7 @@
             }
 
             el.innerHTML = jobs.slice(0, 4).map(job => {
-                const title = job.payload && job.payload.filename ? job.payload.filename : (job.title || "PDF 解析处理");
+                const title = job.payload && job.payload.filename ? job.payload.filename : (job.title || "PDF 上传保存");
                 const status = job.status || "queued";
                 const isRunning = status === "running";
                 const isQueued = status === "queued";
@@ -1890,7 +1913,7 @@
             }
 
             const libraryName = state.currentLibrary || "";
-            showToast(`正在上传 ${validPdfs.length} 篇文献并启动后台解析...`);
+            showToast(`正在上传 ${validPdfs.length} 篇文献…`);
 
             try {
                 for (const file of validPdfs) {
@@ -1899,11 +1922,11 @@
                     formData.append("library_name", libraryName);
                     await fetchJSON(`${API_BASE}/ingest/upload/jobs`, { method: "POST", body: formData });
                 }
-                showToast(`已成功创建 ${validPdfs.length} 个后台解析任务！`);
+                showToast(`上传完成：已保存 ${validPdfs.length} 个 PDF，未启动自动解析。`);
                 await refreshData();
             } catch (e) {
                 const msg = e.detail && e.detail.message ? e.detail.message : e.message;
-                showToast("上传或解析任务创建失败：" + msg);
+                showToast("上传失败：" + msg);
             } finally {
                 input.value = "";
             }

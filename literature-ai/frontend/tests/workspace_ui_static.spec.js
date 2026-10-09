@@ -27,9 +27,9 @@ test('workspace dashboard surface matches the research workbench spec', () => {
   expect(dashboard).toContain('id="recentPapers"');
   expect(dashboard).toContain('最近文献');
 
-  // 解析任务面板
+  // 上传任务面板（新流程上传只保存，不再启动解析）
   expect(dashboard).toContain('id="jobsPanel"');
-  expect(dashboard).toContain('解析任务');
+  expect(dashboard).toContain('上传任务');
 
   // 文献库概况
   expect(dashboard).toContain('id="libraryOverview"');
@@ -55,7 +55,8 @@ test('workspace dashboard surface matches the research workbench spec', () => {
   expect(topnav).not.toContain('id: "ingestion"');
   expect(topnav).toContain('label: "工作台"');
   expect(topnav).toContain('label: "文献库"');
-  expect(topnav).toContain('label: "审核中心"');
+  // 新流程上线后审核中心不再占用主导航（旧 URL 仍可直接访问）
+  expect(topnav).not.toContain('label: "审核中心"');
   expect(topnav).toContain('label: "DFT 数据库"');
   expect(topnav).toContain('label: "数据分析"');
   expect(topnav).toContain('label: "设置"');

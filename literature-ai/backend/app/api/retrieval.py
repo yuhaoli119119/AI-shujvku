@@ -5,7 +5,6 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
 from app.schemas.retrieval import RetrievalSearchRequest, RetrievalSearchResponse
-from app.services.retrieval_service import RetrievalService
 
 router = APIRouter()
 

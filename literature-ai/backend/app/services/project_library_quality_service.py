@@ -9,10 +9,6 @@ from sqlalchemy.orm import Session
 from app.db.models import ExternalAnalysisCandidate, Paper
 from app.domain.element_descriptors import build_metal_descriptor_payload
 from app.domain.project_library_context import get_project_library_context
-from app.services.dft_export_service import build_dft_ml_dataset_v3
-from app.services.lis_sac_dac_feature_service import LiSSacDacFeatureService
-from app.services.project_library_bundle_service import ProjectLibraryBundleService
-from app.services.project_library_queue_service import ProjectLibraryQueueService
 from app.utils.library_names import normalize_library_name
 
 

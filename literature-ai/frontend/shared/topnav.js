@@ -196,7 +196,6 @@ class TopNav {
   static NAV_ITEMS = [
     { id: "dashboard", label: "工作台", href: "../dashboard/index.html" },
     { id: "literature", label: "文献库", href: "../literature_library/index.html" },
-    { id: "review-center", label: "审核中心", href: "../review_center/index.html" },
     { id: "dft-database", label: "DFT 数据库", href: "../dft_database/index.html" },
     { id: "visuals", label: "数据分析", href: "../visuals/index.html" },
     { id: "settings", label: "设置", href: "../settings/index.html" },
@@ -211,20 +210,26 @@ class TopNav {
     "content-knowledge": "literature",
     "ai-writer": "literature",
     "screening": "literature",
-    "dft-audit-center": "review-center",
-    "external": "review-center",
     "extraction-workflow": "literature",
+    "ai-extract": "literature",
+    "figure-assets": "literature",
+    "data-table": "dft-database",
+    "summary-analysis": "visuals",
   };
 
   // 主导航放不下的页面，收进"更多"菜单。
-  // 注意：dft_audit_center / content_knowledge / external_analysis_workbench 现在只是历史 URL，
-  // 打开后会跳回审核中心，所以不再列进菜单（直接改地址栏仍可用），避免出现"点了没去对地方"的错觉。
+  // 新流程四页排在菜单最前，旧流程工具页不再列进菜单：
+  // dft_audit_center / content_knowledge / external_analysis_workbench 只是历史 URL，
+  // 打开后会跳回各自的现行页面（直接改地址栏仍可用）。
   static MORE_ITEMS = [
+    { label: "AI 提取", href: "../literature_library/rebuild.html" },
+    { label: "AI 图表整理", href: "../figure_assets/index.html" },
+    { label: "AI 数据表", href: "../data_table/index.html" },
+    { label: "AI 汇总分析", href: "../summary_analysis/index.html" },
+    { label: "本地 AI 写作", href: "../ai_writer/index.html" },
     { label: "论文入库", href: "../ingestion/index.html" },
     { label: "文献筛选", href: "../literature_screening/index.html" },
     { label: "机理知识聚合", href: "../mechanism_knowledge/index.html" },
-    { label: "本地 AI 写作", href: "../ai_writer/index.html" },
-    { label: "高级提取协议", href: "../extraction_workflow/index.html" },
   ];
 
   // 通用：给"横向可滚动的条带"加两端渐隐提示（类名 .litai-hscroll，样式在 shared/responsive.css）。

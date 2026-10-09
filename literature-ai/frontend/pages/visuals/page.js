@@ -79,6 +79,7 @@
   };
 
   const WARNING_LABELS = {
+    approval_not_evaluated: "当前为探索性数据，审核状态未知",
     min_n_not_reached: "有效配对未达到最少样本数，暂不计算拟合结果",
     fewer_than_two_contributing_papers: "有效数据来自不到 2 篇论文，跨文献可信度不足",
   };
@@ -139,6 +140,7 @@
   /* ---- URL 状态同步（shared/view-state.js）：文献库/字段/阈值/页签/矩阵筛选写进地址栏，
      从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
   const VIEW_PARAMS = {
+    source: { id: "sourceSelect", type: "select", default: "legacy" },
     library_name: { id: "librarySelect", type: "select", default: "" },
     tab: { type: "state", default: "relations", valid: (v) => ["relations", "matrix", "dataset"].includes(v) },
     x: { id: "xField", type: "select", default: DEFAULTS.x },
@@ -198,7 +200,7 @@
   }
 
   function fieldLabel(key) {
-    return state.fields.find((field) => field.key === key)?.label || key;
+    return PROPERTY_META[key]?.zh || state.fields.find((field) => field.key === key)?.label || key;
   }
 
   function pointCatalystName(point) {
@@ -219,23 +221,30 @@
   async function getJSON(url, signal) {
     const cached = responseCache.get(url);
     if (cached && Date.now() - cached.time < 300000) return cached.data;
-    const response = await fetch(url, { signal, headers: { Accept: "application/json" } });
-    if (!response.ok) {
-      let detail = "";
-      try {
-        const err = await response.json();
-        detail = err.detail ? "：" + err.detail : "";
-      } catch (_) {}
-      throw new Error("请求失败（" + response.status + "）" + detail);
-    }
-    const data = await response.json();
-    if (responseCache.size >= 100) responseCache.delete(responseCache.keys().next().value);
-    responseCache.set(url, {time: Date.now(), data});
-    return data;
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    if (signal) { if (signal.aborted) controller.abort(); else signal.addEventListener("abort", onAbort, {once:true}); }
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
+    try {
+      const response = await fetch(url, { signal:controller.signal, headers: { Accept: "application/json" } });
+      if (!response.ok) {
+        let detail = "";
+        try { const err = await response.json(); detail = err.detail ? "：" + err.detail : ""; } catch (_) {}
+        throw new Error("请求失败（" + response.status + "）" + detail);
+      }
+      const data = await response.json();
+      if (responseCache.size >= 100) responseCache.delete(responseCache.keys().next().value);
+      responseCache.set(url, {time: Date.now(), data});
+      return data;
+    } catch (error) { if (timedOut) throw new Error("读取超时，请重试"); throw error; }
+    finally { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); }
   }
 
   function visualParams(params) {
     if (state.libraryName) params.set("library_name", state.libraryName);
+    params.set("source", $("sourceSelect")?.value || new URLSearchParams(location.search).get("source") || "legacy");
+    params.set("export_mode", "exploratory");
     return params;
   }
 
@@ -345,33 +354,25 @@
     return match ? match[1] : fallback;
   }
 
-  async function checkExportPolicy() {
-    try {
-      const settings = await getJSON("/api/settings");
-      state.exportsEnabled = Boolean(settings.exports_enabled && settings.exports_enabled !== "");
-    } catch (_e) {
-      state.exportsEnabled = false;
-    }
+  function applyExportPolicy(policy) {
+    if (!policy || typeof policy.effective_exports_enabled !== "boolean") return;
+    state.exportPolicy = policy;
+    state.exportsEnabled = policy.effective_exports_enabled;
     updateExportUI();
   }
 
+  async function checkExportPolicy() {
+    try {
+      const payload = await getJSON("/api/papers/analysis-summary?" + visualParams(new URLSearchParams()).toString());
+      applyExportPolicy(payload.export_policy);
+    } catch (_) { updateExportUI(); }
+  }
+
   function updateExportUI() {
+    const allowed = state.exportsEnabled === true;
     const badge = $("exportPolicyBadge");
-    if (badge) {
-      if (state.exportsEnabled) {
-        badge.textContent = "策略允许导出";
-        badge.className = "policy-badge policy-badge-enabled";
-      } else {
-        badge.textContent = "策略已禁用导出 (LITAI_EXPORTS_ENABLED=false)";
-        badge.className = "policy-badge policy-badge-disabled";
-      }
-    }
-    if (!state.exportsEnabled) {
-      const status = $("exportStatus");
-      if (status && !status.textContent) {
-        status.textContent = "系统策略当前禁用数据导出 (LITAI_EXPORTS_ENABLED=false)";
-      }
-    }
+    if (badge) { badge.textContent = state.exportPolicy ? (allowed ? "当前会话允许导出" : "当前会话未获导出权限") : "正在读取导出权限"; badge.className = "policy-badge " + (allowed ? "policy-badge-enabled" : "policy-badge-disabled"); }
+    ["exportCatalystCsv", "downloadCatalystJson", "exportCsvCardBtn", "exportJsonCardBtn", "downloadFullCsvBtn"].forEach(id => { const button = $(id); if (button) { button.disabled = !allowed; button.title = allowed ? "导出当前来源的探索性数据" : "当前会话未获导出权限"; } });
   }
 
   async function downloadDataset(kind) {
@@ -419,9 +420,9 @@
   function setOverview(summary) {
     const values = [
       ["metricDftTotal", summary.total_dft_rows],
-      ["metricExportEligible", summary.exportable_dft_rows],
-      ["metricV2Numeric", summary.v2_row_ready_numeric_rows],
-      ["metricCatalysts", summary.distinct_exportable_catalysts],
+      ["metricExportEligible", summary.numeric_records ?? summary.source_numeric_rows],
+      ["metricV2Numeric", summary.exploratory_numeric_records ?? summary.exploratory_numeric_rows],
+      ["metricCatalysts", summary.distinct_exploratory_catalysts ?? summary.distinct_exportable_catalysts],
       ["metricPapers", summary.contributing_papers],
     ];
     values.forEach(([id, value]) => {
@@ -438,13 +439,14 @@
     try {
       const data = await getJSON("/api/visuals/overview?" + visualParams(new URLSearchParams({ sections: "overview" })).toString());
       if (library !== state.libraryName) return;
+      applyExportPolicy(data.export_policy);
       const summary = data.summary || data.overview || {};
       const meta = data.catalyst_analysis_meta || {};
       setOverview(summary);
 
       // 更新头部单行紧凑摘要
       const dftCount = summary.total_dft_rows ?? 0;
-      const catCount = meta.distinct_exportable_catalysts ?? summary.distinct_exportable_catalysts ?? 0;
+      const catCount = meta.distinct_exploratory_catalysts ?? summary.distinct_exploratory_catalysts ?? summary.distinct_exportable_catalysts ?? 0;
       const compactEl = $("headerCompactSummary");
       if (compactEl) {
         compactEl.textContent = `${state.libraryName || "当前文献库"} · ${dftCount} DFT · ${catCount} 催化剂`;
@@ -470,7 +472,7 @@
   function normaliseFields(payload) {
     const raw = Array.isArray(payload) ? payload : (payload.fields || payload.analysis_fields || []);
     return raw.filter((field) => field && field.key && (field.type === "number" || field.numeric === true || field.category === "numeric") && field.analysis_enabled !== false)
-      .map((field) => ({ key: field.key, label: field.label || field.display_name || field.key }));
+      .map((field) => ({ key: field.key, label: PROPERTY_META[field.key]?.zh || field.label || field.display_name || field.key }));
   }
 
   function fillSelect(select, fields, preferred) {
@@ -486,10 +488,12 @@
 
   async function loadFields() {
     const payload = await getJSON("/api/visuals/analysis-fields?" + visualParams(new URLSearchParams()).toString());
+    applyExportPolicy(payload.export_policy);
     state.fields = normaliseFields(payload);
     if (!state.fields.length) throw new Error("接口未返回可用于数值相关分析的字段");
     fillSelect($("xField"), state.fields, DEFAULTS.x);
     fillSelect($("yField"), state.fields, DEFAULTS.y);
+    if ($("yField").value === $("xField").value && state.fields.length > 1) $("yField").value = state.fields.find(field => field.key !== $("xField").value).key;
   }
 
   function listItems(id, items) {
@@ -921,8 +925,8 @@
       if (requestId !== state.requestId) return;
       state.lastCorrelation = data;
       const counts = data.analysis_row_counts || {};
-      $("headerCompactSummary").textContent = `${state.libraryName || "当前文献库"} · ${counts.total_dft_rows ?? "—"} DFT · ${counts.distinct_exportable_catalysts ?? "—"} 催化剂`;
-      $("overviewStatus").textContent = `${counts.pair_analysis_ready_numeric_rows ?? "—"} 条记录可参与关系分析`;
+      $("headerCompactSummary").textContent = `${state.libraryName || "当前文献库"} · ${counts.total_dft_rows ?? "—"} DFT · ${counts.distinct_exploratory_catalysts ?? "—"} 催化剂`;
+      $("overviewStatus").textContent = `${counts.exploratory_numeric_records ?? counts.pair_analysis_ready_numeric_rows ?? "—"} 条记录可参与关系分析`;
       setOverview(counts);
       renderStatistics(data);
       renderVerdict(data);
@@ -989,12 +993,14 @@
     const scope = state.matrixScope;
 
     let vars = [];
+    const availableVars = (mc.variables || []).map(v => v.key || v);
     if (scope === "core") {
-      vars = CORE_MATRIX_VARS;
+      vars = CORE_MATRIX_VARS.filter(key => availableVars.includes(key));
+      if (vars.length < 2) vars = availableVars;
     } else {
       const allVars = mc.variables || [];
       vars = allVars.map((v) => v.key || v);
-      if (!vars.length) vars = CORE_MATRIX_VARS;
+      if (!vars.length) vars = availableVars;
     }
 
     const badgeVarCount = $("badgeVarCount");
@@ -1277,7 +1283,7 @@
     syncVisualUrl();
     const ticket = ++datasetRequest, library = state.libraryName;
     let diagMap = new Map();
-    let totalCats = 44;
+    let totalCats = null;
 
     try {
       const params = visualParams(new URLSearchParams({ sections: "overview,correlation", corr_allow_exploratory: "true" }));
@@ -1289,9 +1295,10 @@
       const cells = corr.cells || [];
 
       const totalDft = s.total_dft_rows ?? s.dft_results ?? 0;
-      const exportable = s.exportable_dft_rows ?? s.reviewed_exportable_dft_results ?? 0;
-      const v2Ready = s.v2_row_ready_numeric_rows ?? 0;
-      totalCats = meta.distinct_exportable_catalysts ?? s.distinct_exportable_catalysts ?? s.catalyst_samples ?? 44;
+      const exportable = s.numeric_records ?? s.source_numeric_rows ?? 0;
+      const v2Ready = s.exploratory_numeric_records ?? s.exploratory_numeric_rows ?? 0;
+      totalCats = meta.distinct_exploratory_catalysts ?? s.distinct_exploratory_catalysts ?? s.catalyst_samples ?? null;
+      setOverview(s);
       const papers = meta.contributing_papers ?? s.contributing_papers ?? s.papers ?? 0;
 
       // 提取对角线样本数作为特征覆盖真源
@@ -1306,7 +1313,7 @@
       if ($("dsExportableDft")) $("dsExportableDft").textContent = display(exportable);
 
       const rate = exportable > 0 ? ((v2Ready / exportable) * 100).toFixed(1) : "—";
-      if ($("dsNumericRate")) $("dsNumericRate").textContent = `${rate}%`;
+      if ($("dsNumericRate")) $("dsNumericRate").textContent = rate === "—" ? "—" : `${rate}%`;
       if ($("dsNumericRatio")) $("dsNumericRatio").textContent = `${v2Ready} / ${exportable} 条记录`;
 
       if ($("dsCatalystCount")) $("dsCatalystCount").textContent = display(totalCats);
@@ -1374,7 +1381,7 @@
         || (f.key === "li2s_bader_charge_transfer" ? diagMap.get("charge_transfer") : null)
         || 0;
       const count = Number(rawCount) || 0;
-      const percent = totalCatalysts > 0 ? ((count / totalCatalysts) * 100).toFixed(1) : "0.0";
+      const percent = totalCatalysts > 0 ? ((count / totalCatalysts) * 100).toFixed(1) : null;
 
       tbody.insertAdjacentHTML("beforeend", `
         <tr>
@@ -1382,13 +1389,13 @@
           <td><strong>${esc(meta.labelZh)}</strong></td>
           <td><code>${esc(meta.symbol)}</code></td>
           <td>${esc(meta.unit || "—")}</td>
-          <td><strong>${count}</strong> / ${totalCatalysts}</td>
+          <td><strong>${count}</strong> / ${totalCatalysts ?? "—"}</td>
           <td>
             <div class="coverage-bar-cell">
               <div class="coverage-bar-track">
-                <div class="coverage-bar-fill" style="width: ${percent}%;"></div>
+                <div class="coverage-bar-fill" style="width: ${percent ?? 0}%;"></div>
               </div>
-              <span class="coverage-percent-text">${percent}%</span>
+              <span class="coverage-percent-text">${percent === null ? "—" : percent + "%"}</span>
             </div>
           </td>
           <td>${esc(meta.desc || "经归一化的可分析数值特征")}</td>
@@ -1408,6 +1415,12 @@
       return;
     }
 
+    if (catData.source === "rebuild" && Array.isArray(catData.field_definitions)) {
+      const definitions = catData.field_definitions;
+      $("previewHeaderRow").innerHTML = '<th>#</th><th>催化剂</th><th>文献来源</th>' + definitions.map(field => '<th>' + esc(PROPERTY_META[field.key]?.zh || field.label || field.key) + (field.unit ? ' (' + esc(field.unit) + ')' : '') + '</th>').join("");
+      tbody.innerHTML = rows.slice(0, 10).map((row, index) => '<tr><td>' + (index + 1) + '</td><td><strong>' + esc(formatChemicalFormula(row.catalyst_name || "—")) + '</strong></td><td>' + esc(row.paper_code || "—") + '</td>' + definitions.map(field => '<td>' + display(row[field.key]) + '</td>').join("") + '</tr>').join("");
+      return;
+    }
     const previewRows = rows.slice(0, 10);
     previewRows.forEach((r, idx) => {
       const catalyst = formatChemicalFormula(r.catalyst_name || "—");
@@ -1527,6 +1540,11 @@
      ============================================================ */
   async function init() {
     TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
+    const source = new URLSearchParams(location.search).get("source");
+    if (["legacy", "rebuild"].includes(source)) $("sourceSelect").value = source;
+    $("sourceSelect").addEventListener("change", () => { const params = new URLSearchParams(location.search); params.set("source", $("sourceSelect").value); location.search = params.toString(); });
+    $("refreshAnalysis").addEventListener("click", () => { responseCache.clear(); if (state.currentTab === "matrix") loadMatrix(); else if (state.currentTab === "dataset") loadDatasetTab(); else loadFields().then(loadCorrelation).catch(error => { $("relationStatus").textContent = "字段读取失败：" + error.message; }); });
+    updateExportUI();
     initEvents();
     await resolveLibraryScope();
     checkExportPolicy();

@@ -1281,3 +1281,188 @@ class LiteratureIntakeCandidate(Base):
     updated_at: Mapped[datetime] = mapped_column(
         sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow
     )
+
+
+# ---------------------------------------------------------------------------
+# Rebuild workflow — 文献库 / 图表资料 / 数据表 / 汇总分析
+# ---------------------------------------------------------------------------
+
+
+class RebuildPaperFile(Base):
+    """New workflow PDF association without triggering legacy parsing."""
+
+    __tablename__ = "rebuild_paper_files"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(sa.String(16), nullable=False, index=True)
+    storage_path: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    original_filename: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False, index=True)
+    file_size: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    upload_status: Mapped[str] = mapped_column(
+        sa.String(32), default="associated", server_default="associated", nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "role", "sha256", name="uq_rebuild_paper_file"),
+    )
+
+
+class RebuildVisualAsset(Base):
+    """AI-curated figure/table/subfigure asset with human-correctable context."""
+
+    __tablename__ = "rebuild_visual_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("rebuild_paper_files.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    asset_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    asset_type: Mapped[str] = mapped_column(sa.String(24), nullable=False, index=True)
+    logical_group_key: Mapped[str | None] = mapped_column(sa.String(255), nullable=True, index=True)
+    figure_label: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    subfigure_label: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    caption: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    page_numbers: Mapped[list] = mapped_column(json_type(), default=list)
+    bbox: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    image_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    x_axis_unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    y_axis_unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    material_mapping: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    context_text: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    explanation: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    unreadable_fields: Mapped[list] = mapped_column(json_type(), default=list)
+    provenance: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    status: Mapped[str] = mapped_column(
+        sa.String(32), default="draft", server_default="draft", nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(sa.Integer, default=1, server_default="1", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "asset_key", name="uq_rebuild_visual_asset"),
+        sa.Index("ix_rebuild_visual_asset_paper_type", "paper_id", "asset_type"),
+    )
+
+
+class RebuildDataRow(Base):
+    """One reaction-template sample with explicit identity and conditions."""
+
+    __tablename__ = "rebuild_data_rows"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    row_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    reaction: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
+    material: Mapped[str] = mapped_column(sa.Text, nullable=False, index=True)
+    support: Mapped[str | None] = mapped_column(sa.Text, nullable=True, index=True)
+    active_site_type: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
+    active_site: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    configuration: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    material_family: Mapped[str | None] = mapped_column(sa.String(128), nullable=True, index=True)
+    data_type: Mapped[str] = mapped_column(sa.String(32), nullable=False, index=True)
+    condition: Mapped[dict] = mapped_column(json_type(), default=dict)
+    properties: Mapped[dict] = mapped_column(json_type(), default=dict)
+    notes: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("paper_id", "row_key", name="uq_rebuild_data_row"),
+        sa.Index("ix_rebuild_data_row_identity", "reaction", "material", "data_type"),
+    )
+
+
+class RebuildDataValue(Base):
+    """Cell-level value preserving raw precision and conflict state."""
+
+    __tablename__ = "rebuild_data_values"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    row_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("rebuild_data_rows.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    field_name: Mapped[str] = mapped_column(sa.String(128), nullable=False, index=True)
+    raw_value: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    numeric_value: Mapped[float | None] = mapped_column(sa.Float, nullable=True, index=True)
+    unit: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    value_type: Mapped[str] = mapped_column(
+        sa.String(32), default="explicit", server_default="explicit", nullable=False
+    )
+    precision_digits: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    is_estimated: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, server_default="false", nullable=False
+    )
+    missing_reason: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    conflict: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
+    preferred_source_id: Mapped[uuid.UUID | None] = mapped_column(sa.Uuid, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("row_id", "field_name", name="uq_rebuild_data_value"),
+    )
+
+
+class RebuildValueSource(Base):
+    """Traceable source for one non-empty cell value."""
+
+    __tablename__ = "rebuild_value_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    value_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("rebuild_data_values.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    row_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("rebuild_data_rows.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    paper_id: Mapped[uuid.UUID] = mapped_column(
+        sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    file_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("rebuild_paper_files.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    asset_id: Mapped[uuid.UUID | None] = mapped_column(
+        sa.ForeignKey("rebuild_visual_assets.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    source_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    source_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    page_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    label: Mapped[str | None] = mapped_column(sa.String(128), nullable=True)
+    table_row: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    table_column: Mapped[int | None] = mapped_column(sa.Integer, nullable=True)
+    quote: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    estimate_basis: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
+
+    __table_args__ = (
+        sa.UniqueConstraint("value_id", "source_key", name="uq_rebuild_value_source"),
+    )
+
+
+class RebuildAnalysisRun(Base):
+    """Persisted analysis/export result derived from filtered rows."""
+
+    __tablename__ = "rebuild_analysis_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    spec_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False, unique=True)
+    spec: Mapped[dict] = mapped_column(json_type(), default=dict)
+    result: Mapped[dict] = mapped_column(json_type(), default=dict)
+    sample_count: Mapped[int] = mapped_column(sa.Integer, default=0, nullable=False)
+    warnings: Mapped[list] = mapped_column(json_type(), default=list)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)

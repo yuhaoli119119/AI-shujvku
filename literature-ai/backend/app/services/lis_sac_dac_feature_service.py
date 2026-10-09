@@ -6,10 +6,6 @@ from typing import Any
 from app.db.models import CatalystSample, DFTResult, ElectrochemicalPerformance
 from app.domain.lis_sac_dac_field_dictionary import list_topic_field_definitions
 from app.domain.project_library_context import get_project_library_context
-from app.schemas.project_library_features import (
-    ProjectLibraryFeatureExtractionPayload,
-    ProjectLibraryFeatureValue,
-)
 
 
 _METAL_SYMBOLS = {

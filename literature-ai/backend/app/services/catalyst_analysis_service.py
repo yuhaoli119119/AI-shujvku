@@ -15,10 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.db.models import CatalystSample, DFTResult, DFTSetting, Paper
 from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
-from app.services.dft_export_service import build_dft_ml_dataset
 from app.services.dft_ml_policy import analysis_entity_id
 from app.utils.library_names import build_library_name_clause, normalize_library_name
-from app.utils.review_safety import bulk_export_gate_results
 
 
 SCHEMA_VERSION = "dft_catalyst_correlation_v1"
@@ -273,6 +271,8 @@ def _context(ready: _ReadyRow) -> dict[str, Any]:
         "coverage": property_context.get("coverage"),
         "termination": property_context.get("termination"),
     }
+    # Readonly projections add explicit stored reaction/condition context here.
+    context.update(ready.record.get("analysis_context") or {})
     return {key: value for key, value in context.items() if value not in (None, "", [])}
 
 
@@ -302,6 +302,10 @@ PAIRING_CONTEXT_KEYS = frozenset(
         "facet",
         "coverage",
         "termination",
+        "reaction_type",
+        "data_type",
+        "condition_key",
+        "source_family",
     }
 )
 
@@ -653,6 +657,10 @@ class CatalystAnalysisService:
         *,
         pair_analysis: bool,
     ) -> tuple[list[_ReadyRow], Counter[str], dict[str, int]]:
+        # Legacy gate dependencies are optional for the pure readonly adapter.
+        from app.services.dft_export_service import build_dft_ml_dataset
+        from app.utils.review_safety import bulk_export_gate_results
+
         normalized_lib = normalize_library_name(library_name) if library_name else None
         cache_key = (normalized_lib, bool(pair_analysis))
         now = time.monotonic()
@@ -1036,6 +1044,10 @@ class CatalystAnalysisService:
             writer.writerow({field: _csv_cell(row.get(field)) for field in CATALYST_WIDE_COLUMNS})
         return "\ufeff" + stream.getvalue(), payload
 
+    def _analysis_candidate_groups(self, field: str, rows: list[_ReadyRow]):
+        """An adapter may memoize pure groups within a single read request."""
+        return _candidate_groups(field, rows)
+
     def correlation(self, *, library_name: str | None, x_field: str, y_field: str, min_n: int = 3) -> dict[str, Any]:
         x_field = FIELD_ALIASES.get(x_field, x_field)
         y_field = FIELD_ALIASES.get(y_field, y_field)
@@ -1057,8 +1069,8 @@ class CatalystAnalysisService:
         details: list[dict[str, Any]] = []
         for catalyst_id in sorted(by_catalyst):
             rows = by_catalyst[catalyst_id]
-            x_groups = _candidate_groups(x_field, rows)
-            y_groups = _candidate_groups(y_field, rows)
+            x_groups = self._analysis_candidate_groups(x_field, rows)
+            y_groups = self._analysis_candidate_groups(y_field, rows)
             selected_x: dict[str, Any] | None = None
             selected_y: dict[str, Any] | None = None
             reason: str | None = None

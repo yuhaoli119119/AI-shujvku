@@ -13,24 +13,6 @@ from app.db.bootstrap import (
     database_bootstrap_lock,
 )
 from app.db.models import Base
-from app.migrations.dft_audit_issue_source_backfill_v1 import (
-    upgrade as upgrade_dft_audit_issue_source_backfill_v1,
-)
-from app.migrations.dft_identity_v2 import upgrade as upgrade_dft_identity_v2
-from app.migrations.external_analysis_candidate_retention_v1 import (
-    upgrade as upgrade_external_analysis_candidate_retention_v1,
-)
-from app.migrations.source_snapshot_reconciliation_v1 import upgrade as upgrade_source_snapshot_reconciliation_v1
-from app.migrations.content_web_review_bundle_v2 import upgrade as upgrade_content_web_review_bundle_v2
-from app.migrations.content_web_review_bundle_v2_active_generation_v1 import (
-    upgrade as upgrade_content_web_review_bundle_v2_active_generation_v1,
-)
-from app.migrations.content_web_review_local_verification_v1 import (
-    upgrade as upgrade_content_web_review_local_verification_v1,
-)
-from app.migrations.ai_verification_batch_receipt_v1 import (
-    upgrade as upgrade_ai_verification_batch_receipt_v1,
-)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATABASE: This project uses PostgreSQL (with pgvector extension) as its
@@ -116,24 +98,6 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                     extension,
                 )
     Base.metadata.create_all(engine)
-    with engine.begin() as connection:
-        upgrade_dft_identity_v2(connection)
-        upgrade_external_analysis_candidate_retention_v1(connection)
-        source_backfill = upgrade_dft_audit_issue_source_backfill_v1(
-            connection,
-            block_on_errors=False,
-        )
-        if source_backfill.get("status") == "blocked":
-            logger.warning(
-                "DFT audit issue source backfill remains blocked for %s paper(s) and wrote no rows: %s",
-                len(source_backfill["blocked_papers"]),
-                source_backfill["error_counts"],
-            )
-        upgrade_source_snapshot_reconciliation_v1(connection)
-        upgrade_content_web_review_bundle_v2(connection)
-        upgrade_content_web_review_bundle_v2_active_generation_v1(connection)
-        upgrade_content_web_review_local_verification_v1(connection)
-        upgrade_ai_verification_batch_receipt_v1(connection)
     with engine.begin() as connection:
         # A snapshot may be exported to both web AI and IDE AI; bundles are
         # distinct audit records even when they start from the same snapshot.

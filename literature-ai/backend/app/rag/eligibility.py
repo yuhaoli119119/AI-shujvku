@@ -8,13 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import AuditLog, DFTResult, EvidenceClaim, ExternalAnalysisCandidate, ExternalAnalysisRun, Paper, PaperChunk, PaperCorrection, PaperFigure, PaperSection, WritingCard
 from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
-from app.utils.review_safety import (
-    bulk_export_gate_results,
-    content_object_gate,
-    has_safe_verified_review,
-    writing_card_content_gate,
-    writing_card_gate,
-)
 
 
 def is_rag_eligible(session: Session, item: Any, item_type: str) -> bool:

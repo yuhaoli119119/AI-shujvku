@@ -1,47 +1,40 @@
-# Literature AI 文档索引
+# Literature AI 文档索引（2026-09-22 清洗后）
 
-本目录只作为当前文档入口。历史计划和审计可以保留，但如果它们与仓库主 README、AGENTS 或代码行为冲突，以仓库主 README、AGENTS 和测试结果为准。
+本目录只放**现行**文档。历史计划、审计、旧接口手册已移出，见文末"历史与备份"。
 
-## 当前有效入口
+## 现行文档
 
-- [../../README.md](../../README.md): 仓库主 README，也是唯一项目入口。
-- [../AGENTS.md](../AGENTS.md): AI 协作者规则、数据安全边界和临时产物规则。
-- [../README.md](../README.md): `literature-ai/` 目录落点说明与入口跳转。
-- [SERVER_GITHUB_WORKFLOW.md](SERVER_GITHUB_WORKFLOW.md): 服务器优先改代码、SSH 推 GitHub、服务重启与验收步骤。
-- [mcp/MCP_API.md](mcp/MCP_API.md): MCP API 与工具说明。
-- [ARCHITECTURE.md](ARCHITECTURE.md): 当前架构、模块职责、健康检查和测试边界。
-- [CONTENT_REVIEW_WORKFLOW.md](CONTENT_REVIEW_WORKFLOW.md): Content Knowledge、review bundle v2、AI Writer、多论文证据计划与资格边界。
-- [schema/dft_ml_dataset_schema.md](schema/dft_ml_dataset_schema.md): DFT ML dataset 导出契约。
-- [schemas/dft_results_ml_v1.md](schemas/dft_results_ml_v1.md): DFT results 相关 schema 说明。
-- [plans/offline_web_ai_dft_review_bundle.md](plans/offline_web_ai_dft_review_bundle.md): 离线网页 AI DFT 核验包、返回校验和受控导入方案。
+| 文档 | 作用 |
+|---|---|
+| [`PIPELINE_TARGET.md`](PIPELINE_TARGET.md) | 目标流程：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析（**核心链路已实现，独立验收进行中**） |
+| [`DATA_RULES.md`](DATA_RULES.md) | 数据规则：数值精度、分行、单元格溯源、单篇去重、冲突局部处理、分析筛字段 |
+| [`AI_WORKBENCH_API.md`](AI_WORKBENCH_API.md) | 外部 AI 批量读取/写回图表解释与来源化数据的接口与提示词 |
+| [`REBUILD_EXECUTION_LOG.md`](REBUILD_EXECUTION_LOG.md) | 全项目改造执行日志：阶段、备份、实测进度与阻碍 |
+| [`REBUILD_ACCEPTANCE.md`](REBUILD_ACCEPTANCE.md) | 全项目改造验收报告：实测能力、A0019 闭环、测试摘要与回滚 |
+| [`BATCH_COORDINATION.md`](BATCH_COORDINATION.md) | 当前对话的固定清单、串行文献任务、持久恢复、结果核对与原生 heartbeat 操作；阶段二源码候选，未部署/未真实执行 |
+| [`CODEX_WEB_DISPATCH.md`](CODEX_WEB_DISPATCH.md) | 总指挥 → Codex-web 派发流程（目标模式）、脚本用法、安全与并发约束 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 现行系统结构：运行位置、服务、数据资产、访问与鉴权 |
+| [`MCP_ACCESS.md`](MCP_ACCESS.md) | MCP 外部接入现状（端点、鉴权、能力分层、key 位置） |
+| [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md) | 工作台真实登录（2026-09-21 上线）；**现行且保持不动** |
 
-## 当前稳定边界
+上游规则（先读）：`AGENTS.md`（协作规则、角色与派发、安全与删除边界）、`README.md`（仓库/目录入口）、
+`SERVER_ACCESS.md`（服务器接入事实）。这三份在源码工作区 `/opt/ai-shujvku-src/` 与运行目录 `/opt/literature-ai/` 下同名存在；
+本目录内另有 `../AGENTS.md` 与 `../README.md` 作为上一级入口。
 
-- PostgreSQL + pgvector 是唯一业务数据源。
-- 内容验收采用 single-AI-first：只有服务端认证且具备 `ai_verify_content` 的单一 AI 能在确定性证据门禁通过后写 `ai_verified`；不使用第二 AI、模型共识或投票。
-- `ai_verified` 与人工 `verified` 分离，人工 Owner-session 仅处理异常队列；Owner 网关不向普通请求注入 Owner 身份。
-- 自动写作与引用仍只读取通过权威内容门禁的对象，投影状态不能自行授权。
-- DFT 抽取结果默认是候选，必须经过证据、审核、材料绑定和导出安全门。
-- Literature Library 的 DFT 页按催化剂样本分组，但保留每条 DFT 记录的审核、证据和操作入口。
-- Catalyst sample 的身份可由 DFT 行提供，基础信息可由 catalyst extractor 或前端补全合流。
-- `potential_determining_step` 是表格上下文，不作为无数值 DFTResult 候选入库。
-- `outputs/tmp/`、`outputs/exports/`、`test-results/`、`.pytest_cache/` 和 scratch 脚本默认不提交。
+## 当前状态（必须如实转述）
 
-## 2026-08-11 维护基线
+- 目标流程**核心链路已实现并上线**：文献库、AI 提取、图表资料、数据表、汇总分析已经通过服务器内与公网浏览器验收。
+- 2026-09-23 最新进展：一键 AI 提取（目标模式）已跑通；任务完成后自动写回旧详情页图片与解读；A0019 有 37 子图、58 数据行、75 数值、105 来源。
+- 2026-09-22 已完成：新流程数据模型/API/页面、真实 PDF 裁图、来源化数据导入、去重/冲突保留、真实配对回归与 CSV 导出。
+- 旧审核链路代码保留但导航入口已隐藏；新上传不触发旧自动解析。
+- 当前仍处于独立验收与完整交付审计阶段，**不得**声称"全项目已闭环"。
 
-- 同步 PDF 导入失败会先回滚数据库会话，再按原始错误更新 workflow job；路径导入、上传和附加 PDF 均有真实 PostgreSQL 回归测试。
-- 数据库初始化按 URL 成功后才缓存，并通过 advisory lock 防止多进程并发执行迁移；必需步骤失败会显式报错且允许重试。
-- 数据库 bootstrap/DDL 只由 backend lifespan 负责；worker 等待 backend 健康，不在 Celery import 时执行迁移。
-- `import_analysis` 导入普通候选和审核意见；非 DFT 不直接覆盖，DFT `new_candidate` 也只进入未验证候选队列。权威自动验收统一使用专用 `ai_verify_content` 身份。
-- Content web review bundle v1 已废弃；v2 是 proposal-only，并提供 history 与受保护 retention。AI Writer 只调用有界只读的 `/api/content-knowledge/writing-plan`。
-- Review Center 的 CSS/JS 已从 6000 多行 HTML 拆出；人工复核进度、bundle 来源文献和图像压缩逻辑已有共享模块。
-- Docker Compose 有核心服务健康检查和依赖门；Playwright 固定使用隔离端口 `4173`。
-- 统一验证入口为仓库根目录的 `python scripts/verify.py fast|full`。历史审计中的单次测试数字只代表当时快照，不应复制为当前结论。
+## 历史与备份（不是现行规范）
 
-## 历史与计划目录
+以下内容保留但**不作为当前约定**：
 
-- `plans/`: 计划和路线图，有些内容是历史阶段记录。
-- `audits/`: 审计和验收记录，有些内容描述当时的状态，不代表当前代码。
-- `walkthrough.md`: 历史阶段汇报，保留作追溯，不作为最新基线。
-
-需要更新项目说明时，优先同步 `../../README.md`、`../AGENTS.md`、本文件；如 `literature-ai/` 目录入口变化，再同步 `../README.md` 的落点说明。
+- `backend/reports/`、`deliverables/`、`outputs/` 中的历史报告与导出快照 → 历史产物，仅供追溯。
+- 清洗前的整套旧文档（含 `plans/`、`audits/`、`mcp/`、`schema/`、`schemas/`、`ui/` 共 51 个文件）已随
+  `docs-cleanup-<UTCtimestamp>` 备份移出，备份位置见仓库根 `AGENTS.md` 的"文档清洗备份"一节；
+  需要旧工具手册/审计记录时从备份读取，不要把它们当成现行规范。
+- 旧的多层阻塞式审核规则、以及"在本机改动再上传 / 先拉到本机 diff"的流程说明，**已不再是现行规范**。

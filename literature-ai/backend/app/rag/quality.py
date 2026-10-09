@@ -13,7 +13,6 @@ from app.rag.eligibility import (
     _figure_has_safe_review,
 )
 from app.utils.figure_summary import figure_summary_echoes_caption, flatten_figure_key_elements
-from app.utils.review_safety import ExportGateResult, bulk_export_gate_results, writing_card_gate
 
 
 def build_rag_quality_summary(

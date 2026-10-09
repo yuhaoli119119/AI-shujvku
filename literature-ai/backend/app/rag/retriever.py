@@ -21,7 +21,6 @@ from app.rag.cards import build_dft_card, build_evidence_card, build_figure_card
 from app.rag.retrieval_intent import RetrievalIntent, SUPPORTED_EVIDENCE_TYPES, route_retrieval_intent
 from app.services.content_figure_link_service import ContentFigureLinkService
 from app.utils.figure_summary import flatten_figure_key_elements
-from app.utils.review_safety import bulk_export_gate_results, content_object_gate, writing_card_gate
 from app.utils.writing_card_content import evidence_chain_search_text, normalized_evidence_chain
 
 

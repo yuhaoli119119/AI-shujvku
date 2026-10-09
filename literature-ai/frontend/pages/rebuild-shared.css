@@ -1,0 +1,693 @@
+:root {
+  --rebuild-radius: 14px;
+  --rebuild-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+.rebuild-shell {
+  width: min(1280px, calc(100% - 40px));
+  margin: 24px auto 48px;
+}
+
+.rebuild-hero {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.rebuild-hero h1 {
+  margin: 4px 0 8px;
+  font-size: clamp(28px, 4vw, 42px);
+  letter-spacing: -0.04em;
+}
+
+.rebuild-hero p {
+  margin: 0;
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .16em;
+  color: var(--primary, #2563eb);
+}
+
+.rebuild-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* Grid 子项默认 min-width:auto，会被宽表按 min-content 撑开，导致窄屏整页横向滚动；
+   置 0 让列宽跟随容器，超出部分交给 .rebuild-table-wrap 自己横向滚动。 */
+.rebuild-layout > * {
+  min-width: 0;
+}
+
+.rebuild-panel {
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: var(--rebuild-radius);
+  background: var(--surface, #fff);
+  box-shadow: var(--rebuild-shadow);
+  padding: 18px;
+}
+
+.rebuild-panel + .rebuild-panel {
+  margin-top: 18px;
+}
+
+.rebuild-panel h2,
+.rebuild-panel h3 {
+  margin: 0 0 12px;
+}
+
+.rebuild-field {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.rebuild-control {
+  width: 100%;
+  min-height: 40px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, .5);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: inherit;
+  font: inherit;
+}
+
+textarea.rebuild-control {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.rebuild-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.rebuild-btn {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary, #2563eb);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.rebuild-btn.ghost {
+  border: 1px solid rgba(148, 163, 184, .5);
+  background: transparent;
+  color: inherit;
+}
+
+.rebuild-btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.rebuild-table-wrap {
+  overflow-x: auto;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, .22);
+}
+
+.rebuild-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.rebuild-table th,
+.rebuild-table td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(148, 163, 184,.18);
+  text-align: left;
+  vertical-align: top;
+}
+
+.rebuild-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: rgba(248, 250, 252, .96);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rebuild-table tbody tr:hover {
+  background: rgba(37, 99, 235, .04);
+}
+
+.rebuild-row-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rebuild-empty,
+.rebuild-error,
+.rebuild-progress {
+  padding: 28px;
+  border-radius: 12px;
+  text-align: center;
+  color: var(--text-secondary, #64748b);
+  background: rgba(248, 250, 252, .8);
+}
+
+.rebuild-error {
+  color: #b91c1c;
+  background: rgba(254, 226, 226, .7);
+}
+
+.rebuild-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.rebuild-asset-card {
+  border: 1px solid rgba(148, 163, 184,.24);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255,255,255,.72);
+}
+
+.rebuild-asset-card img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: #f8fafc;
+}
+
+.rebuild-asset-body {
+  padding: 14px;
+}
+
+.rebuild-tag {
+  display: inline-block;
+  margin: 0 6px 6px 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(37,99,235,.1);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.rebuild-tag.warn {
+  background: rgba(245,158,11,.14);
+  color: #92400e;
+}
+
+.rebuild-value-button {
+  border: 0;
+  border-radius: 8px;
+  background: rgba(37,99,235,.08);
+  color: inherit;
+  font: inherit;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.rebuild-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(15,23,42,.55);
+}
+
+.rebuild-modal.open {
+  display: flex;
+}
+
+.rebuild-modal-panel {
+  width: min(760px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--surface, #fff);
+  padding: 20px;
+}
+
+.rebuild-chart {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  background: rgba(248,250,252,.75);
+}
+
+.rebuild-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.rebuild-metric {
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(248,250,252,.9);
+}
+
+.rebuild-metric strong {
+  display: block;
+  font-size: 22px;
+}
+
+/* ------------------------------------------------------------------
+   AI 提取工作台（pages/literature_library/rebuild.html）
+   左栏选论文 + 右栏四步流程卡片。只做自下而上的补充样式，
+   既有 rebuild-* 规则（含窄屏 min-width:0 约定）保持不变。
+   ------------------------------------------------------------------ */
+
+.rebuild-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-subhead {
+  margin-top: 20px !important;
+}
+
+.rebuild-result-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.rebuild-result-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 8px;
+  /* 列表本身限高并可滚动；条目按内容高度排布，禁止被 flex 压缩后互相叠字。 */
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 10px;
+  background: rgba(248, 250, 252, .7);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rebuild-result-item:hover {
+  border-color: rgba(37, 99, 235, .5);
+}
+
+.rebuild-result-item.is-active {
+  border-color: var(--primary, #2563eb);
+  background: rgba(37, 99, 235, .08);
+}
+
+.rebuild-result-code {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.rebuild-result-title {
+  min-width: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.rebuild-result-counts {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-selected {
+  text-align: left;
+}
+
+.rebuild-selected-code {
+  font-weight: 700;
+}
+
+.rebuild-selected-title {
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+
+.rebuild-selected-meta {
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.rebuild-count {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, .1);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.rebuild-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.rebuild-btn[aria-disabled="true"] {
+  opacity: .5;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.rebuild-steps {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.rebuild-step {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid rgba(148, 163, 184, .24);
+  border-radius: var(--rebuild-radius);
+  background: var(--surface, #fff);
+  box-shadow: var(--rebuild-shadow);
+  transition: opacity .15s ease;
+}
+
+.rebuild-step.is-disabled {
+  opacity: .6;
+}
+
+.rebuild-step-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.rebuild-step-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, .12);
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.rebuild-step-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.rebuild-badge {
+  margin-left: auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.rebuild-badge.is-pending {
+  background: rgba(148, 163, 184, .18);
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-badge.is-ok {
+  background: rgba(22, 163, 74, .14);
+  color: #15803d;
+}
+
+.rebuild-step-desc {
+  margin: 10px 0 0;
+  color: var(--text-secondary, #64748b);
+  overflow-wrap: anywhere;
+}
+
+.rebuild-step-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+.rebuild-upload {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(148, 163, 184, .4);
+}
+
+.rebuild-status-area:not(:empty) {
+  margin-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .rebuild-shell {
+    width: min(100% - 24px, 760px);
+    margin-top: 16px;
+  }
+
+  .rebuild-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .rebuild-hero {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .rebuild-table th,
+  .rebuild-table td {
+    padding: 10px;
+    font-size: 13px;
+  }
+
+  .rebuild-step {
+    padding: 14px;
+  }
+
+  .rebuild-badge {
+    margin-left: 0;
+  }
+
+  .rebuild-result-list {
+    max-height: 260px;
+  }
+}
+
+/* ============================================================
+   One-click AI extract zone (2026-09-23)
+   ============================================================ */
+
+.rebuild-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.ai-extract-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2.5rem 1.5rem;
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 12px;
+  background: var(--surface-elevated, #fafafa);
+  text-align: center;
+}
+
+.ai-extract-placeholder {
+  color: var(--text-secondary, #666);
+  font-size: 0.95rem;
+}
+
+.ai-extract-btn {
+  font-size: 1.25rem;
+  font-weight: 600;
+  padding: 0.9rem 2.5rem;
+  border: none;
+  border-radius: 10px;
+  background: var(--primary, #2563eb);
+  color: #fff;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+  min-height: 52px;
+}
+
+.ai-extract-btn:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.ai-extract-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.ai-extract-btn:disabled {
+  background: var(--border-color, #ccc);
+  cursor: not-allowed;
+}
+
+.ai-extract-status {
+  width: 100%;
+}
+
+.ai-status-running {
+  font-size: 1.05rem;
+  color: var(--primary, #2563eb);
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: var(--primary-soft, #eff6ff);
+  animation: ai-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes ai-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.ai-status-done {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #16a34a;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: #f0fdf4;
+}
+
+.ai-status-failed {
+  font-size: 1rem;
+  color: #dc2626;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  background: #fef2f2;
+}
+
+.ai-extract-result {
+  width: 100%;
+}
+
+.ai-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.ai-result-count {
+  font-size: 0.95rem;
+  color: var(--text-secondary, #555);
+}
+
+.ai-result-count strong {
+  font-size: 1.4rem;
+  color: var(--text-primary, #1a1a1a);
+  display: block;
+}
+
+.ai-result-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+/* Advanced tools collapsed section */
+.advanced-tools {
+  border: 1px solid var(--border-color, #e0e0e0);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  overflow: hidden;
+}
+
+.advanced-tools-summary {
+  padding: 0.85rem 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.advanced-tools-summary::before {
+  content: "▸";
+  font-size: 0.8rem;
+  transition: transform 0.15s;
+}
+
+.advanced-tools[open] .advanced-tools-summary::before {
+  transform: rotate(90deg);
+}
+
+.advanced-tools-summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced-tools-note {
+  padding: 0 1.25rem 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary, #888);
+  margin: 0;
+}
+
+.advanced-tools .rebuild-steps {
+  padding: 0 1.25rem 1.25rem;
+}
+
+@media (max-width: 640px) {
+  .ai-extract-zone {
+    padding: 1.75rem 1rem;
+  }
+
+  .ai-extract-btn {
+    font-size: 1.05rem;
+    padding: 0.8rem 1.75rem;
+    width: 100%;
+  }
+
+  .ai-result-summary {
+    gap: 0.75rem;
+  }
+
+  .ai-result-count strong {
+    font-size: 1.2rem;
+  }
+}

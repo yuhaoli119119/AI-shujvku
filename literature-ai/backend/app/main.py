@@ -7,40 +7,31 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from app.api.analysis_readonly import router as analysis_readonly_router
 from app.api.auth import router as auth_router
-from app.api.corrections import router as corrections_router
-from app.api.content_knowledge import router as content_knowledge_router
-from app.api.dft import router as dft_router
-from app.api.external_analysis import router as external_analysis_router
-from app.api.evidence import router as evidence_router
-from app.api.extraction import router as extraction_router
 from app.api.health import router as health_router
+from app.api.website_jobs import router as website_jobs_router
+from app.api.website_evidence import router as website_evidence_router
 from app.api.impact_metadata import router as impact_metadata_router
-from app.api.jobs import router as jobs_router
 from app.api.libraries import router as libraries_router
 from app.api.library_filter import router as library_filter_router
 from app.api.module_locks import router as module_locks_router
 from app.api.papers import router as papers_router
+from app.api.papers.listing import list_papers
+from app.schemas.api import PaperListItemResponse
 from app.api.references import router as references_router
-from app.api.retrieval import router as retrieval_router
+from app.api.rebuild import router as rebuild_router
 from app.api.share import router as share_router
 from app.api.settings import (
     apply_persisted_settings_to_runtime,
     router as settings_router,
 )
 from app.api.system import router as system_router
-from app.api.verification import router as verification_router
-from app.api.visuals import router as visuals_router
-from app.api.workbench import router as workbench_router
 from app.config import get_settings
 from app.db.session import session_scope
-from app.mcp import mcp_http_app, mcp_server
-from app.mcp.auth import enforce_mcp_auth
 from app.oauth import router as oauth_router
 from app.security.exports import enforce_export_boundary
 from app.security.share import enforce_share_protection
-from app.security.session_auth import enforce_workbench_session
-from app.services.workflow_jobs import expire_stale_activity
 from app.utils.active_database import activate_active_library_database
 
 @asynccontextmanager
@@ -61,19 +52,8 @@ async def lifespan(_: FastAPI):
     except Exception:
         startup_logger.exception("Failed to apply persisted runtime settings during startup")
     settings = get_settings()
-    try:
-        with session_scope(settings.database_url) as session:
-            cleanup = expire_stale_activity(session)
-        if cleanup["workflow_jobs"] or cleanup["parse_jobs"]:
-            startup_logger.warning(
-                "Expired stale background activity on startup: workflow_jobs=%s parse_jobs=%s",
-                cleanup["workflow_jobs"],
-                cleanup["parse_jobs"],
-            )
-    except Exception:
-        startup_logger.exception("Failed to expire stale background activity during startup")
+    # Old workflow_jobs cleanup removed
     async with AsyncExitStack() as stack:
-        await stack.enter_async_context(mcp_server.session_manager.run())
         yield
 
 app = FastAPI(
@@ -82,10 +62,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.middleware("http")(enforce_mcp_auth)
 app.middleware("http")(enforce_export_boundary)
 app.middleware("http")(enforce_share_protection)
-app.middleware("http")(enforce_workbench_session)
 
 @app.middleware("http")
 async def no_cache_frontend_assets(request, call_next):
@@ -98,30 +76,23 @@ async def no_cache_frontend_assets(request, call_next):
     return response
 
 
+app.include_router(analysis_readonly_router, prefix="/api", tags=["analysis-readonly"])
 app.include_router(health_router, prefix="/api")
+app.include_router(website_jobs_router, prefix="/api/jobs", tags=["jobs"])
+app.include_router(website_evidence_router, prefix="/api/evidence", tags=["evidence"])
 app.include_router(auth_router, prefix="/api")
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(impact_metadata_router, prefix="/api/library/impact-metadata", tags=["impact-metadata"])
 app.include_router(library_filter_router, prefix="/api/library/papers", tags=["library-filter"])
-app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(module_locks_router, prefix="/api/module-locks", tags=["module-locks"])
+app.add_api_route("/api/papers", list_papers, methods=["GET"], response_model=list[PaperListItemResponse], response_model_exclude_unset=True)
 app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
+app.include_router(rebuild_router, prefix="/api/rebuild", tags=["rebuild"])
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
-app.include_router(content_knowledge_router, prefix="/api/content-knowledge", tags=["content-knowledge"])
-app.include_router(verification_router, prefix="/api/reviews", tags=["verification"])
-app.include_router(corrections_router, prefix="/api/corrections", tags=["corrections"])
-app.include_router(dft_router, prefix="/api/dft", tags=["dft"])
-app.include_router(external_analysis_router, prefix="/api/external-analysis", tags=["external-analysis"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
-app.include_router(retrieval_router, prefix="/api/retrieval", tags=["retrieval"])
-app.include_router(evidence_router, prefix="/api/evidence", tags=["evidence"])
-app.include_router(extraction_router, prefix="/api/extraction", tags=["extraction"])
-app.include_router(visuals_router, prefix="/api/visuals", tags=["visuals"])
-app.include_router(workbench_router, prefix="/api/workbench", tags=["workbench"])
 app.include_router(share_router, prefix="/api")
 app.include_router(oauth_router)
-app.mount("/mcp", mcp_http_app)
 
 frontend_dir = Path("/frontend")
 if not frontend_dir.exists():

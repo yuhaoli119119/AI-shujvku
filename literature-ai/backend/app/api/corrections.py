@@ -9,7 +9,6 @@ from app.db.session import get_db_session
 from app.mcp.auth import require_request_mcp_capability
 from app.mcp.context import MCPAuthInfo
 from app.schemas.mcp import MCPCorrectionDecisionRequest, MCPCorrectionDetailResponse, MCPCorrectionResponse
-from app.services.review_service import ReviewService
 
 router = APIRouter()
 

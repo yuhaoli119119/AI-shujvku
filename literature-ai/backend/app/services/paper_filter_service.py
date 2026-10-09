@@ -24,7 +24,6 @@ from app.db.models import (
     WritingCard,
 )
 from app.utils.artifact_status import build_paper_pdf_status
-from app.utils.review_safety import is_safe_verified_review
 
 
 PRIORITY_RANK = {"high": 0, "medium": 1, "low": 2, "exclude": 3}

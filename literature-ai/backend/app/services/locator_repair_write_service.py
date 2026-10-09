@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import EvidenceLocator, ExtractionFieldReview, Paper
 from app.services.evidence_locator_service import EvidenceLocatorService
-from app.utils.review_safety import is_safe_verified_review
 
 
 PILOT_PAPER_ID = "3978dc79f94f4457863fd68449ae293d"

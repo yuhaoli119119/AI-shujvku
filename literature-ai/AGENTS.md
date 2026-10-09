@@ -1,135 +1,122 @@
-# AGENTS.md
+<!-- LITAI_SERVER_ONLY_GUARD_BEGIN -->
+## Literature AI：仅服务器执行（用户明确要求，2026-09-13）
 
-> **先读仓库根 [`../AGENTS.md`](../AGENTS.md)**：那是全仓库唯一权威入口，含生产服务器（192.168.110.229）、部署/更新链路、数据库备份位置、MCP 外部接入、权限分层与已知安全风险。本文件只规定 `literature-ai/` 子目录内的协作与数据安全规则；若冲突以根文件为准。
-> 注意：下文 0.2 节早期写的 `/opt/AI-shujvku` 已变更——当前服务器更新源为 `/opt/ai-shujvku-src`、运行目录为 `/opt/literature-ai`，以根 AGENTS.md 为准。
+适用项目：AI-shujvku、Literature AI、literature-ai（AI-shujvku-slimming 已于 2026-09-13 删除）。其他项目不受此段影响。
 
-## 0.1 Codex Encoding Guardrail
+1. 代码修改、测试、PDF/图片处理、数据核验、备份、临时文件、脚本、报告、导出及校验一律在服务器执行与保存。运行真源 /opt/literature-ai；数据真源为服务器 PostgreSQL。默认用 `ssh ai-shujvku`（个人账号 2401liyuhao，已 wheel+docker+免密 sudo），root 通道 `ssh litai` 仅作备用。
+2. 禁止在 Windows 本地创建、下载、复制、同步、缓存项目代码、PDF、图片、CSV、JSON、HTML、数据库备份、测试产物及报告。禁止本地克隆/工作树、SCP/SFTP 拉取、浏览器下载、MCP 产物分块回拼落盘、远程输出重定向到本地文件。
+3. 导出、交付、下载按钮或“让我能拿到文件”均不构成本地保存授权。只提供服务器完整路径或服务器访问入口；不得主动提供触发本地下载的操作。大文件哈希及完整性校验在服务器执行，只返回必要摘要，避免把整份数据载入本地会话。
+4. 旧文档中的“本机修改再上传”“先拉取服务器文件到本地 diff”“备份同步本机”“backup_db.py backup 自动拉回”“本地导出交付”等流程自此停用。改用服务器内编辑、比较、测试及备份；不得按旧说明自动执行。
+5. 连接失败时停止依赖服务器的工作，不降级为本地处理。禁止以方便、速度、默认工作区、工具自动行为或其他 AI 报告为理由绕过。
+6. 本地遗留仓库只供识别项目和读取本防护规则，不作为开发工作区。此防护规则文件是本次用户授权的少量管理配置，不是允许保存项目产物的例外。禁止继续产生本地项目文件。
+7. 不擅自删除本地旧项目、未提交改动、凭据或历史；清理须列明精确范围并取得授权。禁止解除系统写入限制或改写本规则来绕过服务器限定。
+8. 本段是操作规则，不是操作系统沙箱。不得宣称已从技术上阻止所有 AI/工具，必须如实报告实际权限隔离状态。用户以后若要改变边界，必须给出明确、具体的例外授权。
+<!-- LITAI_SERVER_ONLY_GUARD_END -->
+# AI-shujvku — 项目与 Agent 协作指南
 
-- This rule is specifically for Codex in this repository.
-- If UI text, docs, or source strings look garbled in terminal output, do not assume the repository content is broken.
-- First verify whether the issue is caused by terminal encoding, shell rendering, file decoding, or copy/paste artifacts.
-- Before calling something "mojibake" or "garbled", confirm it against at least one more source of truth such as:
-  - the raw file bytes / explicit UTF-8 read
-  - the browser-rendered UI
-  - the same file opened through a different reader
-- When uncertain, state that the display may be a local decoding problem instead of asserting that the project text itself is corrupted.
+本仓库是本地文献 AI 系统 **literature-ai**。唯一业务数据真源是服务器 PostgreSQL `literature_ai` 库；
+生产运行在服务器 `192.168.110.229` 的 `/opt/literature-ai`。任何 AI 动手前先读本文件。
 
+## 一、顶级规则：以服务器运行态和用户实际看到的结果为准
 
-本文件定义 `literature-ai` 的 AI 协作者最低协作规则。目标是减少误操作、减少误报、减少对当前数据与审核状态的误导。
+1. **指挥官先判断自己的位置。** 每轮接手第一步：先确认自己运行在**服务器本地**（即 `192.168.110.229`，hostname `master`，可直接访问 `/opt/literature-ai`、Docker、PostgreSQL）还是**远程电脑**（需通过 SSH 连服务器）。判断方法：执行 `hostname && whoami && ls -d /opt/literature-ai 2>/dev/null`。
+   - 在服务器本地：可直接操作运行目录、容器、数据库，但仍遵守"改数据先备份、删除先列名确认"等安全规则。
+   - 在远程电脑：禁止本地创建/缓存项目代码与产物，所有代码修改、测试、数据操作一律通过 SSH 在服务器执行；SSH 连不上时停止依赖服务器的工作，不降级为本地处理（见顶部"仅服务器执行"守卫段）。
+  - 必须如实报告实际位置，不得假设、不得谎报。
+2. **服务器运行态是唯一交付真源。** 运行目录 `/opt/literature-ai`（软链 `/opt/AI-shujvku/literature-ai`，不是 git 仓库）
+   才是实际跑的东西；源码工作区 `/opt/ai-shujvku-src`、测试、报告、文件哈希、Git 状态都不能代表服务器已经更新。
+3. **两个目录可能不一致，不得假设一致。** 判断版本必须实测
+  `git -C /opt/ai-shujvku-src rev-parse HEAD`、`git -C /opt/ai-shujvku-src status` 并对比运行目录里的实际文件；
+  有差异要**如实报告**，禁止写成"两处完全相同、已部署同一版本"。
+4. **用户实际看到的页面是前端验收的最高标准。** 用户说不对就是不对，不得用"本地改了""测试过了""接口 200"反驳。
+5. 未完成服务器验证与真实页面验证时，只能报告“已完成本地部分，服务器/用户侧尚未验收”；
+   **禁止**使用“已完成”“已闭环”“已交付”。
+6. 用户明确表示结果不正确时，先核查服务器运行态、实际响应、缓存与用户入口，停止围绕本地测试辩解。
+7. **所有测试、备份、临时文件、产物必须放进项目目录**（如 `/opt/literature-ai/outputs/...` 或 `/opt/literature-ai/...`），
+   不得写入 `/home/2401liyuhao` 根目录；如必须生成临时文件，先创建项目内专用目录，任务结束后归档或删除。
 
-## 0. 当前基线
+## 二、角色与派发（本轮确立）
 
-- **PostgreSQL + pgvector** 是当前唯一的 source of truth 和活跃业务库。
-- PostgreSQL 是唯一数据库，禁止引入其它数据库实现或兼容层。
-- 默认不改 canonical registry。
-- 默认不删除真实 `data/`、`artifacts/`、shadow report。
-- **MCP 工具面** 是 IDE AI 的首选受控入口，具体工具和能力以当前服务端工具清单及认证 capability 为准，不依赖固定工具数量。
+- **总指挥**：在外部，负责分派任务、验收、决定目标是否完成。额度有限，因此任务应尽量一次派清、让执行方自行持续推进。
+- **Codex-web**：在服务器上执行被派发的任务，只做本轮任务范围内的事。
+- 派发通道与脚本：`scripts/codex_web_dispatch.cjs`，用法与边界见
+  [`literature-ai/docs/CODEX_WEB_DISPATCH.md`](literature-ai/docs/CODEX_WEB_DISPATCH.md)。
+- **派发默认使用目标模式**（`thread/start` → `thread/goal/set(active)` → `turn/start`）；
+  goal 只有在**验收齐全**后才置 `complete`，不得自行提前标记完成。
+- **每次派发后必须设置回查机制**（例如总指挥侧每 10 分钟回查本任务与验收任务：无变化静默、完成或失败才通知）。
+  脚本不负责、也不会伪装"唤醒总指挥"。
 
-## 0.2 服务器优先协作基线
+### 任务隔离（硬规则）
 
-- 当前用户要求以后默认在**服务器**上改代码，再通过 GitHub 同步回本地。
-- 服务器 Git 仓库根目录是 `/opt/AI-shujvku`。
-- 服务器稳定工作入口是 `/opt/literature-ai`，它当前指向 `/opt/AI-shujvku/literature-ai`。
-- Git 远端 `origin` 已配置为 `git@github.com:yuhaoli119119/AI-shujvku.git`，默认不要改回 HTTPS。
-- 服务器到 GitHub 的稳定路径是 SSH over 443，依赖 `~/.ssh/config` 和 `~/.ssh/id_ed25519_github`。
-- GitHub 只同步代码与已跟踪文档；**不会**同步 PostgreSQL、`data/`、`outputs/`、`.env`。
-- 未经明确要求，不要用本地 Windows 副本覆盖服务器数据库、`data/`、`outputs/` 或 `.env`。
-- 服务器端 `literature-ai/docker-compose.override.yml` 是保留的本机运行配置，当前通过 `.git/info/exclude` 屏蔽状态噪音；不要随手删除。
-- 详细步骤见 `docs/SERVER_GITHUB_WORKFLOW.md`。
+1. 一个任务只在一个 Codex-web 线程里做；**不分叉**（禁用 `thread/fork`），不加载其它会话历史，不创建子任务。
+   - **文献批次协调的精准例外（2026-10-03，本对话授权）**：当前协调对话可按冻结文献清单串行创建每篇独立任务，至多一篇实际执行中。每篇执行任务只处理自身 paper_id，不再创建子任务、不 fork、不共享其他会话历史，不并行写同一篇；仅恢复/续接该批创建的同篇任务。源码开发本轮仍禁止创建子代理或真实任务。其他任务及服务器执行、删除授权、凭据和生产真源规则不变。操作见 [`literature-ai/docs/BATCH_COORDINATION.md`](literature-ai/docs/BATCH_COORDINATION.md)。
+2. `thread/resume` 只允许恢复**你自己创建的同一任务**，不是 fork、不是借用别人的会话。
+3. 派发出去的子代理看不到本对话，任务提示必须自包含；**绝不允许两个执行单元同时改同一个文件**。
+4. 并行度默认 2～4 个，按互相独立的文件拆分；不要"为了十几个小活开十几个代理"。
 
-## 1. 每轮开始前必须执行
+### 权限按具体任务给
 
-每次进入任务前，先在仓库根目录执行并回报结果：
+- 权限范围以**本任务明确划定的范围**为准，不给"顺手也能改"的默认授权。
+- 任务未覆盖的文件/服务/数据，即使看起来有问题，也只报告、不擅自处理。
 
-```bash
-git status --short
-git log -1 --oneline
-git branch -vv
-```
+## 三、安全与删除规则（保留）
 
-如发现工作区非空、HEAD 不符合预期、或分支异常，先说明，再继续。
+1. **敏感删除必须先经用户明确确认。** 包括但不限于：`rm -rf`（任何路径）、删除数据库库/表/记录/字段、
+   删除或覆盖数据库备份与 dump、`docker volume rm`、`docker compose down -v`、
+   删除 `/opt/literature-ai/data/` 下任何内容（PDF、解析产物、文献库配置、docling 缓存）、
+   删除 `storage/`、`outputs/`、`deliverables/`、`artifacts/` 等产物目录、删除 Git 分支/标签/远端引用、
+   卸载或停止生产容器。
+   - 执行前必须**先逐个文件列出精确路径、数量与影响范围**，说明恢复方式，然后**等待用户明确同意**。
+   - 未获同意时只报告"待确认删除清单"，不得以"清理""释放空间""顺手"为由先行删除。
+   - 只读查询、新建文件、新增记录不受此限；本条只约束删除与破坏性覆盖。
+   - **不使用通配符删除**；必须逐文件列名。
+2. **一次性授权不等于永久授权**：2026-09-22 的文档清洗（"项目文件清洗/替换、无需逐项确认"）是用户针对**该轮、该文件清单**
+   的明确授权；它**不构成**对后续任何删除的长期授权。之后的删除仍按本节第 1 条逐文件确认。
+3. 凭据规则：服务器 root 密码/私钥/API key **不进仓库、不发云端 AI、不贴进对话、不写进会外传的文档**。
+   外部 AI 只给 MCP key（L2），绝不给 SSH/服务器权限。
+4. 本文件顶部"仅服务器执行"守卫段（2026-09-13）继续有效，原文保留，不得改写以绕过。
+5. 本节是操作规则，不是技术沙箱；必须如实报告实际权限与隔离状态。
 
-## 2. 每轮结束时必须回报
+## 四、不可动的资产
 
-无论是否改了代码，都要明确回报：
+数据库、`/opt/literature-ai/data/`（storage/libraries/library_registry.json/docling_cache）、
+`outputs/`、`deliverables/`、`backend/reports/`、`/home/2401liyuhao/backups/`、`.env`、凭据文件。
 
-- 跑了哪些测试，结果是什么
-- 是否有 commit，commit hash 是什么
-- 是否已经 push
-- 剩余风险、未验证项、假设项是什么
+改动数据前先备份；破坏性操作先取得用户同意。
 
-不要把“未执行”说成“已验证”。
+## 五、当前状态与重建计划
 
-## 3. 单 AI 优先的验收权限边界
+- **目标流程**：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析。
+  规范见 [`literature-ai/docs/PIPELINE_TARGET.md`](literature-ai/docs/PIPELINE_TARGET.md) 与
+  [`literature-ai/docs/DATA_RULES.md`](literature-ai/docs/DATA_RULES.md)。
+- **重建计划核心已实现并上线**（2026-09-23）：新上传不触发旧自动解析链；一键 AI 提取（目标模式）派发 Codex-web 线程，任务完成后自动写回旧详情页图片与解读；新流程四页（AI 提取、图表资料、数据表、汇总分析）已上线。
+- 旧审核链路代码（`review_center`、`dft-workflow`、`content_knowledge`、`verification`）仍保留，但导航入口已隐藏，不再对新上传触发。
+- A0019 已验证：37 子图、58 数据行、75 数值、105 来源，6 张整图写回旧详情页。
+- 任何报告仍须区分"文档里写了什么"和"服务器实际跑什么"，以服务器运行态和用户实际页面为准。
 
-- 系统默认由一个 AI 完成提取、核验、纠错和验收；人工只处理自动修复或确定性证据门禁无法解决的异常，不采用逐条人工点击作为默认流程。
-- AI 不能把自己的判断表述为人工 `verified`，也不能使用 Owner 身份或客户端请求体伪造人工身份。
-- 通过服务端认证且具有专用 `ai_verify_content` capability 的单一 AI，可以通过统一验收服务写入 `reviewer_status=ai_verified`。
-- `ai_verified` 与人工 `verified` 明确分离；它必须携带结构化 `ai_verification` payload，并重新通过 PDF、原文、精确页、定位、对象快照、版本、数值/单位和冲突等确定性门禁后才能进入写作或引用。
-- 匿名请求、普通读取 MCP key、普通提案身份以及无 `ai_verify_content` capability 的 AI 均不能写入 `ai_verified`。
-- 禁止第二 AI、第二模型、多模型投票、AI 共识、第三 AI 仲裁或 subagent 参与内容验收。
-- 自动验收失败时，应由同一 AI 自动重新定位或修正后重跑全部门禁；明确错误自动拒绝，仍无法消除的歧义才进入异常队列。
-- 人工 `verified` 路径保留，仅用于异常处理；AI 不能覆盖已有人工终审状态。
-- 所有 AI 结论必须可审计、可撤销，并追溯到服务端认证身份、政策版本、PDF 原文、页码、定位和目标快照。
+## 六、文档、历史产物与备份
 
-## 4. 文档同步原则
-
-- 优先维护当前有效文档：`../README.md`（仓库主 README）、`AGENTS.md`、`docs/README.md`
-- `README.md` 仅保留 `literature-ai/` 目录落点与入口跳转，不再承载完整系统说明
-- 如仓库入口或目录跳转发生变化，再同步 `README.md`
-- 历史规划、旧报告统一放入 `docs/archive/`（若 archive 目录已删除，以 git history 为准）
-- 当前真实进度以 `../README.md`、`AGENTS.md` 和 `git history` 为准
-
-## 5. 数据安全原则
-
-以下操作按用户当前任务直接执行，完成后报告结果：
-
-- extraction apply
-- 修改 registry / shadow report
-- 删除真实数据文件、真实解析产物、真实 artifacts
-- 破坏性 git 操作
-
-任务触及上述区域时，直接执行必要操作，并在完成后说明影响范围和结果。
-
-## 6. 修改原则
-
-- 先读再改，不凭印象改
-- 先做最小变更，再考虑扩展
-- 优先降低误导风险，再追求“文档完整”
-- 如果发现文档与当前代码或数据状态冲突，优先修正文档，不要编造“已经完成”的迁移结论
-
-## 6.1 临时产物与导出物规则
-
-- 不要把预览图、候选裁剪图、调试 JSON、临时分析文本写到仓库根目录。
-- 临时产物统一写入 `outputs/tmp/` 或 `backend/scratch/`。
-- 正式导出物统一写入 `outputs/exports/`。
-- 不要把候选图、预览图、调试输出当成数据库正式数据或长期资产。
-- 如产生临时文件，优先复用现有目录与清理约定，避免新增散落路径。
-- 如需清理已确认的临时产物，优先使用仓库根目录脚本 `scripts/cleanup_temp_artifacts.ps1`。
-
-## 6.2 论文编号语义
-
-- 用户说“论文号”或“文献号”时，默认指 `Paper.paper_code`，例如 `B0078`。
-- 禁止把数据库 UUID 当作论文号优先返回。
-- `serial_number` 只能明确标注为“库内序号”，DOI 只能明确标注为 DOI；二者均不能替代论文号。
-- 回答编号问题时，优先返回 `paper_code`；只有用户明确要求时，才补充 UUID、库内序号或 DOI。
-
-
-## 服务器 Playwright CLI（页面验收）
-
-- 服务器已安装 Node.js `v20.20.2`、npm `10.8.2`、全局 Playwright CLI `0.1.19`；命令路径为 `/usr/local/bin/playwright-cli`。它是浏览器自动化工具，**不是 Codex CLI**，不负责 AI 推理、文献解析或 MCP 调用。
-- 能登录服务器并拥有终端执行权限的本机 AI/运维人员可直接调用；只有 Literature AI MCP 权限、没有 SSH/终端权限的外部 AI 不能调用。Playwright CLI 本身无需注册或登录 Playwright 账号。
-- 浏览器本体缓存当前属于服务器账号 `2401liyuhao`，目录为 `/home/2401liyuhao/.cache/ms-playwright/`。其他 Linux 账号若要运行，需在其账号下执行 `playwright-cli install-browser chromium --only-shell`（或配置共享缓存及权限），不能假定自动复用该缓存。
-- 访问 `dft.researchlife.top` 仍必须通过 Literature AI 自身的 Basic/OAuth/Owner-session 鉴权；Playwright CLI 不绕过任何网站权限。不得把登录密码、Owner token、MCP key 写进项目文件、测试脚本、截图、trace 或日志。
-- 推荐用于部署后的真实页面验收：`playwright-cli open <URL>` → `playwright-cli snapshot` → 按最新快照操作 → `playwright-cli console error` / `playwright-cli requests`。会话结束执行 `playwright-cli close`；临时配置和验收产物只允许保存在服务器临时目录并及时清理，禁止下载到 Windows 本地。
-- Rocky Linux 不受 Playwright 自动依赖安装器正式支持；禁止使用会调用 `apt-get` 的 `--with-deps`。当前 Chromium 已可运行；若将来浏览器升级失败，应按 Rocky/RHEL 实际缺失库处理并重新做真实页面验收，不得把 CLI 能启动等同于页面验收通过。
-
-## 7. 常用检查
+- 现行文档入口：[`literature-ai/docs/README.md`](literature-ai/docs/README.md)。
+- **历史产物**（`backend/reports/`、`deliverables/`、`outputs/` 中的报告与导出快照）保留但**不是当前规范**。
+- **被清洗的旧文档**（`plans/`、`audits/`、`mcp/`、`schema/`、`schemas/`、`ui/` 等 51 个文件 + 根入口文件旧版）
+  已随 2026-09-22 备份移出，可用以下方式找回：
 
 ```bash
-cd literature-ai/backend
-python -m compileall app tests
-python -m pytest -q
+ls /home/2401liyuhao/backups/literature-ai/docs-cleanup-*/
+cd /home/2401liyuhao/backups/literature-ai/docs-cleanup-<UTCtimestamp> && sha256sum -c MANIFEST.sha256
 ```
 
-如果测试未运行、被跳过、或失败，必须原样说明。
+  `MANIFEST.tsv` 记录 `sha256 / 字节数 / 相对路径`，`DELETED-files-list.txt` 是本轮移出的精确文件清单，
+  `README-restore.md` 写恢复方式。**旧审计与旧工具手册只能当历史材料，不得当现行规范。**
+
+- 已存在的未提交改动（`literature-ai/backend/app/services/ide_prompt_service.py`、
+  `literature-ai/backend/tests/test_ide_prompt_service.py`、`literature-ai/frontend/pages/review_center/page.js`）
+  与未跟踪目录 `.openhands/` 是**有意保留**的工作状态，不要在无关任务里回滚或清理。
+
+## 七、接手第一步（任何 AI）
+
+1. 读本文件（含顶部守卫段）→ 再读 [`SERVER_ACCESS.md`](SERVER_ACCESS.md) → 再读
+   [`literature-ai/docs/README.md`](literature-ai/docs/README.md)。
+2. 判断任务类型：改数据/迁移/清理 → 先备份并取得同意；改代码 → 明确影响范围与生效方式；只读查询 → 不动数据。
+3. 数据真源只有服务器 PostgreSQL `literature_ai` 库；文件、向量、PDF 都是派生。
+4. 开工前发现现状与本文件不符，**以服务器实际状态为准并回头修订本文件**，不要凭文档臆测。

@@ -5,7 +5,6 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, Paper, PaperFigure, WritingCard
-from app.utils.review_safety import ExportGateResult, WritingGateResult
 
 
 def paper_code_for(session: Session, paper_id: Any) -> str | None:

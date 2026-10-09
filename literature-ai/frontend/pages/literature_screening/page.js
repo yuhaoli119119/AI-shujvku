@@ -92,8 +92,7 @@ async function applyFilters() {
         const url = `/api/library/papers/filter?${queryParams.toString()}`;
         const resp = await fetch(url);
         if (!resp.ok) {
-            console.error('Filter API failed', await resp.text());
-            return;
+            throw new Error('HTTP ' + resp.status);
         }
         
         const data = await resp.json();
@@ -112,7 +111,16 @@ async function applyFilters() {
         updateResultCount(typeof data.total === 'number' ? data.total : currentPapers.length);
         renderTable();
     } catch (err) {
-        console.error('Error applying filters', err);
+        const body = document.getElementById('resultsTableBody');
+        body.innerHTML = '';
+        const row = body.insertRow(), cell = row.insertCell();
+        cell.colSpan = 16;
+        cell.className = 'empty-state';
+        cell.textContent = '文献筛选加载失败：' + err.message + '。';
+        const retry = document.createElement('button');
+        retry.type = 'button'; retry.className = 'btn ghost'; retry.textContent = '重试';
+        retry.addEventListener('click', applyFilters); cell.appendChild(retry);
+        document.getElementById('resultCount').textContent = '未能读取结果';
     }
     syncUrl();
 }

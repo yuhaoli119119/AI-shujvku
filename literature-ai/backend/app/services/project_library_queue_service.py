@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from app.db.models import DFTResult, Paper, PaperSection
 from app.domain.project_library_context import get_project_library_context
-from app.services.dft_export_service import build_dft_ml_dataset_v3
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 
 

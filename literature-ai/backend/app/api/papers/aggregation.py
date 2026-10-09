@@ -22,28 +22,12 @@ from app.db.models import DFTSetting as DS
 from app.db.models import Paper as P
 from app.db.session import get_db_session
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
-from app.services.dft_audit_service import DFTCompletenessAuditor
-from app.services.dft_export_service import (
-    TARGET_ML_DATASET_PROFILES,
-    _extract_evidence_context,
-    _dft_quality_row_payload,
-    _dft_rows_statement,
-    _normalized_property_type,
-    _optional_int_filter,
-    _optional_text_filter,
-    _property_type_filter_clause,
-    build_dft_csv_rows,
-    build_dft_ml_dataset,
-    normalize_dft_display_value,
-)
-from app.services.dft_review_queue_service import DFTReviewQueueService
 from app.utils.library_names import build_library_name_clause, normalize_library_name
 from app.utils.dft_candidate_status import (
     DFT_STATUS_TERMINAL_UNUSABLE,
     is_terminal,
     normalize as normalize_dft_status,
 )
-from app.utils.review_safety import bulk_export_gate_results
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

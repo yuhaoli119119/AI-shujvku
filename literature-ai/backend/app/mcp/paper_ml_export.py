@@ -74,12 +74,6 @@ from app.domain.tabular_task_profiles import (
 from app.mcp.auth import require_mcp_capability
 from app.mcp.context import MCPAuthInfo, get_mcp_auth
 from app.security.exports import require_mcp_exports_enabled
-from app.services.dft_export_service import (
-    DFT_ML_DATASET_V3_CSV_COLUMNS,
-    _csv_cell,
-    _v3_csv_row,
-    build_dft_ml_dataset_v3,
-)
 
 try:  # Python 3.11+
     from mcp.types import ToolAnnotations
