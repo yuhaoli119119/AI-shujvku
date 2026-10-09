@@ -56,6 +56,8 @@ def configuration(runtime,app,sha):
 def verify(runtime,sha):
     for name in SERVICES:
         info=json.loads(run(['docker','inspect',f'literature-ai-{name}-1']))[0]
+        if not info['State'].get('Running') or info['State'].get('Restarting'):raise RuntimeError('Container is not running stably: '+name)
+        if name in {'backend','worker','worker-pdf'} and info['State'].get('Health',{}).get('Status')!='healthy':raise RuntimeError('Service health check has not passed: '+name)
         if info['Config']['Labels'].get('org.opencontainers.image.revision')!=sha:raise RuntimeError('Container revision mismatch: '+name)
         for mount in info['Mounts']:
             if mount['Destination'] in {'/app','/frontend','/prompts'}:

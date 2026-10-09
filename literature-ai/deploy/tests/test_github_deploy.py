@@ -34,4 +34,15 @@ class DeploymentBoundaryTests(unittest.TestCase):
             with self.assertRaises(SystemExit):deploy.main()
             fetch.assert_not_called()
 
+    def test_restarting_container_cannot_pass_verification(self):
+        info={'State':{'Running':False,'Restarting':True}}
+        with patch.object(deploy,'run',return_value=json.dumps([info])):
+            with self.assertRaisesRegex(RuntimeError,'not running stably'):deploy.verify(Path('/opt/literature-ai'),'a'*40)
+
+    def test_worker_must_pass_its_own_health_check(self):
+        backend={'State':{'Running':True,'Health':{'Status':'healthy'}},'Config':{'Labels':{'org.opencontainers.image.revision':'a'*40}},'Mounts':[]}
+        worker={'State':{'Running':True,'Health':{'Status':'unhealthy'}}}
+        with patch.object(deploy,'run',side_effect=[json.dumps([backend]),json.dumps([worker])]):
+            with self.assertRaisesRegex(RuntimeError,'health check has not passed: worker'):deploy.verify(Path('/opt/literature-ai'),'a'*40)
+
 if __name__=='__main__':unittest.main()

@@ -203,6 +203,12 @@ services:
 
   worker:
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket,sys; from app.workers.celery_app import celery_app; reply=celery_app.control.inspect(destination=['celery@'+socket.gethostname()],timeout=5).ping(); sys.exit(0 if reply and any(v.get('ok')=='pong' for v in reply.values()) else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -233,6 +239,12 @@ services:
 
   worker-pdf:
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket,sys; from app.workers.celery_app import celery_app; reply=celery_app.control.inspect(destination=['celery@'+socket.gethostname()],timeout=5).ping(); sys.exit(0 if reply and any(v.get('ok')=='pong' for v in reply.values()) else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
     build:
       context: .
       dockerfile: backend/Dockerfile
