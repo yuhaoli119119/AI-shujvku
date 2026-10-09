@@ -3149,6 +3149,108 @@
         ${sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${page ? '#page=' + page : ''}" target="_blank" rel="noopener">查看${supplementary ? ' SI' : '正文'}原 PDF${page ? ' 第 ' + page + ' 页' : ''}</a>` : ''}
         ${renderPipeTable(table.markdown_content || '')}</section>`;
     }
+    /* 把一个逻辑表跨页拆成的多段 markdown 合并为单一表格：
+       首段保留表头与分隔行，其余段只取数据行；按页顺序拼接，去除跨段重复行。
+       每页原始表题、页码与链接仍逐段保留，不丢行、不重复。 */
+    function splitTableMarkdown(md) {
+      const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
+      const isSep = line => {
+        if (line.indexOf('|') < 0) return false;
+        const cells = line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim());
+        return cells.length >= 2 && cells.every(cell => /^:?-{3,}:?$/.test(cell.replace(/\s/g, '')));
+      };
+      let sep = -1;
+      for (let i = 1; i < lines.length; i++) { if (lines[i - 1].indexOf('|') >= 0 && isSep(lines[i])) { sep = i; break; } }
+      const pipeLines = lines.filter(line => line.trim().indexOf('|') >= 0);
+      if (sep < 0) return { headerLines: pipeLines.slice(0, 1), body: pipeLines.slice(1), post: lines.filter(line => line.trim() && line.trim().indexOf('|') < 0) };
+      const body = [], post = [];
+      for (let i = sep + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        if (line.trim().indexOf('|') >= 0) body.push(line.trim()); else post.push(line.trim());
+      }
+      return { headerLines: lines.slice(0, sep + 1), body, post };
+    }
+    function mergeTableSegments(records) {
+      const parts = records.map(record => splitTableMarkdown(record.markdown_content || ''));
+      const out = [];
+      const seen = new Set();
+      let dropped = 0;
+      parts.forEach((part, index) => {
+        if (index === 0) out.push(...part.headerLines);
+        part.body.forEach(line => {
+          const normalized = line.replace(/\s+/g, ' ').trim();
+          if (seen.has(normalized)) { dropped += 1; return; }
+          seen.add(normalized); out.push(line);
+        });
+      });
+      const post = [];
+      parts.forEach(part => part.post.forEach(line => { if (!post.includes(line)) post.push(line); }));
+      return { markdown: out.join('\n') + (post.length ? '\n' + post.join('\n') : ''), dropped };
+    }
+    function tableEntryFromItem(item) {
+      const asset = item.figure && item.figure._currentAsset ? item.figure._currentAsset : null;
+      const rec = item.text || null;
+      const sourceId = rec ? (rec.related_paper_id || rec.paper_id) : (asset ? asset.paper_id : state.paperId);
+      const label = visualLabelKey(rec && rec.caption, 'table') ||
+        visualLabelKey(asset && (asset.figure_label || asset.caption || asset.asset_key), 'table');
+      const page = rec && Number.isSafeInteger(rec.page) ? rec.page : (asset && Array.isArray(asset.page_numbers) ? asset.page_numbers[0] : null);
+      const caption = (rec && rec.caption) || (asset && asset.caption) || '';
+      const markdown = (rec && rec.markdown_content) ||
+        (asset && asset.provenance && typeof asset.provenance.table_markdown === 'string' ? asset.provenance.table_markdown : '') || '';
+      return { item, asset, rec, sourceId, label, page, caption, markdown };
+    }
+    function tableEntryFromRecord(table) {
+      return {
+        item: null, asset: null, rec: table,
+        sourceId: table.related_paper_id || table.paper_id,
+        label: visualLabelKey(table.caption, 'table'),
+        page: Number.isSafeInteger(table.page) ? table.page : null,
+        caption: table.caption || '', markdown: table.markdown_content || ''
+      };
+    }
+    function groupTableEntries(inventory) {
+      const entries = [...inventory.tables.map(tableEntryFromItem), ...inventory.remainingTables.map(tableEntryFromRecord)]
+        .filter(entry => entry.label || !visualLabelKey(entry.caption, 'figure'));
+      const groups = [], index = new Map();
+      entries.forEach(entry => {
+        const key = entry.sourceId + '::' + (entry.label != null ? entry.label : 'raw:' + String(entry.caption).slice(0, 48) + ':' + String(entry.page));
+        if (index.has(key)) index.get(key).records.push(entry);
+        else { const group = { key, records: [entry] }; index.set(key, group); groups.push(group); }
+      });
+      groups.forEach(group => group.records.sort((a, b) => (a.page || 0) - (b.page || 0)));
+      return groups;
+    }
+    function renderTableGroup(group) {
+      const records = group.records, primary = records[0];
+      if (records.length === 1) {
+        const entry = records[0];
+        if (!entry.asset) return renderStoredPaperTable(entry.rec);
+        const content = entry.rec ? renderStoredPaperTable(entry.rec) :
+          `<section class="section-item pd-paper-table" data-current-asset="${esc(entry.asset.id)}"><div class="section-title">${esc(entry.item.figure.figure_label || '表格')}${entry.item.figure.page ? `<span class="pd-figure-page-badge">Page ${esc(entry.item.figure.page)}</span>` : ''}</div>
+            <div class="muted prewrap">${esc(entry.caption || '未保存表题')}</div>${currentPdfLinks(entry.asset.file_id, entry.asset.page_numbers)}
+            ${entry.markdown && entry.markdown.trim() ? renderPipeTable(entry.markdown) : '<p class="muted">尚未保存表格文本，请查看来源 PDF 核对。</p>'}</section>`;
+        return `<div class="pd-final-table" data-current-asset="${esc(entry.asset.id)}">${content}${renderFigureReadingHtml(currentScientificReading(entry.asset, false))}</div>`;
+      }
+      const supplementary = primary.sourceId !== state.paperId;
+      const code = records.map(record => (record.rec && record.rec.related_paper_code)).find(Boolean) || '';
+      const title = (supplementary ? 'SI' + (code ? ' · ' + code : '') : '正文') + ' · ' + (primary.label ? 'Table ' + primary.label.toUpperCase() : '表格');
+      const pages = records.map(record => record.page).filter(Number.isSafeInteger);
+      const merged = mergeTableSegments(records.map(record => ({ markdown_content: record.markdown })));
+      const provenance = records.map(record => {
+        const page = Number.isSafeInteger(record.page) ? record.page : null;
+        return `<li>第 ${esc(page || '?')} 页 · ${esc(String(record.caption || '').replace(/\s+/g, ' ').slice(0, 140))}${page ? ` · <a href="${API_BASE}/${encodeURIComponent(primary.sourceId)}/pdf#page=${page}" target="_blank" rel="noopener">查看原 PDF</a>` : ''}</li>`;
+      }).join('');
+      const asset = records.map(record => record.asset).find(Boolean);
+      return `<div class="pd-final-table pd-merged-table" data-merged-key="${esc(group.key)}" data-merged-segments="${records.length}">
+        <section class="section-item pd-paper-table">
+          <div class="section-title">${esc(title)}<span class="pd-figure-page-badge">Pages ${esc(pages.join(', '))}</span><span class="pd-figure-page-badge">${records.length} 个跨页分段已合并</span></div>
+          <div class="muted prewrap">${esc(String(primary.caption || '未保存表题').replace(/\s+/g, ' '))}</div>
+          <div class="muted">同一逻辑表按页合并为单一表格；保留每页来源、行顺序与原始精度，去重 ${esc(merged.dropped)} 行。</div>
+          ${merged.markdown.trim() ? renderPipeTable(merged.markdown) : '<p class="muted">尚未保存表格文本，请查看来源 PDF 核对。</p>'}
+          <details><summary>跨页来源明细（${records.length} 段）</summary><ul>${provenance}</ul></details>
+        </section>${asset ? renderFigureReadingHtml(currentScientificReading(asset, false)) : ''}</div>`;
+    }
     function renderCurrentFigures() {
       const paper = state.paper, list = document.getElementById('figuresList'), tableList = document.getElementById('tablesList');
       const hasCurrent = currentResultsPresent(), inventory = visualInventory();
@@ -3162,17 +3264,11 @@
       };
       const status = state.rebuildStatus === 'failed' ? `<p class="warning">当前图表读取失败，未确认是否完整：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前图表…</p>' : '';
       list.innerHTML = status + (inventory.figures.length ? cards(inventory.figures, '图片') : '<div class="empty-state">未保存图片。</div>');
-      tableList.innerHTML = status + inventory.tables.map(item => {
-        const asset = item.figure._currentAsset;
-        const content = item.text ? renderStoredPaperTable(item.text) :
-          `<section class="section-item pd-paper-table" data-current-asset="${esc(asset.id)}"><div class="section-title">${esc(item.figure.figure_label)}${item.figure.page ? `<span class="pd-figure-page-badge">Page ${esc(item.figure.page)}</span>` : ''}</div>
-            <div class="muted prewrap">${esc(asset.caption || '未保存表题')}</div>${currentPdfLinks(asset.file_id, asset.page_numbers)}
-            ${typeof asset.provenance?.table_markdown === 'string' && asset.provenance.table_markdown.trim() ? renderPipeTable(asset.provenance.table_markdown) : '<p class="muted">尚未保存表格文本，请查看来源 PDF 核对。</p>'}</section>`;
-        return `<div class="pd-final-table" data-current-asset="${esc(asset.id)}">${content}${renderFigureReadingHtml(currentScientificReading(asset, false))}</div>`;
-      }).join('') + inventory.remainingTables.map(renderStoredPaperTable).join('') +
-        (!inventory.tables.length && !inventory.remainingTables.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
-      document.getElementById('cntFigures').textContent = inventory.figures.length + inventory.tables.length + inventory.remainingTables.length;
-      document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${inventory.tables.length + inventory.remainingTables.length} 表（含已关联 SI 表格）`;
+      const tableGroups = groupTableEntries(inventory);
+      tableList.innerHTML = status + tableGroups.map(renderTableGroup).join('') +
+        (!tableGroups.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
+      document.getElementById('cntFigures').textContent = inventory.figures.length + tableGroups.length;
+      document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${tableGroups.length} 表（含已关联 SI；同一逻辑表跨页已合并为单表）`;
       const historyMode = hasCurrent || state.rebuildStatus !== 'ready';
       const legacyData = document.getElementById('pdLegacyData');
       if (legacyData && legacyData.dataset.history !== String(historyMode)) {
