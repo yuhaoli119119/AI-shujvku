@@ -2901,8 +2901,10 @@
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
       const role = file.role === 'main' ? '正文' : file.role === 'si' ? 'SI' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
-      return (validPages.length ? validPages : [null]).map(page =>
+      const previewLinks = (validPages.length ? validPages : [null]).map(page =>
         `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} PDF${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
+      const originalLink = `<a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载${esc(role)}原文件</a>`;
+      return previewLinks + ' ' + originalLink;
     }
     function isPlaceholderReading(reading) {
       return (reading?.detailed_explanation_zh || reading?.detailed_explanation || reading?.core_interpretation || '').trim() === '已由 AI 从原 PDF 逐个子图裁切并汇总；可在图表资料页逐个子图核对。';

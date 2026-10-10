@@ -33,6 +33,7 @@ from app.schemas.rebuild import (
 )
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
+from app.services.rebuild_file_preview import resolve_original_download, resolve_reading_pdf
 from app.services.rebuild_workflow_service import (
     RebuildWorkflowError,
     analyze,
@@ -75,7 +76,9 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found"} else (
+        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch"} else 400
+    )
     return HTTPException(status_code=status, detail=str(exc))
 
 
@@ -264,14 +267,33 @@ async def rebuild_file_preview(
 ) -> FileResponse:
     try:
         record = get_file(session, file_id)
-        path = resolve_file_path(record, settings)
+        path = resolve_reading_pdf(record, settings)
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
     return FileResponse(
         path,
         media_type="application/pdf",
-        filename=record.original_filename,
+        filename=f"{Path(record.original_filename).stem}.pdf",
         content_disposition_type="inline",
+    )
+
+
+@router.get("/files/{file_id}/download")
+async def rebuild_file_download(
+    file_id: UUID,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> FileResponse:
+    try:
+        record = get_file(session, file_id)
+        path, media_type = resolve_original_download(record, settings)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+    return FileResponse(
+        path,
+        media_type=media_type,
+        filename=record.original_filename,
+        content_disposition_type="attachment",
     )
 
 
