@@ -2902,7 +2902,7 @@
       const role = file.role === 'main' ? '正文' : file.role === 'si' ? 'SI' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>
-        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} PDF${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
+        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} PDF${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
       const originalLink = `<a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载${esc(role)}原文件</a>`;
       return previewLinks + ' ' + originalLink;
     }

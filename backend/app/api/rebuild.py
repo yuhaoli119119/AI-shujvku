@@ -275,6 +275,7 @@ async def rebuild_file_preview(
         media_type="application/pdf",
         filename=f"{Path(record.original_filename).stem}.pdf",
         content_disposition_type="inline",
+        headers={"Cache-Control": "private, no-store"},
     )
 
 
@@ -294,6 +295,7 @@ async def rebuild_file_download(
         media_type=media_type,
         filename=record.original_filename,
         content_disposition_type="attachment",
+        headers={"Cache-Control": "private, no-store"},
     )
 
 

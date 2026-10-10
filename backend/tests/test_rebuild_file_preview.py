@@ -126,6 +126,7 @@ def test_preview_endpoint_serves_pdf_and_download_serves_original(tmp_path, monk
         preview = client.get("/api/rebuild/files/1887ad2c-340b-4bb8-9e65-e32891889c36/preview")
         assert preview.status_code == 200
         assert preview.headers["content-type"] == "application/pdf"
+        assert preview.headers["cache-control"] == "private, no-store"
         assert preview.headers["content-disposition"].startswith("inline;")
         assert preview.content.startswith(b"%PDF-")
         with fitz.open(stream=preview.content, filetype="pdf") as document:
