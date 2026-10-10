@@ -2186,7 +2186,11 @@
     }
 
     function buildFigureReadingData(figure) {
-      if (figure?._currentAsset) return currentScientificReading(figure._currentAsset, figure._historicalCurrent);
+      if (figure?._currentAsset) {
+        const current = currentScientificReading(figure._currentAsset, figure._historicalCurrent);
+        return current.type === 'current_incomplete' && figure._fallbackReadingFigure
+          ? buildFigureReadingData(figure._fallbackReadingFigure) : current;
+      }
       const reading = figure && typeof figure.reading_explanation === "object" && figure.reading_explanation !== null
         ? figure.reading_explanation
         : null;
@@ -3110,26 +3114,33 @@
         original.paper_id === state.paperId &&
         Number.isSafeInteger(original.page) && assetPages.includes(original.page);
     }
-    function originalFigureUsable(figure) {
-      return (figure.asset_url || figure.image_path) &&
-        !(figure.flags || []).some(flag => ['missing_image_file', 'invalid_image_file'].includes(flag)) &&
-        !figure.reading_explanation?.is_stale &&
-        (hasEstablishedReading(figure) || ['recropped', 'ai_created_crop', 'validated_crop'].includes(figure.crop_status));
+    function matchingLegacyReading(asset, figure) {
+      const reading = figure?.reading_explanation;
+      if (!reading || reading.is_stale || !hasEstablishedReading(figure)) return false;
+      const file = currentSourceFile(asset.file_id);
+      const locators = reading.evidence_locators;
+      return !!file && (!reading.paper_id || reading.paper_id === asset.paper_id) &&
+        (!reading.file_id || reading.file_id === asset.file_id) &&
+        (!reading.file_sha256 || reading.file_sha256 === file.sha256) &&
+        Array.isArray(locators) && locators.length > 0 && locators.every(loc =>
+          loc && Number.isSafeInteger(loc.page) && loc.page > 0 &&
+          (!loc.paper_id || loc.paper_id === asset.paper_id) &&
+          (!loc.file_id || loc.file_id === asset.file_id) &&
+          (!loc.file_sha256 || loc.file_sha256 === file.sha256));
     }
     function visualInventory() {
       const originals = state.paper.figures || [], originalTables = state.paper.tables || [];
       const active = state.rebuildAssets.filter(asset => !supersededCurrentAsset(asset));
       const history = state.rebuildAssets.filter(supersededCurrentAsset);
-      const figures = [...originals], alternateFigures = [];
-      active.filter(asset => asset.asset_type !== 'table').forEach(asset => {
-        const match = originals.find(figure => sameMainVisual(asset, figure, 'figure'));
+      const currentFigures = active.filter(asset => asset.asset_type !== 'table');
+      // A current whole-figure asset owns its card. The old crop remains a
+      // fallback only when no asset from the same source, figure and page exists.
+      const figures = originals.filter(figure => !currentFigures.some(asset => sameMainVisual(asset, figure, 'figure')));
+      currentFigures.forEach(asset => {
+        const match = originals.find(figure => sameMainVisual(asset, figure, 'figure') && matchingLegacyReading(asset, figure));
         const current = currentAssetFigure(asset, false);
-        if (match && originalFigureUsable(match)) alternateFigures.push(current);
-        else if (match && !figures[originals.indexOf(match)]._currentAsset) {
-          alternateFigures.push(match);
-          figures[originals.indexOf(match)] = current;
-        } else if (match) alternateFigures.push(current);
-        else figures.push(current);
+        if (match) current._fallbackReadingFigure = match;
+        figures.push(current);
       });
       const tables = active.filter(asset => asset.asset_type === 'table').map(asset => ({
         figure: currentAssetFigure(asset, false),
@@ -3141,7 +3152,7 @@
         String(visualLabelKey(a.caption, 'table') || '').localeCompare(String(visualLabelKey(b.caption, 'table') || ''), 'en', {numeric:true}));
       figures.sort((a,b) => (a.page || 0) - (b.page || 0) ||
         String(a.figure_label || '').localeCompare(String(b.figure_label || ''), 'en', {numeric:true}));
-      return {figures, alternateFigures, tables, remainingTables,
+      return {figures, alternateFigures: [], tables, remainingTables,
         historicalFigures: history.filter(asset => asset.asset_type !== 'table').map(asset => currentAssetFigure(asset, true)),
         historicalTables: history.filter(asset => asset.asset_type === 'table').map(asset => currentAssetFigure(asset, true))};
     }
