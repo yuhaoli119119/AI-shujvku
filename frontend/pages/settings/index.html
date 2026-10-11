@@ -564,7 +564,7 @@
                 font-size: 10.5px;
             }
 
-            /* 提取协议 */
+            /* 提取流程与规范 */
             .protocol-toolbar { margin-bottom: 8px; gap: 6px; }
             .protocol-actions { gap: 6px; }
             .protocol-grid {
@@ -658,24 +658,73 @@
 
     <div class="main">
         <div class="section-nav litai-hscroll">
-            <button class="active" onclick="showSection('api', event)">API 配置</button>
-            <button onclick="showSection('ide', event)">IDE 连接</button>
-            <button onclick="showSection('protocol', event)">提取协议</button>
-            <button onclick="showSection('theme', event)">主题外观</button>
-            <button onclick="showSection('guide', event)">使用说明</button>
+            <button class="active" data-section="api" onclick="showSection('api', event)">服务配置</button>
+            <button data-section="ide" onclick="showSection('ide', event)">外部 AI 连接</button>
+            <button data-section="protocol" onclick="showSection('protocol', event)">提取流程与规范</button>
+            <button data-section="theme" onclick="showSection('theme', event)">主题外观</button>
+            <button data-section="guide" onclick="showSection('guide', event)">使用说明</button>
         </div>
 
         <div id="section-api" class="section-content active">
             <div class="panel" id="status-panel">
                 <div class="panel-title">服务状态</div>
-                <div class="panel-desc">查看 Embedding、网页端 AI 停用状态和 MCP 的当前可用状态。</div>
+                <div class="panel-desc">查看语义检索与可选外部 AI 接入的配置状态；配置齐全不等于已经通过连接测试。</div>
                 <div id="status-content" class="badge-row">
                     <span class="badge badge-warn">加载中</span>
                 </div>
             </div>
 
+
             <div class="panel">
-                <div class="panel-title">最终人工确认身份（不影响日常使用）</div>
+                <div class="panel-title">语义检索配置</div>
+                <div class="panel-desc">用于文献语义检索，不控制 AI 提取。当前向量库固定使用 BAAI/bge-m3、1024 维；在线服务须支持该模型。</div>
+                <div class="field">
+                    <label for="embedding_provider">检索服务 <span class="hint">离线模式适合基础检索；在线模式使用向量服务</span></label>
+                    <select id="embedding_provider">
+                        <option value="deterministic">离线模式（基础向量）</option>
+                        <option value="openai_compatible">在线模式（兼容 OpenAI 接口）</option>
+                    </select>
+                </div>
+                <div id="embedding-api-fields">
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="embedding_api_base">服务地址 <span class="hint">例如 https://api.example.com/v1</span></label>
+                            <input type="text" id="embedding_api_base" placeholder="https://api.example.com/v1">
+                        </div>
+                        <div class="field">
+                            <label for="embedding_api_key">访问密钥</label>
+                            <input type="password" id="embedding_api_key" placeholder="sk-...">
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field">
+                            <label for="embedding_model">向量模型 <span class="hint">当前数据库固定</span></label>
+                            <input type="text" id="embedding_model" value="BAAI/bge-m3" readonly>
+                        </div>
+                        <div class="field">
+                            <label for="embedding_dimension">向量维度 <span class="hint">当前数据库固定</span></label>
+                            <input type="number" id="embedding_dimension" value="1024" readonly>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-title">AI 提取在哪里配置？</div>
+                <div class="panel-desc">在文献库或论文详情页点击“AI 提取”，选择该任务使用的模型和运行方式。本页管理检索与外部连接；提取的模型选项以任务入口为准。</div>
+            </div>
+
+            <details class="panel">
+                <summary class="panel-title">高级：外部 MCP 访问密钥</summary>
+                <div class="panel-desc">供 IDE / MCP 客户端访问系统。格式为 `name|label|key|scopes;...`。</div>
+                <div class="field">
+                    <label for="mcp_api_keys">MCP API Keys</label>
+                    <textarea id="mcp_api_keys" rows="3" placeholder="claude|Claude Desktop|litmcp_claude|read_papers,append_notes"></textarea>
+                </div>
+            </details>
+
+            <details class="panel">
+                <summary class="panel-title">高级：人工确认身份</summary>
                 <div class="panel-desc">文献库、设置和普通操作无需解锁。仅在把候选结果确认为最终人工结论时，Token 才用于换取 30 分钟的 HttpOnly 会话 Cookie；页面脚本不会保存、读取或附带原始 Token。</div>
                 <div class="field">
                     <label for="settings_token">管理员 Token</label>
@@ -686,55 +735,7 @@
                     <button class="btn btn-ghost" onclick="closeOwnerSession()">退出管理员会话</button>
                     <span id="owner-session-status" class="badge badge-warn">未检查</span>
                 </div>
-            </div>
-
-            <div class="panel">
-                <div class="panel-title">Embedding 配置</div>
-                <div class="panel-desc">用于语义检索和相似度匹配。离线模式不需要外部 API，在线模式需要兼容 OpenAI 的 Embedding 接口。</div>
-                <div class="field">
-                    <label for="embedding_provider">Provider <span class="hint">deterministic = 离线模式，openai_compatible = 在线 API</span></label>
-                    <select id="embedding_provider">
-                        <option value="deterministic">deterministic（离线模式）</option>
-                        <option value="openai_compatible">openai_compatible（在线 API）</option>
-                    </select>
-                </div>
-                <div id="embedding-api-fields">
-                    <div class="field-row">
-                        <div class="field">
-                            <label for="embedding_api_base">API Base URL <span class="hint">例如 https://api.example.com/v1</span></label>
-                            <input type="text" id="embedding_api_base" placeholder="https://api.example.com/v1">
-                        </div>
-                        <div class="field">
-                            <label for="embedding_api_key">API Key</label>
-                            <input type="password" id="embedding_api_key" placeholder="sk-...">
-                        </div>
-                    </div>
-                    <div class="field-row">
-                        <div class="field">
-                            <label for="embedding_model">Model <span class="hint">例如 text-embedding-3-small</span></label>
-                            <input type="text" id="embedding_model" placeholder="text-embedding-3-small">
-                        </div>
-                        <div class="field">
-                            <label for="embedding_dimension">Dimension <span class="hint">向量维度</span></label>
-                            <input type="number" id="embedding_dimension" placeholder="1536">
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="panel">
-                <div class="panel-title">网页端 AI 已停用</div>
-                <div class="panel-desc">本页不再保存网页端模型配置。解析、核对和审阅统一由 IDE AI 通过 MCP 读取材料并回写结果，避免网页和 IDE 两套 AI 路径互相绕。</div>
-            </div>
-
-            <div class="panel">
-                <div class="panel-title">MCP API Keys</div>
-                <div class="panel-desc">供 IDE / MCP 客户端访问系统。格式为 `name|label|key|scopes;...`。</div>
-                <div class="field">
-                    <label for="mcp_api_keys">MCP API Keys</label>
-                    <textarea id="mcp_api_keys" rows="3" placeholder="claude|Claude Desktop|litmcp_claude|read_papers,append_notes"></textarea>
-                </div>
-            </div>
+            </details>
 
             <div class="panel-actions">
                 <button class="btn btn-primary" onclick="saveSettings()">保存配置</button>
@@ -744,8 +745,8 @@
 
         <div id="section-ide" class="section-content">
             <div class="panel">
-                <div class="panel-title">IDE / MCP 连接</div>
-                <div class="panel-desc">把下方内容复制到支持 MCP 的客户端或直接发给 IDE 内的 AI，它就能知道如何连接到当前系统。</div>
+                <div class="panel-title">外部 AI / MCP 连接（可选）</div>
+                <div class="panel-desc">需要外部客户端接入时，复制下方提示词或配置。网站上的 AI 提取使用独立的任务入口，无需先在这里连接 IDE。</div>
                 <div id="ide-status" class="badge-row" style="margin-bottom:16px;">
                     <span class="badge badge-warn">加载中</span>
                 </div>
@@ -802,18 +803,19 @@
             <div class="panel">
                 <div class="protocol-toolbar">
                     <div>
-                        <div class="panel-title">当前提取协议</div>
-                        <div class="panel-desc">这些协议来自项目的 prompt / rule 配置，明确定义系统预处理、AI 抽取、第二指定 AI 复核、证据定位和确认入库闸门。系统规则 DFT 结果只作为 system_candidate 候选。</div>
+                        <div class="panel-title">当前提取流程与规范</div>
+                        <div class="panel-desc">这里展示现行流程说明与数据规范。当前流程：文献库 → AI 整理图表 → 来源化数据表 → DFT 数据库与数据分析。以下规范对应新提取链路与当前催化剂配对规则。</div>
                     </div>
                     <div class="protocol-actions">
-                        <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新协议</button>
+                        <button class="btn btn-ghost" onclick="loadExtractionProtocols()">刷新规范</button>
                     </div>
                 </div>
+                <p id="protocol-revision" class="panel-desc"></p>
                 <div id="protocol-list" class="protocol-grid">
                     <div class="protocol-card">加载中...</div>
                 </div>
                 <div class="field">
-                    <label id="protocol-detail-label">协议明文</label>
+                    <label id="protocol-detail-label">规范详情</label>
                     <div class="code-block protocol-text">
                         <button class="copy-btn" onclick="copyText('protocol-detail-text')">复制</button>
                         <div id="protocol-detail-text">加载中...</div>
@@ -830,12 +832,12 @@
                 <div class="theme-section">
                     <h3>设计风格</h3>
                     <div class="theme-pills">
-                        <button class="theme-pill" data-theme="material">Material</button>
-                        <button class="theme-pill" data-theme="expressive">Expressive</button>
-                        <button class="theme-pill" data-theme="gradient">Gradient</button>
-                        <button class="theme-pill" data-theme="impeccable">Impeccable</button>
-                        <button class="theme-pill" data-theme="neumorphism">Neumorphism</button>
-                        <button class="theme-pill" data-theme="refined">Refined</button>
+                        <button class="theme-pill" data-theme="material">简洁材质</button>
+                        <button class="theme-pill" data-theme="expressive">鲜明活泼</button>
+                        <button class="theme-pill" data-theme="gradient">柔和渐变</button>
+                        <button class="theme-pill" data-theme="impeccable">清晰专业</button>
+                        <button class="theme-pill" data-theme="neumorphism">柔和立体</button>
+                        <button class="theme-pill" data-theme="refined">精致简约</button>
                     </div>
                 </div>
 
@@ -856,93 +858,53 @@
                 <div class="guide-layout">
                     <div class="guide-nav">
                         <button class="active" onclick="showGuidePane('overview', event)">功能总览</button>
-                        <button onclick="showGuidePane('startup', event)">启动与入口</button>
+                        <button onclick="showGuidePane('startup', event)">常用入口</button>
                         <button onclick="showGuidePane('library', event)">文献入库</button>
-                        <button onclick="showGuidePane('review', event)">IDE 审阅与确认</button>
+                        <button onclick="showGuidePane('review', event)">AI 提取与数据分析</button>
                         <button onclick="showGuidePane('ide', event)">IDE / MCP</button>
                         <button onclick="showGuidePane('troubleshooting', event)">排查问题</button>
                     </div>
                     <div class="guide-panels">
                         <div id="guide-pane-overview" class="guide-pane active">
-                            <div class="guide-section">
-                                <h3>系统怎么配合使用</h3>
-                                <p>这套系统把工作流拆成入库、解析、审阅、确认和写作五个阶段。先把论文放进文献库并完成解析，再看结构化结果，再让 AI 生成候选建议，最后经确认后进入正式数据或写作流程。</p>
-                            </div>
-                            <div class="guide-section">
-                                <h3>主要功能分区</h3>
-                                <ul>
-                                    <li>文献库：上传 PDF、按 DOI / URL 入库、阅读摘要、章节和图表。</li>
-                                    <li>DFT 数据库：适合做横向比对和聚合浏览。</li>
-                                    <li>审核中心：通过 IDE AI 回写候选，再进行证据核对与确认。</li>
-                                    <li>设置：集中管理 API、MCP 和界面主题。</li>
-                                </ul>
-                            </div>
+                            <div class="guide-section"><h3>当前工作流程</h3><p>文献库 → AI 提取 → 图表资料与数据表 → DFT 数据库与数据分析。上传保存文件后，按论文发起提取，再检查中文解读、数值及来源。</p><p>数据库和分析只使用新 AI 提取链路的数据。旧链路已退役，新旧依据提取方式区分，不能按日期区分。</p></div>
                         </div>
-
                         <div id="guide-pane-startup" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>启动方式</h3>
-                                <div class="code-block">docker compose up -d --build</div>
-                                <div class="code-block" style="margin-top:12px;">cd backend
-python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
-                            </div>
-                            <div class="guide-section">
-                                <h3>常用入口</h3>
-                                <ul>
-                                    <li><code>/api/health</code></li>
-                                    <li><code>/pages/literature_library/index.html</code></li>
-                                    <li><code>/pages/paper_detail/index.html?id=&lt;paper_id&gt;</code></li>
-                                    <li><code>/pages/settings/index.html</code></li>
-                                </ul>
-                            </div>
+                            <div class="guide-section"><h3>常用入口</h3><ul>
+                                <li><a href="/pages/literature_library/index.html">文献库：上传、关联 SI、发起 AI 提取</a></li>
+                                <li><a href="/pages/dft_database/index.html">DFT 数据库：浏览新提取数值与证据</a></li>
+                                <li><a href="/pages/visuals/index.html">数据分析：催化剂配对、分组拟合与相关性矩阵</a></li>
+                            </ul></div>
                         </div>
-
                         <div id="guide-pane-library" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>文献入库顺序</h3>
-                                <ol>
-                                    <li>先确认当前使用的是目标文献库。</li>
-                                    <li>用上传 PDF、DOI / URL 下载或在线搜索把论文放进库里。</li>
-                                    <li>等待解析完成后检查摘要、章节、图表和结构化字段。</li>
-                                    <li>需要横向比较时，再切换到聚合页面。</li>
-                                </ol>
-                            </div>
+                            <div class="guide-section"><h3>文献入库</h3><ol>
+                                <li>先选目标文献库，上传正文 PDF 或按 DOI / URL 获取论文。</li>
+                                <li>确认正文与补充材料属于同一论文，避免跨文章混用 SI。</li>
+                                <li>在文献库或详情页发起 AI 提取，查看任务状态；上传本身不会启动旧自动解析链。</li>
+                                <li>检查实际 PDF、图片、表格与来源化数据，缺失或冲突定位到具体记录处理。</li>
+                            </ol></div>
                         </div>
-
                         <div id="guide-pane-review" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>IDE 审阅与确认流程</h3>
-                                <ol>
-                                    <li>在文献库选中论文。</li>
-                                    <li>在 IDE 中调用 MCP，读取 prepare-ai-context / codex-item 材料。</li>
-                                    <li>由 IDE AI 核对证据并通过 import_analysis 回写候选。</li>
-                                    <li>最后在确认工作台核对证据并确认。</li>
-                                </ol>
-                            </div>
+                            <div class="guide-section"><h3>从提取结果到可用图表</h3><ol>
+                                <li>提取结果需保留中文解读、数值、单位和单元格证据；非数值记录仍可留存。</li>
+                                <li>数据分析按论文内催化剂身份跨行匹配 X、Y；不同文章同名催化剂分别处理。</li>
+                                <li>明确冲突的位点、构型或计算条件不能配对；多个可比条件组各自拟合。</li>
+                                <li>新增数据补齐有效性质后，分析页可见时每 30 秒检查更新并重算。</li>
+                            </ol><p>提取字段数 ≠ 可用物理量数 ≠ 催化剂样本数 ≠ 有效配对点数。没有配对时先看真实单变量分布及排除原因。</p></div>
                         </div>
-
                         <div id="guide-pane-ide" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>IDE / MCP 连接</h3>
-                                <ol>
-                                    <li>先配置 MCP API Keys。</li>
-                                    <li>复制 IDE 连接页的提示词或配置。</li>
-                                    <li>交给 Cursor、VS Code、Claude Desktop 等客户端。</li>
-                                    <li>最终确认仍建议回到网页工作台完成。</li>
-                                </ol>
-                            </div>
+                            <div class="guide-section"><h3>外部 AI 接入（可选）</h3><ol>
+                                <li>查看“外部 AI 连接”中的服务状态与接入信息。</li>
+                                <li>需要 MCP 时配置相应访问密钥，再复制提示词或客户端配置。</li>
+                                <li>按照当前连接信息核对可用工具与写入范围；不要套用旧审核链的操作说明。</li>
+                            </ol></div>
                         </div>
-
                         <div id="guide-pane-troubleshooting" class="guide-pane">
-                            <div class="guide-section">
-                                <h3>排查问题</h3>
-                                <ol>
-                                    <li>先看 <code>docker ps</code>。</li>
-                                    <li>再访问 <code>/api/health</code>。</li>
-                                    <li>查看 <code>docker compose logs backend --tail=200</code>。</li>
-                                    <li>如果改了代码但行为没变，优先重启 backend。</li>
-                                </ol>
-                            </div>
+                            <div class="guide-section"><h3>常见问题</h3><ul>
+                                <li>提取后找不到数据：检查文献库、目标论文、任务状态与数据来源筛选是否一致。</li>
+                                <li>数值不参与统计：展开数据质量说明，查看非数值、单位不明、估读或冲突等原因。</li>
+                                <li>没有拟合线：检查有效配对数、数值变化和可比条件分组；有数值不代表能与另一性质配对。</li>
+                                <li>新增数据图表未更新：等待可见页面的数据版本检查，或刷新页面，并核对催化剂身份与 X、Y 证据。</li>
+                            </ul><p>维护发布由服务器从 GitHub 的指定提交部署；页面设置不用于启动、重启或部署服务。</p></div>
                         </div>
                     </div>
                 </div>
@@ -988,7 +950,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             document.querySelectorAll(".section-content").forEach(el => el.classList.remove("active"));
             document.querySelectorAll(".section-nav button").forEach(el => el.classList.remove("active"));
             document.getElementById("section-" + name).classList.add("active");
-            if (evt && evt.target) evt.target.classList.add("active");
+            document.querySelector(`[data-section="${name}"]`).classList.add("active");
+            if (window.location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
             scrollSectionNavIntoView();
         }
 
@@ -1067,7 +1030,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
 
         function makeBadge(label, ok, detail) {
             const cls = ok ? "badge-ok" : "badge-warn";
-            return `<span class="badge ${cls}">${label}${detail ? " · " + detail : ""}</span>`;
+            return `<span class="badge ${cls}">${escapeHtml(label)}${detail ? " · " + escapeHtml(detail) : ""}</span>`;
         }
 
         async function loadSettings() {
@@ -1077,8 +1040,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 document.getElementById("embedding_provider").value = data.embedding_provider || "deterministic";
                 document.getElementById("embedding_api_base").value = data.embedding_api_base || "";
                 document.getElementById("embedding_api_key").value = data.embedding_api_key || "";
-                document.getElementById("embedding_model").value = data.embedding_model || "text-embedding-3-small";
-                document.getElementById("embedding_dimension").value = data.embedding_dimension || "1536";
+                document.getElementById("embedding_model").value = data.embedding_model || "BAAI/bge-m3";
+                document.getElementById("embedding_dimension").value = data.embedding_dimension || "1024";
 
                 document.getElementById("mcp_api_keys").value = data.mcp_api_keys || "";
                 toggleEmbeddingFields();
@@ -1091,12 +1054,12 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             try {
                 const data = await fetchSettingsJSON(`${API_BASE}/api/settings/status`);
                 const parser = data.internal_parser || {};
-                const parserDetail = parser.message || "网页端 AI 已停用，解析与核对由 IDE / MCP AI 执行。";
+                const parserDetail = parser.message || "请从文献库或论文详情发起 AI 提取。";
 
                 document.getElementById("status-content").innerHTML = [
                     makeBadge("Embedding", data.embedding && data.embedding.configured, `${data.embedding.provider} / ${data.embedding.model}`),
-                    makeBadge("网页端 AI", false, parserDetail),
-                    makeBadge("MCP", data.mcp && data.mcp.has_keys, data.mcp && data.mcp.enabled ? "已启用" : "未启用")
+                    `<span class="badge">${escapeHtml(parserDetail)}</span>`,
+                    makeBadge("MCP", data.mcp && data.mcp.enabled && data.mcp.has_keys, data.mcp && data.mcp.enabled ? "已启用" : "未启用")
                 ].join("");
             } catch (e) {
                 document.getElementById("status-content").innerHTML = '<span class="badge badge-err">无法获取状态</span>';
@@ -1175,12 +1138,12 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                 document.getElementById("ide-mcp-url").textContent = data.mcp_url || "-";
                 document.getElementById("ide-local-ip").textContent = data.local_ip || "-";
                 document.getElementById("ide-hostname").textContent = data.hostname || "-";
-                const ready = data.mcp_available !== false;
+                const ready = data.mcp_available === true;
                 const status = document.getElementById("ide-status");
                 status.textContent = data.status_message || (ready ? "服务已就绪" : "网站可用；旧 MCP 服务未启用");
                 status.className = ready ? "badge badge-ok" : "badge";
             } catch (e) {
-                document.getElementById("ide-status").innerHTML = '<span class="badge badge-err">无法获取 IDE 连接信息</span>';
+                document.getElementById("ide-status").innerHTML = '<span class="badge badge-err">无法获取 外部 AI 连接信息</span>';
             }
         }
 
@@ -1188,6 +1151,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
         let selectedProtocolKey = "";
 
         function selectProtocol(key) {
+            key = extractionProtocols.some(item => item.key === key) ? key : (extractionProtocols[0] || {}).key;
             selectedProtocolKey = key;
             document.querySelectorAll(".protocol-card").forEach(card => {
                 card.classList.toggle("active", card.dataset.protocolKey === key);
@@ -1195,7 +1159,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             const item = extractionProtocols.find(entry => entry.key === key) || extractionProtocols[0];
             const label = document.getElementById("protocol-detail-label");
             const text = document.getElementById("protocol-detail-text");
-            if (label) label.textContent = item ? (item.title + " / " + (item.version || "未标版本")) : "协议明文";
+            if (label) label.textContent = item ? (item.title + " / " + (item.version || "未标版本")) : "规范详情";
             if (text) text.textContent = item ? (item.raw_text || "") : "";
         }
 
@@ -1204,7 +1168,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             const list = document.getElementById("protocol-list");
             if (!list) return;
             if (!extractionProtocols.length) {
-                list.innerHTML = '<div class="protocol-card">未读取到协议。</div>';
+                list.innerHTML = '<div class="protocol-card">未读取到规范。</div>';
                 selectProtocol("");
                 return;
             }
@@ -1215,9 +1179,8 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
                     '<h3>' + escapeHtml(item.title || item.key) + '</h3>' +
                     '<div class="panel-desc" style="margin-bottom:0;">' + escapeHtml(item.scope || "") + '</div>' +
                     '<div class="protocol-meta">' +
-                        '<span class="protocol-pill">version ' + escapeHtml(version) + '</span>' +
+                        '<span class="protocol-pill">更新于 ' + escapeHtml(version) + '</span>' +
                         '<span class="protocol-pill">' + escapeHtml(stage) + '</span>' +
-                        '<span class="protocol-pill">' + escapeHtml(item.path || "") + '</span>' +
                     '</div>' +
                 '</button>';
             }).join("");
@@ -1228,9 +1191,10 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             try {
                 const data = await fetchSettingsJSON(`${API_BASE}/api/settings/extraction-protocols`);
                 renderExtractionProtocols(data.items || []);
+                document.getElementById("protocol-revision").textContent = "规范版本 " + (data.version || "") + " · " + (data.revision || "");
             } catch (e) {
                 const list = document.getElementById("protocol-list");
-                if (list) list.innerHTML = '<div class="protocol-card">协议加载失败：' + escapeHtml(e.message) + '</div>';
+                if (list) list.innerHTML = '<div class="protocol-card">规范加载失败：' + escapeHtml(e.message) + '</div>';
             }
         }
 
@@ -1244,23 +1208,12 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000</div>
             loadExtractionProtocols();
             document.getElementById("embedding_provider").addEventListener("change", toggleEmbeddingFields);
 
-            // 支持 URL hash 跳转到指定标签
-            const hash = window.location.hash.replace("#", "");
-            const validSections = ["api", "ide", "protocol", "theme", "guide"];
-            if (hash && validSections.includes(hash)) {
-                showSection(hash);
-                document.querySelectorAll(".section-nav button").forEach(btn => {
-                    btn.classList.toggle("active", btn.textContent.includes(
-                        hash === "api" ? "API" :
-                        hash === "ide" ? "IDE" :
-                        hash === "protocol" ? "提取协议" :
-                        hash === "theme" ? "主题" :
-                        hash === "guide" ? "使用说明" : ""
-                    ));
-                });
-                scrollSectionNavIntoView();
-                if (window.TopNav && TopNav.syncScrollHints) TopNav.syncScrollHints();
-            }
+            const navigateHash = () => {
+                const name = window.location.hash.slice(1);
+                showSection(["api", "ide", "protocol", "theme", "guide"].includes(name) ? name : "api");
+            };
+            navigateHash();
+            window.addEventListener("hashchange", navigateHash);
         });
     </script>
 </body>

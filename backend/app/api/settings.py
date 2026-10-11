@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import ipaddress
 import os
-import re
+import json
+import hashlib
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -37,52 +38,6 @@ from app.security.owner import (
 from app.services.website_contract import website_connection_contract
 
 router = APIRouter()
-
-_PROTOCOL_FILES = [
-    {
-        "key": "dft_results",
-        "title": "DFT 结果提取",
-        "path": "prompts/dft_results.yaml",
-        "scope": "吸附能、Gibbs 自由能、反应能垒、电荷、DOS 等计算结果",
-    },
-    {
-        "key": "dft_ai_protocol",
-        "title": "DFT/材料候选提取与权威验收协议",
-        "path": "prompts/dft_ai_protocol.yaml",
-        "scope": "全文证据阅读、候选抽取、去重、完整性审计、专用 ai_verify_content 验收与异常处理",
-    },
-    {
-        "key": "gemini_audit_protocol",
-        "title": "DFT/图像候选证据审核协议（兼容文件名）",
-        "path": "prompts/gemini_audit_protocol.yaml",
-        "scope": "检查候选 DFT 数据与图像声明是否被 PDF 证据支持；普通审核结果仍是候选意见",
-    },
-    {
-        "key": "dft_settings",
-        "title": "DFT 设置与结构参数",
-        "path": "prompts/dft_settings.yaml",
-        "scope": "软件、泛函、赝势/基组、截断能、k 点、收敛、真空层等",
-    },
-    {
-        "key": "paper_writer",
-        "title": "论文写作协议",
-        "path": "prompts/paper_writer.yaml",
-        "scope": "写作引用、证据约束、段落生成和不可引用/未核验内容的阻断规则",
-    },
-]
-
-
-def _extract_protocol_meta(raw_text: str) -> dict[str, str | None]:
-    def grab(key: str) -> str | None:
-        match = re.search(rf"(?m)^{re.escape(key)}:\s*(.+)$", raw_text)
-        return match.group(1).strip() if match else None
-
-    return {
-        "name": grab("name"),
-        "version": grab("version"),
-        "stage": grab("stage"),
-    }
-
 
 # ---------------------------------------------------------------------------
 # Sensitive key detection (for masking in GET responses)
@@ -230,7 +185,7 @@ def _writer_status_from_values(
         "has_api_base": bool(api_base),
         "has_api_key": bool(api_key),
         "missing": [],
-        "message": "网页端写作/解析模型已停用；解析、核对和审阅请通过 IDE / MCP AI 执行。",
+        "message": "旧网页模型配置已退役；请从文献库或论文详情页发起 AI 提取。",
     }
 
 
@@ -242,7 +197,7 @@ def _internal_parser_status_from_writer(writer_status: dict[str, Any]) -> dict[s
         "model": "IDE/MCP AI",
         "uses": "ide_mcp_ai",
         "missing": [],
-        "message": "网页端解析已停用；请使用 prepare-ai-context / codex-item 读取证据，以 import_analysis 导入候选/意见，并用受控修改或验收工具处理后续状态。",
+        "message": "上传只保存文献；当前 AI 提取由文献库或论文详情入口发起，结果写回图表资料和来源化数据表。",
     }
 
 
@@ -608,24 +563,17 @@ async def get_extraction_protocols() -> dict[str, Any]:
     """Return the current extraction protocols shown in the settings UI."""
     from app.config import PROJECT_ROOT
 
-    items = []
-    for item in _PROTOCOL_FILES:
-        path = Path(PROJECT_ROOT) / item["path"]
-        try:
-            raw_text = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raw_text = f"# 协议文件读取失败: {exc}"
-        items.append(
-            {
-                **item,
-                **_extract_protocol_meta(raw_text),
-                "raw_text": raw_text,
-            }
-        )
-    return {
-        "schema_version": "extraction_protocols_v1",
-        "items": items,
-    }
+    path = Path(PROJECT_ROOT) / "prompts/current_workflow.json"
+    try:
+        raw = path.read_bytes()
+        payload = json.loads(raw)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="当前流程规范暂时无法读取") from exc
+    revision = hashlib.sha256(raw).hexdigest()[:12]
+    for item in payload["items"]:
+        item["version"] = payload["version"]
+    return {**payload, "revision": revision}
+
 
 
 @router.get("/ide-prompts")
