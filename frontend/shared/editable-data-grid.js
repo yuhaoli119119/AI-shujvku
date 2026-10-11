@@ -26,7 +26,7 @@
     text=tokens.join(' · ');
     return /[\u3400-\u9fff]/.test(text)?text:`其他指标 · ${name}`;
   }
-  const labels = {software:'计算软件',basis_set:'基组',pseudopotential:'赝势',bsse_correction:'BSSE 校正',charge_analysis:'电荷分析',force_convergence_ev_per_A:'力收敛阈值（eV/Å）',adsorbate:'吸附物',configuration:'构型',reaction_step:'反应步骤',rate:'倍率',c_rate:'倍率（C）',cycles:'循环次数',cycle_number:'循环次数',temperature:'温度',potential:'电位',pH:'pH',method:'计算方法',functional:'泛函',solvent:'溶剂',support:'载体',site:'位点',code:'计算软件',dft_code:'DFT 计算软件',kpoints:'k 点网格',k_points:'k 点网格',vacuum_A:'真空层厚度（Å）',vacuum_angstrom:'真空层厚度（Å）',cutoff_eV:'截断能（eV）',energy_cutoff_ev:'截断能（eV）',force_conv_eV_per_A:'力收敛阈值（eV/Å）',energy_conv_eV:'能量收敛阈值（eV）',spin_polarized:'自旋极化',dispersion_correction:'色散校正',U_eV:'Hubbard U（eV）',hubbard_u_ev:'Hubbard U（eV）',current_rate:'测试倍率',scan_rate_mV_s:'扫描速率（mV/s）',sulfur_loading_mg_cm2:'硫负载量（mg/cm²）',electrolyte:'电解液',voltage_range:'电压范围',step:'步骤',figure:'图号',table:'表号'};
+  const labels = {software:'计算软件',basis_set:'基组',pseudopotential:'赝势',bsse_correction:'BSSE 校正',charge_analysis:'电荷分析',force_convergence_ev_per_A:'力收敛阈值（eV/Å）',adsorbate:'吸附物',configuration:'构型',reaction_step:'反应步骤',rate:'倍率',c_rate:'倍率（C）',cycles:'循环次数',cycle_number:'循环次数',temperature:'温度',potential:'电位',pH:'pH',method:'计算方法',functional:'泛函',solvent:'溶剂',support:'载体',site:'位点',code:'计算软件',dft_code:'DFT 计算软件',kpoints:'k 点网格',k_points:'k 点网格',vacuum_A:'真空层厚度（Å）',vacuum_angstrom:'真空层厚度（Å）',cutoff_eV:'截断能（eV）',energy_cutoff_ev:'截断能（eV）',force_conv_eV_per_A:'力收敛阈值（eV/Å）',energy_conv_eV:'能量收敛阈值（eV）',spin_polarized:'自旋极化',dispersion_correction:'色散校正',dispersion:'色散校正',reaction_cycle:'记录用途',U_eV:'Hubbard U（eV）',hubbard_u_ev:'Hubbard U（eV）',current_rate:'测试倍率',scan_rate_mV_s:'扫描速率（mV/s）',sulfur_loading_mg_cm2:'硫负载量（mg/cm²）',electrolyte:'电解液',voltage_range:'电压范围',step:'步骤',figure:'图号',table:'表号'};
   function readable(value) {
     if (value == null || value === '') return '未记录';
     if (Array.isArray(value)) return value.map(readable).join('、');
@@ -60,10 +60,33 @@
   }
   function mount(container, options) {
     const rows=options.rows || [], columns=fields(rows,options.templates), grouped=groups(rows,options.familyId);
-    const hidden=new Set(), expanded=new Set(); let selectedGroup='全部', query='', chooserOpen=false;
+    const hidden=new Set(), expanded=new Set(), metricFocus=new Map(), fileCache=new Map(); let selectedGroup='全部', query='', chooserOpen=false;
     const categories=[...new Set(columns.map(f=>f.group))];
     // Wide papers open with a readable metric group; all saved fields remain selectable.
     if(columns.length>8)selectedGroup=categories[0];
+    function metricDetails(group,index,name) {
+      const field=columns.find(f=>f.name===name), pairs=group.flatMap(r=>(r.values || []).filter(v=>v.field_name===name).map(v=>[r,v]));
+      const item=(label,value)=>`<div class="edg-condition-item"><span>${esc(label)}：</span><b>${esc(value == null || value === '' ? '未记录' : readable(value))}</b></div>`;
+      return `<div class="edg-detail-heading">${esc(group[0].material)} · ${esc(field?.label || metricLabel(name))}明细 <span>${pairs.length} 条记录，点击数值查看完整来源或编辑</span></div><p class="edg-hint">每条数值对应各自的对象与条件；同一对象的不同来源／条件分别保留，缺失信息显示“未记录”。</p>${pairs.map(([r,v],i)=>{
+        const c=r.condition || {}, files=options.files || fileCache.get(r.paper_id) || [];
+        const sources=(v.sources || []).map(source=>{
+          const file=files.find(f=>f.id===source.file_id), role=displayRole(file,r.paper_id,options.familyId);
+          const roleText=role==='si'?'SI':role==='main'?'正文':'来源文件';
+          const page=Number(source.page_number), locator=[roleText,file?.original_filename,Number.isInteger(page)&&page>0?`PDF 第 ${page} 页`:'页码未记录',source.label].filter(Boolean).join(' · ');
+          const href=source.file_id?`/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview${Number.isInteger(page)&&page>0?'#page='+page:''}`:'';
+          return `<div>${href?`<a href="${esc(href)}" target="_blank" rel="noopener">${esc(locator)}</a>`:esc(locator)}</div>`;
+        }).join('') || '<span class="edg-muted">未保存来源</span>';
+        return `<section class="edg-condition edg-metric-record" data-current-row="${esc(r.id)}"><header><strong>记录 ${i+1} · ${esc(field?.label || metricLabel(name))}</strong>${valueButton(r,v)}</header><div class="edg-condition-meta">${item('吸附物／研究对象',c.adsorbate)}${item('位点',c.site ?? r.active_site)}${item('构型',({edge:'边缘（edge）',basal:'基面（basal）'})[r.configuration ?? c.configuration] || r.configuration || c.configuration)}${c.reaction_cycle?item('记录用途',({adsorption:'吸附能计算',adsorption_geometry:'吸附构型分析'})[c.reaction_cycle] || c.reaction_cycle):''}${c.reaction_step || c.step?item('反应步骤',c.reaction_step ?? c.step):''}${c.solvent?item('溶剂',c.solvent):''}</div><div class="edg-metric-sources"><span>来源：</span>${sources}</div>${v.notes?`<p class="edg-hint">备注：${esc(v.notes)}</p>`:''}<details class="edg-more"><summary>计算／测试条件与材料详情</summary>${conditionContent(r)}${Object.keys(r.properties || {}).some(k=>!k.startsWith('_'))?`<p>${esc(readable(r.properties))}</p>`:''}<button class="edg-identity-button" data-edg-identity="${esc(r.id)}">编辑材料与条件</button></details></section>`;
+      }).join('')}<button class="edg-expand" data-edg-show-all="${index}">查看该材料全部 ${group.length} 条条件记录</button>`;
+    }
+    function loadMetricFiles(group) {
+      if(options.files)return;
+      [...new Set(group.map(r=>r.paper_id))].forEach(owner=>{
+        if(fileCache.has(owner))return;
+        fileCache.set(owner,[]);
+        api(`/api/rebuild/papers/${encodeURIComponent(owner)}/files`).then(data=>{fileCache.set(owner,data.items || []);render();}).catch(()=>{});
+      });
+    }
     function render() {
       const visible=columns.filter(f=>!hidden.has(f.name) && (selectedGroup==='全部' || f.group===selectedGroup));
       const shown=grouped.map((group,index)=>({group,index})).filter(({group})=>(!query || [group[0].material,group[0].support,group[0].active_site].join(' ').toLowerCase().includes(query.toLowerCase())) && (selectedGroup==='全部' || group.some(row=>(row.values || []).some(value=>visible.some(field=>field.name===value.field_name)))));
@@ -73,10 +96,16 @@
       <div class="edg-hint">当前显示 ${shown.length}/${grouped.length} 个材料／位点组合；无此组指标的材料暂不显示。${selectedGroup!=='全部'?'当前按指标分组比较，可切换“全部”查看所有字段。':'点击具体值查看来源与编辑。'}</div>
       <div class="edg-scroll"><table class="edg-table"><thead><tr><th>催化剂</th><th>载体／位点</th>${visible.map(f=>`<th title="${esc(f.name)}">${esc(f.label)}${f.unit?`<small>${esc(f.unit)}</small>`:''}</th>`).join('')}</tr></thead><tbody>${shown.map(({group,index})=>{
         const row=group[0];
-        return `<tr data-edg-group="${index}"><th><span class="edg-material">${esc(row.material || '身份待定')}</span>${row.identity_status==='pending'?'<small>身份待定，独立保留</small>':''}<button class="edg-expand" data-edg-expand="${index}" aria-expanded="${expanded.has(index)}">${expanded.has(index)?'收起':'展开'}条件（${group.length}）</button></th><td><div class="edg-site">${esc(row.support || '载体未记录')}</div><div class="edg-site-detail">${esc(row.active_site || '位点未记录')}</div><small>${esc(({single_atom:'单原子',dual_atom:'双原子',support:'载体',bulk:'体相'})[row.active_site_type] || row.active_site_type || '')}</small></td>${visible.map(f=>{const values=group.flatMap(r=>(r.values || []).filter(v=>v.field_name===f.name).map(v=>[r,v]));return `<td>${values.length===1?valueButton(...values[0]):values.length?`<button class="edg-value edg-multiple" data-edg-expand="${index}">多组（${values.length}）</button>`:'<span class="edg-muted">—</span>'}</td>`;}).join('')}</tr>
-        <tr class="edg-conditions" data-edg-conditions="${index}" ${expanded.has(index)?'':'hidden'}><td colspan="${visible.length+2}"><div class="edg-condition-wrap"><div class="edg-detail-heading">${esc(row.material)} · 条件与证据数据 <span>${group.length} 条记录，各条件单独保存</span></div>${group.map((r,i)=>`<section class="edg-condition" data-current-row="${esc(r.id)}"><header><strong>条件 ${i+1}${r.configuration?` · ${esc(r.configuration)}`:''}</strong><button class="edg-identity-button" data-edg-identity="${esc(r.id)}">编辑材料与条件</button></header>${conditionContent(r)}${Object.keys(r.properties || {}).some(k=>!k.startsWith('_'))?`<details class="edg-more"><summary>附加信息</summary><p>${esc(readable(r.properties))}</p></details>`:''}<div class="edg-condition-values">${(r.values || []).map(v=>`<div><span title="${esc(v.field_name)}">${esc(columns.find(f=>f.name===v.field_name)?.label || metricLabel(v.field_name))}</span>${valueButton(r,v)}</div>`).join('')}</div></section>`).join('')}</div></td></tr>`;
+        return `<tr data-edg-group="${index}"><th><span class="edg-material">${esc(row.material || '身份待定')}</span>${row.identity_status==='pending'?'<small>身份待定，独立保留</small>':''}<button class="edg-expand" data-edg-expand="${index}" aria-expanded="${expanded.has(index)}">${expanded.has(index)?'收起':'展开'}条件（${group.length}）</button></th><td><div class="edg-site">${esc(row.support || '载体未记录')}</div><div class="edg-site-detail">${esc(row.active_site || '位点未记录')}</div><small>${esc(({single_atom:'单原子',dual_atom:'双原子',support:'载体',bulk:'体相'})[row.active_site_type] || row.active_site_type || '')}</small></td>${visible.map(f=>{const values=group.flatMap(r=>(r.values || []).filter(v=>v.field_name===f.name).map(v=>[r,v]));return `<td>${values.length===1?valueButton(...values[0]):values.length?`<button class="edg-value edg-multiple" data-edg-metric="${esc(f.name)}" data-edg-metric-group="${index}" aria-expanded="${expanded.has(index) && metricFocus.get(index)===f.name}">多组（${values.length}）</button>`:'<span class="edg-muted">—</span>'}</td>`;}).join('')}</tr>
+        <tr class="edg-conditions" data-edg-conditions="${index}" ${expanded.has(index)?'':'hidden'}><td colspan="${visible.length+2}"><div class="edg-condition-wrap">${metricFocus.has(index)?metricDetails(group,index,metricFocus.get(index)):`<div class="edg-detail-heading">${esc(row.material)} · 条件与证据数据 <span>${group.length} 条记录，各条件单独保存</span></div>${group.map((r,i)=>`<section class="edg-condition" data-current-row="${esc(r.id)}"><header><strong>条件 ${i+1}${r.configuration?` · ${esc(r.configuration)}`:''}</strong><button class="edg-identity-button" data-edg-identity="${esc(r.id)}">编辑材料与条件</button></header>${conditionContent(r)}${Object.keys(r.properties || {}).some(k=>!k.startsWith('_'))?`<details class="edg-more"><summary>附加信息</summary><p>${esc(readable(r.properties))}</p></details>`:''}<div class="edg-condition-values">${(r.values || []).map(v=>`<div><span title="${esc(v.field_name)}">${esc(columns.find(f=>f.name===v.field_name)?.label || metricLabel(v.field_name))}</span>${valueButton(r,v)}</div>`).join('')}</div></section>`).join('')}`}</div></td></tr>`;
       }).join('') || `<tr><td colspan="${visible.length+2}">${query?'没有匹配的催化剂。':'此分组没有选中的数据列，请选择指标或切换全部。'}</td></tr>`}</tbody></table></div>`;
-      container.querySelectorAll('[data-edg-expand]').forEach(button=>button.onclick=()=>{const id=Number(button.dataset.edgExpand);expanded.has(id)?expanded.delete(id):expanded.add(id);render();});
+      container.querySelectorAll('[data-edg-expand]').forEach(button=>button.onclick=()=>{const id=Number(button.dataset.edgExpand);metricFocus.delete(id);expanded.has(id)?expanded.delete(id):expanded.add(id);render();});
+      container.querySelectorAll('[data-edg-show-all]').forEach(button=>button.onclick=()=>{const index=Number(button.dataset.edgShowAll);metricFocus.delete(index);expanded.add(index);render();});
+      container.querySelectorAll('[data-edg-metric]').forEach(button=>button.onclick=()=>{
+        const index=Number(button.dataset.edgMetricGroup), name=button.dataset.edgMetric;
+        if(expanded.has(index) && metricFocus.get(index)===name){expanded.delete(index);metricFocus.delete(index);}else{expanded.add(index);metricFocus.set(index,name);loadMetricFiles(grouped[index]);}
+        render();
+      });
       container.querySelector('[data-edg-chooser]').onclick=()=>{chooserOpen=!chooserOpen;render();};
       container.querySelector('[data-edg-close]')?.addEventListener('click',()=>{chooserOpen=false;render();});
       container.querySelector('[data-edg-all]')?.addEventListener('click',()=>{hidden.clear();selectedGroup='全部';render();});

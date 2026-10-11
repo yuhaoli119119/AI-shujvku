@@ -13,8 +13,8 @@
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
-  <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011">
-  <script src="../../shared/editable-data-grid.js?v=20261011"></script>
+  <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
+  <script src="../../shared/editable-data-grid.js?v=20261011-metric-details"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -3083,8 +3083,8 @@
       [['pdCurrentData','dft'],['pdExperimentalData','experimental']].forEach(([id,type]) => {
         const area=document.getElementById(id); if(!area) return;
         if(state.rebuildStatus !== 'ready') {area.innerHTML='<div class="panel-card">'+(state.rebuildStatus==='failed'?'读取失败：'+esc(state.rebuildError):'正在读取全部数据…')+'</div>'; return;}
-        area.innerHTML=`<div class="panel-card"><div class="panel-title">${type==='dft'?'计算数据':'实验数据 · 性能与表征'}</div><p class="muted">正文与 SI 数据共同展示；点击具体值查看来源与编辑，多组数据先展开条件。</p>${state.rebuildAssetFilter?'<button class="btn" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部数据</button>':''}<div data-grid></div></div>`;
-        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,type,familyId:state.paperId,reload:reloadEditableData});
+        area.innerHTML=`<div class="panel-card"><div class="panel-title">${type==='dft'?'计算数据':'实验数据 · 性能与表征'}</div><p class="muted">正文与 SI 数据共同展示；点击“多组”查看对应指标的对象、数值与来源；点击具体值查看完整证据与编辑。</p>${state.rebuildAssetFilter?'<button class="btn" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部数据</button>':''}<div data-grid></div></div>`;
+        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,files:state.rebuildFiles,type,familyId:state.paperId,reload:reloadEditableData});
       });
       if(state.rebuildStatus==='ready' && !state.defaultDataTabApplied && !deepLinkHasContext()) {
         state.defaultDataTabApplied=true;

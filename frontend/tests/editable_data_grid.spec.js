@@ -85,3 +85,17 @@ test('wide metric tables remain compact and column choices preserve expanded con
  await page.locator('[data-edg-close]').click();await page.locator('[data-edg-category="反应自由能"]').click();await expect(page.locator('thead')).toContainText('自由能');
  await page.getByRole('searchbox').fill('no match');await expect(page.locator('tbody')).toContainText('没有匹配');await page.getByRole('searchbox').fill('FeCo');await expect(page.locator('[data-current-row="1"]')).toBeVisible();
 });
+test('metric expansion shows seven adsorption records with sources, switches metrics and retains all 37 conditions',async({page})=>{
+ await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ const rows=Array.from({length:37},(_,i)=>row(String(i),{software:'VASP',adsorbate:i<7?'Li2S'+(i+1):undefined,reaction_cycle:i===0?'adsorption_geometry':'adsorption'},i<7?'adsorption_energy':i<10?'solvation_adsorption_energy_ev':'icohp_fe_s_ev'));
+ rows[0].configuration='edge';rows[0].values[0].sources=[{file_id:'si-file',page_number:9,label:'Fig. S7'}];
+ await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows,files:[{id:'si-file',role:'si',original_filename:'SI.pdf'}],onValue:(r,v)=>window.selected=[r.id,v.id]}),rows);
+ await page.getByRole('button',{name:'多组（7）'}).click();
+ const details=page.locator('.edg-conditions:not([hidden])');
+ await expect(details.locator('.edg-metric-record')).toHaveCount(7);await expect(details).toContainText('吸附能明细');await expect(details).not.toContainText('icohp_fe_s_ev');await expect(details).not.toContainText('溶剂化');
+ await expect(details).toContainText('SI · SI.pdf · PDF 第 9 页 · Fig. S7');await expect(details.locator('a')).toHaveAttribute('href','/api/rebuild/files/si-file/preview#page=9');await expect(details).toContainText('边缘（edge）');await expect(details).toContainText('吸附构型分析');
+ await details.locator('[data-current-row="0"] [data-edg-value]').click();expect(await page.evaluate(()=>window.selected)).toEqual(['0','v0']);
+ await page.getByRole('button',{name:'多组（3）'}).click();await expect(details.locator('.edg-metric-record')).toHaveCount(3);await expect(details).toContainText('溶剂化');await expect(details).toContainText('未保存来源');
+ await page.getByRole('button',{name:'查看该材料全部 37 条条件记录'}).click();await expect(details.locator('.edg-condition')).toHaveCount(37);
+ await page.getByRole('button',{name:'多组（7）'}).click();await expect(details.locator('.edg-metric-record')).toHaveCount(7);await page.getByRole('button',{name:'多组（7）'}).click();await expect(details).toHaveCount(0);
+});
