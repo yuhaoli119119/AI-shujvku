@@ -28,12 +28,12 @@ def library_progress(session, library_name):
             problems.append({'kind':'missing_pdf','label':'缺少正文 PDF','reason':'当前未关联正文 PDF'})
         for file in status['files']:
             if file['status']!='parsed':
-                problems.append({'kind':'unfinished_file','label':'文件未完成','file_id':file['file_id'],'role':file['role'],'reason':file['name']+'：'+file['label']})
+                problems.append({'kind':'unfinished_file','label':'文件未完成','file_id':file['file_id'],'role':file['role'],'reason':('正文' if file['role']=='main' else 'SI')+' '+file['name']+'：'+file['label']})
         if status['status'] in ('failed','needs_check','partial'):
             problems.append({'kind':'processing_issue','label':status['label'],'reason':status['message']})
         items.append({'paper_id':str(paper.id),'paper_code':paper.paper_code,'title':paper.title,
             'processing_status':status,'issues':problems,'issue_count':len(problems),
-            'next_action':'核查问题与来源' if problems else '开始提取' if status['status']=='unparsed' else '等待任务并回查' if status['status'] in ('queued','parsing') else '查看已有结果',
+            'next_action':'开始提取未完成文件' if status['status']=='unparsed' and paper.pdf_path else '等待任务并回查' if status['status'] in ('queued','parsing') else '核查问题与来源' if problems else '查看已有结果',
             'work_package_url':f'/api/rebuild/papers/{paper.id}/ai-work-package'})
     return {'library_name':library_name,'generated_at':datetime.now(timezone.utc).isoformat(),
         'summary':{'total':len(items),'statuses':dict(Counter(x['processing_status']['status'] for x in items)),
