@@ -521,3 +521,11 @@
 
   .topnav-more-btn > span { display: none; }
 }
+
+/* Plain-language workflow menu; specialist tools stay collapsed. */
+.topnav-more-panel { min-width:250px; max-height:calc(100vh - 90px); overflow-y:auto; }
+.topnav-more-item small { display:block; font-size:11px; font-weight:400; line-height:1.5; color:var(--color-text-secondary,#667085); margin-top:3px; }
+.topnav-advanced { border-top:1px solid var(--color-border,#e5e7eb); margin-top:6px; padding-top:6px; }
+.topnav-advanced summary { cursor:pointer; padding:10px 14px; font-size:13px; color:var(--color-text-secondary,#667085); border-radius:6px; }
+.topnav-advanced summary:hover { background:var(--color-surface-alt,#f4f5f8); }
+.topnav-advanced .topnav-more-item { padding-left:26px; font-size:13px; }

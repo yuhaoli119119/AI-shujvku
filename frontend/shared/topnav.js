@@ -222,11 +222,13 @@ class TopNav {
   // dft_audit_center / content_knowledge / external_analysis_workbench 只是历史 URL，
   // 打开后会跳回各自的现行页面（直接改地址栏仍可用）。
   static MORE_ITEMS = [
-    { label: "AI 提取", href: "../literature_library/rebuild.html" },
-    { label: "AI 图表整理", href: "../figure_assets/index.html" },
-    { label: "AI 数据表", href: "../data_table/index.html" },
-    { label: "AI 汇总分析", href: "../summary_analysis/index.html" },
-    { label: "本地 AI 写作", href: "../ai_writer/index.html" },
+    { label: "提取论文数据", description: "从正文和 SI 提取图表与数据", href: "../literature_library/rebuild.html" },
+    { label: "图表资料", description: "查看图表、裁图与解释", href: "../figure_assets/index.html" },
+    { label: "跨论文数据表", description: "筛选、查看和编辑已提取数据", href: "../data_table/index.html" },
+    { label: "数据对比分析", description: "比较多篇论文的数据与导出结果", href: "../summary_analysis/index.html" },
+  ];
+
+  static ADVANCED_ITEMS = [
     { label: "论文入库", href: "../ingestion/index.html" },
     { label: "文献筛选", href: "../literature_screening/index.html" },
     { label: "机理知识聚合", href: "../mechanism_knowledge/index.html" },
@@ -302,13 +304,15 @@ class TopNav {
     }).join("");
 
     const moreItems = TopNav.MORE_ITEMS.map(function(item) {
-      return `<a class="topnav-more-item" role="menuitem" href="${item.href}">${item.label}</a>`;
+      return `<a class="topnav-more-item" role="menuitem" href="${item.href}"><span>${item.label}</span><small>${item.description}</small></a>`;
     }).join("");
+
+    const advancedItems = `<details class="topnav-advanced"><summary>高级工具</summary>${TopNav.ADVANCED_ITEMS.map(item => `<a class="topnav-more-item" role="menuitem" href="${item.href}">${item.label}</a>`).join("")}</details>`;
 
     const moreBlock = TopNav.MORE_ITEMS.length
       ? '<div class="topnav-more" id="topnav-more">' +
           '<button class="topnav-more-btn" id="topnav-more-btn" type="button" aria-haspopup="true" aria-expanded="false">更多 <span aria-hidden="true">▾</span></button>' +
-          '<div class="topnav-more-panel" id="topnav-more-panel" role="menu">' + moreItems + "</div>" +
+          '<div class="topnav-more-panel" id="topnav-more-panel" role="menu">' + moreItems + advancedItems + "</div>" +
         "</div>"
       : "";
 
