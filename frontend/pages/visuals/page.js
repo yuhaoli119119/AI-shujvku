@@ -1229,7 +1229,7 @@
         const hint = `${getFieldMeta(vx).labelZh} × ${yMeta.labelZh}\n皮尔逊 r：${rText} · 催化剂样本 n=${nVal}\n${isSufficient ? (selectedGroup ? "最大可比组；其他计算条件分别统计。" : "可比样本的探索性统计。") : "未满足统计条件，请点击查看配对与排除原因。"}\n点击查看来源和散点图。`;
 
         rowHtml += `
-          <td class="${cellClass}" style="${cellStyle}" data-x="${vx}" data-y="${vy}" tabindex="0" role="button" aria-label="${esc(hint)}" data-matrix-hint="${esc(hint)}">
+          <td class="${cellClass}" style="${cellStyle}" data-x="${cell?.x_property || vx}" data-y="${cell?.y_property || vy}" tabindex="0" role="button" aria-label="${esc(hint)}" data-matrix-hint="${esc(hint)}">
             <span class="cell-r-val">${rText}</span>
             ${nText ? `<span class="cell-n-sub">${nText}</span>` : ""}
           </td>
