@@ -99,3 +99,10 @@ test('metric expansion shows seven adsorption records with sources, switches met
  await page.getByRole('button',{name:'查看该材料全部 37 条条件记录'}).click();await expect(details.locator('.edg-condition')).toHaveCount(37);
  await page.getByRole('button',{name:'多组（7）'}).click();await expect(details.locator('.edg-metric-record')).toHaveCount(7);await page.getByRole('button',{name:'多组（7）'}).click();await expect(details).toHaveCount(0);
 });
+test('late detail remount keeps metric expansion and filters visible',async({page})=>{
+ await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ await page.evaluate(rows=>{window.gridOptions={rows,files:[],viewState:{}};EditableDataGrid.mount(document.getElementById('grid'),window.gridOptions);},[row('1',{adsorbate:'Li2S'}),row('2',{adsorbate:'Li2S6'}),row('3',{},'icohp_fe_s_ev')]);
+ await page.getByRole('button',{name:'多组（2）'}).click();await page.getByRole('searchbox').fill('FeCo');
+ await page.evaluate(()=>{document.getElementById('grid').replaceChildren();EditableDataGrid.mount(document.getElementById('grid'),window.gridOptions);});
+ await expect(page.getByRole('searchbox')).toHaveValue('FeCo');await expect(page.locator('.edg-conditions:not([hidden]) .edg-metric-record')).toHaveCount(2);await expect(page.locator('.edg-conditions:not([hidden])')).not.toContainText('icohp');
+});

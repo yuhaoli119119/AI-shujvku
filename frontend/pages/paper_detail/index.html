@@ -2822,7 +2822,7 @@
     async function loadPaperData() {
       const paperId = state.paperId, generation = ++state.detailGeneration;
       closeFigureLightbox(); closeDftEditDialog();
-      state.paper = null; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
+      state.paper = null; state.rebuildGridViews={}; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
       state.fullDetailLoaded = false; state.fullDetailPromise = null;
       state.dftResultsPromise = null; state.dftResultsError = null;
       state.rebuildAssets = []; state.rebuildFiles = []; state.rebuildRows = [];
@@ -3084,7 +3084,7 @@
         const area=document.getElementById(id); if(!area) return;
         if(state.rebuildStatus !== 'ready') {area.innerHTML='<div class="panel-card">'+(state.rebuildStatus==='failed'?'读取失败：'+esc(state.rebuildError):'正在读取全部数据…')+'</div>'; return;}
         area.innerHTML=`<div class="panel-card"><div class="panel-title">${type==='dft'?'计算数据':'实验数据 · 性能与表征'}</div><p class="muted">正文与 SI 数据共同展示；点击“多组”查看对应指标的对象、数值与来源；点击具体值查看完整证据与编辑。</p>${state.rebuildAssetFilter?'<button class="btn" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部数据</button>':''}<div data-grid></div></div>`;
-        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,files:state.rebuildFiles,type,familyId:state.paperId,reload:reloadEditableData});
+        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,files:state.rebuildFiles,viewState:(state.rebuildGridViews ||= {})[type] ||= {},type,familyId:state.paperId,reload:reloadEditableData});
       });
       if(state.rebuildStatus==='ready' && !state.defaultDataTabApplied && !deepLinkHasContext()) {
         state.defaultDataTabApplied=true;

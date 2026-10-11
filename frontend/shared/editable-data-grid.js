@@ -60,10 +60,11 @@
   }
   function mount(container, options) {
     const rows=options.rows || [], columns=fields(rows,options.templates), grouped=groups(rows,options.familyId);
-    const hidden=new Set(), expanded=new Set(), metricFocus=new Map(), fileCache=new Map(); let selectedGroup='全部', query='', chooserOpen=false;
+    const view=options.viewState || {}, hidden=view.hidden || new Set(), expanded=view.expanded || new Set(), metricFocus=view.metricFocus || new Map(), fileCache=new Map(); let selectedGroup=view.selectedGroup || '全部', query=view.query || '', chooserOpen=view.chooserOpen || false;
+    Object.assign(view,{hidden,expanded,metricFocus});
     const categories=[...new Set(columns.map(f=>f.group))];
     // Wide papers open with a readable metric group; all saved fields remain selectable.
-    if(columns.length>8)selectedGroup=categories[0];
+    if(!view.selectedGroup && columns.length>8)selectedGroup=categories[0];
     function metricDetails(group,index,name) {
       const field=columns.find(f=>f.name===name), pairs=group.flatMap(r=>(r.values || []).filter(v=>v.field_name===name).map(v=>[r,v]));
       const item=(label,value)=>`<div class="edg-condition-item"><span>${esc(label)}：</span><b>${esc(value == null || value === '' ? '未记录' : readable(value))}</b></div>`;
@@ -88,6 +89,7 @@
       });
     }
     function render() {
+      Object.assign(view,{selectedGroup,query,chooserOpen});
       const visible=columns.filter(f=>!hidden.has(f.name) && (selectedGroup==='全部' || f.group===selectedGroup));
       const shown=grouped.map((group,index)=>({group,index})).filter(({group})=>(!query || [group[0].material,group[0].support,group[0].active_site].join(' ').toLowerCase().includes(query.toLowerCase())) && (selectedGroup==='全部' || group.some(row=>(row.values || []).some(value=>visible.some(field=>field.name===value.field_name)))));
       container.innerHTML=`<div class="edg-tools"><span>${grouped.length} 个催化剂 · ${rows.length} 条独立条件</span><div class="edg-actions"><input data-edg-search type="search" placeholder="搜索材料、载体或位点" aria-label="搜索催化剂" value="${esc(query)}"><button class="edg-select-button" data-edg-chooser aria-expanded="${chooserOpen}">指标列选择 · ${visible.length}/${columns.length}</button></div></div>
