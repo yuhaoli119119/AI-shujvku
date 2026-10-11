@@ -43,3 +43,10 @@ test('stale revision displays conflict and keeps concurrent value intact',async(
  await expect(page.locator('[data-status]')).toContainText('数据已被其他操作修改');expect(writes).toBe(1);
  expect(await page.evaluate(()=>sessionStorage.getItem('litai.value-correction.v1'))).toBeNull();
 });
+test('stored scientific metric and condition keys use readable Chinese with internal-key tooltips',async({page})=>{
+ await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ const result=await page.evaluate(()=>({barrier:EditableDataGrid.metricLabel('decomposition_barrier_ev'),energy:EditableDataGrid.metricLabel('reaction_free_energy_ev'),xps:EditableDataGrid.metricLabel('xps_fe2p3_2_binding_energy_ev'),capacity:EditableDataGrid.metricLabel('capacity_decay_percent_per_cycle'),unknown:EditableDataGrid.metricLabel('unmapped_measurement_foo'),conditions:EditableDataGrid.readable({code:'VASP',kpoints:[3,3,1],vacuum_A:20,cutoff_eV:500,force_conv_eV_per_A:0.02})}));
+ expect(result.barrier).toBe('分解能垒');expect(result.energy).toBe('反应自由能');expect(result.xps).toContain('结合能');expect(result.xps).toContain('fe2p3');expect(result.capacity).toContain('容量衰减');expect(result.capacity).toContain('每循环');expect(result.unknown).toBe('其他指标 · unmapped_measurement_foo');
+ expect(result.conditions).toContain('计算软件：VASP');expect(result.conditions).toContain('k 点网格：3、3、1');expect(result.conditions).toContain('真空层厚度（Å）：20');expect(result.conditions).toContain('截断能（eV）：500');expect(result.conditions).toContain('力收敛阈值（eV/Å）：0.02');
+ await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows}),[row('1',{},'decomposition_barrier_ev')]);await expect(page.locator('th[title="decomposition_barrier_ev"]')).toContainText('分解能垒');
+});

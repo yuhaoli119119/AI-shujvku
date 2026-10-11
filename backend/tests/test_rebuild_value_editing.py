@@ -44,3 +44,38 @@ def test_value_cas_replay_and_precision(setup_test_db):
         assert corrected.numeric_value is None and corrected.raw_value is None
         assert corrected.missing_reason=='not reported'
         assert session.scalar(select(func.count()).select_from(RebuildValueSource))==1
+
+
+def test_value_readback_and_edit_http_contract(setup_test_db):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.rebuild import router, _require_identity_correction_session
+    from app.db.session import get_db_session
+    from types import SimpleNamespace
+    factory=sessionmaker(bind=setup_test_db,expire_on_commit=False)
+    with factory() as session:
+        paper=Paper(title='API editing fixture',pdf_path='',library_name='API Editing')
+        session.add(paper);session.flush()
+        import_data_row(session,paper.id,RebuildDataRowInput(material='Fe-N4',reaction='HER',
+            data_type='dft',active_site_type='single_atom',values=[dict(field_name='adsorption_energy_ev',
+            raw_value='-1.230',numeric_value=-1.23,unit='eV',precision_digits=3,
+            sources=[dict(source_kind='table',page_number=2,label='Table 1',quote='-1.230 eV')])]))
+        session.commit();cell=list_rows(session,paper_id=paper.id)['items'][0]['values'][0]
+    app=FastAPI();app.include_router(router,prefix='/api/rebuild')
+    def db():
+        with factory() as session:yield session
+    app.dependency_overrides[get_db_session]=db
+    app.dependency_overrides[_require_identity_correction_session]=lambda:SimpleNamespace(username='tester')
+    with TestClient(app) as client:
+        path='/api/rebuild/values/'+cell['id']
+        read=client.get(path);assert read.status_code==200
+        assert read.json()['value_revision']==cell['value_revision']
+        source={k:v for k,v in cell['sources'][0].items() if k!='id'}
+        body=dict(expected_revision=cell['value_revision'],request_id=str(uuid4()),correction_reason='API acceptance',
+            raw_value='-1.230',numeric_value=-1.23,unit='eV',precision_digits=3,source=source)
+        response=client.put(path,json=body);assert response.status_code==200,response.text
+        current=client.get(path).json();assert current['raw_value']=='-1.230'
+        assert len(current['conflict']['correction_requests'])==1
+        assert client.put(path,json=body).status_code==200
+        stale={**body,'request_id':str(uuid4())}
+        assert client.put(path,json=stale).status_code==409

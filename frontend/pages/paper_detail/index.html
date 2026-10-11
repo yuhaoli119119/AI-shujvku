@@ -3403,6 +3403,7 @@
       else { doiWrap.style.display = "none"; }
 
       document.getElementById("paperBadges").innerHTML = `
+        ${paper.paper_code ? `<span class="pd-badge" data-paper-code="${esc(paper.paper_code)}">${esc(paper.paper_code)}</span>` : ""}
         <span class="pd-badge">${esc(paperTypeLabel(paper.paper_type))}</span>
         <span class="pd-badge ${paper.pdf_path ? "success" : "neutral"}">${paper.pdf_path ? "已关联 PDF" : "仅元数据"}</span>
       `;

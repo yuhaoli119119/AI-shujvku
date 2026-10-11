@@ -20,7 +20,7 @@ from pydantic import ValidationError
 
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
-from app.db.models import RebuildValueSource
+from app.db.models import RebuildValueSource, RebuildDataValue
 from app.schemas.rebuild import (
     RebuildAssetsImportRequest,
     RebuildAnalysisRequest,
