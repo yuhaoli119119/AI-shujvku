@@ -33,7 +33,7 @@ from app.schemas.rebuild import (
 )
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
-from app.services.legacy_data_transfer import LegacyTransferRequest, transfer_legacy_value
+from app.services.legacy_data_transfer import LegacyTransferRequest
 from app.services.rebuild_file_preview import resolve_original_download, resolve_reading_pdf
 from app.services.rebuild_workflow_service import (
     RebuildWorkflowError,
@@ -626,14 +626,7 @@ async def rebuild_analysis(
 async def transfer_history(paper_id: UUID, payload: LegacyTransferRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_identity_correction_session)) -> dict[str, Any]:
-    try:
-        result = transfer_legacy_value(session, paper_id, payload, auth.username)
-        session.commit()
-        return result
-    except RebuildWorkflowError as exc:
-        session.rollback()
-        status = 409 if str(exc) == "legacy_transfer_already_exists" else 400
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    raise HTTPException(status_code=410, detail="旧提取数据已停用，请从原 PDF 通过新 AI 提取流程重新取数。")
 
 
 @router.get("/values/{value_id}")

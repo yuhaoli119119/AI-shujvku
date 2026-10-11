@@ -60,7 +60,7 @@ def normalize_numeric(prop, value, unit):
 
 
 class AnalysisReadonlyService(CatalystAnalysisService):
-    def __init__(self, session: Session, *, source='legacy', library_name=None, filters=None, include_estimated=False):
+    def __init__(self, session: Session, *, source='rebuild', library_name=None, filters=None, include_estimated=False):
         super().__init__(session)
         if source not in {'legacy', 'rebuild'}:
             raise ValueError('source must be legacy or rebuild; sources cannot be merged')
@@ -83,7 +83,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
 
     def _matches(self, record):
         f = self.filters
-        for key in ('property_type', 'adsorbate', 'catalyst_name', 'catalyst_type', 'reaction', 'material_family'):
+        for key in ('property_type', 'adsorbate', 'catalyst_name', 'catalyst_type', 'reaction', 'material_family', 'data_type'):
             needle = f.get(key)
             if not needle:
                 continue
@@ -91,6 +91,8 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 wanted = get_property_taxonomy(needle).get('canonical_property_type') or needle
                 if str(record['canonical_property_type']).casefold() != str(wanted).casefold() and str(record['property_type']).casefold() != str(needle).casefold():
                     return False
+            elif key == 'data_type' and needle != record.get('data_type'):
+                return False
             elif str(needle).casefold() not in str(record.get(key) or '').casefold():
                 return False
         minimum = f.get('min_confidence')
@@ -106,9 +108,9 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         with self.session.no_autoflush:
             papers = self._papers()
             ids = list(papers)
-            catalysts = list(self.session.scalars(select(m.CatalystSample).where(m.CatalystSample.paper_id.in_(ids)))) if ids else []
+            catalysts = list(self.session.scalars(select(m.CatalystSample).where(m.CatalystSample.paper_id.in_(ids)))) if ids and self.source == 'legacy' else []
             cat_by_id = {c.id: c for c in catalysts}
-            settings = list(self.session.scalars(select(m.DFTSetting).where(m.DFTSetting.paper_id.in_(ids)))) if ids else []
+            settings = list(self.session.scalars(select(m.DFTSetting).where(m.DFTSetting.paper_id.in_(ids)))) if ids and self.source == 'legacy' else []
             settings_by_paper = defaultdict(list)
             for item in settings:
                 settings_by_paper[item.paper_id].append(item)
@@ -149,7 +151,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                     identity = {'subject': {'property_context': {'configuration':r.configuration}, 'canonical_atom_pair': 'Li1-S' if value.field_name == 'li1_s_bond_length' else 'Li2-S' if value.field_name == 'li2_s_bond_length' else None}}
                     row = SimpleNamespace(id=value.id, paper_id=r.paper_id, catalyst_sample_id=None, adsorbate=ads, property_type=prop, value=value.numeric_value, unit=value.unit, reaction_step=(r.properties or {}).get('reaction_step'), reaction_type=r.reaction, source_section=None, source_figure=None, evidence_text='\n'.join(s.get('quote') or '' for s in by_value[value.id]), confidence=None, candidate_status='stored_rebuild', evidence_payload={'analysis_entity_id':str(r.id)}, identity_payload=identity, identity_version=2, value_kind=value.value_type)
                     cat = SimpleNamespace(id='rebuild:' + str(r.id), paper_id=r.paper_id, name=r.material, catalyst_type=r.active_site_type, metal_centers=[], coordination=r.active_site, support=r.support)
-                    raw.append((row,papers[r.paper_id],cat,{'source_family':'rebuild','sources':by_value[value.id], 'catalyst_name':r.material,'material_family':r.material_family,'estimated':value.is_estimated,'conflict':value.conflict,'missing_reason':value.missing_reason,'identity_pending':bool((r.properties or {}).get('_rebuild_import', {}).get('pending_identity_fields')),'raw_value':value.raw_value,'rebuild_row_id':str(r.id),'analysis_context':{'source_family':'rebuild','reaction_type':r.reaction,'data_type':r.data_type,'condition_key':json.dumps(r.condition or {},sort_keys=True,ensure_ascii=False)}, 'field_name':value.field_name}))
+                    raw.append((row,papers[r.paper_id],cat,{'source_family':'rebuild','sources':by_value[value.id], 'catalyst_name':r.material,'material_family':r.material_family,'estimated':value.is_estimated,'conflict':value.conflict,'missing_reason':value.missing_reason,'identity_pending':bool((r.properties or {}).get('_rebuild_import', {}).get('pending_identity_fields')),'raw_value':value.raw_value,'rebuild_row_id':str(r.id),'analysis_context':{'source_family':'rebuild','reaction_type':r.reaction,'data_type':r.data_type,'condition_key':json.dumps(r.condition or {},sort_keys=True,ensure_ascii=False)}, 'field_name':value.field_name,'data_type':r.data_type}))
             ready, exclusions, records = [], Counter(), []
             for row,paper,cat,extra in raw:
                 taxonomy = get_property_taxonomy(row.property_type)
@@ -296,6 +298,10 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 payload[key]=None
                 payload['statistics'][key]=None
             payload['statistics']['ready']=False
+        elif payload.get('slope') is None or payload.get('intercept') is None:
+            payload['ready']=False
+            payload['statistics']['ready']=False
+            payload['insufficient_reason']='有效配对未达到最少样本数。' if len(payload['points']) < min_n else 'X 字段没有有效变化，无法计算线性拟合。'
         if any(not p['semantic_context'].get('functional') for p in payload['points']):
             payload['warnings'].append('calculation_context_unknown_exploratory_only')
         return payload if self._matrix_mode else self.decorate(payload)

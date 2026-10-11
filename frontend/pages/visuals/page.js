@@ -80,6 +80,8 @@
 
   const WARNING_LABELS = {
     approval_not_evaluated: "当前为探索性数据，审核状态未知",
+    global_fit_suppressed_mixed_contexts: "计算或反应条件不同，不能合并拟合",
+    calculation_context_unknown_exploratory_only: "计算方法信息不完整，结果仅供探索",
     min_n_not_reached: "有效配对未达到最少样本数，暂不计算拟合结果",
     fewer_than_two_contributing_papers: "有效数据来自不到 2 篇论文，跨文献可信度不足",
   };
@@ -140,7 +142,7 @@
   /* ---- URL 状态同步（shared/view-state.js）：文献库/字段/阈值/页签/矩阵筛选写进地址栏，
      从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
   const VIEW_PARAMS = {
-    source: { id: "sourceSelect", type: "select", default: "legacy" },
+    source: { id: "sourceSelect", type: "select", default: "rebuild", valid: v => v === "rebuild" },
     library_name: { id: "librarySelect", type: "select", default: "" },
     tab: { type: "state", default: "relations", valid: (v) => ["relations", "matrix", "dataset"].includes(v) },
     x: { id: "xField", type: "select", default: DEFAULTS.x },
@@ -243,7 +245,7 @@
 
   function visualParams(params) {
     if (state.libraryName) params.set("library_name", state.libraryName);
-    params.set("source", $("sourceSelect")?.value || new URLSearchParams(location.search).get("source") || "legacy");
+    params.set("source", "rebuild");
     params.set("export_mode", "exploratory");
     return params;
   }
@@ -512,6 +514,13 @@
     return EXCLUSION_LABELS[reason] || reason;
   }
 
+  function fitBlockedReason(data) {
+    if (String(data.insufficient_reason || "").startsWith("mixed_calculation_or_reaction_contexts")) {
+      return "计算或反应条件不同，分属 " + (data.comparability_groups || []).length + " 组，暂不合并拟合。";
+    }
+    return data.insufficient_reason || data.fit?.reason || data.reason || "有效配对不足或数值无法拟合。";
+  }
+
   function renderDiagnostics(data) {
     const warnings = data.warnings || [];
     const excluded = data.excluded_reasons || data.excluded || {};
@@ -532,10 +541,12 @@
     
     if (diagSection) diagSection.dataset.state = data.ready === true ? "ready" : "blocked";
     $("diagnosticFlag").textContent = data.ready === true ? "数据范围说明" : "需要处理";
-    $("diagnosticTitle").textContent = data.ready === true ? "当前数据可以进行拟合" : "当前数据不足，暂不进行拟合";
+    $("diagnosticTitle").textContent = data.ready === true ? "当前数据可以进行拟合" : fitBlockedReason(data);
     $("diagnosticMessage").textContent = data.ready === true
       ? "已形成 " + catalystCount + " 个同一催化剂有效配对，来自 " + paperCount + " 篇论文。"
-      : "当前只有 " + catalystCount + " 个同一催化剂有效配对，至少需要 " + minN + " 个才能计算拟合结果。";
+      : catalystCount < minN
+        ? "当前只有 " + catalystCount + " 个同一催化剂有效配对，至少需要 " + minN + " 个才能计算拟合结果。"
+        : "已有 " + catalystCount + " 个有效配对。" + fitBlockedReason(data);
     
     const highlights = [];
     const legacyPointCount = Number(data.legacy_identity_point_count) || 0;
@@ -597,7 +608,7 @@
       $("verdictR").textContent = "—";
       $("verdictMeta").textContent = "有效配对 " + catalysts + " 个，未达到拟合条件";
       $("verdictEquation").textContent = "";
-      $("verdictQuality").textContent = "数据量不足";
+      $("verdictQuality").textContent = String(data.insufficient_reason || "").startsWith("mixed_calculation_or_reaction_contexts") ? "条件不可合并" : catalysts < Number(data.min_n || 3) ? "数据量不足" : "无法拟合";
       return;
     }
     const abs = Math.abs(r);
@@ -731,7 +742,7 @@
         legend.innerHTML = "";
         legend.hidden = true;
       }
-      empty.textContent = data.insufficient_reason || data.fit?.reason || "没有可绘制的同一催化剂样本";
+      empty.textContent = fitBlockedReason(data);
       empty.style.display = "none";
       const rows = data.analysis_row_counts || {};
       const excluded = data.excluded_details || [];
@@ -741,7 +752,7 @@
       $("plotEmptySummary").innerHTML = '<h3>' + (isError ? esc(data.insufficient_reason || "等待分析数据") : "当前字段尚未形成有效配对") + '</h3>'
         + (isError ? '' : '<div class="availability-strip"><span>X 有候选值<b>' + nx + '</b></span><span>Y 有候选值<b>' + ny + '</b></span><span>有效配对<b>0</b></span></div><p>库中仍有 ' + esc(rows.total_dft_rows ?? "—") + ' 条 DFT 记录，' + esc(rows.pair_analysis_ready_numeric_rows ?? "—") + ' 条可参与关系分析。<br>所选字段可能缺少合格数值或可比计算条件，展开下方数据说明查看原因。</p>');
       $("plotEmptySummary").hidden = false;
-      $("fitNotice").textContent = data.insufficient_reason || data.reason || "样本量不足或数据不可比，未绘制拟合线。";
+      $("fitNotice").textContent = fitBlockedReason(data);
       return;
     }
     empty.style.display = "none";
@@ -827,7 +838,7 @@
       });
     });
 
-    $("fitNotice").textContent = fitReady ? "线性拟合 · 悬停或点选散点查看催化剂与数值" : (data.insufficient_reason || data.reason || "样本量不足或数据不可比，未绘制拟合线。");
+    $("fitNotice").textContent = fitReady ? "线性拟合 · 悬停或点选散点查看催化剂与数值" : fitBlockedReason(data);
   }
 
   function ids(value) {
@@ -1540,8 +1551,7 @@
      ============================================================ */
   async function init() {
     TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
-    const source = new URLSearchParams(location.search).get("source");
-    if (["legacy", "rebuild"].includes(source)) $("sourceSelect").value = source;
+    $("sourceSelect").value = "rebuild";
     $("sourceSelect").addEventListener("change", () => { const params = new URLSearchParams(location.search); params.set("source", $("sourceSelect").value); location.search = params.toString(); });
     $("refreshAnalysis").addEventListener("click", () => { responseCache.clear(); if (state.currentTab === "matrix") loadMatrix(); else if (state.currentTab === "dataset") loadDatasetTab(); else loadFields().then(loadCorrelation).catch(error => { $("relationStatus").textContent = "字段读取失败：" + error.message; }); });
     updateExportUI();

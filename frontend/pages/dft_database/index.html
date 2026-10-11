@@ -685,7 +685,7 @@
       <div class="dashboard-body" id="dashboardBody">
         <div class="dashboard-toolbar dft-toolbar">
           <div class="filter-grid dft-filter-grid">
-            <div class="filter-field"><label for="sourceSelect">数据来源</label><select id="sourceSelect" onchange="handleLibraryChange()"><option value="legacy">历史 DFT 记录</option><option value="rebuild">AI 整理数据</option></select></div>
+            <div class="filter-field"><label for="sourceSelect">数据来源</label><select id="sourceSelect" onchange="handleLibraryChange()"><option value="rebuild">新 AI 提取数据</option></select></div>
             <div class="filter-field"><label for="libraryFilter" style="white-space: nowrap;">文献库</label><select id="libraryFilter" onchange="handleLibraryChange()"><option value="">全部文献库</option></select></div>
             <div class="filter-field"><label for="propertyType" style="white-space: nowrap;">能量类型</label><select id="propertyType" onchange="handleDftFilterChange()"><option value="">all</option><option value="adsorption_energy">adsorption_energy</option><option value="binding_energy">binding_energy</option><option value="gibbs_free_energy_change">gibbs_free_energy_change</option><option value="reaction_barrier">reaction_barrier</option><option value="li2s_decomposition_barrier">li2s_decomposition_barrier</option><option value="migration_barrier">migration_barrier</option><option value="charge_transfer">charge_transfer</option><option value="formation_energy">formation_energy</option><option value="band_gap">band_gap</option><option value="d_band_center">d_band_center</option><option value="overpotential">overpotential</option></select></div>
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
@@ -768,7 +768,7 @@
     /* ---- URL 状态同步（shared/view-state.js）：筛选/排序/分页写进地址栏，
        从详情页按「返回」时原样还原；带参数的 URL 粘到新标签也能还原同样的视图。 ---- */
     const VIEW_PARAMS = {
-      source: {id: "sourceSelect", type: "select", default: "legacy"},
+      source: {id: "sourceSelect", type: "select", default: "rebuild", valid: v => v === "rebuild"},
       library_name: { id: "libraryFilter", type: "select", default: "" },
       energy: { id: "propertyType", type: "select", default: "" },
       adsorbate: { id: "adsorbate", type: "text", default: "" },
@@ -1308,7 +1308,7 @@
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
-      params.set("source", document.getElementById("sourceSelect").value);
+      params.set("source", "rebuild");
       params.set("export_mode", "exploratory");
       return params;
     }
@@ -2013,8 +2013,7 @@
       }
     }
     document.addEventListener("DOMContentLoaded", () => {
-      const requestedSource = new URLSearchParams(location.search).get("source");
-      if (["legacy", "rebuild"].includes(requestedSource)) document.getElementById("sourceSelect").value = requestedSource;
+      document.getElementById("sourceSelect").value = "rebuild";
       state.currentLibrary = getQueryLibraryName() || getStoredLibraryName() || "";
       if (state.currentLibrary) rememberLibraryName(state.currentLibrary);
       ensureMLExportButton();
