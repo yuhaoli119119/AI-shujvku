@@ -656,11 +656,11 @@
           <div id="tab-tables" class="tab-pane"><div class="panel-card"><div class="panel-title">原文表格</div><div id="tablesList"></div></div></div>
           <div id="tab-dft" class="tab-pane">
             <div id="pdCurrentData"></div>
-            <details id="pdLegacyData"><summary id="pdLegacyDataLabel">历史计算数据（原解析记录保留）</summary>
+            <div id="pdLegacyData" hidden aria-hidden="true">
             <div class="panel-card"><div class="panel-title">DFT 设置</div><div id="dftSettings"></div></div>
             <div class="panel-card"><div class="panel-title">AI 候选 DFT 数据</div><div id="dftResults"></div></div>
 
-          </details></div>
+          </div></div>
           <div id="tab-experimental" class="tab-pane"><div id="pdExperimentalData"></div><details><summary>历史实验数据（原解析记录保留）</summary><div class="panel-card"><div class="panel-title">历史电化学性能</div><div id="electrochemicalPerformance"></div></div></details></div>
           <div id="tab-supplementary" class="tab-pane"><div class="panel-card"><div class="panel-title">补充资料</div><div id="pdSupplementaryFiles"></div></div></div>
 
@@ -3088,7 +3088,7 @@
       });
       if(state.rebuildStatus==='ready' && !state.defaultDataTabApplied && !deepLinkHasContext()) {
         state.defaultDataTabApplied=true;
-        const hasCalculation=state.rebuildRows.some(row=>row.data_type==='dft') || (state.paper?.counts?.dft_results || state.paper?.dft_results_items?.length || 0)>0;
+        const hasCalculation=state.rebuildRows.some(row=>row.data_type==='dft');
         const hasExperiment=state.rebuildRows.some(row=>row.data_type!=='dft') || (state.paper?.counts?.electrochemical_performance || state.paper?.counts?.electrochemical_performance_items || state.paper?.electrochemical_performance_items?.length || 0)>0;
         switchDetailTab(hasCalculation?'dft':hasExperiment?'experimental':'summary');
       }
@@ -3105,7 +3105,7 @@
         const record=records.find(item=>String(item.id)===card.dataset.recordId);if(!record || card.querySelector('[data-history-transfer]'))return;
         const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm';button.dataset.historyTransfer=record.id;button.textContent='带来源转入当前数据表';button.onclick=()=>EditableDataGrid.transferHistory(state.paperId,kind,record,{templates:state.rebuildTemplates,files:state.rebuildFiles,reload:reloadEditableData});card.append(button);
       });
-      install(document.getElementById('dftResults'),'dft',state.paper?.dft_results_items || []);
+
       install(document.getElementById('electrochemicalPerformance'),'electrochemical',state.paper?.electrochemical_performance_items || []);
     }
     function renderSupplementaryFiles() {
@@ -3337,20 +3337,12 @@
         (!tableGroups.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
       document.getElementById('cntFigures').textContent = inventory.figures.length + tableGroups.length;
       document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${tableGroups.length} 表（含已关联 SI；同一逻辑表跨页已合并为单表）`;
-      const historyMode = hasCurrent || state.rebuildStatus !== 'ready';
-      const legacyData = document.getElementById('pdLegacyData');
-      if (legacyData && legacyData.dataset.history !== String(historyMode)) {
-        legacyData.dataset.history = String(historyMode); legacyData.open = false;
-        document.getElementById('pdLegacyDataLabel').hidden = false;
-      }
       renderCurrentData();
-      document.getElementById('pdDftMetricLabel').textContent = hasCurrent ? '当前数据' : 'DFT 候选';
+      document.getElementById('pdDftMetricLabel').textContent = '当前数据';
       document.getElementById('pdDftTabLabel').textContent = '计算数据';
       document.getElementById('cntDftDesc').textContent = '吸附能、能垒、PDOS 等';
-      if (hasCurrent) {
-        document.getElementById('cntDFT').textContent = state.rebuildRows.length;
-        document.getElementById('cntDftDesc').textContent = '当前提取数据行（原解析另列）';
-      }
+      document.getElementById('cntDFT').textContent = state.rebuildRows.length;
+      document.getElementById('cntDftDesc').textContent = '当前提取数据行';
     }
 
     /* 只使用详情已返回的 SI 关系，不请求或自动打开关联 PDF。 */
