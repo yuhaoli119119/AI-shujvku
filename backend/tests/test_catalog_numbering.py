@@ -177,3 +177,27 @@ def test_parallel_http_uploads_persist_contiguous_codes_and_idempotent_files(sha
         jobs = session.scalars(select(WorkflowJob)).all()
         assert len(jobs) == 4 and all(job.status == 'completed' for job in jobs)
         assert all(job.progress['automatic_parsing_started'] is False for job in jobs)
+
+
+def test_parallel_registered_si_upload_is_idempotent(shared_test_database, tmp_path):
+    import hashlib
+    from app.config import get_settings
+    from app.db.models import RebuildPaperFile
+    from app.services.rebuild_workflow_service import associate_pdf_file
+    settings=get_settings().model_copy(update={'storage_root':tmp_path})
+    path=tmp_path/'si.pdf';path.write_bytes(b'%PDF SI concurrency fixture')
+    sha=hashlib.sha256(path.read_bytes()).hexdigest()
+    with shared_test_database.session_factory() as s:
+        main=paper(library='SI registration');s.add(main);s.commit();pid=main.id
+    barrier=Barrier(4)
+    def register(index):
+        with shared_test_database.session_factory() as s:
+            barrier.wait(timeout=10)
+            record,created=associate_pdf_file(s,paper_id=pid,role='si',saved_path=path,
+                original_filename='si.pdf',sha256=sha,file_size=path.stat().st_size,settings=settings)
+            s.commit();return record.id,created
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results=list(executor.map(register,range(4)))
+    assert len({r[0] for r in results})==1 and sum(r[1] for r in results)==1
+    with shared_test_database.session_factory() as s:
+        assert len(s.scalars(select(RebuildPaperFile)).all())==1

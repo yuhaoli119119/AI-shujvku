@@ -38,10 +38,7 @@ def transfer_legacy_value(session, paper_id, payload, actor):
     if payload.legacy_field not in allowed:
         raise RebuildWorkflowError('legacy_field_not_supported')
     number=getattr(record,payload.legacy_field)
-    if number is None:
-        raise RebuildWorkflowError('legacy_value_missing_preserve_in_history')
-    if payload.legacy_kind=='dft' and record.value_upper is not None:
-        raise RebuildWorkflowError('legacy_range_requires_explicit_separate_values')
+    upper = record.value_upper if payload.legacy_kind == 'dft' else None
     if not payload.reason.strip() or not payload.material.strip():
         raise RebuildWorkflowError('legacy_transfer_reason_and_material_required')
     if not payload.source.file_id or not payload.source.page_number:
@@ -58,15 +55,22 @@ def transfer_legacy_value(session, paper_id, payload, actor):
         raise RebuildWorkflowError('legacy_transfer_already_exists')
     unit=record.unit if payload.legacy_kind=='dft' else payload.unit
     value_type=record.value_kind if payload.legacy_kind=='dft' and record.value_kind in {'explicit','estimated','derived'} else 'explicit'
-    if value_type=='estimated' and not payload.source.estimate_basis:
+    if number is None and upper is None:
+        value_type = 'missing'
+    raw_value = None if value_type == 'missing' else str(number) if upper is None else f'{number if number is not None else "未报告下界"} ～ {upper}'
+    numeric_value = number if upper is None and value_type != 'missing' else None
+    if upper is not None and value_type in {'estimated', 'derived'}:
+        raise RebuildWorkflowError('legacy_estimated_range_requires_separate_bound_verification')
+    if value_type in {'estimated', 'derived'} and not payload.source.estimate_basis:
         raise RebuildWorkflowError('legacy_estimate_basis_required')
     row=RebuildDataRowInput(row_key=key,material=payload.material,reaction=payload.reaction,
         support=payload.support,active_site=payload.active_site,active_site_type=payload.active_site_type,
         data_type='dft' if payload.legacy_kind=='dft' else 'experimental',condition=payload.condition,
         notes=payload.reason,properties={'_legacy_transfer':{'kind':payload.legacy_kind,'id':str(payload.legacy_id),
             'field':payload.legacy_field,'request_id':str(payload.request_id),'fingerprint':fingerprint,
-            'original_value':number,'original_evidence':record.evidence_text,'reason':payload.reason,'actor':actor}},
-        values=[{'field_name':payload.field_name,'raw_value':str(number),'numeric_value':number,'unit':unit,
+            'original_value':number,'original_upper':upper,'original_evidence':record.evidence_text,'reason':payload.reason,'actor':actor}},
+        values=[{'field_name':payload.field_name,'raw_value':raw_value,'numeric_value':numeric_value,'unit':unit,
+                 'missing_reason':'历史记录未提供数值' if value_type=='missing' else None,
                  'value_type':value_type,'sources':[payload.source.model_dump(mode='json')]}])
     result=import_data_row(session,paper_id,row)
     if not result.get('complete'):

@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.config import Settings
-from app.services.paper_codes import main_paper_clause
+from app.services.paper_codes import main_paper_clause, lock_catalog_numbering
 from app.db.models import (
     Paper,
     RebuildAnalysisRun,
@@ -272,6 +272,8 @@ def associate_pdf_file(
 ) -> tuple[RebuildPaperFile, bool]:
     if role not in {"main", "si"}:
         raise RebuildWorkflowError("invalid_file_role")
+    lock_catalog_numbering(session)
+    session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update())
     _required_paper(session, paper_id)
     existing = session.scalar(
         select(RebuildPaperFile).where(
