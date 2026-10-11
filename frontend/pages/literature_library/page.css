@@ -91,3 +91,5 @@ table.litai-stack>tbody>tr>td>.status-chip{justify-self:start}
 .search-box input::placeholder{color:var(--color-text-muted)}
 
 .processing-chip{white-space:nowrap}.processing-detail{display:block;font-size:11px;color:var(--color-text-muted);margin:2px 0 4px}.status-chip.error{background:var(--color-danger-bg);color:var(--color-danger)}.processing-chip[data-processing-status="parsing"]::before{content:"";width:8px;height:8px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:5px;animation:processing-spin 1s linear infinite}@keyframes processing-spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.processing-chip[data-processing-status="parsing"]::before{animation:none}}
+
+.processing-badges{display:flex;align-items:center;gap:4px;white-space:nowrap;justify-self:start}.processing-badges>.status-chip{flex:none;margin:2px 0}
