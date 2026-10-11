@@ -724,3 +724,6 @@ body { margin:0; background:var(--color-bg); color:var(--color-text); font-famil
 .ai-extract-btn { font-size:16px; min-height:44px; padding:10px 24px; }
 @media(max-width:900px) { .rebuild-shell { width:calc(100% - 32px); margin-top:20px; } .rebuild-layout { grid-template-columns:1fr; } .rebuild-hero { flex-direction:row; align-items:start; } }
 @media(max-width:540px) { .rebuild-shell { width:calc(100% - 24px); } .rebuild-panel { padding:16px; } .rebuild-hero { flex-wrap:wrap; } .rebuild-hero h1 { font-size:22px; } }
+
+.rebuild-tool-section { margin-top:20px; padding-top:14px; border-top:1px solid var(--color-border); }
+.rebuild-tool-section > summary { cursor:pointer; font-size:13px; font-weight:600; }

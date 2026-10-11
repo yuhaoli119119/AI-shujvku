@@ -47,10 +47,11 @@
         <option value="dft">DFT</option>
       </select>
       <div class="rebuild-actions"><button class="rebuild-btn" id="applyBtn" type="button">应用</button></div>
-      <h3 style="margin-top:22px">批量导入</h3>
-      <p style="font-size:13px;color:var(--text-secondary,#64748b)">粘贴符合 /api/rebuild/rows/import 的 JSON。来源必须写到页码/图表/表格位置，估读最多两位小数。</p>
+      <details class="rebuild-tool-section"><summary>手工导入数据</summary>
+      <p style="font-size:12px;color:var(--color-text-secondary)">粘贴符合 /api/rebuild/rows/import 的 JSON。来源必须写到页码/图表/表格位置，估读最多两位小数。</p>
       <textarea id="importJson" class="rebuild-control" spellcheck="false" placeholder='{"paper_id":"...","rows":[]}'></textarea>
-      <div class="rebuild-actions"><button class="rebuild-btn" id="importBtn" type="button">幂等导入</button></div>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="importBtn" type="button">导入数据</button></div>
+      </details>
     </aside>
     <section class="rebuild-panel" aria-label="数据行">
       <div class="rebuild-actions" style="justify-content:space-between;align-items:center;margin-bottom:12px">

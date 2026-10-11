@@ -37,7 +37,7 @@
     const known = new Map((templates?.common_fields || []).map(f => [f.name,f]));
     rows.forEach(row => (templates?.reactions?.[row.reaction]?.fields || []).forEach(f => known.set(f.name,f)));
     const saved = new Set(rows.flatMap(row => (row.values || []).map(v => v.field_name)));
-    const classify=name=>/adsorp/.test(name)?'吸附能与构型':/free_energy|reaction_energy|^deltaG_|^delta_g_/i.test(name)?'反应自由能':/barrier|activation/.test(name)?'能垒':/capacity|retention|cycle|rate|loading/.test(name)?'性能与条件':/xps|xrd|exafs|xanes|raman|bet|binding_energy|structure|spectr|surface_area|pore|coordination/.test(name)?'结构与表征':/potential|tafel|resistance|conductivity|voltage|rct|rs_ohm|rg_ohm|efficiency/.test(name)?'电化学指标':'其他指标';
+    const classify=name=>/^(?:xps|xanes|exafs|xrd|raman)(?:_|$)/i.test(name)?'结构与表征':/adsorp/.test(name)?'吸附能与构型':/free_energy|reaction_energy|^deltaG_|^delta_g_/i.test(name)?'反应自由能':/barrier|activation/.test(name)?'能垒':/capacity|retention|cycle|rate|loading/.test(name)?'性能与条件':/xps|xrd|exafs|xanes|raman|bet|binding_energy|structure|spectr|surface_area|pore|coordination/.test(name)?'结构与表征':/potential|tafel|resistance|conductivity|voltage|rct|rs_ohm|rg_ohm|efficiency/.test(name)?'电化学指标':'其他指标';
     const priority=group=>({'吸附能与构型':0,'反应自由能':1,'能垒':2,'性能与条件':0,'电化学指标':3,'结构与表征':4,'其他指标':5})[group] ?? 5;
     return [...known.values()].filter(f => saved.has(f.name)).map(f=>({...f,group:f.group || classify(f.name)})).concat([...saved].filter(name => !known.has(name)).map(name => ({name,label:metricLabel(name),group:classify(name)}))).sort((a,b)=>priority(a.group)-priority(b.group));
   }

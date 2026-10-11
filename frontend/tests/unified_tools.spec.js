@@ -11,3 +11,9 @@ test('figure browsing stays compact while full evidence and correction controls 
  await page.locator('.figure-card-details summary').first().click();await expect(page.locator('.figure-card-details').first()).toContainText('0.0050 eV');await page.locator('[data-edit]').first().click();await expect(page.locator('#editForm')).toBeVisible();await expect(page.locator('#editCaption')).toHaveValue(caption);await page.selectOption('#assetTypeFilter','table');await expect(page.locator('.rebuild-asset-card')).toHaveCount(1);await expect(page.locator('#assetSummary')).toContainText('1 个');
  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);await page.evaluate(()=>document.documentElement.dataset.mode='dark');expect(await page.locator('.rebuild-panel').first().evaluate(el=>getComputedStyle(el).backgroundColor)).not.toBe('rgb(255, 255, 255)');expect(writes).toBe(0);
 });
+
+test('spectroscopic metrics after adsorption remain characterization columns',async({page})=>{
+ await page.setContent('<div></div>');await page.addScriptTag({path:require('path').resolve(__dirname,'../shared/editable-data-grid.js')});
+ const fields=await page.evaluate(()=>EditableDataGrid.fields([{reaction:'SRR',values:[{field_name:'xps_ni2p3_2_after_adsorption_binding_energy_ev'},{field_name:'adsorption_energy_ev'}]}],{}));
+ expect(fields.find(field=>field.name.startsWith('xps')).group).toBe('结构与表征');expect(fields.find(field=>field.name==='adsorption_energy_ev').group).toBe('吸附能与构型');
+});
