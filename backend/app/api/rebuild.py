@@ -140,6 +140,15 @@ async def get_latest_ai_extract_job_endpoint(
     return serialize_job(job, session)
 
 
+@router.get("/library-progress")
+def current_library_progress(
+    library_name: str = Query(..., min_length=1),
+    session: Session = Depends(get_db_session),
+):
+    from app.services.library_progress import library_progress
+    return library_progress(session, library_name)
+
+
 @router.get("/processing-statuses")
 async def current_processing_statuses(
     library_name: str | None = None,
