@@ -21,7 +21,7 @@ def client():
 @pytest.mark.parametrize('path', [
     '/papers/compare', '/papers/analysis-summary', '/papers/export/dft-dataset',
     '/papers/export/csv', '/dft/catalyst-dataset', '/dft/catalyst-dataset.csv',
-    '/visuals/analysis-fields', '/visuals/catalyst-correlation',
+    '/visuals/analysis-fields', '/visuals/data-revision', '/visuals/catalyst-correlation',
     '/visuals/correlation-pairs', '/visuals/overview',
 ])
 def test_retired_source_cannot_reach_any_public_analysis_or_export(path, monkeypatch):

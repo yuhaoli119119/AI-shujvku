@@ -127,6 +127,11 @@ def fields(request: Request,args=Depends(options),session: Session=Depends(get_d
             'selection_policy':POLICY,'assessment_status':'not_evaluated','export_policy':export_policy(request)}
 
 
+@router.get('/visuals/data-revision')
+def data_revision(args=Depends(options),session: Session=Depends(get_db_session)):
+    return service(args,session).data_revision()
+
+
 @router.get('/visuals/catalyst-correlation')
 def correlation(x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
                 args=Depends(options),session: Session=Depends(get_db_session)):

@@ -11,6 +11,7 @@ import csv
 import io
 import json
 import math
+import hashlib
 from types import SimpleNamespace
 from typing import Any
 
@@ -22,6 +23,7 @@ from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_pro
 from app.services.catalyst_analysis_service import CatalystAnalysisService, _ReadyRow, _candidate_groups, _stats
 from app.services.dft_ml_policy import analysis_entity_id
 from app.services.rebuild_analysis_fields import DEFINITIONS, PRESET_FIELDS, project_rows, source_ids
+from app.services.rebuild_analysis_pairing import pair_rows, catalyst_entity_id, context as pair_context
 from app.utils.library_names import normalize_library_name
 
 
@@ -161,7 +163,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                     identity = {'subject': {'property_context': {'configuration':r.configuration}, 'canonical_atom_pair': 'Li1-S' if value.field_name == 'li1_s_bond_length' else 'Li2-S' if value.field_name == 'li2_s_bond_length' else None}}
                     row = SimpleNamespace(id=value.id, paper_id=r.paper_id, catalyst_sample_id=None, adsorbate=ads, property_type=prop, value=value.numeric_value, unit=value.unit, reaction_step=(r.properties or {}).get('reaction_step'), reaction_type=r.reaction, source_section=None, source_figure=None, evidence_text='\n'.join(s.get('quote') or '' for s in by_value[value.id]), confidence=None, candidate_status='stored_rebuild', evidence_payload={'analysis_entity_id':str(r.id)}, identity_payload=identity, identity_version=2, value_kind=value.value_type)
                     cat = SimpleNamespace(id='rebuild:' + str(r.id), paper_id=r.paper_id, name=r.material, catalyst_type=r.active_site_type, metal_centers=[], coordination=r.active_site, support=r.support)
-                    raw.append((row,papers[r.paper_id],cat,{'source_family':'rebuild','sources':by_value[value.id], 'catalyst_name':r.material,'material_family':r.material_family,'estimated':value.is_estimated,'conflict':value.conflict,'missing_reason':value.missing_reason,'identity_pending':bool((r.properties or {}).get('_rebuild_import', {}).get('pending_identity_fields')),'raw_value':value.raw_value,'rebuild_row_id':str(r.id),'analysis_context':{'source_family':'rebuild','reaction_type':r.reaction,'data_type':r.data_type,'configuration':r.configuration,'condition_key':json.dumps(r.condition or {},sort_keys=True,ensure_ascii=False)}, 'field_name':value.field_name,'data_type':r.data_type}))
+                    raw.append((row,papers[r.paper_id],cat,{'source_family':'rebuild','sources':by_value[value.id], 'catalyst_name':r.material,'active_site':r.active_site,'support':r.support,'configuration':r.configuration,'material_family':r.material_family,'estimated':value.is_estimated,'conflict':value.conflict,'missing_reason':value.missing_reason,'identity_pending':bool((r.properties or {}).get('_rebuild_import', {}).get('pending_identity_fields')),'raw_value':value.raw_value,'rebuild_row_id':str(r.id),'analysis_context':{'source_family':'rebuild','reaction_type':r.reaction,'data_type':r.data_type,'configuration':r.configuration,'condition_key':json.dumps(r.condition or {},sort_keys=True,ensure_ascii=False)}, 'field_name':value.field_name,'data_type':r.data_type}))
             ready, exclusions, records = [], Counter(), []
             for row,paper,cat,extra in raw:
                 taxonomy = get_property_taxonomy(row.property_type)
@@ -189,13 +191,28 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 record['linked_dft_setting'] = {'dft_setting_id':str(chosen.id),'functional':chosen.functional,'dispersion_correction':chosen.dispersion_correction} if chosen else {}
                 ready.append(_ReadyRow(row,paper,record,cat, analysis_entity_id=analysis_entity_id(row)))
             self.records = records
-            counts = {'total_dft_rows':len(records),'numeric_records':sum(isinstance(r['value'],(int,float)) and math.isfinite(r['value']) for r in records),'exploratory_numeric_records':len(ready),'pair_analysis_ready_numeric_rows':len(ready),'distinct_exploratory_catalysts':len({str(r.catalyst.id) if r.catalyst else r.analysis_entity_id for r in ready}),'distinct_exportable_catalysts':None,'exportable_dft_rows':None,'v2_row_ready_numeric_rows':None,'contributing_papers':len({str(r.paper.id) for r in ready}),'legacy_pair_analysis_rows':sum(r.row.identity_version!=2 for r in ready),'assessment_status':'not_evaluated','source':self.source}
+            counts = {'total_dft_rows':len(records),'numeric_records':sum(isinstance(r['value'],(int,float)) and math.isfinite(r['value']) for r in records),'exploratory_numeric_records':len(ready),'pair_analysis_ready_numeric_rows':len(ready),'distinct_exploratory_catalysts':len({catalyst_entity_id(r.record) if self.source=='rebuild' else str(r.catalyst.id) if r.catalyst else r.analysis_entity_id for r in ready}),'distinct_exportable_catalysts':None,'exportable_dft_rows':None,'v2_row_ready_numeric_rows':None,'contributing_papers':len({str(r.paper.id) for r in ready}),'legacy_pair_analysis_rows':sum(r.row.identity_version!=2 for r in ready),'assessment_status':'not_evaluated','source':self.source}
             self._loaded = ready,exclusions,counts
             return self._loaded
 
     def summary(self):
         _,excluded,counts = self._load_rows()
-        return {**counts,'total_records':counts['total_dft_rows'],'approved_count':None,'excluded_reasons':dict(excluded),'selection_policy':POLICY}
+        physical_ids={i for fields in self._rebuild_fields().values() for cell in fields.values() if cell['exploratory_eligible'] for i in source_ids(cell)} if self.source=='rebuild' else set()
+        return {**counts,'physical_numeric_records':len(physical_ids) if self.source=='rebuild' else counts['numeric_records'],'total_records':counts['total_dft_rows'],'approved_count':None,'excluded_reasons':dict(excluded),'selection_policy':POLICY}
+
+    def data_revision(self):
+        """Fingerprint the current readback, including evidence and identities.
+
+        A new request loads the database afresh; no material pairing snapshot is
+        stored. This also detects corrections that leave record counts unchanged.
+        """
+        self._load_rows()
+        keys=('record_id','paper_id','field_name','catalyst_name','active_site','support',
+              'configuration','reaction','adsorbate','raw_value','raw_unit','target',
+              'exclusion_reason','analysis_context','sources')
+        snapshot=[{k:r.get(k) for k in keys} for r in sorted(self.records,key=lambda r:r['record_id'])]
+        digest=hashlib.sha256(json.dumps(snapshot,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
+        return {'source':self.source,'revision':digest,'record_count':len(snapshot)}
 
     def decorate(self,payload):
         payload.update(source=self.source,source_family=self.source,assessment_status='not_evaluated',export_mode='exploratory',selection_policy=POLICY)
@@ -278,18 +295,18 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         if x_field not in DEFINITIONS or y_field not in DEFINITIONS:
             raise ValueError('unknown rebuild analysis field')
         grouped=self._rebuild_fields()
+        pairs, excluded, lefts, rights = pair_rows(grouped, x_field, y_field)
         points=[];details=[];reasons=Counter()
-        for identity,records in sorted(grouped.items()):
-            left,right=records.get(x_field),records.get(y_field)
-            reason=(left or {}).get('exclusion_reason') or (right or {}).get('exclusion_reason') or ('missing_x_field_value' if not left else 'missing_y_field_value' if not right else None)
-            if reason:
-                reasons[reason]+=1
-                details.append({'analysis_entity_id':'rebuild:'+identity,'reason':reason,'x_candidates':[left] if left else [],'y_candidates':[right] if right else []})
-                continue
-            points.append({'analysis_entity_id':'rebuild:'+identity,'catalyst_name':left['catalyst_name'],'catalyst_sample_id':None,'catalyst':{'catalyst_name':left['catalyst_name']},'paper':{k:left.get(k) for k in ('paper_id','paper_code','title','doi','journal','year')},'x':{'value':left['target']['normalized_value'],'unit':left['target']['normalized_unit'],'source_record_ids':source_ids(left),'candidates':[left]},'y':{'value':right['target']['normalized_value'],'unit':right['target']['normalized_unit'],'source_record_ids':source_ids(right),'candidates':[right]},'x_source_record_ids':source_ids(left),'y_source_record_ids':source_ids(right),'semantic_context':{**left['analysis_context'],'x_adsorbate':left.get('adsorbate'),'y_adsorbate':right.get('adsorbate'),'x_unit':left['target']['normalized_unit'],'y_unit':right['target']['normalized_unit']}})
+        for left,candidates,reason in excluded:
+            reasons[reason]+=1
+            details.append({'analysis_entity_id':'rebuild:'+left['rebuild_row_id'],'reason':reason,'x_candidates':[left],'y_candidates':candidates})
+        for left,right in pairs:
+            identity=left['rebuild_row_id']+':'+right['rebuild_row_id']
+            points.append({'analysis_entity_id':catalyst_entity_id(left),'pair_observation_id':'rebuild:'+identity,'catalyst_entity_id':catalyst_entity_id(left),'catalyst_name':left['catalyst_name'],'catalyst_sample_id':None,'catalyst':{'catalyst_name':left['catalyst_name']},'paper':{k:left.get(k) for k in ('paper_id','paper_code','title','doi','journal','year')},'x':{'value':left['target']['normalized_value'],'unit':left['target']['normalized_unit'],'source_record_ids':source_ids(left),'candidates':[left]},'y':{'value':right['target']['normalized_value'],'unit':right['target']['normalized_unit'],'source_record_ids':source_ids(right),'candidates':[right]},'x_source_record_ids':source_ids(left),'y_source_record_ids':source_ids(right),'pairing_rule':'same_row' if left['rebuild_row_id']==right['rebuild_row_id'] else 'same_paper_material_compatible_identity_and_method','semantic_context':pair_context(left,right)})
+        distributions={axis:[{'value':c['target']['normalized_value'],'unit':c['target']['normalized_unit'],'catalyst_name':c['catalyst_name'],'paper_code':c.get('paper_code'),'source_record_ids':source_ids(c)} for c in cells if c['exploratory_eligible']] for axis,cells in [('x',lefts),('y',rights)]}
         stats=_stats(points) if len(points)>=min_n else {k:None for k in ('pearson','spearman','r_squared','slope','intercept')}
         stats.update(pearson_r=stats['pearson'],spearman_rho=stats['spearman'],r2=stats['r_squared'],ready=len(points)>=min_n,min_n=min_n)
-        return {'schema_version':'rebuild_correlation_exploratory_v1','x':fields.get(x_field,{'key':x_field}),'y':fields.get(y_field,{'key':y_field}),'x_field':x_field,'y_field':y_field,'min_n':min_n,'points':points,'n_catalysts':len(points),'n_papers':len({p['paper']['paper_id'] for p in points}),'paper_ids':sorted({p['paper']['paper_id'] for p in points}),'excluded_reasons':dict(reasons),'excluded_details':details,'excluded_count':len(details),'analysis_row_counts':self.summary(),'warnings':['approval_not_evaluated'],'statistics':stats,**stats}
+        return {'schema_version':'rebuild_correlation_exploratory_v1','x':fields.get(x_field,{'key':x_field}),'y':fields.get(y_field,{'key':y_field}),'x_field':x_field,'y_field':y_field,'min_n':min_n,'points':points,'distribution':distributions if not self._matrix_mode else {},'n_catalysts':len(points),'n_papers':len({p['paper']['paper_id'] for p in points}),'paper_ids':sorted({p['paper']['paper_id'] for p in points}),'excluded_reasons':dict(reasons),'excluded_details':details,'excluded_count':len(details),'analysis_row_counts':self.summary(),'warnings':['approval_not_evaluated'],'statistics':stats,**stats}
 
     def correlation(self, *, library_name=None,x_field,y_field,min_n=3):
         payload = self._rebuild_correlation(x_field,y_field,min_n) if self.source == 'rebuild' else super().correlation(library_name=library_name,x_field=x_field,y_field=y_field,min_n=min_n)
@@ -298,10 +315,11 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             context=point['semantic_context']
             # Individual catalyst ids/settings ids cannot identify cross-material
             # comparability; recorded method/reaction/condition dimensions do.
-            key=json.dumps({k:context.get(k) for k in ('functional','dispersion_correction','reaction_type','data_type','condition_key','configuration','facet','coverage','termination','x_adsorbate','y_adsorbate','x_unit','y_unit')},sort_keys=True,ensure_ascii=False)
+            key=json.dumps({k:context.get(k) for k in ('paper_id','functional','dispersion_correction','reaction_type','data_type','condition_key','facet','coverage','termination','x_method','y_method','x_reaction_step','y_reaction_step','x_adsorbate','y_adsorbate','x_unit','y_unit')},sort_keys=True,ensure_ascii=False)
             groups[key].append(point)
-            point.update(source_family=self.source,assessment_status='not_evaluated',comparability_group=key)
-        payload['comparability_groups']=[{'context':json.loads(key),'n':len(points),'statistics':_stats(points) if len(points)>=min_n else None} for key,points in groups.items()]
+            point.update(source_family=self.source,assessment_status='not_evaluated',comparability_group=key,group_id=hashlib.sha256(key.encode()).hexdigest()[:12])
+        payload['comparability_groups']=[{'group_id':hashlib.sha256(key.encode()).hexdigest()[:12],'label':f"{points[0].get('paper',{}).get('paper_code') or '文献'} · 条件组 {index+1}",'context':json.loads(key),'n':len(points),'statistics':_stats(points) if len(points)>=min_n else None} for index,(key,points) in enumerate(groups.items())]
+        payload['group_fit_count']=sum(g['statistics'] is not None and g['statistics']['slope'] is not None for g in payload['comparability_groups'])
         if len(groups)>1:
             payload['ready']=False
             payload['insufficient_reason']='mixed_calculation_or_reaction_contexts; inspect comparability_groups'
@@ -323,7 +341,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         available=list(definitions)
         if fields is None:
             counts=Counter(k for row in self._rebuild_fields().values() for k,r in row.items() if r['exploratory_eligible']) if self.source=='rebuild' else Counter()
-            fields=sorted(available,key=lambda k:(-counts[k],k))[:20] if self.source=='rebuild' else available
+            fields=sorted(available,key=lambda k:(-counts[k],k)) if self.source=='rebuild' else available
         if not set(fields)<=set(available):
             raise ValueError('unknown matrix field')
         cells=[]
@@ -331,12 +349,16 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         for index,left in enumerate(fields):
             for right in fields[index:]:
                 result=self.correlation(library_name=library_name,x_field=left,y_field=right,min_n=min_n)
-                cell={'x_property':left,'y_property':right,'descriptor':left,'target_property':right,'n':result['n_catalysts'],'pearson_r':result['pearson_r'],'spearman_rho':result['spearman_rho'],'slope':result['slope'],'intercept':result['intercept'],'status':'sufficient' if result['pearson_r'] is not None else 'mixed_contexts' if len(result['comparability_groups'])>1 else 'insufficient_paired_data','source':self.source}
+                valid_groups=[g for g in result['comparability_groups'] if g['statistics'] and g['statistics']['pearson'] is not None]
+                selected=max(valid_groups,key=lambda g:g['n']) if valid_groups else None
+                stats=selected['statistics'] if selected else result
+                n=selected['n'] if selected else result['n_catalysts']
+                cell={'x_property':left,'y_property':right,'descriptor':left,'target_property':right,'n':n,'total_paired_n':result['n_catalysts'],'pearson_r':stats.get('pearson_r',stats.get('pearson')),'spearman_rho':stats.get('spearman_rho',stats.get('spearman')),'slope':stats.get('slope'),'intercept':stats.get('intercept'),'status':'grouped' if selected and len(result['comparability_groups'])>1 else 'sufficient' if selected else 'insufficient_paired_data','group_id':selected['group_id'] if selected else None,'group_label':selected['label'] if selected else None,'group_statistics':result['comparability_groups'],'source':self.source}
                 cells.append(cell)
                 if left!=right:
                     cells.append({**cell,'x_property':right,'y_property':left,'descriptor':right,'target_property':left})
         self._matrix_mode=False
-        return {'schema_version':'stored_exploratory_matrix_v1','variables':[definitions[f] for f in fields],'cells':cells,'available_field_count':len(available),'omitted_fields':[f for f in available if f not in fields],'selection_policy':'Up to 20 most populated curated physical fields are shown by default; raw observations retain original extracted fields. Pair details preserve row, unit and context exclusions.','min_n':min_n}
+        return {'schema_version':'stored_exploratory_matrix_v1','variables':[definitions[f] for f in fields],'cells':cells,'available_field_count':len(available),'omitted_fields':[f for f in available if f not in fields],'selection_policy':'All curated physical fields; pair split rows within a paper and material identity. Display separately identified comparable groups; raw observations retain original extracted fields.','min_n':min_n}
 
     def observation_dataset(self, *, limit=None, offset=0, dataset_profile=None):
         self._load_rows()

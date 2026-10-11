@@ -149,7 +149,7 @@
               <p class="field-hint">仅控制拟合门槛，不隐藏已有散点</p>
             </div>
 
-            <p class="field-hint">仅列常用物理量；模型预测、误差与计算参数保留在原始数据中。配对需来自同一材料数据行。</p>
+            <p class="field-hint">仅列常用物理量；模型预测、误差与计算参数保留在原始数据中。以同一催化剂为单位配对，并区分计算条件；新增提取数据后自动更新。</p>
             <p class="status status-row" aria-live="polite">
               <span id="relationStatus">正在读取可分析字段…</span>
               <button id="retryCorrelation" class="btn btn-secondary btn-small" type="button" hidden>重试</button>
@@ -173,7 +173,7 @@
                 <span class="preset-name">吸附能 ↔ d 带中心</span>
                 <span class="preset-arrow">›</span>
               </button>
-              <button id="quickAdsorptionRds" class="preset-btn" type="button" title="吸附能 ↔ 决速步自由能变化" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
+              <button id="quickAdsorptionRds" class="preset-btn" type="button" title="吸附能 ↔ 决速步自由能变化" data-x="adsorption_energy" data-y="rds_delta_g">
                 <span class="preset-name">吸附能 ↔ 决速步自由能变化</span>
                 <span class="preset-arrow">›</span>
               </button>
@@ -315,8 +315,8 @@
             <div class="control-group">
               <label for="matrixScopeSelect" class="control-label">变量范围</label>
               <select id="matrixScopeSelect" class="form-select">
-                <option value="core">核心物理化学性质 (6个)</option>
-                <option value="all">全部已提取性质 (19个)</option>
+                <option value="core">有统计结果的变量</option>
+                <option value="all" selected>全部常用物理量</option>
               </select>
             </div>
 
@@ -384,7 +384,7 @@
             <div class="matrix-card-header">
               <div>
                 <h2 class="chart-title">探索性物理化学相关性矩阵</h2>
-                <p class="card-desc">按催化剂样本无序统一配对，展示物理化学关键性质间的皮尔逊线性相关系数趋势（探索性结果，不代表因果关系）。</p>
+                <p class="card-desc">同篇文献、同一材料与位点配对；不同计算条件分别统计。色块展示最大可比组的相关系数与样本数，点选查看全部来源。</p>
               </div>
               <div class="matrix-meta-badges">
                 <span class="meta-badge" id="badgeVarCount">6 个变量</span>

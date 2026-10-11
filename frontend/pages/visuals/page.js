@@ -9,8 +9,8 @@
 
   // 默认分析字段
   const DEFAULTS = {
-    x: "li2s_bader_charge_transfer",
-    y: "li_s_bond_max",
+    x: "li2s_adsorption_energy",
+    y: "d_band_center",
     quickX: "li2s_bader_charge_transfer",
     quickY: "li_s_bond_max",
     minN: 3,
@@ -21,6 +21,9 @@
     "s8_adsorption_energy",
     "li2s2_adsorption_energy",
     "li2s_adsorption_energy",
+    "d_band_center",
+    "li2s_dissociation_barrier",
+    "rds_delta_g",
     "li2s_bader_charge_transfer",
     "li1_s_bond_length",
     "li_s_bond_max",
@@ -134,7 +137,7 @@
     minN: DEFAULTS.minN,
     lastCorrelation: null,
     matrixData: null,
-    matrixScope: "core", // 'core' | 'all'
+    matrixScope: "all", // 'core' | 'all'
     matrixMinN: 3,
     selectedMatrixCell: null,
     matrixDetailData: null,
@@ -155,7 +158,7 @@
     x: { id: "xField", type: "select", default: DEFAULTS.x },
     y: { id: "yField", type: "select", default: DEFAULTS.y },
     min_n: { id: "minN", type: "text", default: String(DEFAULTS.minN), valid: (v) => Number(v) >= 3 },
-    scope: { id: "matrixScopeSelect", type: "select", default: "core" },
+    scope: { id: "matrixScopeSelect", type: "select", default: "all" },
     reaction: { id: "matrixReactionSelect", type: "select", default: "" },
     adsorbate: { id: "matrixAdsorbateSelect", type: "select", default: "" },
     family: { id: "matrixFamilySelect", type: "select", default: "" },
@@ -221,13 +224,17 @@
   }
 
   function statistic(data, name) {
-    return data.statistics?.[name] ?? data[name] ?? null;
+    const alias = { pearson_r: "pearson", spearman_rho: "spearman" }[name];
+    return data.statistics?.[name] ?? (alias ? data.statistics?.[alias] : null) ?? data[name] ?? (alias ? data[alias] : null) ?? null;
   }
 
   const responseCache = new Map();
+  let responseCacheEpoch = 0;
+  function invalidateResponses() { responseCacheEpoch++; responseCache.clear(); }
   let correlationController;
   let detailLimit = 50;
   async function getJSON(url, signal) {
+    const epoch = responseCacheEpoch;
     const cached = responseCache.get(url);
     if (cached && Date.now() - cached.time < 300000) return cached.data;
     const controller = new AbortController();
@@ -244,7 +251,7 @@
       }
       const data = await response.json();
       if (responseCache.size >= 100) responseCache.delete(responseCache.keys().next().value);
-      responseCache.set(url, {time: Date.now(), data});
+      if (epoch === responseCacheEpoch) responseCache.set(url, {time: Date.now(), data});
       return data;
     } catch (error) { if (timedOut) throw new Error("读取超时，请重试"); throw error; }
     finally { clearTimeout(timer); signal?.removeEventListener("abort", onAbort); }
@@ -298,13 +305,14 @@
   function onLibraryChange(newLib) {
     if (newLib === state.libraryName && state.lastCorrelation) return;
     state.libraryName = newLib;
+    resetRevisionPolling();
     ++state.requestId;
     correlationController?.abort();
     state.lastCorrelation = null;
     state.matrixData = null;
     state.selectedMatrixCell = null;
     ++matrixRequest; ++pairRequest; ++datasetRequest;
-    responseCache.clear();
+    invalidateResponses();
     window.localStorage.setItem(CURRENT_LIBRARY_STORAGE_KEY, newLib);
 
     const url = new URL(window.location);
@@ -458,7 +466,7 @@
       const catCount = meta.distinct_exploratory_catalysts ?? summary.distinct_exploratory_catalysts ?? summary.distinct_exportable_catalysts ?? 0;
       const compactEl = $("headerCompactSummary");
       if (compactEl) {
-        compactEl.textContent = `${state.libraryName || "当前文献库"} · ${dftCount} DFT · ${catCount} 催化剂`;
+        compactEl.textContent = `${state.libraryName || "当前文献库"} · ${dftCount} 提取字段 · ${catCount} 催化剂`;
       }
 
       const statusEl = $("overviewStatus");
@@ -495,13 +503,17 @@
     if (fields.some((field) => field.key === preferred)) select.value = preferred;
   }
 
-  async function loadFields() {
+  async function loadFields(preserveSelection = false) {
+    const epoch = responseCacheEpoch;
+    const library = state.libraryName;
+    const previousX = $("xField").value, previousY = $("yField").value;
     const payload = await getJSON("/api/visuals/analysis-fields?" + visualParams(new URLSearchParams()).toString());
+    if (library !== state.libraryName || epoch !== responseCacheEpoch) return;
     applyExportPolicy(payload.export_policy);
     state.fields = normaliseFields(payload);
     if (!state.fields.length) throw new Error("接口未返回可用于数值相关分析的字段");
-    fillSelect($("xField"), state.fields, DEFAULTS.x);
-    fillSelect($("yField"), state.fields, DEFAULTS.y);
+    fillSelect($("xField"), state.fields, preserveSelection ? previousX : DEFAULTS.x);
+    fillSelect($("yField"), state.fields, preserveSelection ? previousY : DEFAULTS.y);
     if ($("yField").value === $("xField").value && state.fields.length > 1) $("yField").value = state.fields.find(field => field.key !== $("xField").value).key;
   }
 
@@ -546,10 +558,11 @@
     const paperCount = Number(data.n_papers ?? data.paper_count) || 0;
     const minN = Number(data.min_n ?? data.statistics?.min_n ?? $("minN").value) || 3;
     
-    if (diagSection) diagSection.dataset.state = data.ready === true ? "ready" : "blocked";
-    $("diagnosticFlag").textContent = data.ready === true ? "数据范围说明" : "需要处理";
-    $("diagnosticTitle").textContent = data.ready === true ? "当前数据可以进行拟合" : fitBlockedReason(data);
-    $("diagnosticMessage").textContent = data.ready === true
+    const groupFits = fittedGroups(data);
+    if (diagSection) diagSection.dataset.state = data.ready === true || groupFits.length ? "ready" : "blocked";
+    $("diagnosticFlag").textContent = data.ready === true || groupFits.length ? "数据范围说明" : "数据范围";
+    $("diagnosticTitle").textContent = groupFits.length ? `${groupFits.length} 个可比组已分别拟合` : data.ready === true ? "当前数据可以进行拟合" : fitBlockedReason(data);
+    $("diagnosticMessage").textContent = groupFits.length ? `同篇文献、同一材料与位点形成 ${catalystCount} 个真实配对；不同条件分别统计，颜色对应可比组。` : data.ready === true
       ? "已形成 " + catalystCount + " 个同一催化剂有效配对，来自 " + paperCount + " 篇论文。"
       : catalystCount < minN
         ? "当前只有 " + catalystCount + " 个同一催化剂有效配对，至少需要 " + minN + " 个才能计算拟合结果。"
@@ -574,7 +587,33 @@
     }
   }
 
+  const GROUP_COLORS = ["#6d45de", "#0e9b94", "#df8b28", "#df5785", "#397dde", "#819b30"];
+
+  function fittedGroups(data) {
+    return (data.comparability_groups || []).filter(g => Number(g.n) >= Number(data.min_n || 3)
+      && number(g.statistics?.slope) !== null && number(g.statistics?.intercept) !== null);
+  }
+
+  function leadingGroup(data) {
+    return fittedGroups(data).slice().sort((a, b) => Number(b.n) - Number(a.n))[0];
+  }
+
+  function showGroupLegend(groups) {
+    let legend = $("groupLegend");
+    if (!legend) {
+      legend = document.createElement("div");
+      legend.id = "groupLegend";
+      legend.className = "group-legend";
+      $("scatterPlot").parentElement.insertAdjacentElement("afterend", legend);
+    }
+    legend.hidden = !groups.length;
+    legend.innerHTML = groups.map((g, i) => '<span><i style="background:' + GROUP_COLORS[i % GROUP_COLORS.length] + '"></i>'
+      + esc(g.label || "可比组 " + (i + 1)) + ' · n=' + esc(g.n) + (number(g.statistics?.pearson_r ?? g.statistics?.pearson) !== null ? ' · r=' + fmt2(g.statistics.pearson_r ?? g.statistics.pearson) : '') + '</span>').join('');
+  }
+
   function renderStatistics(data) {
+    const best = data.ready === true ? null : leadingGroup(data);
+    if (best) data = { ...data, statistics: best.statistics, ready: true };
     const stats = {
       statPearson: statistic(data, "pearson_r"),
       statSpearman: statistic(data, "spearman_rho"),
@@ -594,7 +633,7 @@
     const eqEl = $("statEquation");
     if (eqEl) {
       if (data.ready === true && slope !== null && intercept !== null) {
-        eqEl.textContent = "y = " + fmt2(slope) + "x " + (intercept >= 0 ? "+ " : "− ") + fmt2(Math.abs(intercept));
+        eqEl.textContent = (best ? "最大可比组 · " : "") + "y = " + fmt2(slope) + "x " + (intercept >= 0 ? "+ " : "− ") + fmt2(Math.abs(intercept));
       } else {
         eqEl.textContent = "—";
       }
@@ -602,6 +641,9 @@
   }
 
   function renderVerdict(data) {
+    const best = data.ready === true ? null : leadingGroup(data);
+    const groupCount = fittedGroups(data).length;
+    if (best) data = { ...data, statistics: best.statistics, n_catalysts: best.n, ready: true };
     const card = $("verdictCard");
     const r = number(statistic(data, "pearson_r"));
     const r2 = number(statistic(data, "r_squared"));
@@ -633,7 +675,7 @@
     $("verdictEquation").textContent = slope === null || intercept === null
       ? ""
       : "y = " + fmt2(slope) + "x " + (intercept >= 0 ? "+ " : "− ") + fmt2(Math.abs(intercept));
-    $("verdictQuality").textContent = papers < 2 ? "单一论文（探索性分析，不构成因果关系）" : `跨 ${papers} 篇论文（探索性统计趋势）`;
+    $("verdictQuality").textContent = best ? `${groupCount} 个可比组分别拟合 · 上方指标为最大组` : papers < 2 ? "单一论文（探索性分析，不构成因果关系）" : `跨 ${papers} 篇论文（探索性统计趋势）`;
   }
 
   function hideTooltip() {
@@ -729,6 +771,52 @@
     return (Math.round(n * 100) / 100).toString();
   }
 
+  function plotDistributions(data, layer, width, height) {
+    const axes = ["x", "y"];
+    const series = axes.map(axis => (data.distribution?.[axis] || []).filter(p => number(p.value) !== null));
+    if (!series.some(items => items.length)) return false;
+    const stacked = width < 640;
+    const panelWidth = stacked ? width - 40 : (width - 70) / 2;
+    const panelHeight = stacked ? (height - 30) / 2 : height - 40;
+    let html = '';
+    series.forEach((items, index) => {
+      const left = stacked ? 20 : 25 + index * (panelWidth + 20);
+      const top = stacked ? 8 + index * (panelHeight + 14) : 16;
+      const meta = getFieldMeta(data[axes[index] + "_field"] || $(axes[index] + "Field").value);
+      const color = GROUP_COLORS[index];
+      html += `<rect x="${left}" y="${top}" width="${panelWidth}" height="${panelHeight}" rx="12" fill="${color}" fill-opacity="0.045"/>`;
+      html += `<text x="${left + 15}" y="${top + 24}" class="distribution-title">${esc(meta.labelZh)}</text>`;
+      html += `<text x="${left + panelWidth - 15}" y="${top + 24}" text-anchor="end" class="plot-tick">${items.length} 条真实数值</text>`;
+      if (!items.length) { html += `<text x="${left + panelWidth / 2}" y="${top + panelHeight / 2}" text-anchor="middle" class="plot-tick">暂无合格数值</text>`; return; }
+      const values = items.map(p => Number(p.value));
+      const scale = niceScale(Math.min(...values), Math.max(...values), 4);
+      const bins = Array.from({length: Math.min(12, Math.max(3, Math.ceil(Math.sqrt(values.length))))}, () => []);
+      items.forEach(p => bins[Math.min(bins.length - 1, Math.floor((Number(p.value) - scale.min) / (scale.max - scale.min || 1) * bins.length))].push(p));
+      const L = left + 36, R = left + panelWidth - 15, T = top + 42, B = top + panelHeight - 38;
+      const maxCount = Math.max(1, ...bins.map(b => b.length));
+      const bw = (R - L) / bins.length;
+      [0, 0.5, 1].forEach(t => {
+        const y = B - (B - T) * t;
+        html += `<line class="plot-grid" x1="${L}" x2="${R}" y1="${y}" y2="${y}"/><text class="plot-tick" x="${L - 5}" y="${y + 3}" text-anchor="end">${Math.round(maxCount * t)}</text>`;
+      });
+      bins.forEach((bin, i) => {
+        const h = (B - T) * bin.length / maxCount;
+        const lo = scale.min + i / bins.length * (scale.max - scale.min);
+        const hi = scale.min + (i + 1) / bins.length * (scale.max - scale.min);
+        html += `<rect class="distribution-bar" x="${L + i * bw + 2}" y="${B - h}" width="${Math.max(1, bw - 4)}" height="${h}" rx="3" fill="${color}"><title>${esc(meta.labelZh)} ${formatTick(lo)}～${formatTick(hi)} ${esc(meta.unit)}：${bin.length} 条\n${esc(bin.slice(0, 12).map(p => `${p.paper_code || ''} ${p.catalyst_name || ''}：${p.value}`).join('\n'))}</title></rect>`;
+      });
+      scale.ticks.forEach(t => {
+        const x = L + (t - scale.min) / (scale.max - scale.min || 1) * (R - L);
+        html += `<text class="plot-tick" x="${x}" y="${B + 17}" text-anchor="middle">${formatTick(t)}</text>`;
+      });
+      html += `<text class="plot-tick" x="${(L + R) / 2}" y="${B + 31}" text-anchor="middle">${esc(meta.unit)} · 数值分布</text>`;
+    });
+    layer.innerHTML = html;
+    showGroupLegend([]);
+    $("fitNotice").textContent = "两图分别展示已提取的真实数值分布；尚未配对，不计算两变量相关性。悬停柱形查看文献、材料与数值，下方数据范围列出中文排除原因。";
+    return true;
+  }
+
   function plot(data) {
     const points = (data.points || []).filter((point) => number(axisValue(point, "x")) !== null && number(axisValue(point, "y")) !== null);
     const svg = $("scatterPlot");
@@ -744,6 +832,12 @@
     empty.setAttribute("x", width / 2);
     empty.setAttribute("y", height / 2);
     if (!points.length) {
+      if (plotDistributions(data, layer, width, height)) {
+        empty.style.display = "none";
+        if ($("plotLegend")) $("plotLegend").hidden = true;
+        return;
+      }
+      showGroupLegend([]);
       const legend = $("plotLegend");
       if (legend) {
         legend.innerHTML = "";
@@ -757,7 +851,7 @@
       const ny = excluded.filter(p => p.y_candidates?.length).length;
       const isError = !data.analysis_row_counts;
       $("plotEmptySummary").innerHTML = '<h3>' + (isError ? esc(data.insufficient_reason || "等待分析数据") : "当前字段尚未形成有效配对") + '</h3>'
-        + (isError ? '' : '<div class="availability-strip"><span>X 有候选值<b>' + nx + '</b></span><span>Y 有候选值<b>' + ny + '</b></span><span>有效配对<b>0</b></span></div><p>库中仍有 ' + esc(rows.total_dft_rows ?? "—") + ' 条 DFT 记录，' + esc(rows.pair_analysis_ready_numeric_rows ?? "—") + ' 条可参与关系分析。<br>所选字段可能缺少合格数值或可比计算条件，展开下方数据说明查看原因。</p>');
+        + (isError ? '' : '<div class="availability-strip"><span>X 有候选值<b>' + nx + '</b></span><span>Y 有候选值<b>' + ny + '</b></span><span>有效配对<b>0</b></span></div><p>库中仍有 ' + esc(rows.total_dft_rows ?? "—") + ' 条提取字段，' + esc(rows.physical_numeric_records ?? rows.pair_analysis_ready_numeric_rows ?? "—") + ' 条可探索数值。字段记录数不等于有效配对点数。<br>所选字段可能缺少合格数值或可比计算条件，展开下方数据说明查看原因。</p>');
       $("plotEmptySummary").hidden = false;
       $("fitNotice").textContent = fitBlockedReason(data);
       return;
@@ -805,20 +899,29 @@
       '<text class="plot-axis-title" x="' + (L + W / 2) + '" y="' + (B + 34) + '" text-anchor="middle">' + esc(xTitle) + "</text>"
       + '<text class="plot-axis-title" x="14" y="' + (T + H / 2) + '" text-anchor="middle" transform="rotate(-90 14 ' + (T + H / 2) + ')">' + esc(yTitle) + "</text>");
 
+    const groups = data.comparability_groups || [];
+    const fits = fittedGroups(data);
     const slope = number(data.statistics?.slope);
     const intercept = number(data.statistics?.intercept);
     const fitReady = data.ready === true && slope !== null && intercept !== null;
-    if (fitReady) {
-      layer.insertAdjacentHTML("beforeend",
-        '<g clip-path="url(#plotClip)"><line class="fit-line" x1="' + sx(xLo) + '" y1="' + sy(slope * xLo + intercept) + '" x2="' + sx(xHi) + '" y2="' + sy(slope * xHi + intercept) + '"/></g>');
-    }
+    const pointGroup = point => groups.findIndex(g => g.group_id === point.group_id);
+    const colorFor = point => GROUP_COLORS[Math.max(0, pointGroup(point)) % GROUP_COLORS.length];
+    const drawFit = (s, b, lo, hi, color) => layer.insertAdjacentHTML("beforeend",
+      `<g clip-path="url(#plotClip)"><line class="fit-line" style="stroke:${color}" x1="${sx(lo)}" y1="${sy(s * lo + b)}" x2="${sx(hi)}" y2="${sy(s * hi + b)}"/></g>`);
+    if (groups.length) {
+      fits.forEach(g => {
+        const xs = points.filter(p => p.group_id === g.group_id).map(p => Number(axisValue(p, "x")));
+        if (xs.length) drawFit(Number(g.statistics.slope), Number(g.statistics.intercept), Math.min(...xs), Math.max(...xs), GROUP_COLORS[groups.indexOf(g) % GROUP_COLORS.length]);
+      });
+    } else if (fitReady) drawFit(slope, intercept, xLo, xHi, "#0e9b94");
+    showGroupLegend(groups);
 
     let pts = '';
     points.forEach((point, idx) => {
       const x = number(axisValue(point, "x")), y = number(axisValue(point, "y"));
       const aria = pointCatalystName(point) + "，X " + display(x) + "，Y " + display(y);
-      pts += '<circle class="plot-point-halo" cx="' + sx(x) + '" cy="' + sy(y) + '" r="11"/>';
-      pts += '<circle class="plot-point" role="button" tabindex="0" aria-label="' + esc(aria) + '" data-idx="' + idx + '" cx="' + sx(x) + '" cy="' + sy(y) + '" r="6"><title>' + esc(pointCatalystName(point) + " · " + (point.catalyst_sample_id || "")) + "</title></circle>";
+      pts += '<circle class="plot-point-halo" style="fill:' + colorFor(point) + '" cx="' + sx(x) + '" cy="' + sy(y) + '" r="11"/>';
+      pts += '<circle class="plot-point" style="fill:' + colorFor(point) + '" role="button" tabindex="0" aria-label="' + esc(aria) + '" data-idx="' + idx + '" cx="' + sx(x) + '" cy="' + sy(y) + '" r="6"><title>' + esc(pointCatalystName(point) + " · " + (point.catalyst_sample_id || "")) + "</title></circle>";
     });
     layer.insertAdjacentHTML("beforeend", pts);
 
@@ -845,7 +948,7 @@
       });
     });
 
-    $("fitNotice").textContent = fitReady ? "线性拟合 · 悬停或点选散点查看催化剂与数值" : fitBlockedReason(data);
+    $("fitNotice").textContent = fits.length ? `${points.length} 个真实配对 · ${fits.length} 个可比组独立拟合 · 颜色区分计算条件，点选查看来源` : fitReady ? "线性拟合 · 悬停或点选散点查看催化剂与数值" : fitBlockedReason(data);
   }
 
   function ids(value) {
@@ -943,8 +1046,10 @@
       if (requestId !== state.requestId) return;
       state.lastCorrelation = data;
       const counts = data.analysis_row_counts || {};
-      $("headerCompactSummary").textContent = `${state.libraryName || "当前文献库"} · ${counts.total_dft_rows ?? "—"} DFT · ${counts.distinct_exploratory_catalysts ?? "—"} 催化剂`;
-      $("overviewStatus").textContent = `${counts.exploratory_numeric_records ?? counts.pair_analysis_ready_numeric_rows ?? "—"} 条记录可参与关系分析`;
+      $("headerCompactSummary").textContent = `${state.libraryName || "当前文献库"} · ${counts.total_dft_rows ?? "—"} 提取字段 · ${counts.distinct_exploratory_catalysts ?? "—"} 催化剂`;
+      $("overviewStatus").textContent = counts.physical_numeric_records !== undefined
+        ? `${counts.physical_numeric_records} 条物理量数值，按催化剂配对`
+        : `${counts.exploratory_numeric_records ?? counts.pair_analysis_ready_numeric_rows ?? "—"} 条可探索数值，实际配对数量由所选字段决定`;
       setOverview(counts);
       renderStatistics(data);
       renderVerdict(data);
@@ -1013,7 +1118,8 @@
     let vars = [];
     const availableVars = (mc.variables || []).map(v => v.key || v);
     if (scope === "core") {
-      vars = CORE_MATRIX_VARS.filter(key => availableVars.includes(key));
+      const useful = new Set(cells.filter(c => number(c.pearson_r) !== null || (c.group_statistics || []).some(g => number(g.statistics?.pearson_r ?? g.statistics?.pearson ?? g.pearson_r) !== null)).flatMap(c => [c.x_property, c.y_property]));
+      vars = availableVars.filter(key => useful.has(key));
       if (vars.length < 2) vars = availableVars;
     } else {
       const allVars = mc.variables || [];
@@ -1073,8 +1179,9 @@
         // 下三角：无序独立变量对 (colIdx < rowIdx)
         const pairKey = [vx, vy].sort().join(":");
         const cell = canonicalMap.get(pairKey);
-        const nVal = cell ? Number(cell.n || 0) : 0;
-        const rVal = (cell && number(cell.pearson_r) !== null) ? number(cell.pearson_r) : null;
+        const selectedGroup = (cell?.group_statistics || []).filter(g => Number(g.n) >= state.matrixMinN && number(g.statistics?.pearson_r ?? g.statistics?.pearson ?? g.pearson_r) !== null).sort((a,b) => Number(b.n) - Number(a.n))[0];
+        const nVal = selectedGroup ? Number(selectedGroup.n) : cell ? Number(cell.n || 0) : 0;
+        const rVal = selectedGroup ? number(selectedGroup.statistics?.pearson_r ?? selectedGroup.statistics?.pearson ?? selectedGroup.pearson_r) : (cell && number(cell.pearson_r) !== null) ? number(cell.pearson_r) : null;
         const isSufficient = nVal >= state.matrixMinN && rVal !== null;
 
         let cellStyle = "";
@@ -1094,7 +1201,7 @@
         }
 
         const rText = rVal !== null ? fmt2(rVal) : "—";
-        const nText = nVal > 0 ? `n=${nVal}` : "";
+        const nText = nVal > 0 ? `n=${nVal}${selectedGroup ? " · 最大可比组" : ""}` : "";
 
         rowHtml += `
           <td class="${cellClass}" style="${cellStyle}" data-x="${vx}" data-y="${vy}">
@@ -1161,9 +1268,10 @@
       if (ticket !== pairRequest || library !== state.libraryName) return;
       state.matrixDetailData = pairData;
 
-      const r = number(pairData.pearson_r);
-      const n = pairData.n || (pairData.points || []).length;
-      if ($("detailBadgeR")) $("detailBadgeR").textContent = r !== null ? `r = ${fmt2(r)}` : "样本不足";
+      const best = pairData.ready === true ? null : leadingGroup(pairData);
+      const r = number(best?.statistics?.pearson_r ?? best?.statistics?.pearson ?? pairData.pearson_r);
+      const n = best?.n || pairData.n || (pairData.points || []).length;
+      if ($("detailBadgeR")) $("detailBadgeR").textContent = r !== null ? `r = ${fmt2(r)}${best ? " · 最大组" : ""}` : "暂无相关系数";
       if ($("detailBadgeN")) $("detailBadgeN").textContent = `n = ${n}`;
 
       if ($("interpretText")) {
@@ -1172,9 +1280,9 @@
           const strength = abs >= 0.8 ? "强" : abs >= 0.5 ? "中等" : "弱";
           const dir = r > 0 ? "正相关" : "负相关";
           const trendText = n < 5 ? `当前小样本内呈${strength}${dir}趋势` : `呈${strength}${dir}趋势`;
-          $("interpretText").textContent = `当前催化剂样本内，${xMeta.labelZh} 与 ${yMeta.labelZh} ${trendText} (r = ${fmt2(r)}, n = ${n})。属于小样本探索性统计分析，不构成因果关系。`;
+          $("interpretText").textContent = `${best ? "最大可比组内，其他组分别统计。" : ""}当前催化剂样本内，${xMeta.labelZh} 与 ${yMeta.labelZh} ${trendText} (r = ${fmt2(r)}, n = ${n})。属于小样本探索性统计分析，不构成因果关系。`;
         } else {
-          $("interpretText").textContent = `当前变量对在所选文献库范围内配对样本数不足 (n = ${n} < ${state.matrixMinN})，暂无法形成可信的统计拟合。`;
+          $("interpretText").textContent = `当前变量对在所选文献库范围内配对样本数不足 (n = ${n} < ${state.matrixMinN})，暂未形成统计拟合（样本不足、数值无变化或计算条件分组）。`;
         }
       }
 
@@ -1235,19 +1343,24 @@
       <line stroke="var(--color-border)" stroke-width="1" x1="${L}" y1="${T}" x2="${L}" y2="${B}"/>
     `);
 
-    const slope = number(pairData.slope);
-    const intercept = number(pairData.intercept);
-    if (slope !== null && intercept !== null) {
-      const x1 = xScale.min, y1 = slope * x1 + intercept;
-      const x2 = xScale.max, y2 = slope * x2 + intercept;
-      lineLayer.insertAdjacentHTML("beforeend", `
-        <line stroke="var(--color-primary)" stroke-width="2" stroke-dasharray="4 2" x1="${sx(x1)}" y1="${sy(y1)}" x2="${sx(x2)}" y2="${sy(y2)}"/>
-      `);
+    const groups = pairData.comparability_groups || [];
+    const fits = fittedGroups(pairData);
+    const drawLine = (slope, intercept, lo, hi, color) => {
+      lineLayer.insertAdjacentHTML("beforeend", `<line stroke="${color}" stroke-width="2" stroke-dasharray="4 2" x1="${sx(lo)}" y1="${sy(slope * lo + intercept)}" x2="${sx(hi)}" y2="${sy(slope * hi + intercept)}"/>`);
+    };
+    if (groups.length) {
+      fits.forEach(g => {
+        const xs = pts.filter(p => p.group_id === g.group_id).map(p => p.x);
+        if (xs.length) drawLine(Number(g.statistics.slope), Number(g.statistics.intercept), Math.min(...xs), Math.max(...xs), GROUP_COLORS[groups.indexOf(g) % GROUP_COLORS.length]);
+      });
+    } else {
+      const slope = number(pairData.slope), intercept = number(pairData.intercept);
+      if (slope !== null && intercept !== null) drawLine(slope, intercept, xScale.min, xScale.max, GROUP_COLORS[0]);
     }
 
     pts.forEach((p) => {
       pointsLayer.insertAdjacentHTML("beforeend", `
-        <circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="4" fill="var(--color-primary)" stroke="var(--color-surface)" stroke-width="1.5"/>
+        <circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="4" fill="${GROUP_COLORS[Math.max(0, groups.findIndex(g => g.group_id === p.group_id)) % GROUP_COLORS.length]}" stroke="var(--color-surface)" stroke-width="1.5"/>
       `);
     });
   }
@@ -1544,6 +1657,69 @@
     });
   }
 
+  let revisionBaseline = null, revisionScope = null, revisionController = null;
+  let revisionGeneration = 0, revisionPending = false;
+  function resetRevisionPolling() {
+    revisionGeneration++;
+    revisionBaseline = null;
+    revisionScope = null;
+    revisionController?.abort();
+  }
+
+  async function pollDataRevision() {
+    if (document.hidden || revisionPending || state.libraryResolutionFailed) return;
+    revisionPending = true;
+    const generation = revisionGeneration;
+    const scope = state.libraryName;
+    const controller = new AbortController();
+    revisionController = controller;
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    try {
+      // The revision endpoint always bypasses the five-minute response cache.
+      const response = await fetch("/api/visuals/data-revision?" + visualParams(new URLSearchParams()), {
+        signal: controller.signal, cache: "no-store", headers: { Accept: "application/json" }
+      });
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (generation !== revisionGeneration || scope !== state.libraryName || document.hidden) return;
+      if (payload.source !== "rebuild" || typeof payload.revision !== "string") return;
+      if (revisionScope !== scope || revisionBaseline === null) {
+        revisionScope = scope;
+        revisionBaseline = payload.revision;
+        return;
+      }
+      if (payload.revision === revisionBaseline) return;
+      invalidateResponses();
+      // Prevent an earlier response from overwriting the refreshed source data.
+      ++state.requestId; ++matrixRequest; ++pairRequest; ++datasetRequest;
+      correlationController?.abort();
+      await loadFields(true);
+      if (generation !== revisionGeneration || scope !== state.libraryName || document.hidden) return;
+      if (state.currentTab === "matrix") await loadMatrix();
+      else if (state.currentTab === "dataset") await loadDatasetTab();
+      else await loadCorrelation();
+      if (generation !== revisionGeneration || scope !== state.libraryName) return;
+      revisionBaseline = payload.revision;
+      const status = $("globalStatus");
+      if (status) status.textContent = "已同步新提取数据，按同一催化剂重新配对。";
+    } catch (error) {
+      if (error.name !== "AbortError") console.warn("检查数据更新失败，下次自动重试", error);
+    } finally {
+      clearTimeout(timeout);
+      if (revisionController === controller) revisionController = null;
+      revisionPending = false;
+    }
+  }
+
+  function startRevisionPolling() {
+    pollDataRevision();
+    setInterval(pollDataRevision, 30000);
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) revisionController?.abort();
+      else pollDataRevision();
+    });
+  }
+
   /* ============================================================
      启动入口
      ============================================================ */
@@ -1551,7 +1727,7 @@
     TopNav.init({ currentPage: "visuals", mountId: "topnav-mount" });
     $("sourceSelect").value = "rebuild";
     $("sourceSelect").addEventListener("change", () => { const params = new URLSearchParams(location.search); params.set("source", $("sourceSelect").value); location.search = params.toString(); });
-    $("refreshAnalysis").addEventListener("click", () => { responseCache.clear(); if (state.currentTab === "matrix") loadMatrix(); else if (state.currentTab === "dataset") loadDatasetTab(); else loadFields().then(loadCorrelation).catch(error => { $("relationStatus").textContent = "字段读取失败：" + error.message; }); });
+    $("refreshAnalysis").addEventListener("click", () => { invalidateResponses(); if (state.currentTab === "matrix") loadMatrix(); else if (state.currentTab === "dataset") loadDatasetTab(); else loadFields().then(loadCorrelation).catch(error => { $("relationStatus").textContent = "字段读取失败：" + error.message; }); });
     updateExportUI();
     initEvents();
     await resolveLibraryScope();
@@ -1561,10 +1737,11 @@
       await loadFields();
       /* 先读 URL 填控件（此时字段下拉已就绪），再用同样的值发第一次查询（只发一次） */
       viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
-      state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "core";
+      state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "all";
       ViewState.bindDetailLinks("visuals");
       if (viewState.tab && viewState.tab !== "relations") switchTab(viewState.tab);
       await loadCorrelation();
+      startRevisionPolling();
     } catch (error) {
       const statusEl = $("relationStatus");
       if (statusEl) statusEl.textContent = "可分析字段读取失败：" + error.message;

@@ -1731,3 +1731,15 @@ details[open]>summary.table-card-header:after { transform:rotate(180deg); }
   .paired-data-table { font-size: 11.5px; }
   .tech-detail-summary { font-size: 11px; }
 }
+
+/* 真实数据的分组趋势与单变量分布 */
+.group-legend { display:flex; flex-wrap:wrap; gap:8px 18px; padding:10px 24px 14px; border-top:1px solid var(--color-border); font-size:11px; color:var(--color-text-secondary); }
+.group-legend span { display:inline-flex; align-items:center; gap:6px; }
+.group-legend i { width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+.distribution-title { font-size:12px; font-weight:650; fill:var(--color-text); }
+.distribution-bar { transition:opacity .15s; }
+.distribution-bar:hover { opacity:.7; }
+.cell-n-sub { line-height:1.4; }
+
+.heatmap-table th:not(.col-header-y), .heatmap-table td { min-width:105px; }
+.heatmap-table .col-header-y { position:sticky; left:0; z-index:1; background:var(--color-surface-alt); }
