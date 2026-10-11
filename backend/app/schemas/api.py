@@ -330,6 +330,7 @@ class PaperListItemResponse(BaseModel):
     pdf_exists: bool = False
     pdf_file_size: int | None = None
     pdf_path_kind: str | None = None
+    processing_status: dict[str, Any] = Field(default_factory=dict)
     has_parsed_content: bool = False
     manual_review_progress: dict[str, Any] = Field(default_factory=dict)
     needs_human_confirmation: bool = False

@@ -125,6 +125,14 @@ async function selectPaper(id) {
   }
 }
 
+function paperProcessingMarkup(paper) {
+  const progress = paper && paper.processing_status;
+  if (!progress) return '<p class="rebuild-selected-meta">解析状态：待核实</p>';
+  const fileMessage = (Array.isArray(progress.files) ? progress.files : []).map(file => `${file.role === "main" ? "正文" : "SI"} ${file.name || "未命名文件"}：${file.label || ({parsed:"已解析",unparsed:"未解析",parsing:"解析中",queued:"排队中",needs_check:"待核实"}[file.status]) || "待核实"}`).join("\n");
+  const coverage = Number(progress.total_files) > 0 ? ` · 文件 ${Number(progress.parsed_files || 0)}/${Number(progress.total_files)} 已解析` : "";
+  return `<p class="rebuild-selected-meta" title="${esc([progress.message, fileMessage].filter(Boolean).join("\n"))}">解析状态：<strong>${esc(progress.label || "待核实")}</strong>${esc(coverage)}</p>`;
+}
+
 function renderSelection() {
   const host = $("selectedPaper");
   const paper = state.selected;
@@ -140,6 +148,7 @@ function renderSelection() {
     <p class="rebuild-selected-title">${esc(paper.title || "无标题")}</p>
     <p class="rebuild-selected-meta">${esc(paper.year || "—")} · ${esc(paper.journal || "—")}</p>
     <p class="rebuild-selected-meta">源 PDF：${paper.has_pdf ? "已有" : "缺失"}</p>
+    ${paperProcessingMarkup(paper)}
     <div class="rebuild-counts">
       <span class="rebuild-count"><strong>${count(paper, "files")}</strong> 关联文件</span>
       <span class="rebuild-count"><strong>${count(paper, "assets")}</strong> 图表对象</span>
@@ -309,7 +318,8 @@ function renderJobStatus() {
   const job = state.job;
 
   if (!job || job.status === "not_started") {
-    statusArea.hidden = true;
+    statusArea.hidden = !state.selected;
+    statusArea.innerHTML = state.selected ? paperProcessingMarkup(state.selected) : "";
     resultArea.hidden = true;
     return;
   }
@@ -327,9 +337,10 @@ function renderJobStatus() {
     const r = job.result || {};
     const reading = r.reading_coverage;
     const coverageText = reading ? `图表解读已存 ${reading.structured_readings} / ${reading.current_assets}；${reading.status === 'incomplete' ? '内容尚不完整' : '内容待独立审核'}` : '图表解读覆盖尚未核验';
-    statusArea.innerHTML = `<div class="ai-status-done">执行结束 · ${esc(modeLabel)} · ${esc(coverageText)}；科学验收待核实。</div>`;
+    statusArea.innerHTML = `<div class="ai-status-done">本次任务执行结束 · ${esc(modeLabel)} · ${esc(coverageText)}；科学验收待核实。</div>`;
     resultArea.hidden = false;
     resultArea.innerHTML = `
+      <p class="rebuild-selected-meta">本次任务写回记录</p>
       <div class="ai-result-summary">
         <span class="ai-result-count"><strong>${count(r, "assets")}</strong> 图表对象</span>
         <span class="ai-result-count"><strong>${count(r, "rows")}</strong> 数据行</span>
@@ -348,6 +359,7 @@ function renderJobStatus() {
     statusArea.innerHTML = `<div class="ai-status-running">${esc(label)}</div>`;
     resultArea.hidden = true;
   }
+  if (state.selected) statusArea.innerHTML = paperProcessingMarkup(state.selected) + statusArea.innerHTML;
 }
 
 async function startAiExtract() {
@@ -378,6 +390,10 @@ async function startAiExtract() {
     const job = await api(`/api/rebuild/papers/${paper.id}/ai-extract/jobs`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({model}) });
     if (state.selectedId !== paper.id) return;
     state.job = job;
+    if (job.processing_status && state.selected && state.selected.id === state.selectedId) {
+      state.selected = {...state.selected, processing_status: job.processing_status};
+      renderSelection();
+    }
     renderJobStatus();
     renderJobArea();
     if (job.status === "running" || job.status === "queued" || job.status === "dispatching") {
@@ -410,6 +426,10 @@ async function pollJobStatus(paperId) {
     const job = await api(`/api/rebuild/papers/${paperId}/ai-extract/jobs/latest`);
     if (state.selectedId !== paperId) return;
     state.job = job;
+    if (job.processing_status && state.selected && state.selected.id === state.selectedId) {
+      state.selected = {...state.selected, processing_status: job.processing_status};
+      renderSelection();
+    }
     renderJobStatus();
     renderJobArea();
     if (job.status === "completed" || job.status === "failed") {
@@ -426,6 +446,10 @@ async function checkExistingJob(paperId) {
     const job = await api(`/api/rebuild/papers/${paperId}/ai-extract/jobs/latest`);
     if (state.selectedId !== paperId) return;
     state.job = job;
+    if (job.processing_status && state.selected && state.selected.id === state.selectedId) {
+      state.selected = {...state.selected, processing_status: job.processing_status};
+      renderSelection();
+    }
     renderJobStatus();
     renderJobArea();
     if (job.status === "running" || job.status === "queued" || job.status === "dispatching") {

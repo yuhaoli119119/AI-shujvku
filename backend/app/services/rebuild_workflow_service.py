@@ -192,7 +192,9 @@ def _paper_counts(session: Session, paper_id: UUID) -> dict[str, int]:
 
 
 def serialize_paper(session: Session, paper: Paper) -> dict[str, Any]:
+    from app.services.paper_processing_status import processing_statuses
     return {
+        "processing_status": processing_statuses(session,[paper.id])[paper.id],
         "id": str(paper.id),
         "paper_code": paper.paper_code,
         "serial_number": paper.serial_number,

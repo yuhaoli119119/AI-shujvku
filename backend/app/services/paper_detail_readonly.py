@@ -15,6 +15,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.services.paper_processing_status import processing_statuses
 from app.config import get_settings
 from app.db import models
 from app.schemas import api
@@ -78,10 +79,12 @@ class PaperDetailReadonlyService:
             counts['comprehensive_analysis'] = int(bool(analysis))
             status = build_paper_artifact_status(paper, settings=get_settings())
             base['source_pdf_sha256'] = source_pdf_digest(paper, get_settings())
+            processing = processing_statuses(self.session,[paper.id])[paper.id]
             base.update(counts=counts, artifact_status=status, pdf_artifact_status=status,
                         pdf_exists=status['pdf_exists'], pdf_size=status['pdf_file_size'],
                         pdf_file_size=status['pdf_file_size'], pdf_path_kind=status['pdf_path_kind'],
-                        has_parsed_content=bool(paper.abstract or any(counts[k] for k in ('sections','tables','figures','dft_results'))),
+                        processing_status=processing,
+                        has_parsed_content=processing['has_results'],
                         reading_guide=paper.reading_guide)
             metadata = self.session.scalar(select(models.PaperImpactMetadata).where(models.PaperImpactMetadata.paper_id == paper_id))
             if metadata:

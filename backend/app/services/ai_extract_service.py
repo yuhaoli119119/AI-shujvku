@@ -242,6 +242,9 @@ def serialize_job(job: WorkflowJob, session: Session | None = None) -> dict[str,
 
     if isinstance(result.get("result"), dict):
         result["result"] = {**result["result"], "execution_status": job.status}
+    if session is not None and paper_id_str:
+        from app.services.paper_processing_status import processing_statuses
+        result['processing_status'] = processing_statuses(session,[UUID(paper_id_str)])[UUID(paper_id_str)]
     return result
 
 
@@ -283,7 +286,7 @@ async def create_ai_extract_job(
         objective = prompt
     job = WorkflowJob(job_id=_job_id(),type=JOB_TYPE,status="dispatching",library_name=paper.library_name,
         payload={"paper_id":str(paper_id),"attempt_token":attempt_token,"chosen_model":chosen_model,
-                 "chosen_mode":chosen_mode,"dispatch_intent_at":_utcnow().isoformat()},
+                 "chosen_mode":chosen_mode,"file_ids":[str(fid) for fid in session.scalars(select(RebuildPaperFile.id).where(RebuildPaperFile.paper_id==paper_id))],"dispatch_intent_at":_utcnow().isoformat()},
         progress={"phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
                   "dispatch_started":False,"events":[],"actual_inference_verified":False,
                   "model_verification_status":"pending_start_ack"})
@@ -408,6 +411,7 @@ async def sync_job_status(
     observed = {"thread_id":status.thread_id,"turn_id":status.turn_id,"turn_status":status.turn_status,
                 "goal_status":status.goal_status,"read_at":_utcnow().isoformat()}
     progress["readback"] = observed
+    progress["status_checked_at"] = _utcnow().isoformat()
     if (status.thread_id != thread_id or not progress.get("turn_id") or
         status.turn_id != progress.get("turn_id") or not mode):
         job.progress = {**progress,"phase":"needs_check","needs_check":True,"automatic_retry":False}
@@ -420,7 +424,8 @@ async def sync_job_status(
         if status.final_report:
             summary["final_report"] = status.final_report[:2000]
         job.status = "completed"
-        job.result = summary
+        observed_files = set(session.scalars(select(RebuildVisualAsset.file_id).where(RebuildVisualAsset.paper_id==UUID(paper_id_str),RebuildVisualAsset.file_id.is_not(None)))) | set(session.scalars(select(RebuildValueSource.file_id).where(RebuildValueSource.paper_id==UUID(paper_id_str),RebuildValueSource.file_id.is_not(None)))) if paper_id_str else set()
+        job.result = {**summary,"file_ids":[str(fid) for fid in observed_files if str(fid) in (job.payload or {}).get("file_ids",[])]}
         job.progress = {**progress,"phase":"completed","needs_check":False}
         session.flush()
         # Original detail reads both stores directly. Never overwrite legacy figures on job polling.

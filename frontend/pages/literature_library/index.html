@@ -4,7 +4,7 @@
   <meta charset="UTF-8"><meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"><meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>文献库 - Literature AI</title>
   <link rel="stylesheet" href="../../shared/fonts.css"><link rel="stylesheet" href="../../shared/tokens.css"><link rel="stylesheet" href="../../shared/components.css"><link rel="stylesheet" href="../../shared/topnav.css">
-<link rel="stylesheet" href="../../shared/responsive.css"><link rel="stylesheet" href="./page.css?v=20261011-theme-tokens">
+<link rel="stylesheet" href="../../shared/responsive.css"><link rel="stylesheet" href="./page.css?v=20261011-library-status">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script><script>ThemeManager.init();</script>
 </head>
 <body>
@@ -18,6 +18,7 @@
 <div class="stat-grid" aria-label="文献库统计"><div><strong id="statTotal">—</strong><span>文献总数</span></div><div><strong id="statPdf">—</strong><span>有 PDF</span></div></div>
 <nav class="quick-links" aria-label="快捷筛选"><button class="quick-link active" type="button" data-quick="all"><span>全部文献</span><b id="quickAll">0</b></button><button class="quick-link" type="button" data-quick="pdf"><span>有 PDF</span><b id="quickPdf">0</b></button></nav>
 <button class="btn ghost small" type="button" id="pendingSiBtn">待关联附件</button><div class="filter-title"><span>快速筛选</span><button type="button" id="resetFiltersBtn">重置</button></div>
+<label class="field-label" for="processingFilter">解析状态</label><select id="processingFilter" class="control"><option value="">全部</option><option value="parsed">已解析</option><option value="unparsed">未解析</option><option value="parsing">解析中</option><option value="partial">部分解析</option><option value="failed">解析失败</option><option value="needs_check">待核实</option><option value="queued">排队中</option></select>
 <label class="field-label" for="yearFilter">年份</label><select id="yearFilter" class="control"><option value="">全部</option></select>
 <label class="field-label" for="journalFilter">期刊</label><select id="journalFilter" class="control"><option value="">全部</option></select>
 <label class="field-label" for="typeFilter">文献类型</label><select id="typeFilter" class="control"><option value="">全部</option></select>
@@ -30,5 +31,5 @@
 <div class="list-summary"><div><strong id="resultCount">0</strong> 篇结果 <span id="loadMeta"></span></div><button class="btn ghost small" type="button" id="refreshBtn">刷新</button></div>
 <div class="table-wrap litai-scroll-x"><table class="paper-table litai-stack"><thead><tr><th>编号</th><th>年份</th><th>类型</th><th>IF</th><th class="title-col">标题</th><th>来源 / DOI</th><th>状态</th></tr></thead><tbody id="paperRows"><tr><td colspan="7" class="empty">正在读取服务器文献数据…</td></tr></tbody></table></div>
 <footer class="pager"><div>共 <strong id="footerTotal">0</strong> 篇 · 每页 <select id="pageSizeSelect" aria-label="每页数量"><option>10</option><option selected>20</option><option>50</option></select></div><div class="pager-buttons"><button type="button" id="prevPageBtn" aria-label="上一页">‹</button><span id="pageButtons"></span><button type="button" id="nextPageBtn" aria-label="下一页">›</button></div></footer>
-</section></section></main><div id="toast" role="status" aria-live="polite"></div><script src="../../shared/view-state.js"></script><script src="./page.js?v=20261011-library-theme" defer></script>
+</section></section></main><div id="toast" role="status" aria-live="polite"></div><script src="../../shared/view-state.js"></script><script src="./page.js?v=20261011-library-status" defer></script>
 </body></html>

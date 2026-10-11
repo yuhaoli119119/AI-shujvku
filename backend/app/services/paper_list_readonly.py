@@ -8,6 +8,7 @@ from __future__ import annotations
 from sqlalchemy import Numeric, String, case, cast, func, or_, select
 from sqlalchemy.orm import Session
 
+from app.services.paper_processing_status import processing_statuses
 from app.config import get_settings
 from app.db import models
 from app.schemas.api import PaperListFilterParams, PaperListItemResponse
@@ -118,6 +119,7 @@ class PaperListReadonlyService:
                 .group_by(models.PaperRelationship.source_paper_id, models.PaperRelationship.relationship_type)):
                 relationships[pid][kind] = int(count)
             attachments = supplementary_attachments(self.session, ids)
+            processing = processing_statuses(self.session, ids)
             result = []
             for paper in papers:
                 analysis = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
@@ -134,7 +136,8 @@ class PaperListReadonlyService:
                     comprehensive_analysis=paper.comprehensive_analysis, counts=counts[paper.id],
                     pdf_exists=file_size is not None, pdf_size=file_size, pdf_file_size=file_size,
                     pdf_artifact_status={"pdf_exists": file_size is not None, "pdf_file_size": file_size},
-                    has_parsed_content=bool(paper.abstract or any(counts[paper.id][k] for k in ("sections", "tables", "figures", "dft_results"))),
+                    processing_status=processing[paper.id],
+                    has_parsed_content=processing[paper.id]["has_results"],
                     relationship_summary=relationships[paper.id], supplementary_count=len(attachments[paper.id]))
                 if (metadata := impact.get(paper.id)) is not None:
                     payload.update(impact_factor=metadata.impact_factor, impact_factor_source=metadata.impact_factor_source,

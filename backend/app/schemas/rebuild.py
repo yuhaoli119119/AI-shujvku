@@ -215,3 +215,12 @@ class RebuildAnalysisRequest(BaseModel):
     )
     include_estimated: bool = False
     max_samples: int = Field(default=5000, ge=1, le=5000)
+
+class ProcessingStatusReport(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    run_id: str = Field(min_length=1, max_length=160)
+    agent: str = Field(default='external_ai', min_length=1, max_length=128)
+    status: Literal['queued','parsing','parsed','partial','failed']
+    message: str = Field(default='', max_length=2000)
+    no_extractable_content_reason: str | None = Field(default=None, max_length=2000)
+    file_ids: list[UUID] = Field(default_factory=list, max_length=100)

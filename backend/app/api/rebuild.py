@@ -22,6 +22,7 @@ from app.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.db.models import RebuildValueSource, RebuildDataValue
 from app.schemas.rebuild import (
+    ProcessingStatusReport,
     RebuildAssetsImportRequest,
     RebuildAnalysisRequest,
     RebuildRowsImportRequest,
@@ -139,6 +140,64 @@ async def get_latest_ai_extract_job_endpoint(
     return serialize_job(job, session)
 
 
+@router.get("/processing-statuses")
+async def current_processing_statuses(
+    library_name: str | None = None,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+):
+    from app.db.models import Paper, WorkflowJob
+    from app.services.paper_list_readonly import readonly_library_clause
+    from app.services.paper_processing_status import processing_statuses
+    import asyncio
+    from datetime import datetime
+    query = select(Paper.id)
+    if library_name is not None:
+        query = query.where(readonly_library_clause(library_name))
+    ids = list(session.scalars(query))
+    # Read-through native tasks, even when the AI task page is closed. Fair order
+    # keeps an unreachable task from starving the others. External agents report
+    # their own lifecycle through the shared write endpoint below.
+    jobs = list(session.scalars(select(WorkflowJob).where(
+        WorkflowJob.type == JOB_TYPE, WorkflowJob.status.in_(['queued','dispatching','running']),
+        WorkflowJob.payload.op('->>')('paper_id').in_([str(pid) for pid in ids])
+    ).order_by(WorkflowJob.updated_at.asc()).limit(4))) if ids else []
+    for job in jobs:
+        job_id = job.job_id
+        old_read_at = ((job.progress or {}).get('readback') or {}).get('read_at')
+        try:
+            job = await asyncio.wait_for(sync_job_status(session,job,settings),timeout=5)
+            if job.status in ('queued','dispatching','running') and ((job.progress or {}).get('readback') or {}).get('read_at') == old_read_at:
+                job.progress = {**(job.progress or {}),'needs_check':True,'phase':'needs_check','status_checked_at':datetime.utcnow().isoformat()}
+            session.commit()
+        except Exception:
+            session.rollback()
+            unknown = session.get(WorkflowJob,job_id)
+            if unknown and unknown.status in ('queued','dispatching','running'):
+                unknown.progress = {**(unknown.progress or {}),'needs_check':True,'phase':'needs_check','status_checked_at':datetime.utcnow().isoformat()}
+                session.commit()
+    statuses = processing_statuses(session,ids)
+    return {'items':[{'paper_id':str(pid),'processing_status':status} for pid,status in statuses.items()]}
+
+
+@router.put("/papers/{paper_id}/processing-status")
+async def report_paper_processing_status(
+    paper_id: UUID,
+    payload: ProcessingStatusReport,
+    session: Session = Depends(get_db_session),
+    _auth: SessionState = Depends(require_session),
+):
+    from app.services.paper_processing_status import report_processing
+    from app.services.rebuild_workflow_service import _required_paper
+    try:
+        result = report_processing(session,_required_paper(session,paper_id),payload)
+        session.commit()
+        return {'paper_id':str(paper_id),'processing_status':result}
+    except (ValueError, RebuildWorkflowError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.get("/templates")
 async def rebuild_templates() -> dict[str, Any]:
     return reaction_templates()
@@ -198,6 +257,12 @@ async def rebuild_ai_work_package(
                 "asset_crop": "/api/rebuild/papers/{paper_id}/assets/crop",
                 "data_rows": "/api/rebuild/rows/import",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
+                "processing_status": "/api/rebuild/papers/{paper_id}/processing-status",
+            },
+            "processing_status_contract": {
+                "method": "PUT", "authentication": "workbench session",
+                "body": {"run_id": "stable id for this attempt", "agent": "AI name", "status": "parsing then parsed/partial/failed", "message": "completion or remaining work", "file_ids": "IDs of files covered by this completed attempt"},
+                "rule": "Report parsing before work and parsed/partial/failed after committed writes, using the same run_id. Terminal runs are immutable; retry identical terminal status, use a new run_id for a new attempt. Specify file_ids for files fully processed; newly attached SI remains unparsed until covered. Empty completion requires no_extractable_content_reason. Processing completion does not mean scientific acceptance.",
             },
             "row_identity_contract": {
                 "dimensions": ["adsorbate", "intermediate", "reaction_step", "adsorption_site", "identity_context"],

@@ -54,7 +54,7 @@ def _override_auth():
 def _patch_bg_dispatch_success(monkeypatch):
     """Mock _background_dispatch to set the job to 'running' immediately."""
     async def _fake_bg(*, job_id, database_url, prompt, objective, settings,
-                       primary_model, fallback_model):
+                       primary_model, attempt_token):
         from app.db.session import session_scope
         with session_scope(database_url) as session:
             job = session.get(WorkflowJob, job_id)
@@ -77,7 +77,7 @@ def _patch_bg_dispatch_success(monkeypatch):
 def _patch_bg_dispatch_failure(monkeypatch):
     """Mock _background_dispatch to set the job to 'failed' immediately."""
     async def _fake_bg(*, job_id, database_url, prompt, objective, settings,
-                       primary_model, fallback_model):
+                       primary_model, attempt_token):
         from app.db.session import session_scope
         with session_scope(database_url) as session:
             job = session.get(WorkflowJob, job_id)
