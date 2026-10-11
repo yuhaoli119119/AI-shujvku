@@ -13,6 +13,8 @@
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
+  <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011">
+  <script src="../../shared/editable-data-grid.js?v=20261011"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -623,10 +625,12 @@
         <div>
           <div class="tabs">
             <button class="tab-btn active" onclick="switchDetailTab('summary', event)">概览</button>
-            <button class="tab-btn" onclick="switchDetailTab('sections', event)">章节</button>
+            <button class="tab-btn" onclick="switchDetailTab('dft', event)"><span id="pdDftTabLabel">计算数据</span></button>
+            <button class="tab-btn" onclick="switchDetailTab('experimental', event)">实验数据</button>
             <button class="tab-btn" onclick="switchDetailTab('figures', event)">图片</button>
-            <button class="tab-btn" onclick="switchDetailTab('tables', event)">表格</button>
-            <button class="tab-btn" onclick="switchDetailTab('dft', event)"><span id="pdDftTabLabel">DFT 候选与性能</span></button>
+            <button class="tab-btn" onclick="switchDetailTab('tables', event)">原文表格</button>
+            <button class="tab-btn" onclick="switchDetailTab('supplementary', event)">补充资料</button>
+            <button class="tab-btn" onclick="switchDetailTab('sections', event)">章节</button>
           </div>
 
           <div id="tab-summary" class="tab-pane active">
@@ -649,14 +653,16 @@
           </div>
           <div id="tab-sections" class="tab-pane"><div class="panel-card"><div class="panel-title">解析章节</div><div id="sectionsList"></div></div></div>
           <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图片</div><div id="figuresList"></div></div></div>
-          <div id="tab-tables" class="tab-pane"><div class="panel-card"><div class="panel-title">表格</div><div id="tablesList"></div></div></div>
+          <div id="tab-tables" class="tab-pane"><div class="panel-card"><div class="panel-title">原文表格</div><div id="tablesList"></div></div></div>
           <div id="tab-dft" class="tab-pane">
             <div id="pdCurrentData"></div>
-            <details id="pdLegacyData" open><summary id="pdLegacyDataLabel" hidden>历史解析 DFT 与性能资料（保留原编辑功能）</summary>
+            <details id="pdLegacyData"><summary id="pdLegacyDataLabel">历史计算数据（原解析记录保留）</summary>
             <div class="panel-card"><div class="panel-title">DFT 设置</div><div id="dftSettings"></div></div>
             <div class="panel-card"><div class="panel-title">AI 候选 DFT 数据</div><div id="dftResults"></div></div>
-            <div class="panel-card"><div class="panel-title">电化学性能</div><div id="electrochemicalPerformance"></div></div>
+
           </details></div>
+          <div id="tab-experimental" class="tab-pane"><div id="pdExperimentalData"></div><details><summary>历史实验数据（原解析记录保留）</summary><div class="panel-card"><div class="panel-title">历史电化学性能</div><div id="electrochemicalPerformance"></div></div></details></div>
+          <div id="tab-supplementary" class="tab-pane"><div class="panel-card"><div class="panel-title">补充资料</div><div id="pdSupplementaryFiles"></div></div></div>
 
 
         </div>
@@ -1345,7 +1351,7 @@
         ? '<button class="btn ghost small" type="button" data-role="copy-dft-locator" onclick="copyDftLocator(event, \'' + esc(resultId) + '\', ' + index + ')">复制 ID</button>'
         : "";
       const editAction = resultId
-        ? '<button class="btn ghost small" type="button" onclick="openDftEditDialog(\'' + esc(resultId) + '\')">修改数据</button>'
+        ? '<button class="btn ghost small" type="button" onclick="openHistoryTransfer(\'dft\', \'' + esc(resultId) + '\')" data-history-transfer="' + esc(resultId) + '">带来源转入当前数据表</button>'
         : "";
       const meta = [
         source ? renderDftStatusChip("来源 " + source, "", source) : "",
@@ -2033,7 +2039,7 @@
             `).join("")
           : '<div class="empty-state">暂无可展示字段。</div>';
         const editAction = isDftResult && resultId
-          ? `<button class="btn ghost small" type="button" onclick="openDftEditDialog('${esc(resultId)}')">修改数据</button>`
+          ? `<button class="btn ghost small" type="button" onclick="openHistoryTransfer('dft','${esc(resultId)}')" data-history-transfer="${esc(resultId)}">带来源转入当前数据表</button>`
           : "";
         return `
           <div class="structured-card" data-collection="${esc(options.collection || "")}" data-record-id="${esc(item && item.id || "")}" data-record-index="${esc(index)}">
@@ -3058,30 +3064,45 @@
       state.rebuildAssetFilter = assetId; switchDetailTab('dft'); renderCurrentData();
       document.getElementById('pdCurrentData')?.scrollIntoView({block:'start'});
     }
+    async function reloadEditableData() {
+      state.rebuildStatus = 'loading'; state.rebuildPromise = null;
+      await loadRebuildAssets();
+    }
     function renderCurrentData() {
-      const area = document.getElementById('pdCurrentData'); if (!area) return;
-      if (state.rebuildStatus !== 'ready') {
-        area.innerHTML = `<div class="panel-card"><div class="panel-title">当前提取结果</div><div class="${state.rebuildStatus === 'failed' ? 'warning' : 'muted'}">${state.rebuildStatus === 'failed' ? '当前结果读取失败，未确认数据是否为空：' + esc(state.rebuildError) : '正在读取当前图表和全部数据分页…'}</div></div>`;
-        return;
-      }
-      if (!currentResultsPresent()) { area.innerHTML = ''; return; }
       const rows = state.rebuildRows.filter(row => !state.rebuildAssetFilter || row.values.some(value => (value.sources || []).some(source => source.asset_id === state.rebuildAssetFilter)));
-      const sourceMap = new Map(state.rebuildRows.flatMap(row => row.values.flatMap(item => item.sources || [])).map(source => [source.id, source]));
-      const templates = state.rebuildTemplates || {}, reactions = templates.reactions || {};
-      const groups = [...new Set(rows.map(row => row.reaction || '未记录反应'))];
-      area.innerHTML = `<div class="panel-card"><div class="panel-title">当前提取结果 · ${state.rebuildRows.length} 行</div>
-        <p class="muted">展示当前已保存的材料、条件、数值、缺失与来源；不代表独立科学验收。</p>
-        ${state.rebuildAssetFilter ? '<button class="btn btn-ghost btn-sm" type="button" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部当前数据</button>' : ''}
-        ${!state.rebuildTemplates ? '<p class="warning">模板名称读取失败，以下保留原字段名称。</p>' : ''}
-        ${!rows.length ? '<div class="empty-state">当前筛选没有关联数据。</div>' : groups.map(reaction => {
-          const template = reactions[reaction] || {}, fields = [...(templates.common_fields || []), ...(template.fields || [])];
-          return `<section><h3>${esc(template.label || reaction)}</h3>${rows.filter(row => (row.reaction || '未记录反应') === reaction).map(row => `<details class="structured-card pd-current-row" data-current-row="${esc(row.id)}"><summary>${esc([row.material, row.support, row.active_site, row.active_site_type, row.configuration, row.data_type].filter(v => v !== null && v !== undefined && v !== '').join(' · '))} ${row.identity_status === 'pending' ? '· 身份待定' : ''}</summary>
-            <div class="prewrap">条件：${esc(storedText(row.condition))}</div>
-            ${row.properties && Object.keys(row.properties).some(key => !key.startsWith('_')) ? `<div class="prewrap">补充属性：${esc(storedText(Object.fromEntries(Object.entries(row.properties).filter(([key]) => !key.startsWith('_')))))}</div>` : ''}
-            <div class="pd-current-table-wrap"><table class="pd-current-table"><thead><tr><th>模板字段</th><th>当前值与来源</th><th>单位</th></tr></thead><tbody>${row.values.map(value => `<tr data-current-value="${esc(value.id)}"><th>${esc(fields.find(field => field.name === value.field_name)?.label || value.field_name)}</th><td>${currentValueHtml(value, sourceMap)}</td><td>${esc(storedText(value.unit))}</td></tr>`).join('')}</tbody></table></div>
-            <details><summary>原始行记录</summary><pre class="pd-current-json">${esc(JSON.stringify(row, null, 2))}</pre></details></details>`).join('')}</section>`;
-        }).join('')}
-        <a href="../data_table/index.html?paper_id=${encodeURIComponent(state.paperId)}">打开完整数据表与纠正工具</a></div>`;
+      [['pdCurrentData','dft'],['pdExperimentalData','experimental']].forEach(([id,type]) => {
+        const area=document.getElementById(id); if(!area) return;
+        if(state.rebuildStatus !== 'ready') {area.innerHTML='<div class="panel-card">'+(state.rebuildStatus==='failed'?'读取失败：'+esc(state.rebuildError):'正在读取全部数据…')+'</div>'; return;}
+        area.innerHTML=`<div class="panel-card"><div class="panel-title">${type==='dft'?'计算数据':'实验数据 · 性能与表征'}</div><p class="muted">正文与 SI 数据共同展示；点击具体值查看来源与编辑，多组数据先展开条件。</p>${state.rebuildAssetFilter?'<button class="btn" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部数据</button>':''}<div data-grid></div></div>`;
+        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,type,reload:reloadEditableData});
+      });
+      if(state.rebuildStatus==='ready' && !state.defaultDataTabApplied && !deepLinkHasContext()) {
+        state.defaultDataTabApplied=true;
+        switchDetailTab(state.rebuildRows.some(row=>row.data_type==='dft')?'dft':state.rebuildRows.length?'experimental':'summary');
+      }
+      renderSupplementaryFiles();
+      installHistoryTransferButtons();
+    }
+    function openHistoryTransfer(kind,id) {
+      const records=kind==='dft'?state.paper?.dft_results_items:state.paper?.electrochemical_performance_items;
+      const record=(records || []).find(item=>String(item.id)===id);
+      if(record)EditableDataGrid.transferHistory(state.paperId,kind,record,{templates:state.rebuildTemplates,files:state.rebuildFiles,reload:reloadEditableData});
+    }
+    function installHistoryTransferButtons() {
+      const install=(container,kind,records)=>container?.querySelectorAll('[data-record-id]').forEach(card=>{
+        const record=records.find(item=>String(item.id)===card.dataset.recordId);if(!record || card.querySelector('[data-history-transfer]'))return;
+        const button=document.createElement('button');button.type='button';button.className='btn btn-ghost btn-sm';button.dataset.historyTransfer=record.id;button.textContent='带来源转入当前数据表';button.onclick=()=>EditableDataGrid.transferHistory(state.paperId,kind,record,{templates:state.rebuildTemplates,files:state.rebuildFiles,reload:reloadEditableData});card.append(button);
+      });
+      install(document.getElementById('dftResults'),'dft',state.paper?.dft_results_items || []);
+      install(document.getElementById('electrochemicalPerformance'),'electrochemical',state.paper?.electrochemical_performance_items || []);
+    }
+    function renderSupplementaryFiles() {
+      const area=document.getElementById('pdSupplementaryFiles'); if(!area)return;
+      const attachments=state.paper?.supplementary_attachments;
+      const files=Array.isArray(attachments)?attachments:state.rebuildFiles.filter(file=>file.role==='si').map(file=>({...file,preview_url:`/api/rebuild/files/${encodeURIComponent(file.id)}/preview`,download_url:`/api/rebuild/files/${encodeURIComponent(file.id)}/download`}));
+      area.innerHTML=files.map(file=>`<article class="section-item"><strong>${esc(file.attachment_code || file.paper_code || 'SI')}</strong> · ${esc(file.original_filename)}<p>${file.preview_url ? `<a class="btn" href="${esc(file.preview_url)}" target="_blank" rel="noopener">打开 PDF</a>` : 'PDF 未登记'} ${file.download_url ? `<a class="btn" href="${esc(file.download_url)}" download>下载</a>` : ''}</p></article>`).join('') || '<p class="muted">尚无已登记的补充资料。</p>';
+      area.innerHTML+='<label>上传补充资料 PDF <input id="pdSIUpload" type="file" accept="application/pdf"></label><p id="pdSIUploadStatus" role="status"></p>';
+      document.getElementById('pdSIUpload').onchange=async event=>{const file=event.target.files[0];if(!file)return;const form=new FormData();form.append('file',file);form.append('role','si');const status=document.getElementById('pdSIUploadStatus');status.textContent='正在上传…';try{await fetchJSON(`/api/rebuild/papers/${state.paperId}/files`,{method:'POST',body:form});state.paper=await fetchJSON(`${API_BASE}/${state.paperId}`);await reloadEditableData();}catch(error){status.textContent='上传失败：'+error.message;}};
     }
     function visualLabelKey(label, type) {
       const text = String(label || '').trim();
@@ -3306,12 +3327,12 @@
       const historyMode = hasCurrent || state.rebuildStatus !== 'ready';
       const legacyData = document.getElementById('pdLegacyData');
       if (legacyData && legacyData.dataset.history !== String(historyMode)) {
-        legacyData.dataset.history = String(historyMode); legacyData.open = !historyMode;
-        document.getElementById('pdLegacyDataLabel').hidden = !historyMode;
+        legacyData.dataset.history = String(historyMode); legacyData.open = false;
+        document.getElementById('pdLegacyDataLabel').hidden = false;
       }
       renderCurrentData();
       document.getElementById('pdDftMetricLabel').textContent = hasCurrent ? '当前数据' : 'DFT 候选';
-      document.getElementById('pdDftTabLabel').textContent = hasCurrent ? '当前数据与历史性能' : 'DFT 候选与性能';
+      document.getElementById('pdDftTabLabel').textContent = '计算数据';
       document.getElementById('cntDftDesc').textContent = '吸附能、能垒、PDOS 等';
       if (hasCurrent) {
         document.getElementById('cntDFT').textContent = state.rebuildRows.length;

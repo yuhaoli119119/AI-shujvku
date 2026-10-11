@@ -51,7 +51,7 @@ def test_workflow_queue_routes_pdf_ingest_to_dedicated_queue():
     assert workflow_queue_for_job_type(JOB_TYPE_AGENT_ACTIVITY) == WORKFLOW_QUEUE_DEFAULT
 
 
-def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
+def test_init_db_keeps_numbering_migration_explicit(monkeypatch):
     db_url = "postgresql+psycopg://test:test@db:5432/test"
     db_session._initialized_urls.discard(db_url)
     events: list[str] = []
@@ -157,9 +157,8 @@ def test_init_db_backfills_paper_codes_after_migration_transaction(monkeypatch):
 
     db_session.init_db(db_url, force=True)
 
-    assert "ensure_paper_codes" in events
-    assert events.index("begin_exit") < events.index("session_open")
-    assert events.index("session_open") < events.index("ensure_paper_codes")
+    assert "ensure_paper_codes" not in events
+    assert "session_open" not in events
 
 
 def test_serialize_extraction_job_includes_readable_summary_and_failure_explanation():

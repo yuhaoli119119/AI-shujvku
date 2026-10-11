@@ -9,6 +9,8 @@
   <link rel="stylesheet" href="../../shared/responsive.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011">
+  <script src="../../shared/editable-data-grid.js?v=20261011"></script>
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <script>ThemeManager.init();</script>
   <style>
@@ -100,6 +102,10 @@
     <p>更正当前行的活性中心类型或完整条件，所有数值与来源保持原样。请先核对关联 PDF，并说明依据。</p>
     <div id="identityBefore" class="rebuild-panel" style="box-shadow:none;overflow-wrap:anywhere"></div>
     <form id="identityForm" style="display:grid;gap:10px;margin-top:16px">
+      <label class="rebuild-field">材料<input id="identityMaterial" class="rebuild-control" required></label>
+      <label class="rebuild-field">载体<input id="identitySupport" class="rebuild-control"></label>
+      <label class="rebuild-field">位点<input id="identityActiveSite" class="rebuild-control"></label>
+      <label class="rebuild-field">构型<input id="identityConfiguration" class="rebuild-control"></label>
       <label class="rebuild-field">活性中心类型<select id="identitySiteType" class="rebuild-control"></select></label>
       <label class="rebuild-field">完整条件（JSON 对象）<textarea id="identityCondition" class="rebuild-control" spellcheck="false" rows="6" required></textarea></label>
       <p style="margin:0;font-size:13px">保留仍适用的条件键。缺失条件可留空对象 {}，不要用 0 表示未知。</p>

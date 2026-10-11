@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.paper_codes import main_paper_clause
 from app.db.models import Paper, PaperCitationEligibility, PaperImpactMetadata
 from app.db.session import get_db_session
 from app.services.citation_eligibility_service import CitationEligibilityService, CitationEligibilityUpdate
@@ -217,7 +218,7 @@ async def citation_metadata_preview(
 def metadata_diagnostics(
     session: Session = Depends(get_db_session)
 ) -> dict:
-    papers = session.scalars(select(Paper)).all()
+    papers = session.scalars(select(Paper).where(main_paper_clause())).all()
     impact_map = {
         row.paper_id: row 
         for row in session.scalars(select(PaperImpactMetadata)).all()

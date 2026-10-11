@@ -33,6 +33,7 @@ from app.schemas.rebuild import (
 )
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
+from app.services.legacy_data_transfer import LegacyTransferRequest, transfer_legacy_value
 from app.services.rebuild_file_preview import resolve_original_download, resolve_reading_pdf
 from app.services.rebuild_workflow_service import (
     RebuildWorkflowError,
@@ -76,8 +77,8 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found"} else (
-        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found"} else (
+        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -621,15 +622,40 @@ async def rebuild_analysis(
     return result
 
 
+@router.post("/papers/{paper_id}/history-transfer")
+async def transfer_history(paper_id: UUID, payload: LegacyTransferRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_identity_correction_session)) -> dict[str, Any]:
+    try:
+        result = transfer_legacy_value(session, paper_id, payload, auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        status = 409 if str(exc) == "legacy_transfer_already_exists" else 400
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+
+
+@router.get("/values/{value_id}")
+async def read_rebuild_value(value_id: UUID, session: Session = Depends(get_db_session)) -> dict[str, Any]:
+    value = session.get(RebuildDataValue, value_id)
+    if value is None:
+        raise HTTPException(status_code=404, detail="value_not_found")
+    sources = session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)).all()
+    return serialize_value(value, sources)
+
+
 @router.put("/values/{value_id}")
 async def correct_rebuild_value(
     value_id: UUID,
     payload: RebuildValueCorrectionRequest,
     session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_identity_correction_session),
 ) -> dict[str, Any]:
     try:
-        value = update_data_value(session, value_id=value_id, payload=payload)
+        value = update_data_value(session, value_id=value_id, payload=payload, actor=auth.username)
     except RebuildWorkflowError as exc:
+        session.rollback()
         raise _http_error(exc) from exc
     sources = session.scalars(
         select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)

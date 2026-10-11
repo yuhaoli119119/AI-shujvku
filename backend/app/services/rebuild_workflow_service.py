@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.config import Settings
+from app.services.paper_codes import main_paper_clause
 from app.db.models import (
     Paper,
     RebuildAnalysisRun,
@@ -212,7 +213,7 @@ def list_papers(
     limit: int = 50,
     offset: int = 0,
 ) -> dict[str, Any]:
-    statement = select(Paper).order_by(Paper.serial_number.asc().nullslast(), Paper.created_at.desc())
+    statement = select(Paper).where(main_paper_clause()).order_by(Paper.serial_number.asc().nullslast(), Paper.created_at.desc())
     if query:
         needle = f"%{query.strip()}%"
         statement = statement.where(
@@ -1196,14 +1197,32 @@ def update_data_value(
     *,
     value_id: UUID,
     payload: RebuildValueCorrectionRequest,
+    actor: str = "service",
 ) -> RebuildDataValue:
-    value = session.get(RebuildDataValue, value_id)
+    # Coordinate with row imports and identity edits before locking the cell.
+    paper_id = session.scalar(select(RebuildDataValue.paper_id).where(RebuildDataValue.id == value_id))
+    if paper_id is None:
+        raise RebuildWorkflowError("value_not_found")
+    session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update())
+    value = session.scalar(select(RebuildDataValue).where(RebuildDataValue.id == value_id)
+                           .with_for_update().execution_options(populate_existing=True))
     if value is None:
         raise RebuildWorkflowError("value_not_found")
     row = session.get(RebuildDataRow, value.row_id)
     if row is None:
         raise RebuildWorkflowError("row_not_found")
 
+    fingerprint = hashlib.sha256(_canonical_json(payload.model_dump(mode="json")).encode()).hexdigest()
+    correction_requests = list((value.conflict or {}).get("correction_requests") or [])
+    for entry in correction_requests:
+        if entry["request_id"] == str(payload.request_id):
+            if entry["request_fingerprint"] != fingerprint:
+                raise RebuildWorkflowError("value_request_id_reused")
+            return value
+    if value_revision(value) != payload.expected_revision:
+        raise RebuildWorkflowError("value_revision_conflict")
+    if not payload.correction_reason.strip():
+        raise RebuildWorkflowError("correction_reason_required")
     data = payload.model_dump()
     value_type = data.get("value_type") or "explicit"
     previous = {
@@ -1268,6 +1287,14 @@ def update_data_value(
         "history": history,
         "correction_reason": data.get("correction_reason"),
     }
+    value.conflict = {**value.conflict, "notes": payload.notes,
+                      "correction_requests": [*correction_requests, {
+                          "request_id": str(payload.request_id), "request_fingerprint": fingerprint,
+                          "expected_revision": payload.expected_revision,
+                          "before": previous, "after": {k: data.get(k) for k in previous},
+                          "reason": payload.correction_reason, "notes": payload.notes, "actor": actor,
+                          "recorded_at": datetime.now(timezone.utc).isoformat(),
+                      }]}
     session.flush()
     return value
 
@@ -1288,9 +1315,19 @@ def serialize_source(source: RebuildValueSource) -> dict[str, Any]:
     }
 
 
+def value_revision(value: RebuildDataValue) -> str:
+    state = {k: getattr(value, k) for k in ("raw_value", "numeric_value", "unit", "value_type",
+              "precision_digits", "missing_reason", "conflict")}
+    state["preferred_source_id"] = str(value.preferred_source_id) if value.preferred_source_id else None
+    state["updated_at"] = value.updated_at.isoformat() if value.updated_at else None
+    return hashlib.sha256(_canonical_json(state).encode()).hexdigest()
+
+
 def serialize_value(value: RebuildDataValue, sources: list[RebuildValueSource]) -> dict[str, Any]:
     return {
         "id": str(value.id),
+        "value_revision": value_revision(value),
+        "notes": (value.conflict or {}).get("notes"),
         "field_name": value.field_name,
         "raw_value": value.raw_value,
         "numeric_value": value.numeric_value,

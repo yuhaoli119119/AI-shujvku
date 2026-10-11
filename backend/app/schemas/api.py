@@ -347,11 +347,13 @@ class PaperListItemResponse(BaseModel):
     serial_number: int | None = None
     paper_code: str | None = None
     relationship_summary: dict[str, int] = Field(default_factory=dict)
+    supplementary_count: int = 0
 
     model_config = {"from_attributes": True}
 
 
 class PaperDetailResponse(PaperListItemResponse):
+    supplementary_attachments: list[dict[str, Any]] = Field(default_factory=list)
     source_pdf_sha256: str | None = None
     sections: list[PaperSectionResponse] = Field(default_factory=list)
     tables: list[PaperTableResponse] = Field(default_factory=list)

@@ -70,6 +70,8 @@ class Paper(Base):
     __tablename__ = "papers"
     __table_args__ = (
         sa.UniqueConstraint("library_name", "doi", name="uq_papers_library_doi"),
+        sa.UniqueConstraint("library_name", "paper_code", name="uq_papers_library_code"),
+        sa.UniqueConstraint("library_name", "serial_number", name="uq_papers_library_main_serial"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
@@ -97,7 +99,7 @@ class Paper(Base):
     docling_json_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     markdown_path: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     serial_number: Mapped[int | None] = mapped_column(sa.Integer, nullable=True, index=True)
-    paper_code: Mapped[str | None] = mapped_column(sa.String(16), nullable=True, unique=True, index=True)
+    paper_code: Mapped[str | None] = mapped_column(sa.String(16), nullable=True, index=True)
     comprehensive_analysis: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     reading_guide: Mapped[dict | None] = mapped_column(json_type(), nullable=True)
     paper_type: Mapped[str | None] = mapped_column(sa.String(20), nullable=True, index=True)

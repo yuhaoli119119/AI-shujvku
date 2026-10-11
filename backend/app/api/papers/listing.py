@@ -8,11 +8,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, exists
 from sqlalchemy.orm import Session
 
+from app.services.paper_codes import main_paper_clause, supplementary_paper_clause
 from app.config import get_settings
-from app.db.models import Paper
+from app.db.models import Paper, PaperRelationship
 from app.db.session import get_db_session, session_scope
 from app.schemas.api import (
     ExtractionRunResponse,
@@ -64,7 +65,7 @@ def list_papers(
 @router.get("/libraries", response_model=list[PaperLibraryResponse])
 def list_libraries(session: Session = Depends(get_db_session)) -> list[PaperLibraryResponse]:
     rows = session.execute(
-        select(Paper.library_name, func.count(Paper.id))
+        select(Paper.library_name, func.count(Paper.id).filter(main_paper_clause()))
         .group_by(Paper.library_name)
         .order_by(Paper.library_name.asc())
     ).all()
@@ -81,6 +82,24 @@ def list_libraries(session: Session = Depends(get_db_session)) -> list[PaperLibr
     return libraries
 
 
+@router.get("/unassociated-si")
+def unassociated_supplementary(
+    library_name: str | None = None,
+    session: Session = Depends(get_db_session),
+) -> dict:
+    """Expose pending attachments without guessing ownership or counting papers."""
+    from app.services.catalog_attachments import SI_RELATIONSHIPS
+    query = select(Paper).where(supplementary_paper_clause(), ~exists().where(
+        PaperRelationship.target_paper_id == Paper.id,
+        PaperRelationship.relationship_type.in_(SI_RELATIONSHIPS)))
+    if library_name is not None:
+        query = query.where(readonly_library_clause(library_name))
+    rows = session.scalars(query.order_by(Paper.created_at, Paper.id)).all()
+    return {"total": len(rows), "items": [{"paper_id": str(row.id),
+        "paper_code": row.paper_code, "title": row.title,
+        "preview_url": f"/api/papers/{row.id}/pdf"} for row in rows]}
+
+
 @router.get("/type-stats")
 def get_paper_type_stats(
     library_name: str | None = Query(default=None, description="Filter by literature library"),
@@ -93,7 +112,7 @@ def get_paper_type_stats(
         "uncategorized": {"label": "未分类 (Uncategorized)", "color": "#9ca3af"},
     }
     counts = {key: 0 for key in labels}
-    stmt = select(Paper.paper_type, func.count(Paper.id)).group_by(Paper.paper_type)
+    stmt = select(Paper.paper_type, func.count(Paper.id)).where(main_paper_clause()).group_by(Paper.paper_type)
     if library_name is not None:
         stmt = stmt.where(build_library_name_clause(Paper.library_name, library_name))
 
@@ -152,9 +171,9 @@ async def stream_papers(
 
     def fetch_paper_snapshot():
         with session_scope(settings.database_url) as poll_session:
-            total_stmt = select(func.count(Paper.id))
-            max_created_stmt = select(func.max(Paper.created_at))
-            max_serial_stmt = select(func.max(Paper.serial_number))
+            total_stmt = select(func.count(Paper.id)).where(main_paper_clause())
+            max_created_stmt = select(func.max(Paper.created_at)).where(main_paper_clause())
+            max_serial_stmt = select(func.max(Paper.serial_number)).where(main_paper_clause())
             if library_name is not None:
                 clause = readonly_library_clause(library_name)
                 total_stmt = total_stmt.where(clause)
@@ -184,7 +203,7 @@ async def stream_papers(
                 offset=offset,
             )
             papers = PaperListReadonlyService(poll_session).list_papers(filters=filters)
-            total_stmt = select(func.count(Paper.id))
+            total_stmt = select(func.count(Paper.id)).where(main_paper_clause())
             if library_name is not None:
                 total_stmt = total_stmt.where(readonly_library_clause(library_name))
             total_papers = poll_session.scalar(total_stmt) or 0
@@ -233,8 +252,8 @@ async def stream_papers(
 
 @router.get("/status")
 def get_papers_status(session: Session = Depends(get_db_session)):
-    total = session.scalar(select(func.count(Paper.id))) or 0
-    last_paper = session.scalars(select(Paper).order_by(Paper.created_at.desc()).limit(1)).first()
+    total = session.scalar(select(func.count(Paper.id)).where(main_paper_clause())) or 0
+    last_paper = session.scalars(select(Paper).where(main_paper_clause()).order_by(Paper.created_at.desc()).limit(1)).first()
     return {
         "total": total,
         "last_added": {

@@ -19,6 +19,7 @@ from app.config import get_settings
 from app.db import models
 from app.schemas import api
 from app.services.paper_list_readonly import COUNT_MODELS
+from app.services.catalog_attachments import supplementary_attachments
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference, resolve_paper_pdf_path
 from app.utils.artifact_status import build_paper_artifact_status
 from app.utils.library_names import normalize_library_name
@@ -64,7 +65,9 @@ class PaperDetailReadonlyService:
                 return None
             base = {name:getattr(paper,name) for name in api.PaperListItemResponse.model_fields
                     if name in {c.key for c in paper.__table__.columns}}
-            base.update(paper_id=paper.id, library_name=normalize_library_name(paper.library_name))
+            attachments = supplementary_attachments(self.session, [paper.id])[paper.id]
+            base.update(paper_id=paper.id, library_name=normalize_library_name(paper.library_name),
+                        supplementary_attachments=attachments, supplementary_count=len(attachments))
             if base.get('authors') is None:
                 base['authors'] = []
             analysis = paper.comprehensive_analysis or {}

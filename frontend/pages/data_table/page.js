@@ -168,26 +168,10 @@ function renderRows() {
   const fixedColumns = showReaction ? 7 : 6;
   const pageCount = Math.max(1, Math.ceil(state.total / state.pageSize));
   $("rowSummary").textContent = `${state.total} 行 · 第 ${state.page}/${pageCount} 页${showReaction ? " · 全部反应（仅公共字段）" : ""}`;
-  $("tableHead").innerHTML = `<tr><th>论文</th><th title="当前模板列之外已保存的字段，展开可查看值、单位和来源">补充数据</th><th>材料</th><th>位点</th><th>类型</th><th>条件</th>${showReaction ? '<th style="white-space:nowrap">反应</th>' : ""}${fields.map((field) => `<th>${escapeHtml(field.label)}${field.unit ? ` (${escapeHtml(field.unit)})` : ""}</th>`).join("")}</tr>`;
-  const body = $("tableBody");
-  if (!state.rows.length) {
-    body.innerHTML = `<tr><td colspan="${fields.length + fixedColumns}"><div class="rebuild-empty">暂无符合条件的数据</div></td></tr>`;
-  } else {
-    body.innerHTML = state.rows.map((row) => `
-      <tr>
-        <td>${escapeHtml(row.paper_code || row.paper_id.slice(0, 8))}</td>
-        <td>${renderSupplementalData(row, fields)}</td>
-        <td>${escapeHtml(row.material)}</td>
-        <td>${escapeHtml(row.active_site || row.active_site_type)}</td>
-        <td>${row.data_type === "dft" ? "DFT" : "实验"}</td>
-        <td><code>${escapeHtml(JSON.stringify(row.condition))}</code><div><button class="rebuild-btn ghost" type="button" data-identity-row="${escapeHtml(row.id)}">更正身份/条件</button></div>${row.identity_status === "pending" ? `<div class="rebuild-error">身份待定：${escapeHtml((row.properties?._rebuild_import?.pending_identity_fields || []).join(", "))}。请用行键 ${escapeHtml(row.row_key)} 补交正确身份字段及来源；现有值暂不参与分析。</div>` : ""}</td>
-        ${showReaction ? `<td style="white-space:nowrap">${escapeHtml(reactionLabel(row))}</td>` : ""}
-        ${fields.map((field) => `<td>${renderValue(row, field)}</td>`).join("")}
-      </tr>
-    `).join("");
-    body.querySelectorAll("button[data-identity-row]").forEach(button => button.addEventListener("click", () => openIdentityEditor(button.dataset.identityRow)));
-    body.querySelectorAll("button[data-row]").forEach((button) => button.addEventListener("click", () => showSource(button.dataset.row, button.dataset.field)));
-  }
+  const wrap = $("tableHead").closest('.rebuild-table-wrap');
+  let grid=document.getElementById('sharedCurrentGrid');
+  if(!grid) {grid=document.createElement('div');grid.id='sharedCurrentGrid';wrap.parentNode.insertBefore(grid,wrap);wrap.hidden=true;}
+  EditableDataGrid.mount(grid,{rows:state.rows,templates:state.templates,reload:()=>loadRows(),onIdentity:row=>openIdentityEditor(row.id)});
   $("pager").innerHTML = `
     <button class="rebuild-btn ghost" id="prevPage" ${state.rowsLoading || state.page <= 1 ? "disabled" : ""} type="button">上一页</button>
     <button class="rebuild-btn ghost" id="nextPage" ${state.rowsLoading || state.page >= pageCount ? "disabled" : ""} type="button">下一页</button>
@@ -415,9 +399,10 @@ async function openIdentityEditor(rowId) {
   if (!row) return;
   identityRow = row;
   $("identityTitle").textContent = `${row.material} · 更正身份与条件`;
-  $("identityBefore").textContent = `当前活性中心：${state.templates.active_site_types.find(item => item.value === row.active_site_type)?.label || row.active_site_type}；当前条件：${JSON.stringify(row.condition)}`;
+  $("identityBefore").textContent = `当前材料：${row.material}；当前活性中心：${state.templates.active_site_types.find(item => item.value === row.active_site_type)?.label || row.active_site_type}；当前条件：${EditableDataGrid.readable(row.condition)}`;
   $("identitySiteType").innerHTML = state.templates.active_site_types.map(item => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("");
   $("identitySiteType").value = row.active_site_type;
+  $("identityMaterial").value=row.material || ""; $("identitySupport").value=row.support || ""; $("identityActiveSite").value=row.active_site || ""; $("identityConfiguration").value=row.configuration || "";
   $("identityCondition").value = JSON.stringify(row.condition, null, 2);
   $("identitySourceKind").value = "text";
   for (const id of ["identityPage", "identityLabel", "identityQuote", "identityReason"]) $(id).value = "";
@@ -472,7 +457,7 @@ async function submitIdentityCorrection(event) {
       const page = Number($("identityPage").value);
       if (!reason || !$("identityFile").value || !Number.isSafeInteger(page) || page < 1) throw Error("请填写更正理由，选择本篇依据 PDF 并填写有效页码。");
       payload = {paper_id:row.paper_id,row_key:row.row_key,request_id:crypto.randomUUID(),expected_revision:row.identity_revision,
-        changes:{active_site_type:$("identitySiteType").value,condition},correction_reason:reason,
+        changes:{material:$("identityMaterial").value.trim(),support:$("identitySupport").value.trim() || null,active_site:$("identityActiveSite").value.trim() || null,configuration:$("identityConfiguration").value.trim() || null,active_site_type:$("identitySiteType").value,condition},correction_reason:reason,
         evidence:[{file_id:$("identityFile").value,source_kind:$("identitySourceKind").value,page_number:page,label:$("identityLabel").value.trim() || null,quote:$("identityQuote").value.trim() || null}]};
       // Persist the exact request before sending; a lost reply must reuse this ID.
       sessionStorage.setItem(key, JSON.stringify(payload));
@@ -507,3 +492,5 @@ async function submitIdentityCorrection(event) {
     $("identitySubmit").disabled = false;
   }
 }
+
+window.addEventListener("load", async () => {const rowId=new URLSearchParams(location.search).get("row_id");if(!rowId)return;for(let i=0;i<50;i++){if(state.rows.some(row=>row.id===rowId)){openIdentityEditor(rowId);return;}await new Promise(resolve=>setTimeout(resolve,100));}});

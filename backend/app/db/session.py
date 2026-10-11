@@ -13,6 +13,7 @@ from app.db.bootstrap import (
     database_bootstrap_lock,
 )
 from app.db.models import Base
+from app.services import paper_codes  # register catalogue transaction hooks
 
 # ──────────────────────────────────────────────────────────────────────────────
 # DATABASE: This project uses PostgreSQL (with pgvector extension) as its
@@ -332,17 +333,6 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                 "serial_number",
                 "ALTER TABLE papers ADD COLUMN IF NOT EXISTS serial_number INTEGER",
             )
-            try:
-                if serial_added or has_column("papers", "serial_number"):
-                    # Backfill serial_number for existing papers ordered by created_at per library.
-                    connection.execute(text("""
-                        UPDATE papers SET serial_number = sub.rn FROM (
-                          SELECT id, ROW_NUMBER() OVER (PARTITION BY library_name ORDER BY created_at) AS rn
-                          FROM papers WHERE serial_number IS NULL
-                        ) sub WHERE papers.id = sub.id
-                    """))
-            except Exception:
-                logger.exception("Automatic database migration failed while backfilling papers.serial_number")
             execute_migration_step(
                 "papers",
                 "paper_type",
@@ -358,15 +348,6 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                 "journal_id",
                 "ALTER TABLE papers ADD COLUMN IF NOT EXISTS journal_id UUID REFERENCES journals(id) ON DELETE SET NULL",
             )
-            try:
-                connection.execute(
-                    text(
-                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_papers_paper_code "
-                        "ON papers (paper_code) WHERE paper_code IS NOT NULL AND paper_code <> ''"
-                    )
-                )
-            except Exception:
-                logger.exception("Automatic database migration failed while indexing papers.paper_code")
             try:
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_papers_journal_id ON papers (journal_id)"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_journals_normalized_name ON journals (normalized_name)"))
@@ -418,7 +399,7 @@ def _init_db_locked(database_url: str, *, engine) -> BootstrapOutcome:
                 "workspace_path",
                 "ALTER TABLE papers ADD COLUMN IF NOT EXISTS workspace_path TEXT",
             )
-            should_backfill_paper_codes = True
+            should_backfill_paper_codes = False
             execute_migration_step(
                 "paper_tables",
                 "prov",

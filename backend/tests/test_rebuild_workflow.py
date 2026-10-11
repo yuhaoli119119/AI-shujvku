@@ -384,6 +384,8 @@ def test_rebuild_value_correction_preserves_previous_value(setup_test_db):
                 value_type="explicit",
                 precision_digits=0,
                 correction_reason="人工复核表格第 2 行",
+                expected_revision=value["value_revision"],
+                request_id=__import__("uuid").uuid4(),
                 source={
                     "source_kind": "table",
                     "page_number": 2,
@@ -440,7 +442,7 @@ def test_rebuild_ai_work_package_and_batch_asset_import(setup_test_db, monkeypat
             assert created is True
         session.commit()
 
-        assert paper.paper_code == "R0001"
+        assert paper.paper_code == "U001"
         assert len(assets) == 2
         assert list_rows(session, paper_id=paper_id)["total"] == 0
         assert reaction_templates()["reactions"]["CO2RR"]["label"] == "二氧化碳还原反应"

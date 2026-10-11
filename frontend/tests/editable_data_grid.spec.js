@@ -1,0 +1,45 @@
+const {test,expect}=require('@playwright/test');
+const path=require('path');
+const script=path.resolve(__dirname,'../shared/editable-data-grid.js');
+const row=(id,condition,field='adsorption_energy')=>({id,paper_id:'paper',material:'FeCo-NC',support:'NC',active_site:'Fe-Co',active_site_type:'dual_atom',data_type:'dft',condition,identity_status:'confirmed',values:[{id:'v'+id,field_name:field,raw_value:'-1.230',numeric_value:-1.23,unit:'eV',value_type:'explicit',sources:[]} ]});
+test('separate conditions expand without choosing or averaging values; unknown identity stays separate',async({page})=>{
+ await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows,templates:{reactions:{},common_fields:[{name:'adsorption_energy',label:'吸附能',unit:'eV'}]},onValue:(row,value)=>window.selected=[row.id,value.raw_value]}),[row('1',{adsorbate:'Li2S6'}),row('2',{adsorbate:'Li2S'}),{...row('3',{}),identity_status:'pending'},row('4',{},'XPS_binding_energy')]);
+ await expect(page.locator('.edg-tools>span')).toHaveText('2 个催化剂 · 4 条独立条件');
+ await expect(page.getByRole('button',{name:'多组（2）'})).toBeVisible();
+ await page.getByRole('button',{name:'多组（2）'}).click();
+ await expect(page.locator('[data-current-row="1"]')).toContainText('吸附物：Li2S6');
+ await expect(page.locator('[data-current-row="2"]')).toContainText('吸附物：Li2S');
+ await expect(page.locator('thead')).toContainText('XPS 结合能');
+ await page.locator('[data-current-row="2"] [data-edg-value]').click();
+ expect(await page.evaluate(()=>window.selected)).toEqual(['2','-1.230']);
+});
+test('value correction keeps precision, source locator and exact request across uncertain retry',async({page})=>{
+ await page.goto('http://127.0.0.1:4173/pages/data_table/index.html');
+ await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ const source={id:'s',file_id:'f',asset_id:'a',source_key:'table-2',source_kind:'table',page_number:4,label:'Table 2',table_row:1,table_column:2,quote:'-1.230'};
+ let attempts=[];let failed=false;
+ await page.route('**/api/rebuild/papers/paper/files',r=>r.fulfill({json:{items:[{id:'f',role:'si',original_filename:'SI.pdf'}]}}));
+ await page.route('**/api/rebuild/values/v1',r=>{if(r.request().method()==='GET')return r.fulfill({json:{id:'v1',conflict:{}}});attempts.push(r.request().postDataJSON());if(!failed){failed=true;return r.abort('failed');}return r.fulfill({json:{id:'v1'}});});
+ await page.evaluate(({rows,source})=>{rows[0].values[0].sources=[source];rows[0].values[0].value_revision='a'.repeat(64);EditableDataGrid.mount(document.getElementById('grid'),{rows,reload:async()=>window.readBack=true});},{rows:[row('1',{})],source});
+ await page.locator('[data-edg-value]').first().click();
+ await expect(page.locator('.edg-source')).toContainText('SI.pdf');
+ await page.locator('[name=correction_reason]').fill('核对来源，保留原值');
+ await page.getByRole('button',{name:'保存修改'}).click();
+ await expect(page.locator('[data-status]')).toContainText('保存结果尚未确认');
+ await page.getByRole('button',{name:'保存修改'}).click();
+ await expect(page.locator('dialog')).toHaveCount(0);
+ expect(attempts).toHaveLength(2);expect(attempts[0]).toEqual(attempts[1]);
+ expect(attempts[0].raw_value).toBe('-1.230');expect(attempts[0].source.asset_id).toBe('a');expect(attempts[0].source.table_column).toBe(2);
+ expect(await page.evaluate(()=>window.readBack)).toBe(true);
+});
+test('stale revision displays conflict and keeps concurrent value intact',async({page})=>{
+ await page.goto('http://127.0.0.1:4173/pages/data_table/index.html');await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
+ let writes=0;
+ await page.route('**/api/rebuild/papers/paper/files',r=>r.fulfill({json:{items:[]}}));
+ await page.route('**/api/rebuild/values/v1',r=>r.request().method()==='GET'?r.fulfill({json:{id:'v1',value_revision:'b'.repeat(64),raw_value:'-2.000',conflict:{}}}):(writes++,r.fulfill({status:409,json:{detail:'value_revision_conflict'}})));
+ await page.evaluate(rows=>{rows[0].values[0].value_revision='a'.repeat(64);EditableDataGrid.mount(document.getElementById('grid'),{rows});},[row('1',{})]);
+ await page.locator('[data-edg-value]').first().click();await page.locator('[name=correction_reason]').fill('依据原文修正');await page.getByRole('button',{name:'保存修改'}).click();
+ await expect(page.locator('[data-status]')).toContainText('数据已被其他操作修改');expect(writes).toBe(1);
+ expect(await page.evaluate(()=>sessionStorage.getItem('litai.value-correction.v1'))).toBeNull();
+});

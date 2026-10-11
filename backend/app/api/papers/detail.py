@@ -44,7 +44,7 @@ from app.schemas.api import (
     PaperDetailResponse,
     PaperKnowledgeContextResponse,
 )
-from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code
+from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code, lock_catalog_numbering
 from pydantic import BaseModel, Field
 
 class RelationshipCreateRequest(BaseModel):
@@ -1569,11 +1569,14 @@ async def head_paper_pdf(
 @router.get("/{paper_id}/pdf")
 async def get_paper_pdf(
     paper_id: UUID,
+    download: bool = False,
     session: Session = Depends(get_db_session),
 ):
     """Serve the PDF file for a paper, for in-browser preview."""
     file_path = _resolve_paper_pdf_path(paper_id, session)
-    return FileResponse(str(file_path), media_type="application/pdf")
+    return FileResponse(str(file_path), media_type="application/pdf",
+                        filename=file_path.name if download else None,
+                        content_disposition_type="attachment" if download else "inline")
 
 
 @router.post("/{paper_id}/relationships", response_model=RelationshipCreateResponse)
@@ -1633,6 +1636,7 @@ async def create_paper_relationship(
 
     # Shared SI ownership is checked only after both paper rows are locked.
     # Stable UUID order avoids deadlocks when two requests reference the same pair.
+    lock_catalog_numbering(session)
     locked = session.scalars(select(Paper).where(Paper.id.in_([source.id, target.id]))
         .order_by(Paper.id).with_for_update().execution_options(populate_existing=True)).all()
     locked_by_id = {paper.id: paper for paper in locked}
@@ -1674,6 +1678,7 @@ async def create_paper_relationship(
         try:
             target.paper_code = next_supplementary_paper_code(
                 session,
+                library_name=source.library_name,
                 main_paper_code=source.paper_code,
                 serial_number=source.serial_number,
                 exclude_paper_id=target.id,

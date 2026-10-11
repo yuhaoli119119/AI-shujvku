@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.services.paper_codes import main_paper_clause
 from app.config import get_settings
 from app.db.models import (
     AuditLog,
@@ -118,12 +119,12 @@ def list_papers(
     token_record = verify_share_token(share_token, session)
     query = select(Paper)
     if token_record.scope == "all":
-        pass
+        query = query.where(main_paper_clause())
     elif token_record.scope.startswith("paper:"):
         pid = token_record.scope.split(":", 1)[1]
         query = query.where(Paper.id == _paper_uuid(pid))
     elif library_name := _library_scope_name(token_record.scope):
-        query = query.where(Paper.library_name == library_name)
+        query = query.where(Paper.library_name == library_name, main_paper_clause())
     else:
         raise HTTPException(status_code=403, detail="Invalid share token scope")
 

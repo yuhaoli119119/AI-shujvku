@@ -18,7 +18,7 @@ from app.db.session import get_db_session
 from app.schemas.api import IngestFromPathRequest, IngestResponse
 from app.security.files import UnsafeLocalPDF, validate_local_ingest_pdf
 from app.services.artifact_store import ArtifactStore
-from app.services.paper_codes import ensure_paper_codes, next_supplementary_paper_code
+from app.services.paper_codes import ensure_paper_codes, next_supplementary_paper_code, lock_catalog_numbering
 from app.services.rebuild_workflow_service import associate_pdf_file
 from app.utils.artifact_paths import canonicalize_persisted_artifact_reference
 from app.utils.library_names import normalize_library_name
@@ -465,6 +465,7 @@ async def queue_upload_supplementary_pdf(
 
     sha256, file_size = await _uploaded_digest_and_size(file)
     _lock_upload(session, "si:" + str(target.id), sha256)
+    lock_catalog_numbering(session)
     session.refresh(target, with_for_update=True)
     existing = session.scalar(select(RebuildPaperFile).where(
         RebuildPaperFile.paper_id == target.id, RebuildPaperFile.role == "si", RebuildPaperFile.sha256 == sha256))
@@ -494,6 +495,7 @@ async def queue_upload_supplementary_pdf(
     session.flush()
     supplementary.paper_code = next_supplementary_paper_code(
         session,
+        library_name=target.library_name,
         main_paper_code=target.paper_code,
         serial_number=target.serial_number,
         exclude_paper_id=supplementary.id,

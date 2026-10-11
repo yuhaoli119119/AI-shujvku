@@ -154,7 +154,10 @@ class RebuildValueCorrectionRequest(BaseModel):
     value_type: ValueType = "explicit"
     precision_digits: int | None = Field(default=None, ge=0, le=12)
     missing_reason: str | None = None
-    correction_reason: str | None = None
+    correction_reason: str = Field(min_length=1, max_length=4000)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_id: UUID
+    notes: str | None = None
     source: RebuildValueSourceInput | None = None
 
 

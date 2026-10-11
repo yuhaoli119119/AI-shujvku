@@ -12,34 +12,15 @@ from app.services import paper_codes
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
 
-def test_required_paper_code_backfill_failure_is_retryable(setup_test_db, monkeypatch):
+def test_bootstrap_never_renumbers_without_explicit_backup_migration(setup_test_db, monkeypatch):
     database_url = setup_test_db.url.render_as_string(hide_password=False)
     db_session._initialized_urls.discard(database_url)
-    calls = 0
-
-    def fail_backfill(_session):
-        nonlocal calls
-        calls += 1
-        raise RuntimeError("required paper code backfill failed")
-
-    monkeypatch.setattr(paper_codes, "ensure_paper_codes", fail_backfill)
-
-    with pytest.raises(RuntimeError, match="required paper code backfill failed"):
-        db_session.init_db(database_url, force=True)
-
-    assert database_url not in db_session._initialized_urls
-
-    def successful_backfill(_session):
-        nonlocal calls
-        calls += 1
-
-    monkeypatch.setattr(paper_codes, "ensure_paper_codes", successful_backfill)
-    outcome = db_session.init_db(database_url)
-
+    def forbidden_backfill(_session):
+        raise AssertionError("startup must not rewrite catalogue numbering")
+    monkeypatch.setattr(paper_codes, "ensure_paper_codes", forbidden_backfill)
+    outcome = db_session.init_db(database_url, force=True)
     assert outcome.initialized is True
-    assert outcome.required_failures == ()
     assert database_url in db_session._initialized_urls
-    assert calls == 2
 
 
 def test_database_bootstrap_advisory_lock_serializes_connections(setup_test_db):

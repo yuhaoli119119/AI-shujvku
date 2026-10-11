@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.services.paper_codes import main_paper_clause
 from app.db.models import (
     CatalystSample,
     DFTResult,
@@ -823,7 +824,7 @@ def _count(session: Session, stmt) -> int:
 
 
 def _paper_count(session: Session, library_name: str | None) -> int:
-    stmt = select(func.count(Paper.id))
+    stmt = select(func.count(Paper.id)).where(main_paper_clause())
     for clause in _paper_filters(library_name):
         stmt = stmt.where(clause)
     return _count(session, stmt)
@@ -1658,12 +1659,12 @@ def _overview_summary_counts(
             stmt = stmt.where(clause)
         return stmt.scalar_subquery()
 
-    paper_count = select(func.count(Paper.id))
-    pdf_papers = select(Paper)
+    paper_count = select(func.count(Paper.id)).where(main_paper_clause())
+    pdf_papers = select(Paper).where(main_paper_clause())
     parsed_count = select(func.count(func.distinct(PaperSection.paper_id))).join(
         Paper,
         PaperSection.paper_id == Paper.id,
-    )
+    ).where(main_paper_clause())
     for clause in filters:
         paper_count = paper_count.where(clause)
         pdf_papers = pdf_papers.where(clause)
@@ -1849,7 +1850,7 @@ def visualization_overview(
             },
         }
         years = []
-        year_stmt = select(Paper.year, func.count(Paper.id)).group_by(Paper.year).order_by(Paper.year.desc())
+        year_stmt = select(Paper.year, func.count(Paper.id)).where(main_paper_clause()).group_by(Paper.year).order_by(Paper.year.desc())
         for clause in filters:
             year_stmt = year_stmt.where(clause)
         for year, count in session.execute(year_stmt).all():
@@ -1857,7 +1858,7 @@ def visualization_overview(
 
         journals = []
         journal_stmt = (
-            select(Paper.journal, func.count(Paper.id))
+            select(Paper.journal, func.count(Paper.id)).where(main_paper_clause())
             .group_by(Paper.journal)
             .order_by(func.count(Paper.id).desc())
             .limit(12)
@@ -1868,7 +1869,7 @@ def visualization_overview(
             journals.append({"journal": journal or "未记录期刊", "count": int(count or 0)})
 
         type_counts: Counter[str] = Counter()
-        type_stmt = select(Paper.paper_type, func.count(Paper.id)).group_by(Paper.paper_type)
+        type_stmt = select(Paper.paper_type, func.count(Paper.id)).where(main_paper_clause()).group_by(Paper.paper_type)
         for clause in filters:
             type_stmt = type_stmt.where(clause)
         for paper_type, count in session.execute(type_stmt).all():

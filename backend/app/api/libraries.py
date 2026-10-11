@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import func, select
 
+from app.services.paper_codes import main_paper_clause
 from app.config import get_settings
 from app.db.models import Paper
 from app.db.session import session_scope
@@ -34,7 +35,7 @@ def _database_library_counts(library_names: list[str]) -> dict[str, int]:
     with session_scope(settings.database_url) as session:
         counts: dict[str, int] = {}
         for library_name in normalized_names:
-            stmt = select(func.count(Paper.id)).where(build_library_name_clause(Paper.library_name, library_name))
+            stmt = select(func.count(Paper.id)).where(main_paper_clause()).where(build_library_name_clause(Paper.library_name, library_name))
             counts[library_name] = int(session.scalar(stmt) or 0)
         return counts
 

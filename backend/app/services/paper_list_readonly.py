@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import models
 from app.schemas.api import PaperListFilterParams, PaperListItemResponse
+from app.services.paper_codes import main_paper_clause
+from app.services.catalog_attachments import supplementary_attachments
 from app.services.paper_query_storage import cached_pdf_size_for_storage
 from app.utils.library_names import DEFAULT_LIBRARY_ALIASES, DEFAULT_LIBRARY_NAME, normalize_library_name
 
@@ -47,7 +49,7 @@ def _ordering(filters):
     valid = p.paper_code.op("~")(r"^[A-Za-z]+[0-9]+$")
     prefix = func.substring(p.paper_code, r"^([A-Za-z]+)")
     number = case((valid, cast(func.substring(p.paper_code, r"([0-9]+)$"), Numeric)), else_=None)
-    code = (valid.desc().nulls_last(), direction(func.lower(prefix)), direction(number), direction(p.paper_code))
+    code = (valid.desc().nulls_last(), direction(number), direction(func.lower(prefix)), direction(p.paper_code))
     if filters.sort_by in {"paper_code", "paper_code_numeric"}:
         order = code
     elif filters.sort_by == "title":
@@ -68,7 +70,7 @@ class PaperListReadonlyService:
     def list_papers(self, filters: PaperListFilterParams | None = None) -> list[PaperListItemResponse]:
         filters = filters or PaperListFilterParams()
         p = models.Paper
-        query = select(p)
+        query = select(p).where(main_paper_clause())
         if filters.library_name is not None:
             query = query.where(readonly_library_clause(filters.library_name))
         for name in ("source_path", "year"):
@@ -115,6 +117,7 @@ class PaperListReadonlyService:
                 .where(models.PaperRelationship.source_paper_id.in_(ids))
                 .group_by(models.PaperRelationship.source_paper_id, models.PaperRelationship.relationship_type)):
                 relationships[pid][kind] = int(count)
+            attachments = supplementary_attachments(self.session, ids)
             result = []
             for paper in papers:
                 analysis = paper.comprehensive_analysis if isinstance(paper.comprehensive_analysis, dict) else {}
@@ -132,7 +135,7 @@ class PaperListReadonlyService:
                     pdf_exists=file_size is not None, pdf_size=file_size, pdf_file_size=file_size,
                     pdf_artifact_status={"pdf_exists": file_size is not None, "pdf_file_size": file_size},
                     has_parsed_content=bool(paper.abstract or any(counts[paper.id][k] for k in ("sections", "tables", "figures", "dft_results"))),
-                    relationship_summary=relationships[paper.id])
+                    relationship_summary=relationships[paper.id], supplementary_count=len(attachments[paper.id]))
                 if (metadata := impact.get(paper.id)) is not None:
                     payload.update(impact_factor=metadata.impact_factor, impact_factor_source=metadata.impact_factor_source,
                                    impact_factor_year=metadata.impact_factor_year)

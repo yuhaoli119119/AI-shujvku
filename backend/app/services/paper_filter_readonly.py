@@ -13,6 +13,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from app.services.paper_codes import main_paper_clause
 from app.config import Settings, get_settings
 from app.db.models import (
     CatalystSample,
@@ -115,7 +116,7 @@ class PaperFilterReadonlyService:
         return rows[criteria.offset : criteria.offset + criteria.limit]
 
     def _candidate_paper_ids(self, criteria: PaperFilterCriteria) -> list[UUID]:
-        stmt = select(Paper.id)
+        stmt = select(Paper.id).where(main_paper_clause())
         if criteria.year_min is not None:
             stmt = stmt.where(Paper.year >= criteria.year_min)
         if criteria.year_max is not None:
