@@ -2293,7 +2293,7 @@
             <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">原文位置：</div>
             <div class="pd-reading-locators">
               ${pageLocators.map(loc => `
-                ${loc.paper_id && loc.paper_id !== state.paperId ? '<span class="warning">证据论文归属不一致</span>' : loc.file_id ? currentPdfLinks(loc.file_id,[Number(loc.page)]) : `<button type="button" class="pd-reading-locator-chip clickable" onclick="openPdfAtPage(${Number(loc.page)})" title="${esc(loc.quote || loc.section || (`PDF 第 ${loc.page} 页`))}">
+                ${loc.paper_id && !rebuildOwnerIsKnown(loc.paper_id) ? '<span class="warning">证据论文归属不一致</span>' : loc.file_id ? currentPdfLinks(loc.file_id,[Number(loc.page)]) : `<button type="button" class="pd-reading-locator-chip clickable" onclick="openPdfAtPage(${Number(loc.page)})" title="${esc(loc.quote || loc.section || (`PDF 第 ${loc.page} 页`))}">
                   打开 PDF 第 ${esc(loc.page)} 页
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:3px;vertical-align:-1px;"><path d="M7 17l9.2-9.2M17 17V8H8"/></svg>
                 </button>`}
@@ -2467,7 +2467,7 @@
       figure: "figures", table: "tables", charts: "figures", visuals: "figures",
       dft_result: "dft", dft_results: "dft", dft_setting: "dft", dft_settings: "dft",
       catalyst_sample: "dft", catalyst_samples: "dft",
-      electrochemical_performance: "dft", performance: "dft",
+      electrochemical_performance: "experimental", performance: "experimental",
     };
 
     function resolveDetailTab(tab) {
@@ -2678,7 +2678,7 @@
     async function applyStructuredDeepLink() {
       const link = state.deepLink || {};
       if (!link.tab) return;
-      const tab = resolveDetailTab(link.tab);
+      const tab = resolveDetailTab(link.targetType === "electrochemical_performance" ? "experimental" : link.tab);
       if (tab === "summary") return;
       if (link.targetType === "dft_results") return; // 由 applyDftDeepLink 处理
 
@@ -2822,7 +2822,7 @@
     async function loadPaperData() {
       const paperId = state.paperId, generation = ++state.detailGeneration;
       closeFigureLightbox(); closeDftEditDialog();
-      state.paper = null;
+      state.paper = null; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
       state.fullDetailLoaded = false; state.fullDetailPromise = null;
       state.dftResultsPromise = null; state.dftResultsError = null;
       state.rebuildAssets = []; state.rebuildFiles = []; state.rebuildRows = [];
@@ -2839,7 +2839,7 @@
         if (!currentDetailIs(paperId, generation)) return;
         if (String(paper.id || paper.paper_id) !== String(paperId)) throw new Error("论文响应归属不一致");
         state.paper = paper;
-        state.currentTab = state.deepLink.tab || "summary";
+        state.currentTab = state.deepLink.targetType === "electrochemical_performance" ? "experimental" : state.deepLink.tab || "summary";
         renderPaperDetails();
         loadRebuildAssets();
         switchDetailTab(state.currentTab);
@@ -2904,12 +2904,12 @@
       return value === null || value === undefined ? '—' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     }
     function currentSourceFile(fileId) {
-      return state.rebuildFiles.find(file => file.id === fileId && file.paper_id === state.paperId) || null;
+      return state.rebuildFiles.find(file => file.id === fileId && rebuildOwnerIsKnown(file.paper_id)) || null;
     }
     function currentPdfLinks(fileId, pages) {
       const file = currentSourceFile(fileId);
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
-      const role = file.role === 'main' ? '正文' : file.role === 'si' ? 'SI' : storedText(file.role);
+      const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>
         `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} PDF${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
@@ -2964,7 +2964,7 @@
 
     function currentAssetFigure(asset, history) {
       const file = currentSourceFile(asset.file_id);
-      const role = file ? file.role === 'main' ? '正文' : file.role === 'si' ? 'SI' : file.role : '来源未登记';
+      const role = file ? currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : file.role : '来源未登记';
       return { _currentAsset: asset, _historicalCurrent: !!history,
         figure_label: `${role} · ${asset.figure_label || asset.asset_key || '图表'}${asset.subfigure_label ? ' · ' + asset.subfigure_label : ''}`,
         caption: asset.caption || '', page: asset.page_numbers?.[0] ?? null,
@@ -2976,11 +2976,11 @@
       // Explicit lifecycle only; never infer supersession from names/version numbers.
       return marker && (marker.lifecycle === 'superseded' || typeof marker.superseded_by_asset_id === 'string' && marker.superseded_by_asset_id.trim());
     }
-    async function loadCurrentRows(paperId, generation) {
+    async function loadCurrentRows(paperId, generation, detailId = state.paperId) {
       const rows = [], seen = new Set(); let total = null;
       for (let count = 0; count < 1000; count++) {
         const page = await fetchJSON(`/api/rebuild/rows?paper_id=${encodeURIComponent(paperId)}&limit=200&offset=${rows.length}`);
-        if (!currentDetailIs(paperId, generation)) return null;
+        if (!currentDetailIs(detailId, generation)) return null;
         if (!page || !Array.isArray(page.items) || !Number.isSafeInteger(page.total) || page.total < 0) throw new Error('当前数据分页响应不完整');
         if (total !== null && total !== page.total) throw new Error('当前数据在读取时发生变化，请刷新');
         total = page.total;
@@ -2993,25 +2993,33 @@
       }
       throw new Error('当前数据分页超出读取上限');
     }
+    function explicitPaperFamily(paper,mainId) {
+      const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const ids=new Set([mainId]);
+      for(const attachment of paper?.supplementary_attachments || [])if(uuid.test(attachment.paper_id || ''))ids.add(attachment.paper_id);
+      for(const relation of paper?.outgoing_relationships || [])if(relation.source_paper_id===mainId && ['supplementary','supplementary_information','supporting_information','si'].includes(String(relation.relationship_type || '').toLowerCase()) && uuid.test(relation.target_paper_id || ''))ids.add(relation.target_paper_id);
+      return [...ids];
+    }
+    function rebuildOwnerIsKnown(owner) {return (state.rebuildFamilyIds || [state.paperId]).includes(owner);}
+    function currentDisplayRole(file) {return file?.role==='si' || file?.paper_id!==state.paperId?'si':file?.role;}
     async function loadRebuildAssets() {
       if (state.rebuildPromise) return state.rebuildPromise;
-      if (state.rebuildStatus === 'ready') return;
+      if (state.rebuildStatus === 'ready' && JSON.stringify(state.rebuildFamilyIds || [state.paperId])===JSON.stringify(explicitPaperFamily(state.paper,state.paperId))) return;
       const paperId = state.paperId, generation = state.detailGeneration;
       const task = (async () => {
         try {
-          const [files, assets, rows, templates] = await Promise.all([
-            fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/files`),
-            fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/assets`),
-            loadCurrentRows(paperId, generation),
-            fetchJSON('/api/rebuild/templates').catch(() => null)
+          const owners=explicitPaperFamily(state.paper,paperId);
+          const [snapshots,templates]=await Promise.all([
+            Promise.all(owners.map(async owner=>{
+              const [files,assets,rows]=await Promise.all([fetchJSON(`/api/rebuild/papers/${encodeURIComponent(owner)}/files`),fetchJSON(`/api/rebuild/papers/${encodeURIComponent(owner)}/assets`),loadCurrentRows(owner,generation,paperId)]);
+              if(!files || !assets || !Array.isArray(files.items) || !Array.isArray(assets.items) || !rows || files.items.some(file=>file.paper_id!==owner) || assets.items.some(asset=>asset.paper_id!==owner))throw new Error('关联正文／SI 文件或数据归属不一致');
+              return {files:files.items,assets:assets.items,rows};
+            })),fetchJSON('/api/rebuild/templates').catch(()=>null)
           ]);
-          if (!currentDetailIs(paperId, generation)) return;
-          if (!files || !assets || !Array.isArray(files.items) || !Array.isArray(assets.items) || !rows ||
-              files.items.some(file => file.paper_id !== paperId) || assets.items.some(asset => asset.paper_id !== paperId) ||
-              new Set(files.items.map(file => file.id)).size !== files.items.length || new Set(assets.items.map(asset => asset.id)).size !== assets.items.length) {
-            throw new Error('当前图表与文件归属响应不完整');
-          }
-          state.rebuildFiles = files.items; state.rebuildAssets = assets.items; state.rebuildRows = rows;
+          if(!currentDetailIs(paperId,generation))return;
+          const files=snapshots.flatMap(item=>item.files), assets=snapshots.flatMap(item=>item.assets),rows=snapshots.flatMap(item=>item.rows);
+          if(new Set(files.map(file=>file.id)).size!==files.length || new Set(assets.map(asset=>asset.id)).size!==assets.length || new Set(rows.map(row=>row.id)).size!==rows.length)throw new Error('关联文献集合出现重复内部 ID');
+          state.rebuildFamilyIds=owners; state.rebuildFiles=files;state.rebuildAssets=assets;state.rebuildRows=rows;
           state.rebuildTemplates = templates; state.rebuildStatus = 'ready'; state.rebuildError = '';
         } catch (error) {
           if (!currentDetailIs(paperId, generation)) return;
@@ -3030,11 +3038,11 @@
     function matchingRebuildAssets(figure) {
       // Historical figures never borrow a current image under an old explanation.
       const asset = figure?._currentAsset;
-      return asset && asset.paper_id === state.paperId ? state.rebuildAssets.filter(item => item.id === asset.id && item.file_id === asset.file_id) : [];
+      return asset && rebuildOwnerIsKnown(asset.paper_id) ? state.rebuildAssets.filter(item => item.id === asset.id && item.file_id === asset.file_id) : [];
     }
     function renderCurrentSource(source) {
       const file = currentSourceFile(source.file_id);
-      const asset = state.rebuildAssets.find(item => item.id === source.asset_id && item.paper_id === state.paperId);
+      const asset = state.rebuildAssets.find(item => item.id === source.asset_id && rebuildOwnerIsKnown(item.paper_id));
       const mismatch = asset && source.file_id && asset.file_id !== source.file_id;
       return `<div class="pd-current-source"><strong>${esc(source.label || source.source_kind || '来源')}</strong>
         ${source.quote ? `<div class="prewrap">${esc(source.quote)}</div>` : ''}
@@ -3059,10 +3067,12 @@
           <pre class="pd-current-json">${esc(JSON.stringify(conflict, null, 2))}</pre></details>` : ''}`;
     }
     function showCurrentAssetRows(assetId) {
-      if (!currentResultsPresent() || !state.rebuildAssets.some(asset => asset.id === assetId && asset.paper_id === state.paperId)) return;
+      if (!currentResultsPresent() || !state.rebuildAssets.some(asset => asset.id === assetId && rebuildOwnerIsKnown(asset.paper_id))) return;
       closeFigureLightbox();
-      state.rebuildAssetFilter = assetId; switchDetailTab('dft'); renderCurrentData();
-      document.getElementById('pdCurrentData')?.scrollIntoView({block:'start'});
+      state.rebuildAssetFilter = assetId;
+      const linkedRows=state.rebuildRows.filter(row=>row.values.some(value=>(value.sources || []).some(source=>source.asset_id===assetId)));
+      switchDetailTab(linkedRows.some(row=>row.data_type==='dft')?'dft':linkedRows.length?'experimental':'dft'); renderCurrentData();
+      document.getElementById(state.currentTab==='experimental'?'pdExperimentalData':'pdCurrentData')?.scrollIntoView({block:'start'});
     }
     async function reloadEditableData() {
       state.rebuildStatus = 'loading'; state.rebuildPromise = null;
@@ -3074,11 +3084,13 @@
         const area=document.getElementById(id); if(!area) return;
         if(state.rebuildStatus !== 'ready') {area.innerHTML='<div class="panel-card">'+(state.rebuildStatus==='failed'?'读取失败：'+esc(state.rebuildError):'正在读取全部数据…')+'</div>'; return;}
         area.innerHTML=`<div class="panel-card"><div class="panel-title">${type==='dft'?'计算数据':'实验数据 · 性能与表征'}</div><p class="muted">正文与 SI 数据共同展示；点击具体值查看来源与编辑，多组数据先展开条件。</p>${state.rebuildAssetFilter?'<button class="btn" onclick="state.rebuildAssetFilter=null;renderCurrentData()">显示全部数据</button>':''}<div data-grid></div></div>`;
-        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,type,reload:reloadEditableData});
+        EditableDataGrid.mount(area.querySelector('[data-grid]'),{rows:rows.filter(row => type==='dft'?row.data_type==='dft':row.data_type!=='dft'),templates:state.rebuildTemplates,type,familyId:state.paperId,reload:reloadEditableData});
       });
       if(state.rebuildStatus==='ready' && !state.defaultDataTabApplied && !deepLinkHasContext()) {
         state.defaultDataTabApplied=true;
-        switchDetailTab(state.rebuildRows.some(row=>row.data_type==='dft')?'dft':state.rebuildRows.length?'experimental':'summary');
+        const hasCalculation=state.rebuildRows.some(row=>row.data_type==='dft') || (state.paper?.counts?.dft_results || state.paper?.dft_results_items?.length || 0)>0;
+        const hasExperiment=state.rebuildRows.some(row=>row.data_type!=='dft') || (state.paper?.counts?.electrochemical_performance || state.paper?.counts?.electrochemical_performance_items || state.paper?.electrochemical_performance_items?.length || 0)>0;
+        switchDetailTab(hasCalculation?'dft':hasExperiment?'experimental':'summary');
       }
       renderSupplementaryFiles();
       installHistoryTransferButtons();
@@ -3126,7 +3138,8 @@
       if (type === 'table' && original.paper_id !== state.paperId) {
         // Supplementary tables live on the linked SI paper; their single stored
         // SI file is attached to this paper with role "si".
-        return file?.role === 'si' && !!original.related_paper_id &&
+        return currentDisplayRole(file) === 'si' && !!original.related_paper_id &&
+          (asset.paper_id === original.related_paper_id || file?.role === 'si' && asset.paper_id === state.paperId) &&
           Number.isSafeInteger(original.page) && assetPages.includes(original.page);
       }
       // Matching labels alone must never merge different PDF editions or SI.
