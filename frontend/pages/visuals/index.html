@@ -149,6 +149,7 @@
               <p class="field-hint">仅控制拟合门槛，不隐藏已有散点</p>
             </div>
 
+            <p class="field-hint">仅列常用物理量；模型预测、误差与计算参数保留在原始数据中。配对需来自同一材料数据行。</p>
             <p class="status status-row" aria-live="polite">
               <span id="relationStatus">正在读取可分析字段…</span>
               <button id="retryCorrelation" class="btn btn-secondary btn-small" type="button" hidden>重试</button>
@@ -172,8 +173,8 @@
                 <span class="preset-name">吸附能 ↔ d 带中心</span>
                 <span class="preset-arrow">›</span>
               </button>
-              <button id="quickAdsorptionRds" class="preset-btn" type="button" title="吸附能 ↔ RDS ΔG" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
-                <span class="preset-name">吸附能 ↔ RDS ΔG</span>
+              <button id="quickAdsorptionRds" class="preset-btn" type="button" title="吸附能 ↔ 决速步自由能变化" data-x="li2s_adsorption_energy" data-y="rds_delta_g">
+                <span class="preset-name">吸附能 ↔ 决速步自由能变化</span>
                 <span class="preset-arrow">›</span>
               </button>
             </div>

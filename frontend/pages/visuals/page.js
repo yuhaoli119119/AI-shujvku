@@ -94,6 +94,13 @@
     missing_y_field_value: "缺少 Y 字段",
     missing_field_value: "缺少分析字段",
     conflicting_values: "同一语义上下文存在冲突数值",
+    conflicting_field_aliases: "同一物理量的不同命名存在数值冲突",
+    incompatible_analysis_unit: "单位与所选物理量不兼容",
+    estimated_excluded: "估计值未纳入分析",
+    unresolved_conflict: "提取值存在尚未解决的冲突",
+    identity_pending: "材料身份待确认",
+    missing_source: "缺少数值来源证据",
+    non_scalar_value: "区间或上下限不能作为单一数值拟合",
     identity_v2_required: "历史记录尚未完成 Identity V2 结构化身份",
     identity_v2_not_ml_ready: "Identity V2 信息不完整，尚不能用于分析",
     pair_analysis_invalid_numeric_target: "缺少可用于关系分析的有限数值",
@@ -188,7 +195,7 @@
   function getFieldMeta(key) {
     const info = PROPERTY_META[key] || {};
     const fieldObj = state.fields.find((f) => f.key === key);
-    const labelZh = info.zh || fieldObj?.label || key;
+    const labelZh = fieldObj?.label || info.zh || key;
     const unit = info.unit || fieldObj?.unit || "";
     const symbol = info.symbol || key;
     return {
@@ -202,7 +209,7 @@
   }
 
   function fieldLabel(key) {
-    return PROPERTY_META[key]?.zh || state.fields.find((field) => field.key === key)?.label || key;
+    return state.fields.find((field) => field.key === key)?.label || PROPERTY_META[key]?.zh || key;
   }
 
   function pointCatalystName(point) {
@@ -474,7 +481,7 @@
   function normaliseFields(payload) {
     const raw = Array.isArray(payload) ? payload : (payload.fields || payload.analysis_fields || []);
     return raw.filter((field) => field && field.key && (field.type === "number" || field.numeric === true || field.category === "numeric") && field.analysis_enabled !== false)
-      .map((field) => ({ key: field.key, label: PROPERTY_META[field.key]?.zh || field.label || field.display_name || field.key }));
+      .map((field) => ({ key: field.key, unit: field.unit, available: field.available, label: (field.label_zh || PROPERTY_META[field.key]?.zh || field.label || field.display_name || field.key) }));
   }
 
   function fillSelect(select, fields, preferred) {
@@ -482,7 +489,7 @@
     fields.forEach((field) => {
       const option = document.createElement("option");
       option.value = field.key;
-      option.textContent = field.label;
+      option.textContent = field.label + (field.unit ? " / " + field.unit : "") + (field.available === false ? "（暂无合格值）" : "");
       select.appendChild(option);
     });
     if (fields.some((field) => field.key === preferred)) select.value = preferred;
@@ -1490,18 +1497,7 @@
     if (plotWrap) plotWrap.addEventListener("click", hideTooltip);
 
     // 常用关系预设点击
-    $("quickChargeBond")?.addEventListener("click", () => {
-      if (state.fields.some((field) => field.key === DEFAULTS.quickX) && state.fields.some((field) => field.key === DEFAULTS.quickY)) {
-        $("xField").value = DEFAULTS.quickX;
-        $("yField").value = DEFAULTS.quickY;
-        loadCorrelation();
-      } else {
-        $("relationStatus").textContent = "当前接口未提供该快捷关系所需的数值字段。";
-      }
-    });
-
     document.querySelectorAll(".preset-btn").forEach((btn) => {
-      if (btn.id === "quickChargeBond") return;
       btn.addEventListener("click", () => {
         const x = btn.getAttribute("data-x");
         const y = btn.getAttribute("data-y");
@@ -1509,6 +1505,8 @@
           $("xField").value = x;
           $("yField").value = y;
           loadCorrelation();
+        } else {
+          $("relationStatus").textContent = "常用关系字段尚未加载，请点击刷新重试。";
         }
       });
     });

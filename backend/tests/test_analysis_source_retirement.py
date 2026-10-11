@@ -138,7 +138,7 @@ def test_new_projection_keeps_evidence_history_but_excludes_actual_conflicts(sta
     assert payload['total'] == 1
     assert payload['items'][0]['exploratory_eligible'] is eligible
     assert svc.summary()['exploratory_numeric_records'] == int(eligible)
-    assert bool(svc.field_registry()) is eligible
+    assert any(f['available_count'] for f in svc.field_registry()) is eligible
     assert payload['items'][0]['sources'][0]['page_number'] == 2
     assert session.scalars.call_count == 4  # No old catalyst or DFT-setting reads.
     session.commit.assert_not_called()
