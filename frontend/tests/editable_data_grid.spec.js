@@ -74,3 +74,14 @@ test('detail loads only explicitly linked SI owners and preserves each row and f
  await page.evaluate(()=>loadRebuildAssets());const snapshot=await page.evaluate(()=>window.familyState);
  expect(snapshot.rebuildStatus).toBe('ready');expect(snapshot.rebuildRows.map(r=>r.paper_id)).toEqual([main,si]);expect(snapshot.rebuildFiles.map(f=>f.paper_id)).toEqual([main,si]);expect(snapshot.rebuildAssets.map(f=>f.paper_id)).toEqual([main,si]);expect(requested.some(u=>u.includes(unrelated))).toBe(false);expect(snapshot.rebuildRows[1].values[0].raw_value).toBe('-1.230');
 });
+test('wide metric tables remain compact and column choices preserve expanded conditions',async({page})=>{
+ await page.setViewportSize({width:1200,height:900});await page.setContent('<div id="grid"></div>');await page.addStyleTag({path:path.resolve(__dirname,'../shared/editable-data-grid.css')});await page.addScriptTag({path:script});
+ const rows=[row('1',{software:'SIESTA',functional:'PBE',basis_set:'DZP',vacuum_A:20,pseudopotential:'Troullier-Martins',charge_analysis:'Voronoi'}),row('2',{adsorbate:'Li2S'})];rows[0].values.push(...Array.from({length:12},(_,i)=>({id:'extra'+i,field_name:'deltaG_step'+i,raw_value:'0.56',unit:'eV',value_type:'explicit'})));
+ await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows}),rows);
+ await expect(page.locator('thead th')).toHaveCount(3);
+ await page.getByRole('button',{name:'展开条件（2）'}).click();await expect(page.locator('[data-current-row="1"]')).toBeVisible();
+ await page.locator('[data-edg-chooser]').click();expect(await page.locator('.edg-column-list').evaluate(el=>el.getBoundingClientRect().height)).toBeLessThanOrEqual(241);
+ await page.locator('[data-edg-column="deltaG_step0"]').uncheck();await expect(page.locator('[data-current-row="1"]')).toBeVisible();
+ await page.locator('[data-edg-close]').click();await page.locator('[data-edg-category="反应自由能"]').click();await expect(page.locator('thead')).toContainText('自由能');
+ await page.getByRole('searchbox').fill('no match');await expect(page.locator('tbody')).toContainText('没有匹配');await page.getByRole('searchbox').fill('FeCo');await expect(page.locator('[data-current-row="1"]')).toBeVisible();
+});
