@@ -111,3 +111,34 @@ def test_constant_x_never_claims_fit_ready(monkeypatch):
     assert not result['ready']
     assert not result['statistics']['ready']
     assert 'X 字段' in result['insufficient_reason']
+
+
+@pytest.mark.parametrize('status,eligible', [
+    ('evidence_history', True), ('corrected_previous_retained', True),
+    ('value_conflict', False), ('unit_conflict', False),
+])
+def test_new_projection_keeps_evidence_history_but_excludes_actual_conflicts(status, eligible):
+    from uuid import uuid4
+    from app.db.models import Paper, RebuildDataRow, RebuildDataValue, RebuildValueSource
+    pid, rid, vid = uuid4(), uuid4(), uuid4()
+    paper = Paper(id=pid, library_name='test', title='Evidence-backed DFT')
+    row = RebuildDataRow(id=rid, paper_id=pid, row_key='Fe', reaction='SRR',
+                         material='Fe-N4', active_site_type='single_atom', data_type='dft',
+                         condition={}, properties={})
+    value = RebuildDataValue(id=vid, row_id=rid, paper_id=pid,
+                            field_name='adsorption_energy_ev', numeric_value=-1., unit='eV',
+                            value_type='explicit', is_estimated=False,
+                            conflict={'status': status, 'candidates': [{'numeric_value': -1.}]})
+    source = RebuildValueSource(id=uuid4(), row_id=rid, value_id=vid, paper_id=pid,
+                               source_kind='table', page_number=2, quote='Fe-N4 -1.0 eV')
+    session = MagicMock()
+    session.scalars.side_effect = [[paper], [row], [value], [source]]
+    svc = AnalysisReadonlyService(session, filters={'data_type': 'dft'})
+    payload = svc.compare(offset=0, limit=25, sort='catalyst_group')
+    assert payload['total'] == 1
+    assert payload['items'][0]['exploratory_eligible'] is eligible
+    assert svc.summary()['exploratory_numeric_records'] == int(eligible)
+    assert bool(svc.field_registry()) is eligible
+    assert payload['items'][0]['sources'][0]['page_number'] == 2
+    assert session.scalars.call_count == 4  # No old catalyst or DFT-setting reads.
+    session.commit.assert_not_called()

@@ -30,6 +30,14 @@ ENERGY = {'ev': 1., 'mev': .001, 'hartree': 27.211386245988, 'ha': 27.2113862459
 LENGTH = {'å': 1., 'a': 1., 'angstrom': 1., 'angstroms': 1., 'nm': 10., 'pm': .01}
 
 
+def unresolved_conflict(conflict):
+    if not conflict:
+        return False
+    if isinstance(conflict, dict) and conflict.get('status') in {'evidence_history', 'corrected_previous_retained'}:
+        return bool(conflict.get('legacy_unresolved'))
+    return True
+
+
 def plain(obj):
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}
 
@@ -158,7 +166,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 normalized_value, normalized_unit, reason = normalize_numeric(row.property_type,row.value,row.unit)
                 if extra.get('estimated') and not self.include_estimated:
                     reason = 'estimated_excluded'
-                elif extra.get('conflict'):
+                elif unresolved_conflict(extra.get('conflict')):
                     reason = 'unresolved_conflict'
                 elif extra.get('identity_pending'):
                     reason = 'identity_pending'
