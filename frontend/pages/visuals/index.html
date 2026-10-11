@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
-  <link rel="stylesheet" href="./page.css?v=20261011-compact-matrix">
+  <link rel="stylesheet" href="./page.css?v=20261011-matrix-studio">
   <script src="../../shared/topnav.js?v=20261004-original-v2"></script>
   <script>ThemeManager.init();</script>
 </head>
@@ -315,8 +315,8 @@
             <div class="control-group">
               <label for="matrixScopeSelect" class="control-label">变量范围</label>
               <select id="matrixScopeSelect" class="form-select">
-                <option value="core">有统计结果的变量</option>
-                <option value="all" selected>全部常用物理量</option>
+                <option value="core" selected>有统计结果的变量</option>
+                <option value="all">全部常用物理量</option>
               </select>
             </div>
 
@@ -369,9 +369,9 @@
               <h3>矩阵使用说明</h3>
             </div>
             <ol class="guide-list">
-              <li>矩阵展示<strong>下三角无序独立变量对</strong>，对角线为自相关（—），上三角留空以避免重复。</li>
+              <li>矩阵<strong>对称展示变量对</strong>，对角线为自身（—），数量按独立变量对统计。</li>
               <li>单元格数值展示皮尔逊相关系数 <strong>r</strong> 与样本数 <strong>n</strong>。</li>
-              <li>灰色单元格表示有效配对样本数不足（n &lt; 3），未计算统计相关。</li>
+              <li>浅灰单元格表示未满足当前样本阈值或其他统计条件。</li>
               <li>点击任意有效单元格可查看下方变量对下钻图谱、文献示例与定量趋势。</li>
             </ol>
           </div>
@@ -383,44 +383,35 @@
           <div class="chart-card matrix-card">
             <div class="matrix-card-header">
               <div>
-                <h2 class="chart-title">探索性物理化学相关性矩阵</h2>
-                <p class="card-desc">悬停符号查看含义与单位，点击格子查看来源与散点。按同篇文献、同一催化剂及位点配对，不同计算条件分别统计。</p>
+                <span class="matrix-eyebrow">CORRELATION EXPLORER</span><h2 class="chart-title">物理化学相关性矩阵</h2>
+                <p class="card-desc">从变量间的关联出发，探索催化剂性质。点击色块，查看散点与文献来源。</p>
               </div>
               <div class="matrix-meta-badges">
-                <span class="meta-badge" id="badgeVarCount">6 个变量</span>
-                <span class="meta-badge" id="badgeCellCount">0 / 15 变量对可分析</span>
+                <span class="meta-badge" id="badgeVarCount">加载变量…</span>
+                <span class="meta-badge" id="badgeCellCount">正在统计…</span>
                 <span class="meta-badge">探索性数据 · 审核未知</span>
               </div>
             </div>
 
             <div class="matrix-stage">
+              <p class="matrix-axis-note">列编号对应左侧变量编号 · 悬停查看含义与单位 · 对称位置展示同一变量对</p>
               <div class="matrix-scroll-wrapper">
-                <table id="matrixTable" class="heatmap-table">
+                <table id="matrixTable" class="heatmap-table" aria-label="物理化学变量相关性矩阵">
                   <tbody id="matrixBody">
                     <tr><td class="empty-cell">加载矩阵中…</td></tr>
                   </tbody>
                 </table>
               </div>
 
-              <!-- Continuous Diverging Colorbar Legend (-1 to +1) -->
               <div class="matrix-legend-col">
-                <span class="legend-scale-title">相关系数 r</span>
-                <div class="diverging-colorbar-wrapper">
-                  <span class="scale-label">+1.0</span>
-                  <div class="continuous-colorbar"></div>
-                  <span class="scale-label">0.0</span>
-                  <div class="continuous-colorbar-neg"></div>
-                  <span class="scale-label">-1.0</span>
-                </div>
-                <div class="legend-info-box">
-                  <p><strong>r</strong>：皮尔逊相关系数</p>
-                  <p><strong>n</strong>：有效催化剂样本数</p>
-                  <p class="muted">灰色：样本不足 (n &lt; 3)</p>
-                </div>
+                <div class="matrix-scale"><span>负相关</span><span class="matrix-gradient"></span><span>正相关</span><span class="muted">−1 / 0 / +1</span></div>
+                <span class="matrix-reading-note">色块内为 r · 下方为样本数 n</span>
+                <span id="matrixMissingNote" class="matrix-reading-note">浅灰：不满足统计条件</span>
               </div>
             </div>
           </div>
 
+          <p class="matrix-method-note">配对规则：同篇文献、同一催化剂与位点；不同计算条件分别统计。相关性仅用于探索，不代表因果关系。</p>
           <!-- Bottom Drill-Down Card for Selected Pair -->
           <div id="matrixDetailCard" class="matrix-detail-card">
             <div class="detail-card-header">
@@ -694,6 +685,6 @@
   </main>
 
   <script src="../../shared/view-state.js"></script>
-  <script src="./page.js?v=20261011-compact-matrix"></script>
+  <script src="./page.js?v=20261011-matrix-studio"></script>
 </body>
 </html>

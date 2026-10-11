@@ -143,7 +143,7 @@
     minN: DEFAULTS.minN,
     lastCorrelation: null,
     matrixData: null,
-    matrixScope: "all", // 'core' | 'all'
+    matrixScope: "core", // 'core' | 'all'
     matrixMinN: 3,
     selectedMatrixCell: null,
     matrixDetailData: null,
@@ -164,7 +164,7 @@
     x: { id: "xField", type: "select", default: DEFAULTS.x },
     y: { id: "yField", type: "select", default: DEFAULTS.y },
     min_n: { id: "minN", type: "text", default: String(DEFAULTS.minN), valid: (v) => Number(v) >= 3 },
-    scope: { id: "matrixScopeSelect", type: "select", default: "all" },
+    scope: { id: "matrixScopeSelect", type: "select", default: "core" },
     reaction: { id: "matrixReactionSelect", type: "select", default: "" },
     adsorbate: { id: "matrixAdsorbateSelect", type: "select", default: "" },
     family: { id: "matrixFamilySelect", type: "select", default: "" },
@@ -1116,9 +1116,9 @@
     }
   }
 
-  function matrixHeader(meta) {
+  function matrixHeader(meta, label = meta.symbol) {
     const hint = `${meta.symbol} · ${meta.labelZh}\n单位：${meta.unit || "无量纲 / 未注明"}\n${meta.desc || "具体定义与参考态请查看原文及该变量的来源记录。"}`;
-    return `<button type="button" class="matrix-symbol" data-matrix-hint="${esc(hint)}" aria-label="${esc(hint)}">${esc(meta.symbol)}</button>`;
+    return `<button type="button" class="matrix-symbol" data-matrix-hint="${esc(hint)}" aria-label="${esc(hint)}">${esc(label)}</button>`;
   }
 
   function installMatrixHints(tbody) {
@@ -1176,10 +1176,10 @@
       }
     });
 
-    let headerHtml = '<tr><th class="col-header-y matrix-corner">变量 ↗</th>';
-    vars.forEach((vx) => {
+    let headerHtml = '<tr><th scope="col" class="col-header-y matrix-corner">变量 / VARIABLE</th>';
+    vars.forEach((vx, index) => {
       const meta = getFieldMeta(vx);
-      headerHtml += `<th class="matrix-col-symbol">${matrixHeader(meta)}</th>`;
+      headerHtml += `<th scope="col" class="matrix-col-symbol">${matrixHeader(meta, String(index + 1).padStart(2, "0"))}</th>`;
     });
     headerHtml += "</tr>";
     tbody.insertAdjacentHTML("beforeend", headerHtml);
@@ -1189,15 +1189,9 @@
 
     vars.forEach((vy, rowIdx) => {
       const yMeta = getFieldMeta(vy);
-      let rowHtml = `<tr><th class="col-header-y">${matrixHeader(yMeta)}</th>`;
+      let rowHtml = `<tr><th scope="row" class="col-header-y"><span class="matrix-index">${String(rowIdx + 1).padStart(2, "0")}</span>${matrixHeader(yMeta)}</th>`;
 
       vars.forEach((vx, colIdx) => {
-        // 上三角：留空，避免重复展示造成认知负担
-        if (colIdx > rowIdx) {
-          rowHtml += `<td class="heatmap-empty-cell"></td>`;
-          return;
-        }
-
         // 对角线：自身相关显示 —
         if (colIdx === rowIdx) {
           rowHtml += `
@@ -1222,17 +1216,15 @@
         if (!isSufficient) {
           cellClass += " is-insufficient";
         } else {
-          validPairCount++;
+          if (colIdx < rowIdx) validPairCount++;
           cellClass += " is-ready-cell";
-          const alpha = Math.min(0.88, Math.max(0.15, Math.abs(rVal)));
-          if (rVal > 0) {
-            cellStyle = `background: rgba(124, 58, 237, ${alpha}); color: ${alpha > 0.5 ? '#fff' : 'inherit'};`;
-          } else {
-            cellStyle = `background: rgba(59, 130, 246, ${alpha}); color: ${alpha > 0.5 ? '#fff' : 'inherit'};`;
-          }
+          const strength = Math.min(1, Math.abs(rVal));
+          const base = rVal > 0 ? [184, 91, 43] : [44, 105, 151];
+          const rgb = base.map(v => Math.round(248 + (v - 248) * strength));
+          cellStyle = `background: rgb(${rgb.join(',')}); color: ${strength > 0.57 ? '#fff' : '#263445'};`;
         }
 
-        const rText = rVal !== null ? fmt2(rVal) : "—";
+        const rText = isSufficient ? rVal.toFixed(2) : "—";
         const nText = nVal > 0 ? `n=${nVal}` : "";
         const hint = `${getFieldMeta(vx).labelZh} × ${yMeta.labelZh}\n皮尔逊 r：${rText} · 催化剂样本 n=${nVal}\n${isSufficient ? (selectedGroup ? "最大可比组；其他计算条件分别统计。" : "可比样本的探索性统计。") : "未满足统计条件，请点击查看配对与排除原因。"}\n点击查看来源和散点图。`;
 
@@ -1248,6 +1240,7 @@
       tbody.insertAdjacentHTML("beforeend", rowHtml);
     });
 
+    if ($("matrixMissingNote")) $("matrixMissingNote").textContent = `浅灰：n < ${state.matrixMinN} 或不满足统计条件`;
     const badgeCellCount = $("badgeCellCount");
     if (badgeCellCount) badgeCellCount.textContent = `${validPairCount} / ${totalIndependentPairs} 变量对可分析`;
 
@@ -1265,6 +1258,16 @@
     tbody.querySelectorAll('[role="button"]').forEach(td => td.addEventListener('keydown', event => {
       if(event.key==='Enter'||event.key===' '){event.preventDefault();td.click()}
     }));
+    tbody.querySelectorAll('td[data-x]').forEach(td => {
+      const highlight = () => {
+        tbody.querySelectorAll('.is-axis-active').forEach(el => el.classList.remove('is-axis-active'));
+        td.parentElement.querySelector('th')?.classList.add('is-axis-active');
+        tbody.rows[0]?.cells[td.cellIndex]?.classList.add('is-axis-active');
+      };
+      td.addEventListener('pointerenter', highlight);
+      td.addEventListener('focus', highlight);
+    });
+    tbody.addEventListener('pointerleave', () => tbody.querySelectorAll('.is-axis-active').forEach(el => el.classList.remove('is-axis-active')));
     const firstReady = tbody.querySelector('.heatmap-cell.is-ready-cell');
     if (firstReady) {
       firstReady.classList.add("is-active-cell");
@@ -1774,7 +1777,7 @@
       await loadFields();
       /* 先读 URL 填控件（此时字段下拉已就绪），再用同样的值发第一次查询（只发一次） */
       viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
-      state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "all";
+      state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "core";
       ViewState.bindDetailLinks("visuals");
       if (viewState.tab && viewState.tab !== "relations") switchTab(viewState.tab);
       await loadCorrelation();
