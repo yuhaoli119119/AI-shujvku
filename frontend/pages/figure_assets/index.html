@@ -8,7 +8,8 @@
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
-  <link rel="stylesheet" href="../rebuild-shared.css?v=20260923-closeout">
+  <link rel="stylesheet" href="../rebuild-shared.css?v=20261011-unified">
+  <link rel="stylesheet" href="./page.css?v=20261011-unified">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <script>ThemeManager.init();</script>
 <style>
@@ -27,7 +28,7 @@
 .rebuild-context-links { display:flex; flex-wrap:wrap; gap:14px; margin-top:14px; line-height:1.6; }
 </style>
 </head>
-<body>
+<body class="figure-assets-page">
 <div id="topnav-mount"></div>
 <main class="rebuild-shell">
   <section class="rebuild-hero" aria-labelledby="pageTitle">
@@ -44,7 +45,7 @@
       <select id="paperSelect" class="rebuild-control" aria-label="选择论文"></select>
       <h3 style="margin-top:18px">关联文件</h3>
       <div id="fileList" class="rebuild-empty">请选择论文</div>
-      <h3 style="margin-top:18px">PDF 裁图</h3>
+      <details class="figure-tool-section" id="cropTools"><summary>裁图工具</summary>
       <form id="cropForm">
         <label class="rebuild-field" for="cropFile">来源文件</label>
         <select id="cropFile" class="rebuild-control" required></select>
@@ -68,7 +69,8 @@
         <textarea id="explanation" class="rebuild-control"></textarea>
         <div class="rebuild-actions"><button class="rebuild-btn" id="cropBtn" type="submit">生成裁图</button></div>
       </form>
-      <h3 style="margin-top:22px">纠正选中对象</h3>
+      </details>
+      <details class="figure-tool-section" id="editTools"><summary>纠正图表内容</summary>
       <form id="editForm">
         <label class="rebuild-field" for="editCaption">图注 / 表题</label>
         <textarea id="editCaption" class="rebuild-control"></textarea>
@@ -89,12 +91,13 @@
         </select>
         <div class="rebuild-actions"><button class="rebuild-btn" id="editBtn" type="submit" disabled>保存纠正</button></div>
       </form>
+      </details>
     </aside>
     <section class="rebuild-panel" aria-label="图表对象">
       <div class="rebuild-actions" style="justify-content:space-between;align-items:center;margin-bottom:12px">
         <strong id="assetSummary">请选择论文</strong>
-        <label class="rebuild-field" style="display:inline-flex;align-items:center;gap:8px"><input type="checkbox" id="showSuperseded">显示历史版本</label>
-        <span id="aiHint" class="rebuild-tag">AI 读写工具：/api/rebuild</span>
+        <label class="rebuild-field figure-history-toggle" style="display:inline-flex;align-items:center;gap:8px"><input type="checkbox" id="showSuperseded">显示历史版本</label>
+        <select id="assetTypeFilter" class="figure-type-filter" aria-label="筛选图表类型"><option value="">全部类型</option><option value="figure">整图</option><option value="subfigure">子图</option><option value="table">表格</option></select>
       </div>
       <div id="statusArea"></div>
       <div id="assetGrid" class="rebuild-card-grid"></div>
@@ -109,6 +112,7 @@
   <section aria-labelledby="contextCaptionLabel"><h3 id="contextCaptionLabel">整图图注</h3><p id="contextCaption" class="rebuild-context-caption"></p><p class="rebuild-context-warning">图注文字来自整图资料记录，不表示图注包含在原 PNG 像素内。</p></section>
   <div class="rebuild-context-links"><a id="contextOriginal" target="_blank" rel="noopener">查看原子图裁图</a><a id="contextWhole" target="_blank" rel="noopener">查看整图原文件</a><a id="contextPdf" target="_blank" rel="noopener">查看来源 PDF</a></div>
 </dialog>
-<script src="./page.js?v=20261009-context-roi-r4" defer></script>
+<dialog id="assetImageViewer" class="rebuild-context-dialog figure-image-dialog" aria-label="查看图表"><header><strong id="assetImageTitle"></strong><button id="assetImageClose" type="button" class="rebuild-btn ghost">关闭</button></header><img id="assetFullImage" alt=""><p id="assetImageCaption"></p></dialog>
+<script src="./page.js?v=20261011-unified" defer></script>
 </body>
 </html>

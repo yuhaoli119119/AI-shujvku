@@ -45,6 +45,8 @@ function syncWriteControls() {
 
 async function loadCurrentPaper() {
   closeContextViewer();
+  if($("assetImageViewer")?.open)$("assetImageViewer").close();
+  if($("editTools"))$("editTools").open=false;
   const loadGeneration = ++paperLoadGeneration;
   loadedPaperGeneration = null;
   const paperId = $("paperSelect").value;
@@ -81,16 +83,13 @@ function renderFiles() {
     $("cropFile").innerHTML = "";
     return;
   }
-  $("fileList").innerHTML = state.files.map((file) => `
-    <div style="margin-bottom:8px">
-      <strong>${file.role === "main" ? "正文" : "SI"}</strong>
-      <div>${file.original_filename}</div>
-      <a href="/api/rebuild/files/${file.id}/preview" target="_blank" rel="noopener">预览 PDF</a>
-    </div>
-  `).join("");
-  $("cropFile").innerHTML = state.files.map((file) => `
-    <option value="${file.id}">${file.role === "main" ? "正文" : "SI"} · ${file.original_filename}</option>
-  `).join("");
+  $("fileList").innerHTML = state.files.map(file => {
+    const full=file.original_filename || '未保存文件名';
+    const display=full.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i,'');
+    return `<article class="figure-source-file"><header><strong>${file.role==='main'?'正文':'补充资料 SI'}</strong><a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">打开 PDF ↗</a></header><div title="${assetText(full)}">${assetText(display)}</div></article>`;
+  }).join('');
+  $("cropFile").innerHTML=state.files.map(file=>`<option value="${assetText(file.id)}">${file.role==='main'?'正文':'SI'} · ${assetText(file.original_filename)}</option>`).join('');
+
 }
 
 
@@ -220,34 +219,36 @@ async function openContextViewer(assetId) {
 
 function renderAssets() {
   const superseded = state.assets.filter(asset => supersedingAsset(asset, state.assets));
-  const visible = $("showSuperseded").checked ? state.assets : state.assets.filter(asset => !supersedingAsset(asset, state.assets));
+  const current = $("showSuperseded").checked ? state.assets : state.assets.filter(asset => !supersedingAsset(asset, state.assets));
+  const type=$("assetTypeFilter")?.value || "";
+  const visible=current.filter(asset=>!type || asset.asset_type===type);
   $("assetSummary").textContent = `${visible.length} 个图表/子图对象${superseded.length ? $("showSuperseded").checked ? `（含 ${superseded.length} 个历史版本）` : ` · 已隐藏 ${superseded.length} 个历史版本` : ""}`;
   const grid = $("assetGrid");
   if (!visible.length) {
-    grid.innerHTML = `<div class="rebuild-empty" style="grid-column:1/-1">还没有图表对象；可由 AI 工具批量生成，也可在左侧创建。</div>`;
+    grid.innerHTML = `<div class="rebuild-empty" style="grid-column:1/-1">当前筛选下没有图表资料。可切换类型查看，或使用裁图工具添加。</div>`;
     return;
   }
   grid.innerHTML = visible.map((asset) => `
     <article class="rebuild-asset-card" data-id="${asset.id}">
-      ${asset.image_url ? `<img src="${asset.image_url}" alt="${asset.figure_label || asset.asset_key}">` : `<div class="rebuild-empty">无裁图</div>`}
+      ${asset.image_url ? `<button class="figure-thumbnail" type="button" data-view="${assetText(asset.id)}" aria-label="放大 ${assetText(asset.figure_label || asset.asset_key)}"><img loading="lazy" src="${assetText(asset.image_url)}" alt="${assetText(asset.figure_label || asset.asset_key)}"><span>点击放大</span></button>` : `<div class="figure-thumbnail figure-no-image">尚无裁图</div>`}
       <div class="rebuild-asset-body">
         ${supersedingAsset(asset,state.assets) ? `<div class="rebuild-panel" style="box-shadow:none"><span class="rebuild-tag warn">历史版本</span> 已由 ${assetText(supersedingAsset(asset,state.assets).figure_label || supersedingAsset(asset,state.assets).asset_key)} 替代。<p>${assetText(asset.provenance.reason)}</p><button class="rebuild-btn ghost" type="button" data-current="${assetText(supersedingAsset(asset,state.assets).id)}">查看当前版本</button></div>` : ""}
         <div>
           <span class="rebuild-tag">${asset.asset_type === "table" ? "表" : asset.asset_type === "subfigure" ? "子图" : "图"}</span>
-          ${asset.figure_label ? `<span class="rebuild-tag">${asset.figure_label}</span>` : ""}
-          ${asset.subfigure_label ? `<span class="rebuild-tag">${asset.subfigure_label}</span>` : ""}
-          ${asset.unreadable_fields.length ? `<span class="rebuild-tag warn">局部不可读</span>` : ""}
-          <span class="rebuild-tag">页 ${asset.page_numbers.join(", ") || "—"}</span>
+
+
+          ${(asset.unreadable_fields || []).length ? `<span class="rebuild-tag warn">局部不可读</span>` : ""}
+          <span class="rebuild-tag">页 ${(asset.page_numbers || []).join(", ") || "—"}</span>
         </div>
-        <h3>${asset.figure_label || asset.asset_key}</h3>
-        <p>${assetText(asset.caption || "未填写图注")}</p>
-        <p><strong>解释：</strong>${asset.explanation || "未填写"}</p>
-        <p><strong>坐标：</strong>${asset.x_axis_unit || "?"} / ${asset.y_axis_unit || "?"}</p>
+        <h3>${assetText(asset.figure_label || asset.asset_key)}${asset.subfigure_label ? ` · ${assetText(asset.subfigure_label)}` : ''}</h3>
+        <p class="figure-caption-preview">${assetText(asset.caption || "未填写图注")}</p>
+        <details class="figure-card-details"><summary>完整图注与解释</summary><p>${assetText(asset.caption || "未填写图注")}</p><p><strong>解释：</strong>${assetText(asset.explanation || "未填写")}</p>${asset.x_axis_unit || asset.y_axis_unit ? `<p>坐标单位：${assetText(asset.x_axis_unit || '未记录')} / ${assetText(asset.y_axis_unit || '未记录')}</p>` : ''}</details>
         ${contextAction(asset)}
         <button class="rebuild-btn ghost" type="button" data-edit="${asset.id}">选择纠正</button>
       </div>
     </article>
   `).join("");
+  grid.querySelectorAll("button[data-view]").forEach(button=>button.addEventListener("click",()=>{const asset=state.assets.find(item=>item.id===button.dataset.view);if(!asset)return;$("assetImageTitle").textContent=asset.figure_label || asset.asset_key;$("assetFullImage").src=asset.image_url;$("assetFullImage").alt=asset.figure_label || asset.asset_key;$("assetImageCaption").textContent=asset.caption || "未填写图注";$("assetImageViewer").showModal();}));
   grid.querySelectorAll("button[data-context]").forEach(button => button.addEventListener("click", () => openContextViewer(button.dataset.context)));
   grid.querySelectorAll("button[data-current]").forEach(button => button.addEventListener("click", () => selectAsset(button.dataset.current)));
   grid.querySelectorAll("button[data-edit]").forEach((button) => {
@@ -259,6 +260,7 @@ function selectAsset(id) {
   state.selected = state.assets.find((asset) => asset.id === id && asset.paper_id === state.paperId) || null;
   syncWriteControls();
   if (!state.selected) return;
+  if($("editTools"))$("editTools").open=true;
   $("editCaption").value = state.selected.caption || "";
   $("editExplanation").value = state.selected.explanation || "";
   $("editContext").value = state.selected.context_text || "";
@@ -354,6 +356,8 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   TopNav.init({ currentPage: "figure-assets", mountId: "topnav-mount" });
   $("showSuperseded").addEventListener("change", renderAssets);
+  $("assetTypeFilter")?.addEventListener("change",renderAssets);
+  $("assetImageClose")?.addEventListener("click",()=>$("assetImageViewer").close());
   $("paperSelect").addEventListener("change", loadCurrentPaper);
   $("cropFile").addEventListener("change", syncWriteControls);
   $("refreshBtn").addEventListener("click", loadCurrentPaper);

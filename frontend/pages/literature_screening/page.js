@@ -114,8 +114,9 @@ async function applyFilters() {
         const body = document.getElementById('resultsTableBody');
         body.innerHTML = '';
         const row = body.insertRow(), cell = row.insertCell();
-        cell.colSpan = 16;
+        cell.colSpan = 6;
         cell.className = 'empty-state';
+        updateSelection();
         cell.textContent = '文献筛选加载失败：' + err.message + '。';
         const retry = document.createElement('button');
         retry.type = 'button'; retry.className = 'btn ghost'; retry.textContent = '重试';
@@ -128,7 +129,7 @@ async function applyFilters() {
 function updateResultCount(count) {
     const el = document.getElementById('resultCount');
     if (!el) return;
-    el.textContent = count === 0 ? 'No papers' : `${count} paper${count === 1 ? '' : 's'}`;
+    el.textContent = `${count} 篇正文`;
 }
 
 function clearFilters() {
@@ -149,53 +150,55 @@ function clearFilters() {
     applyFilters();
 }
 
+const PRIORITY_LABELS = { high: '高优先级', medium: '中优先级', low: '低优先级', exclude: '排除' };
+const IF_STATUS_LABELS = { needs_metadata: '待补信息', matched: '已匹配', verified: '已核对', available: '已登记', imported: '已导入', missing: '待补信息', unknown: '来源未登记', manual: '人工登记', ok: '已登记' };
+function renderTitle(title) {
+    // Preserve scientific subscripts without inserting other stored HTML.
+    const doc = new DOMParser().parseFromString(String(title || '未命名论文'), 'text/html');
+    function safe(node) {
+        if (node.nodeType === Node.TEXT_NODE) return esc(node.textContent);
+        const content = Array.from(node.childNodes).map(safe).join('');
+        const tag = node.nodeName.toLowerCase();
+        return ['sub', 'sup', 'i', 'b', 'em'].includes(tag) ? `<${tag}>${content}</${tag}>` : content;
+    }
+    return safe(doc.body);
+}
 function renderTable() {
     const tbody = document.getElementById('resultsTableBody');
     tbody.innerHTML = '';
-
-    if (currentPapers.length === 0) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = '<td colspan="16" class="empty-row">No papers match the current filters.</td>';
-        tbody.appendChild(tr);
+    document.getElementById('selectAllCheckbox').checked = false;
+    document.getElementById('selectAllCheckbox').indeterminate = false;
+    if (!currentPapers.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-row">没有符合条件的文献。可放宽筛选条件后重试。</td></tr>';
+        updateSelection();
         return;
     }
-
     currentPapers.forEach(paper => {
         const tr = document.createElement('tr');
-
-        const safeVerifiedCount = paper.safe_verified_evidence_count !== undefined ? paper.safe_verified_evidence_count : '-';
-        const verifiedCount = paper.verified_evidence_count !== undefined ? paper.verified_evidence_count : '-';
-
-        let ifStatusDisplay = paper.impact_factor_status || '';
-        if (!paper.impact_factor) {
-            ifStatusDisplay = 'needs_metadata';
-        }
-
-        // data-label 带上列名：<=700px 时 shared/responsive.css 的 table.litai-stack
-        // 规则会把每个 td 渲染成「列名 + 值」的卡片行；标题和复选框不带列名。
-        // 注意：title 内层 HTML 保持原样 —— 库里有 11 条标题带 <sub> 下标标记，
-        // 必须继续按 HTML 渲染（转义会把 <sub> 显示成字面标签，桌面行高也会变）；
-        // 只有 title 属性做转义，避免标题里的引号截断属性。
+        const hasIF = paper.impact_factor !== null && paper.impact_factor !== undefined && paper.impact_factor !== '';
+        const status = hasIF ? (IF_STATUS_LABELS[paper.impact_factor_status] || '已登记') : '待补信息';
+        const tags = [['PDF',paper.has_pdf],['全文',paper.has_parsed_text],['提取结果',paper.has_extraction_output]].map(([name,yes]) => `<span class="status-badge ${yes ? 'available' : ''}">${yes ? '有' : '无'}${name}</span>`).join('');
         tr.innerHTML = `
-            <td class="cell-select"><input type="checkbox" class="row-checkbox" value="${esc(paper.id)}"></td>
-            <td class="title-col" title="${esc(paper.title || '')}"><a class="screening-title-link" href="../paper_detail/index.html?paper_id=${esc(paper.id)}&from=literature_screening" title="${esc(paper.title || '')}">${paper.title || '-'}</a></td>
-            <td data-label="Year">${esc(paper.year || '-')}</td>
-            <td data-label="Journal">${esc(paper.journal || '-')}</td>
-            <td data-label="Impact Factor">${esc(paper.impact_factor || '-')}</td>
-            <td data-label="IF Year">${esc(paper.impact_factor_year || '-')}</td>
-            <td data-label="IF Source">${esc(paper.impact_factor_source || '-')}</td>
-            <td data-label="IF Status">${esc(ifStatusDisplay)}</td>
-            <td data-label="PDF">${paper.has_pdf ? 'Yes' : 'No'}</td>
-            <td data-label="Parsed Text">${paper.has_parsed_text ? 'Yes' : 'No'}</td>
-            <td data-label="Ext. Output">${paper.has_extraction_output ? 'Yes' : 'No'}</td>
-            <td data-label="Verified Ev. Count">${esc(verifiedCount)}</td>
-            <td data-label="Safe Ver. Ev. Count">${esc(safeVerifiedCount)}</td>
-            <td data-label="Exclude Citation">${paper.exclude_from_citation ? 'Yes' : 'No'}</td>
-            <td data-label="Priority">${esc(paper.citation_priority || '-')}</td>
-            <td data-label="User Note">${esc(paper.user_note || '')}</td>
-        `;
+            <td class="cell-select"><input type="checkbox" class="row-checkbox" aria-label="选择文献" value="${esc(paper.id)}"></td>
+            <td class="title-col">${paper.paper_code ? `<span class="paper-code">${esc(paper.paper_code)}</span>` : ''}<a class="screening-title-link" href="../paper_detail/index.html?paper_id=${esc(paper.id)}&from=literature_screening">${renderTitle(paper.title)}</a></td>
+            <td data-label="发表信息"><div>${esc(paper.journal || '期刊未登记')}</div><div class="cell-subtle">${esc(paper.year ?? '年份未登记')}</div></td>
+            <td data-label="影响因子"><strong>${esc(hasIF ? paper.impact_factor : '—')}</strong><div class="cell-subtle">${esc(status)}</div><details class="record-details"><summary>来源详情</summary><dl><dt>指标年份</dt><dd>${esc(paper.impact_factor_year ?? '未登记')}</dd><dt>来源</dt><dd>${esc(paper.impact_factor_source === 'unknown' ? '未登记' : paper.impact_factor_source || '未登记')}</dd></dl></details></td>
+            <td data-label="资料与证据"><div class="status-tags">${tags}</div><details class="record-details"><summary>证据详情</summary><dl><dt>核验证据数</dt><dd>${esc(paper.verified_evidence_count ?? '未登记')}</dd><dt>安全核验证据数</dt><dd>${esc(paper.safe_verified_evidence_count ?? '未登记')}</dd></dl></details></td>
+            <td data-label="引用设置"><span class="status-badge ${paper.exclude_from_citation ? 'warning' : 'priority'}">${paper.exclude_from_citation ? '不引用' : '未排除'}</span><div class="cell-subtle">${esc(PRIORITY_LABELS[paper.citation_priority] || '未设优先级')}</div>${paper.user_note ? `<details class="record-details"><summary>备注</summary><p class="user-note">${esc(paper.user_note)}</p></details>` : ''}</td>`;
+        tr.querySelector('.row-checkbox').addEventListener('change', updateSelection);
         tbody.appendChild(tr);
     });
+    updateSelection();
+}
+function updateSelection() {
+    const boxes = Array.from(document.querySelectorAll('.row-checkbox'));
+    const count = boxes.filter(cb => cb.checked).length;
+    document.getElementById('selectionCount').textContent = `已选 ${count} 篇`;
+    document.getElementById('bulkPriorityBtn').disabled = count === 0;
+    document.getElementById('bulkExcludeBtn').disabled = count === 0;
+    const all = document.getElementById('selectAllCheckbox');
+    all.checked = boxes.length > 0 && count === boxes.length;
+    all.indeterminate = count > 0 && count < boxes.length;
 }
 
 function esc(value) {
@@ -211,6 +214,7 @@ function toggleSelectAll() {
     const checked = document.getElementById('selectAllCheckbox').checked;
     const checkboxes = document.querySelectorAll('.row-checkbox');
     checkboxes.forEach(cb => cb.checked = checked);
+    updateSelection();
 }
 
 function getSelectedIds() {
@@ -220,7 +224,7 @@ function getSelectedIds() {
 
 function markSelectedDoNotCite() {
     const ids = getSelectedIds();
-    if (ids.length === 0) return alert('No papers selected.');
+    if (ids.length === 0) return alert('请先选择文献。');
     
     pendingAction = 'bulkEligibility';
     pendingData = {
@@ -230,12 +234,12 @@ function markSelectedDoNotCite() {
         }
     };
     
-    showConfirmModal('Mark as Do Not Cite', `Are you sure you want to mark ${ids.length} selected paper(s) as "Do Not Cite"?`);
+    showConfirmModal('设为不引用', `确认将选中的 ${ids.length} 篇文献设为不引用？`);
 }
 
 function setPriorityForSelected() {
     const ids = getSelectedIds();
-    if (ids.length === 0) return alert('No papers selected.');
+    if (ids.length === 0) return alert('请先选择文献。');
     const priority = document.getElementById('bulkPrioritySelect').value;
     
     pendingAction = 'bulkEligibility';
@@ -246,7 +250,7 @@ function setPriorityForSelected() {
         }
     };
     
-    showConfirmModal('Set Citation Priority', `Are you sure you want to set citation priority to "${priority}" for ${ids.length} selected paper(s)?`);
+    showConfirmModal('设置引用优先级', `确认将选中的 ${ids.length} 篇文献设为${PRIORITY_LABELS[priority]}？`);
 }
 
 function showConfirmModal(title, message) {
@@ -272,10 +276,10 @@ async function executeConfirmedAction() {
             if (resp.ok) {
                 applyFilters();
             } else {
-                alert('Bulk update failed: ' + await resp.text());
+                alert('批量更新失败：' + await resp.text());
             }
         } catch (err) {
-            alert('Error updating: ' + err);
+            alert('更新失败：' + err);
         }
     }
     closeConfirmModal();
@@ -297,12 +301,12 @@ async function executeImport() {
     const isDryRun = document.getElementById('importDryRun').checked;
     
     if (!text.trim()) {
-        alert('Please paste CSV or JSON content first.');
+        alert('请先粘贴 CSV 或 JSON 内容。');
         return;
     }
     
     if (!isDryRun) {
-        const confirmReal = confirm('You are running a real import (dry_run = false). This will update the database. Are you sure?');
+        const confirmReal = confirm('确认导入并保存影响因子信息？此次操作会更新文献的发表信息。');
         if (!confirmReal) return;
     }
 
@@ -327,9 +331,9 @@ async function executeImport() {
                 applyFilters();
             }
         } else {
-            alert('Import failed: ' + await resp.text());
+            alert('导入失败：' + await resp.text());
         }
     } catch (err) {
-        alert('Error during import: ' + err);
+        alert('导入失败：' + err);
     }
 }

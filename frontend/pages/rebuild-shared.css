@@ -24,14 +24,14 @@
 
 .rebuild-hero p {
   margin: 0;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-eyebrow {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: .16em;
-  color: var(--primary, #2563eb);
+  color: var(--color-primary, #6442d6);
 }
 
 .rebuild-layout {
@@ -50,7 +50,7 @@
 .rebuild-panel {
   border: 1px solid rgba(148, 163, 184, .24);
   border-radius: var(--rebuild-radius);
-  background: var(--surface, #fff);
+  background: var(--color-surface, #fff);
   box-shadow: var(--rebuild-shadow);
   padding: 18px;
 }
@@ -78,7 +78,7 @@
   padding: 8px 10px;
   border: 1px solid rgba(148, 163, 184, .5);
   border-radius: 10px;
-  background: var(--surface, #fff);
+  background: var(--color-surface, #fff);
   color: inherit;
   font: inherit;
 }
@@ -99,7 +99,7 @@ textarea.rebuild-control {
   padding: 8px 14px;
   border: 0;
   border-radius: 999px;
-  background: var(--primary, #2563eb);
+  background: var(--color-primary, #6442d6);
   color: #fff;
   font: inherit;
   font-weight: 700;
@@ -166,7 +166,7 @@ textarea.rebuild-control {
   padding: 28px;
   border-radius: 12px;
   text-align: center;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
   background: rgba(248, 250, 252, .8);
 }
 
@@ -246,7 +246,7 @@ textarea.rebuild-control {
   max-height: 85vh;
   overflow: auto;
   border-radius: 16px;
-  background: var(--surface, #fff);
+  background: var(--color-surface, #fff);
   padding: 20px;
 }
 
@@ -283,7 +283,7 @@ textarea.rebuild-control {
 .rebuild-hint {
   margin-top: 10px;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-subhead {
@@ -322,7 +322,7 @@ textarea.rebuild-control {
 }
 
 .rebuild-result-item.is-active {
-  border-color: var(--primary, #2563eb);
+  border-color: var(--color-primary, #6442d6);
   background: rgba(37, 99, 235, .08);
 }
 
@@ -340,7 +340,7 @@ textarea.rebuild-control {
 .rebuild-result-counts {
   grid-column: 1 / -1;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-selected {
@@ -359,7 +359,7 @@ textarea.rebuild-control {
 .rebuild-selected-meta {
   margin: 4px 0;
   font-size: 13px;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-counts {
@@ -401,7 +401,7 @@ textarea.rebuild-control {
   padding: 18px;
   border: 1px solid rgba(148, 163, 184, .24);
   border-radius: var(--rebuild-radius);
-  background: var(--surface, #fff);
+  background: var(--color-surface, #fff);
   box-shadow: var(--rebuild-shadow);
   transition: opacity .15s ease;
 }
@@ -445,7 +445,7 @@ textarea.rebuild-control {
 
 .rebuild-badge.is-pending {
   background: rgba(148, 163, 184, .18);
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-badge.is-ok {
@@ -455,14 +455,14 @@ textarea.rebuild-control {
 
 .rebuild-step-desc {
   margin: 10px 0 0;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
   overflow-wrap: anywhere;
 }
 
 .rebuild-step-note {
   margin: 10px 0 0;
   font-size: 12px;
-  color: var(--text-secondary, #64748b);
+  color: var(--color-text-secondary, #667085);
 }
 
 .rebuild-upload {
@@ -526,14 +526,14 @@ textarea.rebuild-control {
   align-items: center;
   gap: 1rem;
   padding: 2.5rem 1.5rem;
-  border: 1px solid var(--border-color, #e0e0e0);
+  border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 12px;
-  background: var(--surface-elevated, #fafafa);
+  background: var(--color-surface, #fff);
   text-align: center;
 }
 
 .ai-extract-placeholder {
-  color: var(--text-secondary, #666);
+  color: var(--color-text-secondary, #667085);
   font-size: 0.95rem;
 }
 
@@ -543,7 +543,7 @@ textarea.rebuild-control {
   padding: 0.9rem 2.5rem;
   border: none;
   border-radius: 10px;
-  background: var(--primary, #2563eb);
+  background: var(--color-primary, #6442d6);
   color: #fff;
   cursor: pointer;
   transition: opacity 0.15s, transform 0.1s;
@@ -569,10 +569,10 @@ textarea.rebuild-control {
 
 .ai-status-running {
   font-size: 1.05rem;
-  color: var(--primary, #2563eb);
+  color: var(--color-primary, #6442d6);
   padding: 0.6rem 1rem;
   border-radius: 8px;
-  background: var(--primary-soft, #eff6ff);
+  background: var(--color-primary-bg, #f2edff);
   animation: ai-pulse 1.5s ease-in-out infinite;
 }
 
@@ -612,12 +612,12 @@ textarea.rebuild-control {
 
 .ai-result-count {
   font-size: 0.95rem;
-  color: var(--text-secondary, #555);
+  color: var(--color-text-secondary, #667085);
 }
 
 .ai-result-count strong {
   font-size: 1.4rem;
-  color: var(--text-primary, #1a1a1a);
+  color: var(--color-text, #111827);
   display: block;
 }
 
@@ -630,9 +630,9 @@ textarea.rebuild-control {
 
 /* Advanced tools collapsed section */
 .advanced-tools {
-  border: 1px solid var(--border-color, #e0e0e0);
+  border: 1px solid var(--color-border, #e5e7eb);
   border-radius: 10px;
-  background: var(--surface, #fff);
+  background: var(--color-surface, #fff);
   overflow: hidden;
 }
 
@@ -664,7 +664,7 @@ textarea.rebuild-control {
 .advanced-tools-note {
   padding: 0 1.25rem 0.5rem;
   font-size: 0.85rem;
-  color: var(--text-secondary, #888);
+  color: var(--color-text-secondary, #667085);
   margin: 0;
 }
 
@@ -691,3 +691,36 @@ textarea.rebuild-control {
     font-size: 1.2rem;
   }
 }
+
+/* Unified tool pages: the same typography, surfaces and controls as literature detail. */
+body { margin:0; background:var(--color-bg); color:var(--color-text); font-family:var(--font-body,system-ui,-apple-system,"Segoe UI",sans-serif); font-size:14px; line-height:1.6; }
+.rebuild-shell, .rebuild-shell *, .rebuild-modal-panel * { box-sizing:border-box; }
+.rebuild-shell { width:min(1520px,calc(100% - 48px)); margin:28px auto 48px; }
+.rebuild-hero { align-items:center; gap:16px; margin-bottom:22px; }
+.rebuild-hero h1 { font-size:24px; line-height:1.3; letter-spacing:-.02em; margin:0 0 7px; font-weight:650; }
+.rebuild-hero p { font-size:13px; max-width:850px; line-height:1.7; }
+.rebuild-eyebrow { display:none; }
+.rebuild-layout { grid-template-columns:280px minmax(0,1fr); gap:20px; }
+.rebuild-panel { border-color:var(--color-border); border-radius:12px; background:var(--color-surface); box-shadow:none; padding:20px; }
+.rebuild-layout > .rebuild-panel + .rebuild-panel { margin-top:0; }
+.rebuild-panel h2 { font-size:15px; font-weight:650; margin:0 0 14px; }
+.rebuild-panel h3 { font-size:13px; font-weight:600; }
+.rebuild-field { font-size:12px; color:var(--color-text-secondary); font-weight:500; margin:12px 0 4px; }
+.rebuild-control { display:block; min-height:38px; margin:4px 0 12px; border:1px solid var(--color-border); border-radius:8px; color:var(--color-text); font-size:13px; padding:8px 10px; max-width:100%; }
+.rebuild-control:focus { outline:2px solid var(--color-primary-bg); border-color:var(--color-primary); }
+.rebuild-btn { min-height:36px; border-radius:8px; font-size:13px; font-weight:500; padding:7px 13px; background:var(--color-primary); text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+.rebuild-btn.ghost { border-color:var(--color-border); background:var(--color-surface); color:var(--color-text); }
+.rebuild-btn:hover:not(:disabled) { filter:brightness(.97); }
+.rebuild-empty,.rebuild-progress { background:var(--color-surface-alt); color:var(--color-text-secondary); font-size:13px; padding:20px; }
+.rebuild-tag { background:var(--color-primary-bg); color:var(--color-primary); font-size:11px; font-weight:500; }
+.rebuild-table th { background:var(--color-surface-alt); color:var(--color-text-secondary); }
+.rebuild-table-wrap,.rebuild-asset-card { border-color:var(--color-border); }
+.rebuild-step { box-shadow:none; border-color:var(--color-border); }
+.rebuild-result-item { background:var(--color-surface); border-color:var(--color-border); }
+.rebuild-result-item.is-active { background:var(--color-primary-bg); border-color:var(--color-primary); }
+.rebuild-step-no,.rebuild-count { background:var(--color-primary-bg); color:var(--color-primary); }
+.rebuild-metric,.rebuild-chart { background:var(--color-surface-alt); }
+.ai-extract-zone { padding:32px 24px; }
+.ai-extract-btn { font-size:16px; min-height:44px; padding:10px 24px; }
+@media(max-width:900px) { .rebuild-shell { width:calc(100% - 32px); margin-top:20px; } .rebuild-layout { grid-template-columns:1fr; } .rebuild-hero { flex-direction:row; align-items:start; } }
+@media(max-width:540px) { .rebuild-shell { width:calc(100% - 24px); } .rebuild-panel { padding:16px; } .rebuild-hero { flex-wrap:wrap; } .rebuild-hero h1 { font-size:22px; } }
