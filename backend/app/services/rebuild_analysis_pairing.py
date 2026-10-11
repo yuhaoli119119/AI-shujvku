@@ -83,6 +83,9 @@ def pair_rows(rows, x_field, y_field):
             continue
         right = dict(candidates[0])
         right['source_record_ids'] = list(dict.fromkeys(i for r in candidates for i in source_ids(r)))
+        if x_field != y_field and set(source_ids(left)) == set(source_ids(right)):
+            excluded.append((left, candidates, 'same_source_self_comparison'))
+            continue
         signature = (left['paper_id'], left.get('catalyst_name'),
                      left['target']['normalized_value'], right['target']['normalized_value'],
                      json.dumps(context(left, right), sort_keys=True, ensure_ascii=False))

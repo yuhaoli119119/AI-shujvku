@@ -341,7 +341,11 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         available=list(definitions)
         if fields is None:
             counts=Counter(k for row in self._rebuild_fields().values() for k,r in row.items() if r['exploratory_eligible']) if self.source=='rebuild' else Counter()
-            fields=sorted(available,key=lambda k:(-counts[k],k)) if self.source=='rebuild' else available
+            # Generic adsorption/charge fields have unresolved species. They
+            # remain available as observations, but are not independent matrix
+            # axes beside the resolved species-specific variables.
+            matrix_fields = [f for f in available if f not in {'adsorption_energy', 'bader_charge_transfer'}] if self.source=='rebuild' else available
+            fields=sorted(matrix_fields,key=lambda k:(-counts[k],k)) if self.source=='rebuild' else matrix_fields
         if not set(fields)<=set(available):
             raise ValueError('unknown matrix field')
         cells=[]
@@ -358,7 +362,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 if left!=right:
                     cells.append({**cell,'x_property':right,'y_property':left,'descriptor':right,'target_property':left})
         self._matrix_mode=False
-        return {'schema_version':'stored_exploratory_matrix_v1','variables':[definitions[f] for f in fields],'cells':cells,'available_field_count':len(available),'omitted_fields':[f for f in available if f not in fields],'selection_policy':'All curated physical fields; pair split rows within a paper and material identity. Display separately identified comparable groups; raw observations retain original extracted fields.','min_n':min_n}
+        return {'schema_version':'stored_exploratory_matrix_v1','variables':[definitions[f] for f in fields],'cells':cells,'available_field_count':len(available),'omitted_fields':[f for f in available if f not in fields],'selection_policy':'Curated physical fields excluding unresolved generic adsorption/charge axes; one canonical variable per observation; same-source alias comparisons excluded; pair split rows within a paper and material identity. Display separately identified comparable groups; raw observations retain original extracted fields.','min_n':min_n}
 
     def observation_dataset(self, *, limit=None, offset=0, dataset_profile=None):
         self._load_rows()

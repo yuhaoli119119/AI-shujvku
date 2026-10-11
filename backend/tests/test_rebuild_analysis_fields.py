@@ -73,3 +73,32 @@ def test_derived_maximum_does_not_rescue_excluded_bond():
     rows = project_rows([cell('li1_s_bond_length_angstrom', 2.3, unit='Å'),
                          cell('li2_s_bond_length_angstrom', 2.6, unit='Å', reason='estimated_excluded')])
     assert not rows['one']['li_s_bond_max']['exploratory_eligible']
+
+
+@pytest.mark.parametrize('species,field', [('Li2S','li2s_adsorption_energy'),
+    ('Li2S6','li2s6_adsorption_energy'), ('S8','s8_adsorption_energy')])
+def test_known_adsorption_has_only_one_species_variable(species, field):
+    original = cell('adsorption_energy_ev', -2, adsorbate=species)
+    projected = project_rows([original])['one']
+    assert set(projected) == {field}
+    assert source_ids(projected[field]) == [original['record_id']]
+    assert original['field_name'] == 'adsorption_energy_ev'
+
+
+def test_known_bader_transfer_is_not_duplicated_as_generic():
+    projected = project_rows([cell('bader_charge_transfer_e', -.4, unit='e')])['one']
+    assert set(projected) == {'li2s_bader_charge_transfer'}
+
+
+def test_unclassified_adsorption_preserved_but_not_a_matrix_axis():
+    svc = AnalysisReadonlyService(MagicMock())
+    svc.records = [cell('adsorption_energy_ev', -2, adsorbate=None),
+                   cell('adsorption_energy_ev', -3, row='two'),
+                   cell('d_band_center_ev', -1)]
+    svc._loaded = ([], {}, {'total_dft_rows':len(svc.records)})
+    assert 'adsorption_energy' in svc._rebuild_fields()['one']
+    matrix = svc.correlation_matrix()
+    assert 'adsorption_energy' in matrix['omitted_fields']
+    assert 'adsorption_energy' not in {v['key'] for v in matrix['variables']}
+    assert 'li2s_adsorption_energy' in {v['key'] for v in matrix['variables']}
+    svc.session.commit.assert_not_called()

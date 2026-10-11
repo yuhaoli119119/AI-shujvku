@@ -98,3 +98,17 @@ def test_new_property_in_new_row_increases_catalyst_pairs_and_revision():
     assert before.data_revision()['revision']!=after.data_revision()['revision']
     corrected=dict(y,raw_value=-.6,target={'normalized_value':-.6,'normalized_unit':'eV'})
     assert after.data_revision()['revision']!=service([x,corrected]).data_revision()['revision']
+
+
+def test_same_source_alias_comparison_is_excluded_with_reason():
+    x=cell('x',-2,'one');y=cell('y',-2,'one')
+    x['source_record_ids']=['original'];y['source_record_ids']=['original']
+    pairs,excluded,_,_=pair_rows({'one':{'x':x,'y':y}},'x','y')
+    assert pairs==[]
+    assert excluded[0][2]=='same_source_self_comparison'
+
+
+def test_equal_values_from_distinct_sources_remain_pairable():
+    x=cell('x',-2,'one');y=cell('y',-2,'one')
+    pairs,excluded,_,_=pair_rows({'one':{'x':x,'y':y}},'x','y')
+    assert len(pairs)==1 and excluded==[]

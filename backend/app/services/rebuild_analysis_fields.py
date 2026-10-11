@@ -19,9 +19,9 @@ FIELDS = [
     ('li2_s_bond_length', 'Li₂S 中 Li2–S 键长', 'Å', ('li2_s_bond_length_angstrom',)),
     ('d_band_center', 'd 带中心', 'eV', ('d_band_center_ev',)),
     ('rds_delta_g', '决速步吉布斯自由能变化', 'eV', ('delta_g_rds_ev', 'rate_determining_step_gibbs_free_energy_ev')),
-    ('adsorption_energy', '吸附能（按吸附物分别比较）', 'eV', ('adsorption_energy_ev',)),
+    ('adsorption_energy', '吸附能（吸附物未分类）', 'eV', ('adsorption_energy_ev',)),
     ('li_s_bond_length', 'Li–S 键长（未注明是否最大）', 'Å', ('li_s_bond_length_angstrom',)),
-    ('bader_charge_transfer', 'Bader 电荷转移（按吸附物分别比较）', 'e', ('bader_charge_transfer_e',)),
+    ('bader_charge_transfer', 'Bader 电荷转移（吸附物未分类）', 'e', ('bader_charge_transfer_e',)),
     ('binding_energy', '结合能', 'eV', ('binding_energy_ev',)),
     ('band_gap', '带隙', 'eV', ('band_gap_ev',)),
     ('formation_energy', '形成能', 'eV', ('formation_energy_ev',)),
@@ -75,14 +75,16 @@ def project_rows(records):
             field = ALIASES.get(raw)
             if raw in {'li1_s_bond_length_angstrom', 'li2_s_bond_length_angstrom'} and species != 'Li2S':
                 field = None
-            if field:
-                candidates[field].append(record)
+            # A known adsorbate gives one canonical variable, not both a
+            # generic alias and its species-specific projection.
             if raw in {'adsorption_energy_ev', 'adsorption_energy'} and species:
                 species_field = str(species).lower() + '_adsorption_energy'
                 if species_field in DEFINITIONS:
-                    candidates[species_field].append(record)
+                    field = species_field
             if raw in {'bader_charge_transfer_e', 'bader_charge_transfer'} and species == 'Li2S':
-                candidates['li2s_bader_charge_transfer'].append(record)
+                field = 'li2s_bader_charge_transfer'
+            if field:
+                candidates[field].append(record)
         fields = {key: merge(cells, key) for key, cells in candidates.items()}
         # A maximum is defined only when both explicitly indexed bonds are
         # recorded in this same row, never from another material/configuration.
