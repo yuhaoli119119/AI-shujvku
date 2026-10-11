@@ -46,6 +46,12 @@
     d_band_center: { symbol: "ε_d", zh: "d 带中心", unit: "eV", desc: "催化活性金属表面的 d 带中心能量" },
     rds_delta_g: { symbol: "ΔG_RDS", zh: "决速步自由能", unit: "eV", desc: "反应决速步骤（RDS）的自由能变化" },
 
+    bader_charge_transfer: { symbol: "Δqᴮ", zh: "Bader 电荷转移", unit: "e", desc: "按吸附物分别统计的 Bader 电荷转移；正负号以原文定义为准。" },
+    defect_formation_energy: { symbol: "E_def", zh: "缺陷形成能", unit: "eV", desc: "形成指定缺陷的能量；比较时需核对缺陷类型与参考态。" },
+    li_ion_diffusion_barrier: { symbol: "E_diff(Li)", zh: "锂离子扩散能垒", unit: "eV", desc: "指定迁移路径上的锂离子扩散能垒。" },
+    li2s_delithiation_barrier: { symbol: "E_del(Li₂S)", zh: "Li₂S 脱锂能垒", unit: "eV", desc: "Li₂S 脱锂过程的能垒；需核对原文反应路径。" },
+    metal_s_bond_length: { symbol: "d(M–S)", zh: "金属–硫键长", unit: "Å", desc: "指定金属位点与硫原子的键长。" },
+    icohp: { symbol: "ICOHP", zh: "积分晶体轨道哈密顿布居", unit: "eV", desc: "指定原子对的积分晶体轨道哈密顿布居；符号和积分范围按原文。" },
     adsorption_energy: { symbol: "E_ads", zh: "吸附能", unit: "eV", desc: "多硫化物/吸附质在表面的吸附能" },
     binding_energy: { symbol: "E_bind", zh: "结合能", unit: "eV", desc: "结合能" },
     reaction_barrier: { symbol: "E_act", zh: "反应能垒", unit: "eV", desc: "多硫化物催化转化能垒" },
@@ -200,7 +206,7 @@
     const fieldObj = state.fields.find((f) => f.key === key);
     const labelZh = fieldObj?.label || info.zh || key;
     const unit = info.unit || fieldObj?.unit || "";
-    const symbol = info.symbol || key;
+    const symbol = (info.symbol || key).replace("E_ads", "Eₐ").replace("E_bind", "Eᵦ").replace("E_b(", "E‡(").replace("d_max", "dₘₐₓ").replace("ΔG_RDS", "ΔGᵣ").replace("E_form", "E𝒇").replace("Q_Bader", "Δqᴮ(Li₂S)");
     return {
       key,
       labelZh: formatChemicalFormula(labelZh),
@@ -1110,6 +1116,32 @@
     }
   }
 
+  function matrixHeader(meta) {
+    const hint = `${meta.symbol} · ${meta.labelZh}\n单位：${meta.unit || "无量纲 / 未注明"}\n${meta.desc || "具体定义与参考态请查看原文及该变量的来源记录。"}`;
+    return `<button type="button" class="matrix-symbol" data-matrix-hint="${esc(hint)}" aria-label="${esc(hint)}">${esc(meta.symbol)}</button>`;
+  }
+
+  function installMatrixHints(tbody) {
+    let bubble = $("matrixHintBubble");
+    if (!bubble) { bubble=document.createElement("div");bubble.id="matrixHintBubble";bubble.className="matrix-hint-bubble";bubble.setAttribute("role","tooltip");bubble.hidden=true;document.body.appendChild(bubble); }
+    bubble.hidden=true;
+    function hide(){bubble.hidden=true;}
+    function show(el) {
+      bubble.textContent=el.dataset.matrixHint;bubble.hidden=false;
+      const rect=el.getBoundingClientRect(),width=bubble.offsetWidth,height=bubble.offsetHeight;
+      bubble.style.left=Math.max(8,Math.min(rect.left,innerWidth-width-8))+"px";
+      bubble.style.top=Math.max(8,rect.bottom+8+height>innerHeight ? rect.top-height-8 : rect.bottom+8)+"px";
+    }
+    tbody.querySelectorAll('[data-matrix-hint]').forEach(el=>{
+      el.setAttribute('aria-describedby','matrixHintBubble');
+      el.addEventListener('mouseenter',()=>show(el));el.addEventListener('mouseleave',hide);
+      el.addEventListener('focus',()=>show(el));el.addEventListener('blur',hide);
+      el.addEventListener('keydown',event=>{if(event.key==='Escape')hide()});
+      if(el.tagName==='BUTTON')el.addEventListener('click',()=>show(el));
+    });
+    const wrapper=tbody.closest('.matrix-scroll-wrapper');if(wrapper)wrapper.onscroll=hide;
+  }
+
   function renderMatrix() {
     const mc = state.matrixData || {};
     const cells = mc.cells || [];
@@ -1144,10 +1176,10 @@
       }
     });
 
-    let headerHtml = '<tr><th class="col-header-y">性质 / 变量</th>';
+    let headerHtml = '<tr><th class="col-header-y matrix-corner">变量 ↗</th>';
     vars.forEach((vx) => {
       const meta = getFieldMeta(vx);
-      headerHtml += `<th>${esc(meta.labelZh)}<br><small class="muted">(${esc(meta.unit || "—")})</small></th>`;
+      headerHtml += `<th class="matrix-col-symbol">${matrixHeader(meta)}</th>`;
     });
     headerHtml += "</tr>";
     tbody.insertAdjacentHTML("beforeend", headerHtml);
@@ -1157,7 +1189,7 @@
 
     vars.forEach((vy, rowIdx) => {
       const yMeta = getFieldMeta(vy);
-      let rowHtml = `<tr><th class="col-header-y">${esc(yMeta.labelZh)} <small class="muted">(${esc(yMeta.unit || "—")})</small></th>`;
+      let rowHtml = `<tr><th class="col-header-y">${matrixHeader(yMeta)}</th>`;
 
       vars.forEach((vx, colIdx) => {
         // 上三角：留空，避免重复展示造成认知负担
@@ -1201,10 +1233,11 @@
         }
 
         const rText = rVal !== null ? fmt2(rVal) : "—";
-        const nText = nVal > 0 ? `n=${nVal}${selectedGroup ? " · 最大可比组" : ""}` : "";
+        const nText = nVal > 0 ? `n=${nVal}` : "";
+        const hint = `${getFieldMeta(vx).labelZh} × ${yMeta.labelZh}\n皮尔逊 r：${rText} · 催化剂样本 n=${nVal}\n${isSufficient ? (selectedGroup ? "最大可比组；其他计算条件分别统计。" : "可比样本的探索性统计。") : "未满足统计条件，请点击查看配对与排除原因。"}\n点击查看来源和散点图。`;
 
         rowHtml += `
-          <td class="${cellClass}" style="${cellStyle}" data-x="${vx}" data-y="${vy}">
+          <td class="${cellClass}" style="${cellStyle}" data-x="${vx}" data-y="${vy}" tabindex="0" role="button" aria-label="${esc(hint)}" data-matrix-hint="${esc(hint)}">
             <span class="cell-r-val">${rText}</span>
             ${nText ? `<span class="cell-n-sub">${nText}</span>` : ""}
           </td>
@@ -1228,6 +1261,10 @@
       });
     });
 
+    installMatrixHints(tbody);
+    tbody.querySelectorAll('[role="button"]').forEach(td => td.addEventListener('keydown', event => {
+      if(event.key==='Enter'||event.key===' '){event.preventDefault();td.click()}
+    }));
     const firstReady = tbody.querySelector('.heatmap-cell.is-ready-cell');
     if (firstReady) {
       firstReady.classList.add("is-active-cell");

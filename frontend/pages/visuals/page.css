@@ -1743,3 +1743,44 @@ details[open]>summary.table-card-header:after { transform:rotate(180deg); }
 
 .heatmap-table th:not(.col-header-y), .heatmap-table td { min-width:105px; }
 .heatmap-table .col-header-y { position:sticky; left:0; z-index:1; background:var(--color-surface-alt); }
+
+/* Compact catalyst correlation workspace: filters above, symbols on both axes. */
+#tabMatrix .matrix-layout{grid-template-columns:minmax(0,1fr);gap:12px}
+#tabMatrix .matrix-sidebar{display:block}
+#tabMatrix .matrix-sidebar>.sidebar-card:first-child{display:grid;grid-template-columns:130px repeat(4,minmax(120px,1fr)) 110px;gap:12px;align-items:center;padding:12px 16px}
+#tabMatrix .matrix-sidebar .card-title-row,#tabMatrix .matrix-sidebar .control-group{margin:0}
+#tabMatrix .matrix-sidebar .control-label{font-size:11px;margin-bottom:4px}
+#tabMatrix .matrix-sidebar .form-select,#tabMatrix .matrix-sidebar .form-input{height:34px;padding:6px 10px;font-size:12px}
+#tabMatrix .matrix-sidebar .field-hint,#tabMatrix .guide-card{display:none}
+#tabMatrix .matrix-card{padding:14px 16px}
+#tabMatrix .matrix-card-header{gap:12px;margin-bottom:10px;flex-wrap:wrap}
+#tabMatrix .chart-title{font-size:16px}
+#tabMatrix .card-desc{font-size:12px;margin-top:6px;max-width:none;line-height:1.5}
+#tabMatrix .matrix-meta-badges{flex-wrap:wrap}
+#tabMatrix .matrix-stage{display:flex;flex-direction:column;gap:8px}
+#tabMatrix .matrix-legend-col{order:-1;display:flex;align-items:center;gap:12px;width:100%;box-sizing:border-box;padding:7px 10px;font-size:11px}
+#tabMatrix .legend-scale-title{margin:0;white-space:nowrap}
+#tabMatrix .diverging-colorbar-wrapper{flex-direction:row-reverse;gap:5px;margin:0}
+#tabMatrix .continuous-colorbar{width:65px;height:10px;background:linear-gradient(to right,var(--color-surface),#7c3aed);border:0;border-radius:0 3px 3px 0}
+#tabMatrix .continuous-colorbar-neg{width:65px;height:10px;background:linear-gradient(to right,#3b82f6,var(--color-surface));border:0;border-radius:3px 0 0 3px}
+#tabMatrix .legend-info-box{display:flex;gap:12px;margin:0;padding:0;border:0;flex-wrap:wrap}
+#tabMatrix .matrix-scroll-wrapper{width:100%;max-height:72vh;overflow:auto;scrollbar-gutter:stable}
+#tabMatrix .heatmap-table{width:max-content;table-layout:fixed;border-collapse:separate;border-spacing:0;min-width:0}
+#tabMatrix .heatmap-table th:not(.col-header-y),#tabMatrix .heatmap-table td{width:42px;min-width:42px;max-width:42px;box-sizing:border-box}
+#tabMatrix .heatmap-table td{height:34px;padding:2px 0;border-width:0 1px 1px 0}
+#tabMatrix .heatmap-table th{padding:0;border-width:0 1px 1px 0;font-size:10px}
+#tabMatrix .heatmap-table tr:first-child th{position:sticky;top:0;height:110px;z-index:6;background:var(--color-surface-alt);vertical-align:bottom}
+#tabMatrix .heatmap-table .col-header-y{width:108px;min-width:108px;max-width:108px;position:sticky;left:0;z-index:7;text-align:right;background:var(--color-surface-alt)}
+#tabMatrix .heatmap-table .matrix-corner{z-index:9;padding:10px;vertical-align:bottom}
+#tabMatrix .matrix-symbol{border:0;background:none;color:inherit;font:inherit;font-weight:600;padding:4px;white-space:nowrap;cursor:help}
+#tabMatrix .matrix-col-symbol .matrix-symbol{position:absolute;bottom:6px;left:19px;transform:rotate(-55deg);transform-origin:left center;text-align:left}
+#tabMatrix .col-header-y .matrix-symbol{max-width:108px;font-size:10px}
+#tabMatrix .matrix-symbol:focus-visible{outline:2px solid var(--color-primary);border-radius:3px}
+#tabMatrix .cell-r-val{font-size:10px;line-height:1.1}
+#tabMatrix .cell-n-sub{font-size:8px;line-height:1;margin-top:2px;color:inherit;opacity:.85}
+#tabMatrix .heatmap-cell.is-insufficient{opacity:1}
+#tabMatrix .matrix-detail-layout{grid-template-columns:220px minmax(0,1.2fr) minmax(0,1fr)}
+.matrix-hint-bubble{position:fixed;z-index:10000;max-width:min(340px,calc(100vw - 32px));padding:12px 14px;background:var(--color-surface);color:var(--color-text);border:1px solid var(--color-border);border-radius:8px;box-shadow:0 8px 28px rgb(0 0 0 / .2);font-size:12px;line-height:1.65;white-space:pre-line;pointer-events:none}
+.matrix-hint-bubble[hidden]{display:none}
+@media(max-width:1000px){#tabMatrix .matrix-sidebar>.sidebar-card:first-child{grid-template-columns:repeat(3,minmax(0,1fr))}#tabMatrix .matrix-sidebar .card-title-row{grid-column:1/-1}#tabMatrix .matrix-detail-layout{grid-template-columns:1fr}}
+@media(max-width:600px){#tabMatrix .matrix-sidebar>.sidebar-card:first-child{grid-template-columns:repeat(2,minmax(0,1fr))}#tabMatrix .matrix-legend-col{flex-wrap:wrap}#tabMatrix .matrix-meta-badges{gap:4px}}
