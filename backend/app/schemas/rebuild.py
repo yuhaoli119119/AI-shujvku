@@ -67,6 +67,45 @@ class RebuildSectionsImportRequest(BaseModel):
         if len(keys) != len(set(keys)):
             raise ValueError("section_key_repeated_in_request")
         return self
+
+
+class RebuildSectionCorrectionTarget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_id: UUID
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RebuildSectionCorrectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["extraction_boundary"]
+    file_id: UUID
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    old_section: RebuildSectionCorrectionTarget
+    new_sections: list[RebuildSectionCorrectionTarget] = Field(min_length=1, max_length=50)
+    reason: str = Field(min_length=1, max_length=20000)
+    sources: list[RebuildSectionSourceInput] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_explicit_relation(self):
+        ids = [target.section_id for target in self.new_sections]
+        if not self.reason.strip():
+            raise ValueError("section_correction_reason_required")
+        if len(ids) != len(set(ids)) or self.old_section.section_id in ids:
+            raise ValueError("section_correction_targets_invalid")
+        return self
+
+
+class RebuildSectionCorrectionsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    corrections: list[RebuildSectionCorrectionInput] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def reject_duplicate_old_sections(self):
+        ids = [item.old_section.section_id for item in self.corrections]
+        if len(ids) != len(set(ids)):
+            raise ValueError("section_correction_old_repeated")
+        return self
 import json
 
 

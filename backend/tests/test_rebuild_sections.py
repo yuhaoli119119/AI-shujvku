@@ -11,7 +11,7 @@ import asyncio
 import importlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import fitz
 import pytest
@@ -25,7 +25,8 @@ from app.main import app
 from app.security.htpasswd import hash_password, write_htpasswd
 from app.security.session_auth import create_session
 from app.services.paper_detail_readonly import PaperDetailReadonlyService
-from app.services.rebuild_sections import EVENT, RECEIPT, list_sections
+from app.services.rebuild_sections import (EVENT, RECEIPT, list_sections, CORRECTION_EVENT,
+                                         CORRECTION_RECEIPT, CORRECTION_VERSION)
 
 
 @pytest.fixture
@@ -190,6 +191,7 @@ def test_request_collision_key_collision_and_explicit_retained_alternative(chapt
         assert len(items) == 3
         assert next(s for s in items if s["id"] == first_id)["explanation_zh"] == original["sections"][0]["explanation_zh"]
         assert next(s for s in items if s["section_key"] == "intro-alternative")["conflicts_with_section_ids"] == [first_id]
+        assert all(s["display_status"] == "current" and not s["correction_history"] for s in items)
 
 
 def test_new_si_coverage_does_not_replace_main_or_infer_legacy_file(chapter_env):
@@ -296,3 +298,224 @@ def test_actual_lifespan_established_postgres_only_reads(chapter_env, monkeypatc
         event.remove(engine, "before_cursor_execute", observe)
     assert statements[0] == "SET TRANSACTION READ ONLY"
     assert counts(env) == [1, 0]
+
+
+def correction_fixture(env):
+    old = post(env, body(env)).json()['items'][0]['section_id']
+    alternative = body(env, key='boundary-fixed', request='fixed-chapter')
+    alternative['sections'][0].update(text='Original paragraph.', explanation_zh='AI边界纠正；本字符串不能自动历史化。',
+                                      conflicts_with_section_ids=[old])
+    new = post(env, alternative).json()['items'][0]['section_id']
+    sections = {s['id']: s for s in env['client'].get(f'/api/rebuild/papers/{env["paper_id"]}/sections').json()['items']}
+    return {'request_id': 'correction-request', 'corrections': [{
+        'kind': 'extraction_boundary', 'file_id': str(env['main']),
+        'source_sha256': env['hashes'][str(env['main'])],
+        'old_section': {'section_id': old, 'content_sha256': sections[old]['provenance']['content_sha256']},
+        'new_sections': [{'section_id': new, 'content_sha256': sections[new]['provenance']['content_sha256']}],
+        'reason': 'The extraction included text beyond the printed heading; preserve the old bytes.',
+        'sources': [{'page_number': 1, 'locator': 'Original heading, first paragraph', 'quote': 'Original paragraph.'}],
+    }]}
+
+
+def correction_post(env, payload):
+    return env['client'].post(f'/api/rebuild/papers/{env["paper_id"]}/sections/corrections', json=payload)
+
+
+def correction_counts(env):
+    with env['factory']() as session:
+        return tuple(session.scalar(select(func.count(AuditLog.id)).where(AuditLog.action == action))
+                     for action in (CORRECTION_EVENT, CORRECTION_RECEIPT))
+
+
+def immutable_snapshot(env):
+    with env['factory']() as session:
+        session.execute(text('SET TRANSACTION READ ONLY'))
+        return {model.__tablename__: [{c.name: getattr(row, c.name) for c in model.__table__.columns}
+                for row in session.scalars(select(model).order_by(model.id))]
+                for model in (Paper, PaperSection, RebuildPaperFile, RebuildDataRow, RebuildDataValue)} | {
+            'imports': [{c.name: getattr(row, c.name) for c in AuditLog.__table__.columns}
+                        for row in session.scalars(select(AuditLog).where(AuditLog.action.in_([EVENT, RECEIPT])).order_by(AuditLog.id))]}
+
+
+def test_boundary_correction_authentication_csrf_and_origin(chapter_env):
+    env = chapter_env; payload = correction_fixture(env)
+    path = f'/api/rebuild/papers/{env["paper_id"]}/sections/corrections'
+    with TestClient(app) as anonymous:
+        assert anonymous.post(path, json=payload).status_code == 401
+        anonymous.headers['X-MCP-Key'] = 'not-a-session'
+        assert anonymous.post(path, json=payload).status_code == 401
+    env['client'].headers.pop('X-CSRF-Token')
+    assert correction_post(env, payload).status_code == 403
+    env['client'].headers['X-CSRF-Token'] = 'wrong'
+    assert correction_post(env, payload).status_code == 403
+    env['client'].headers['X-CSRF-Token'] = env['client'].cookies.get('litai_csrf')
+    env['client'].headers['Origin'] = 'https://foreign.invalid'
+    assert correction_post(env, payload).status_code == 403
+    assert correction_counts(env) == (0, 0)
+
+
+def test_explicit_history_preservation_replay_and_readonly_projection(chapter_env):
+    env = chapter_env; payload = correction_fixture(env); before = immutable_snapshot(env)
+    with env['factory']() as session:
+        assert all(s['display_status'] == 'current' for s in list_sections(session, env['paper_id']))
+    response = correction_post(env, payload)
+    assert response.status_code == 200, response.text
+    assert response.json()['created'] == 1
+    assert correction_counts(env) == (1, 1)
+    replay = correction_post(env, copy.deepcopy(payload)).json()
+    assert replay['replayed'] and replay['created'] == 0
+    assert correction_counts(env) == (1, 1)
+    changed = copy.deepcopy(payload); changed['corrections'][0]['reason'] += ' Changed.'
+    assert correction_post(env, changed).status_code == 409
+    changed['request_id'] = 'another-declaration'
+    assert correction_post(env, changed).json()['detail'] == 'section_correction_relation_conflict'
+    same = copy.deepcopy(payload); same['request_id'] = 'same-declaration-new-request'
+    assert correction_post(env, same).json()['created'] == 0
+    assert correction_counts(env) == (1, 2)
+    assert immutable_snapshot(env) == before
+    old = payload['corrections'][0]['old_section']['section_id']
+    new = payload['corrections'][0]['new_sections'][0]['section_id']
+    with env['factory']() as session:
+        session.execute(text('SET TRANSACTION READ ONLY'))
+        detail = PaperDetailReadonlyService(session).get_paper_detail(env['paper_id'])
+        sections = {str(s.id): s.model_dump(mode='json') for s in detail.sections}
+        assert sections[old]['display_status'] == 'extraction_boundary_history'
+        assert sections[new]['display_status'] == sections[str(env['legacy_id'])]['display_status'] == 'current'
+        assert sections[new]['conflicts_with_section_ids'] == [old]
+        assert sections[old]['correction_history'] == sections[new]['correction_history']
+        relation = sections[old]['correction_history'][0]
+        assert relation['reason'] == payload['corrections'][0]['reason']
+        assert relation['sources'] == payload['corrections'][0]['sources']
+        assert relation['actor'] == 'chapter_tester' and relation['version'] == CORRECTION_VERSION
+        assert relation['old_section']['content_sha256'] == sections[old]['provenance']['content_sha256']
+        assert sections[old]['scientific_acceptance'] == 'not_implied'
+    package = env['client'].get(f'/api/rebuild/papers/{env["paper_id"]}/ai-work-package').json()
+    assert package['section_write_contract']['boundary_correction']['version'] == CORRECTION_VERSION
+    assert next(s for s in package['sections'] if s['id'] == old)['display_status'] == 'extraction_boundary_history'
+
+
+@pytest.mark.parametrize('change,expected', [
+    ('kind', 422), ('unknown', 422), ('blank_reason', 422), ('missing_source', 422),
+    ('self', 422), ('hash', 409), ('file', 400), ('alien_file', 400), ('source_hash', 409),
+    ('legacy', 400), ('alien_section', 400), ('source_page', 400), ('source_boolean', 422),
+])
+def test_correction_identity_and_source_contract(chapter_env, change, expected):
+    env = chapter_env; payload = correction_fixture(env); c = payload['corrections'][0]
+    if change == 'kind': c['kind'] = 'scientific_conflict'
+    elif change == 'unknown': c['accepted'] = True
+    elif change == 'blank_reason': c['reason'] = '  '
+    elif change == 'missing_source': c['sources'] = []
+    elif change == 'self': c['new_sections'] = [c['old_section']]
+    elif change == 'hash': c['old_section']['content_sha256'] = 'f' * 64
+    elif change == 'file': c['file_id'] = str(env['si']); c['source_sha256'] = env['hashes'][str(env['si'])]
+    elif change == 'alien_file': c['file_id'] = str(env['alien']); c['source_sha256'] = env['hashes'][str(env['alien'])]
+    elif change == 'source_hash': c['source_sha256'] = 'f' * 64
+    elif change == 'legacy': c['old_section']['section_id'] = str(env['legacy_id'])
+    elif change == 'alien_section': c['new_sections'][0]['section_id'] = str(uuid4())
+    elif change == 'source_page': c['sources'][0]['page_number'] = 2
+    elif change == 'source_boolean': c['sources'][0]['page_number'] = True
+    before = immutable_snapshot(env)
+    response = correction_post(env, payload)
+    assert response.status_code == expected, response.text
+    assert correction_counts(env) == (0, 0)
+    assert immutable_snapshot(env) == before
+
+
+def test_correction_no_science_conflict_preference_and_legacy_inference(chapter_env):
+    env = chapter_env; payload = correction_fixture(env)
+    science = body(env, key='science-conflict', request='science-conflict-request')
+    science['sections'][0].update(text='Different original scientific candidate.',
+        explanation_zh='章节边界纠正；即使写了这个字样也不能推断 supersede。',
+        conflicts_with_section_ids=[payload['corrections'][0]['new_sections'][0]['section_id'], str(env['legacy_id'])])
+    science_id = post(env, science).json()['items'][0]['section_id']
+    assert correction_post(env, payload).status_code == 200
+    items = env['client'].get(f'/api/rebuild/papers/{env["paper_id"]}/sections').json()['items']
+    by_id = {s['id']: s for s in items}
+    assert len(items) == 4
+    assert by_id[science_id]['display_status'] == 'current' and by_id[science_id]['correction_history'] == []
+    assert by_id[str(env['legacy_id'])]['display_status'] == 'current'
+    assert by_id[science_id]['conflicts_with_section_ids'] == science['sections'][0]['conflicts_with_section_ids']
+    assert by_id[payload['corrections'][0]['new_sections'][0]['section_id']]['display_status'] == 'current'
+
+
+def test_correction_atomic_batch_rollback_and_receipt_failure(chapter_env):
+    env = chapter_env; payload = correction_fixture(env); before = immutable_snapshot(env)
+    bad = copy.deepcopy(payload); another = copy.deepcopy(bad['corrections'][0])
+    another['old_section']['section_id'] = str(env['legacy_id'])
+    bad['corrections'].append(another)
+    assert correction_post(env, bad).status_code == 400
+    assert correction_counts(env) == (0, 0)
+    def fail(mapper, connection, target):
+        if target.action == CORRECTION_RECEIPT:
+            raise RuntimeError('Synthetic receipt failure')
+    event.listen(AuditLog, 'before_insert', fail)
+    try:
+        assert correction_post(env, payload).status_code == 500
+    finally:
+        event.remove(AuditLog, 'before_insert', fail)
+    assert correction_counts(env) == (0, 0)
+    assert immutable_snapshot(env) == before
+    assert correction_post(env, payload).status_code == 200
+
+
+def test_correction_concurrent_replay_and_cycle_rejection(chapter_env):
+    env = chapter_env; payload = correction_fixture(env)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: correction_post(env, copy.deepcopy(payload)), range(2)))
+    assert all(r.status_code == 200 for r in results)
+    assert sorted(r.json()['created'] for r in results) == [0, 1]
+    assert correction_counts(env) == (1, 1)
+    reverse = copy.deepcopy(payload); reverse['request_id'] = 'reverse'
+    c = reverse['corrections'][0]
+    c['old_section'], c['new_sections'] = c['new_sections'][0], [c['old_section']]
+    assert correction_post(env, reverse).json()['detail'] == 'section_correction_target_is_history'
+    assert correction_counts(env) == (1, 1)
+
+
+@pytest.mark.parametrize('change', ['bytes', 'size', 'audit_hash', 'stored_text', 'reading_hash'])
+def test_correction_rejects_changed_source_or_import_snapshot(chapter_env, change):
+    env = chapter_env; payload = correction_fixture(env)
+    if change == 'bytes':
+        (env['settings'].storage_root / 'main.pdf').write_bytes(b'%PDF-tampered-synthetic')
+    else:
+        with env['factory']() as session:
+            if change == 'size':
+                session.get(RebuildPaperFile, env['main']).file_size += 1
+            elif change == 'stored_text':
+                old = payload['corrections'][0]['old_section']['section_id']
+                session.get(PaperSection, UUID(old)).text += ' Modified.'
+            else:
+                imported = session.scalar(select(AuditLog).where(AuditLog.action == EVENT))
+                data = copy.deepcopy(imported.payload)
+                data['content_sha256' if change == 'audit_hash' else 'reading_pdf_sha256'] = 'f' * 64
+                imported.payload = data
+            session.commit()
+    before = immutable_snapshot(env)
+    assert correction_post(env, payload).status_code in {400, 409}
+    assert correction_counts(env) == (0, 0)
+    assert immutable_snapshot(env) == before
+
+
+def test_multi_old_shared_new_and_stale_declaration_fails_closed(chapter_env):
+    env = chapter_env; payload = correction_fixture(env)
+    another = body(env, key='another-overlapping-old', request='another-old-request')
+    old2 = post(env, another).json()['items'][0]['section_id']
+    sections = env['client'].get(f'/api/rebuild/papers/{env["paper_id"]}/sections').json()['items']
+    c2 = copy.deepcopy(payload['corrections'][0])
+    c2['old_section'] = {'section_id': old2, 'content_sha256': next(s for s in sections if s['id'] == old2)['provenance']['content_sha256']}
+    payload['corrections'].append(c2)
+    before = immutable_snapshot(env)
+    assert correction_post(env, payload).json()['created'] == 2
+    assert correction_counts(env) == (2, 1) and immutable_snapshot(env) == before
+    # Simulate a corrupted explicit declaration in the isolated DB only. The
+    # reader must keep the original chapter current rather than trust its kind.
+    with env['factory']() as session:
+        record = session.scalar(select(AuditLog).where(AuditLog.action == CORRECTION_EVENT,
+                                                       AuditLog.target_id == old2))
+        data = copy.deepcopy(record.payload); data['declaration']['kind'] = 'scientific_conflict'
+        record.payload = data; session.commit()
+    with env['factory']() as session:
+        session.execute(text('SET TRANSACTION READ ONLY'))
+        items = {s['id']: s for s in list_sections(session, env['paper_id'])}
+        assert items[old2]['display_status'] == 'current' and items[old2]['correction_history'] == []
+        assert items[payload['corrections'][0]['old_section']['section_id']]['display_status'] == 'extraction_boundary_history'

@@ -32,6 +32,7 @@ from app.schemas.rebuild import (
     RebuildValueCorrectionRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
+    RebuildSectionCorrectionsRequest,
 )
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
@@ -301,6 +302,33 @@ async def import_rebuild_sections(
             409 if error in {"section_request_id_reused", "section_key_conflict", "section_id_collision",
                              "section_stored_content_conflict", "source_sha256_mismatch",
                              "section_reading_pdf_sha256_mismatch", "derived_pdf_preview_unavailable"} else 400)
+        raise HTTPException(status_code=status, detail=error) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/papers/{paper_id}/sections/corrections")
+async def declare_rebuild_section_corrections(
+    paper_id: UUID,
+    payload: RebuildSectionCorrectionsRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
+) -> dict[str, Any]:
+    from app.services.rebuild_sections import declare_section_corrections
+    try:
+        result = declare_section_corrections(session, paper_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        error = str(exc)
+        status = 404 if error in {"paper_not_found", "file_not_found"} else (
+            409 if error in {"section_correction_request_id_reused", "section_correction_relation_conflict",
+                             "section_correction_content_mismatch", "section_correction_target_is_history",
+                             "section_correction_reading_source_mismatch", "source_sha256_mismatch",
+                             "derived_pdf_preview_unavailable"} else 400)
         raise HTTPException(status_code=status, detail=error) from exc
     except Exception:
         session.rollback()

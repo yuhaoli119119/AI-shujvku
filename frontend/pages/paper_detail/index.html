@@ -2662,6 +2662,7 @@
 
     function highlightDeepLinkTarget(node, containerSelector) {
       if (!node) return false;
+      if (node.tagName === "DETAILS") node.open = true;
       node.classList.add("deep-link-target");
       let ancestor = node.parentElement;
       while (ancestor && ancestor !== document.body) {
@@ -3390,7 +3391,7 @@
         const label = source.role === "si" ? "SI" : "正文";
         const pageLabel = source.page_basis === "derived_pdf" ? "派生 PDF 物理页" : "PDF 物理页";
         const evidence = (source.sources || []).map(item => `
-          <div class="muted"><a href="${base}/preview#page=${encodeURIComponent(item.page_number)}&toolbar=1" target="_blank" rel="noopener">${esc(pageLabel)} ${esc(item.page_number)}</a> · ${esc(item.locator || "")}</div>
+          <div class="muted"><a href="${base}/preview?section=${encodeURIComponent(section.id)}&page=${encodeURIComponent(item.page_number)}#page=${encodeURIComponent(item.page_number)}&toolbar=1" target="_blank" rel="noopener">${esc(pageLabel)} ${esc(item.page_number)}</a> · ${esc(item.locator || "")}</div>
           <div class="prewrap">${esc(item.quote || "")}</div>`).join("");
         html += `<details><summary>章节来源：${esc(label)} · ${esc(source.original_filename || "")}</summary>${evidence}
           <a href="${base}/download" target="_blank" rel="noopener">原始文件</a></details>`;
@@ -3399,6 +3400,63 @@
         html += '<div class="muted">存在与已保留章节的冲突，双方内容均保留，待独立核对。</div>';
       }
       return html;
+    }
+
+    function jumpToSection(index) {
+      const node = document.getElementById("sec-item-" + index);
+      highlightDeepLinkTarget(node, "#tab-sections");
+    }
+
+    async function copySectionOriginal(event, index) {
+      const section = (state.paper.sections || [])[index];
+      if (!section) return;
+      const button = event.currentTarget;
+      try {
+        await navigator.clipboard.writeText(section.text || "");
+        button.textContent = "已复制原文";
+      } catch (_) {
+        button.textContent = "复制失败，请选中原文复制";
+      }
+    }
+
+    function renderSectionCorrectionHistory(section, sections) {
+      return (section.correction_history || []).filter(relation => relation.kind === "extraction_boundary").map(relation => {
+        const old = relation.old_section;
+        const targets = section.id === old.section_id ? relation.new_sections : [old];
+        const links = targets.map(target => {
+          const index = sections.findIndex(item => item.id === target.section_id);
+          if (index < 0) return "";
+          const label = sections[index].section_title || "未命名章节";
+          return `<a href="#sec-item-${index}" onclick="jumpToSection(${index}); return false;">${esc(label)}</a>`;
+        }).join(" · ");
+        const base = `/api/rebuild/files/${encodeURIComponent(relation.file_id)}`;
+        const sources = (relation.sources || []).map(item => `<div class="muted"><a href="${base}/preview?correction=${encodeURIComponent(relation.audit_id)}&page=${encodeURIComponent(item.page_number)}#page=${encodeURIComponent(item.page_number)}&toolbar=1" target="_blank" rel="noopener">PDF 物理页 ${esc(item.page_number)}</a> · ${esc(item.locator)}</div><div class="prewrap">${esc(item.quote)}</div>`).join("");
+        return `<div class="section-correction"><div class="muted">AI提取章节边界纠正 · ${section.id === old.section_id ? "纠正后章节" : "保留的历史章节"}：${links}</div>
+          <details><summary>纠正依据与审计记录</summary><div class="prewrap">${esc(relation.reason)}</div>${sources}
+            <div class="muted">声明者：${esc(relation.actor)} · ${esc(relation.created_at)}</div>
+            <div class="muted">审计：${esc(relation.audit_id)} · 请求：${esc(relation.request_id)}</div>
+            <div class="prewrap muted">来源 SHA256：${esc(relation.source_sha256)}\n声明 SHA256：${esc(relation.declaration_sha256)}</div>
+          </details></div>`;
+      }).join("");
+    }
+
+    function renderSections(sections) {
+      if (!sections.length) return '<div class="empty-state">暂无解析章节。</div>';
+      const cards = sections.map((section, index) => {
+        const historical = section.display_status === "extraction_boundary_history";
+        const title = esc(section.section_title || section.section_type || "未命名章节");
+        const attributes = `id="sec-item-${index}" data-record-id="${esc(section.id)}" data-section-title="${title}"`;
+        const content = `<div class="prewrap">${esc(section.text || "")}</div>
+          <div class="muted">页码：${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</div>
+          <button class="btn btn-ghost btn-sm" type="button" onclick="copySectionOriginal(event, ${index})">复制原文</button>
+          ${renderSectionCorrectionHistory(section, sections)}${renderSectionEvidence(section)}`;
+        return {historical, html: historical
+          ? `<details class="section-item section-history-item" ${attributes}><summary class="section-title">AI提取章节边界纠正历史 · ${title}（展开保留原文）</summary>${content}</details>`
+          : `<div class="section-item" ${attributes}><div class="section-title">${index + 1}. ${title}</div>${content}</div>`};
+      });
+      const history = cards.filter(card => card.historical);
+      return cards.filter(card => !card.historical).map(card => card.html).join("") + (history.length
+        ? `<section class="section-history-group"><h3>AI提取章节边界纠正历史（${history.length}）</h3><p class="muted">保留旧提取边界、全部原文与来源；纠正声明不代表科学结论已验收。</p>${history.map(card => card.html).join("")}</section>` : "");
     }
 
     function renderPaperDetails() {
@@ -3500,16 +3558,7 @@
         panel.innerHTML = items.join("");
       }
 
-      document.getElementById("sectionsList").innerHTML = (paper.sections || []).length
-        ? (paper.sections || []).map((section, index) => `
-            <div class="section-item" id="sec-item-${index}" data-section-title="${esc(section.section_title || section.section_type || '')}">
-              <div class="section-title">${index + 1}. ${esc(section.section_title || section.section_type || "未命名章节")}</div>
-              <div class="prewrap">${esc(section.text || "")}</div>
-              <div class="muted">页码：${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</div>
-              ${renderSectionEvidence(section)}
-            </div>
-          `).join("")
-        : '<div class="empty-state">暂无解析章节。</div>';
+      document.getElementById("sectionsList").innerHTML = renderSections(paper.sections || []);
 
       document.getElementById("dftSettings").innerHTML = renderDftSettingsList(paper.dft_settings_items || []);
       document.getElementById("dftResults").innerHTML = deepLinkIssueContextHtml() + renderStructuredCollection(paper.dft_results_items || [], "暂无 DFT 候选结果。", { collection: "dft_results" });

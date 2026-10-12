@@ -14,15 +14,20 @@ from uuid import UUID, uuid5, NAMESPACE_URL
 import fitz
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.db.models import AuditLog, Paper, PaperSection, RebuildPaperFile
-from app.schemas.rebuild import RebuildSectionsImportRequest
+from app.schemas.rebuild import (RebuildSectionsImportRequest, RebuildSectionCorrectionInput,
+                                 RebuildSectionCorrectionsRequest)
 from app.services.rebuild_workflow_service import RebuildWorkflowError, get_file
 
 EVENT = "section_imported"
 RECEIPT = "section_import_request"
 VERSION = "rebuild_sections_v1"
+CORRECTION_VERSION = "rebuild_section_corrections_v1"
+CORRECTION_EVENT = "section_boundary_corrected"
+CORRECTION_RECEIPT = "section_correction_request"
 SECTION_FIELDS = ("section_title", "section_type", "text", "page_start", "page_end",
                   "section_level", "section_number", "parent_heading", "heading_path")
 
@@ -39,8 +44,81 @@ def _events(session, paper_id):
     ).order_by(AuditLog.created_at, AuditLog.id)))
 
 
+def _correction_events(session, paper_id):
+    return list(session.scalars(select(AuditLog).where(
+        AuditLog.paper_id == paper_id, AuditLog.action == CORRECTION_EVENT,
+        AuditLog.source == CORRECTION_VERSION, AuditLog.target_type == "paper_section"
+    ).order_by(AuditLog.created_at, AuditLog.id)))
+
+
+def _checked_snapshot(row, event):
+    """A declared digest binds both the original audit and the stored chapter."""
+    if row is None or event is None or not isinstance(event.payload, dict):
+        raise RebuildWorkflowError("section_correction_provenance_required")
+    snapshot = event.payload.get("section")
+    if not isinstance(snapshot, dict) or event.payload.get("content_sha256") != _digest(snapshot):
+        raise RebuildWorkflowError("section_correction_content_mismatch")
+    if any(getattr(row, field) != snapshot.get(field) for field in SECTION_FIELDS):
+        raise RebuildWorkflowError("section_correction_content_mismatch")
+    return snapshot
+
+
+def _check_correction_targets(declaration, rows, imports, files):
+    file = files.get(str(declaration.file_id))
+    if file is None or file.role not in {"main", "si"}:
+        raise RebuildWorkflowError("section_correction_file_paper_mismatch")
+    if file.sha256 != declaration.source_sha256:
+        raise RebuildWorkflowError("source_sha256_mismatch")
+    snapshots = []
+    for target in [declaration.old_section, *declaration.new_sections]:
+        key = str(target.section_id)
+        snapshot = _checked_snapshot(rows.get(key), imports.get(key))
+        if (snapshot.get("file_id") != str(file.id) or
+                snapshot.get("source_sha256") != declaration.source_sha256):
+            raise RebuildWorkflowError("section_correction_file_paper_mismatch")
+        if target.content_sha256 != imports[key].payload["content_sha256"]:
+            raise RebuildWorkflowError("section_correction_content_mismatch")
+        snapshots.append(snapshot)
+    basis = {(s.get("page_basis"), imports[str(t.section_id)].payload.get("reading_pdf_sha256"))
+             for s, t in zip(snapshots, [declaration.old_section, *declaration.new_sections])}
+    if len(basis) != 1:
+        raise RebuildWorkflowError("section_correction_reading_source_mismatch")
+    # Every reason locator must be in a physical page shared by the old boundary
+    # and at least one replacement. Mechanical identity is not scientific review.
+    old, *new = snapshots
+    if any(s["page_start"] > old["page_end"] or s["page_end"] < old["page_start"] for s in new):
+        raise RebuildWorkflowError("section_correction_source_relation_invalid")
+    if any(not (old["page_start"] <= s.page_number <= old["page_end"] and
+                   any(n["page_start"] <= s.page_number <= n["page_end"] for n in new))
+           for s in declaration.sources):
+        raise RebuildWorkflowError("section_correction_source_relation_invalid")
+    return file, next(iter(basis))
+
+
+def _valid_corrections(session, paper_id, rows, imports, files):
+    """Fail closed for malformed/stale declarations; never interpret conflicts."""
+    valid = []
+    for event in _correction_events(session, paper_id):
+        try:
+            data = event.payload
+            if not isinstance(data, dict) or data.get("version") != CORRECTION_VERSION:
+                continue
+            declaration = RebuildSectionCorrectionInput.model_validate(data["declaration"])
+            if event.target_id != str(declaration.old_section.section_id):
+                continue
+            if data.get("declaration_sha256") != _digest(declaration.model_dump(mode="json")):
+                continue
+            _, (_, reading_hash) = _check_correction_targets(declaration, rows, imports, files)
+            if data.get("reading_pdf_sha256") != reading_hash:
+                continue
+            valid.append((event, declaration))
+        except (ValidationError, RebuildWorkflowError, KeyError, TypeError, ValueError):
+            continue
+    return valid
+
+
 def list_sections(session: Session, paper_id: UUID) -> list[dict]:
-    """Three batched reads, including old chapters with unknown file coverage."""
+    """Batched reads; only explicit, source-bound declarations mark history."""
     rows = list(session.scalars(select(PaperSection).where(
         PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.id)))
     events = {event.target_id: event for event in _events(session, paper_id)}
@@ -52,7 +130,8 @@ def list_sections(session: Session, paper_id: UUID) -> list[dict]:
                 **{field: getattr(row, field) for field in SECTION_FIELDS}}
         item["heading_path"] = item["heading_path"] or []
         item.update(section_key=None, explanation_zh=None, provenance=None,
-                    conflicts_with_section_ids=[], scientific_acceptance="not_implied")
+                    conflicts_with_section_ids=[], scientific_acceptance="not_implied",
+                    display_status="current", correction_history=[])
         event = events.get(str(row.id))
         if event and isinstance(event.payload, dict):
             data = event.payload
@@ -77,6 +156,20 @@ def list_sections(session: Session, paper_id: UUID) -> list[dict]:
                                 "download_url": f"/api/rebuild/files/{file.id}/download",
                             })
         items.append(item)
+    by_id = {item["id"]: item for item in items}
+    row_map = {str(row.id): row for row in rows}
+    for event, declaration in _valid_corrections(session, paper_id, row_map, events, files):
+        old_id = str(declaration.old_section.section_id)
+        new_ids = [str(target.section_id) for target in declaration.new_sections]
+        relation = {**declaration.model_dump(mode="json"), "version": CORRECTION_VERSION,
+                    "audit_id": str(event.id), "actor": event.payload.get("actor"),
+                    "request_id": event.payload.get("request_id"),
+                    "declaration_sha256": event.payload["declaration_sha256"],
+                    "reading_pdf_sha256": event.payload["reading_pdf_sha256"],
+                    "created_at": event.created_at.isoformat()}
+        by_id[old_id]["display_status"] = "extraction_boundary_history"
+        for key in [old_id, *new_ids]:
+            by_id[key]["correction_history"].append(relation)
     return items
 
 
@@ -114,7 +207,118 @@ def section_write_contract(paper_id):
         "retry": "Persist the exact JSON before sending. Identical request_id/body replays with zero writes. Identical file_id/section_key/content under another request_id adds no chapter. Reusing a request_id or chapter key with changed input is HTTP 409; read existing coverage, retain history, and use a new explicit key plus conflicts_with_section_ids for an evidence-backed alternative.",
         "source_rule": "The registered file must belong to this paper. Original bytes, claimed source_sha256, registered hash and size must agree. PDF pages must physically exist; every covered page needs a nonempty original quote and locator. DOCX page numbers require the existing derived reading PDF and its exact SHA256; no conversion is triggered by this API. Source quotes/full-text completeness and Chinese interpretation require independent DS verification; the code never certifies science. Missing/unreported content stays unwritten.",
         "preservation": "Append only to paper_sections and audit_logs in one transaction. No replacement, deletion, scientific-value changes or automatic parsing/status promotion. Legacy chapters keep unknown provenance; do not infer a file identity.",
+        "boundary_correction": section_correction_contract(paper_id),
     }
+
+
+def section_correction_contract(paper_id):
+    return {
+        "version": CORRECTION_VERSION, "method": "POST",
+        "url": f"/api/rebuild/papers/{paper_id}/sections/corrections",
+        "authentication": "workbench session + X-CSRF-Token + same-origin",
+        "body": {"request_id": "stable request identity; persist exact JSON", "corrections": [{
+            "kind": "extraction_boundary", "file_id": "same-paper registered main/SI UUID",
+            "source_sha256": "original file SHA256",
+            "old_section": {"section_id": "existing source-bound chapter UUID",
+                            "content_sha256": "provenance.content_sha256"},
+            "new_sections": [{"section_id": "existing corrected chapter UUID",
+                              "content_sha256": "provenance.content_sha256"}],
+            "reason": "source-grounded extraction boundary error explanation",
+            "sources": [{"page_number": "physical page shared by old/new",
+                         "locator": "original heading/paragraph location", "quote": "original quote"}],
+        }]},
+        "retry": "Identical request/body: zero events. Changed request body or changed prior declaration for an old chapter: HTTP 409. New request with identical declaration: zero correction events, one receipt.",
+        "preservation": "Only append audit events/receipt. Never mutate chapters/import audits/files/scientific data. Generic conflicts are not corrections; no automatic priority or scientific acceptance. Unproven legacy file identity is rejected.",
+        "coordination": "Owner must hold the same-paper serial write claim, back up first, and arrange a separate DS metadata task. Code deployment alone does not mark any chapter historical.",
+    }
+
+
+def declare_section_corrections(session: Session, paper_id: UUID,
+                                payload: RebuildSectionCorrectionsRequest,
+                                settings: Settings, *, actor: str) -> dict:
+    """Append metadata atomically. The authenticated caller owns the transaction."""
+    if session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update()) is None:
+        raise RebuildWorkflowError("paper_not_found")
+    request_hash = _digest(payload.model_dump(mode="json"))
+    receipt = session.scalar(select(AuditLog).where(
+        AuditLog.paper_id == paper_id, AuditLog.action == CORRECTION_RECEIPT,
+        AuditLog.source == CORRECTION_VERSION, AuditLog.target_type == "paper_sections",
+        AuditLog.target_id == payload.request_id))
+    if receipt:
+        if receipt.payload["request_sha256"] != request_hash:
+            raise RebuildWorkflowError("section_correction_request_id_reused")
+        return {**receipt.payload["result"], "created": 0, "replayed": True}
+
+    rows = {str(row.id): row for row in session.scalars(select(PaperSection).where(
+        PaperSection.paper_id == paper_id))}
+    imports = {event.target_id: event for event in _events(session, paper_id)}
+    files = {str(file.id): file for file in session.scalars(select(RebuildPaperFile).where(
+        RebuildPaperFile.paper_id == paper_id))}
+    previous = {event.target_id: event for event in _correction_events(session, paper_id)}
+    old_ids = set(previous) | {str(c.old_section.section_id) for c in payload.corrections}
+    planned = []
+    checks = {}
+    for declaration in payload.corrections:
+        if any(str(t.section_id) in old_ids for t in declaration.new_sections):
+            raise RebuildWorkflowError("section_correction_target_is_history")
+        file, (basis, expected_reading_hash) = _check_correction_targets(declaration, rows, imports, files)
+        if file.id not in checks:
+            from app.services.rebuild_file_preview import _checked_source, resolve_reading_pdf
+            path, source_format = _checked_source(file, settings)
+            if path.stat().st_size != file.file_size:
+                raise RebuildWorkflowError("section_source_size_mismatch")
+            expected_basis = "source_pdf" if source_format == "pdf" else "derived_pdf"
+            reading_path = path if source_format == "pdf" else resolve_reading_pdf(file, settings)
+            reading_bytes = reading_path.read_bytes()
+            reading_hash = hashlib.sha256(reading_bytes).hexdigest()
+            if source_format == "pdf" and reading_hash != file.sha256:
+                raise RebuildWorkflowError("source_sha256_mismatch")
+            try:
+                with fitz.open(stream=reading_bytes, filetype="pdf") as doc:
+                    if doc.needs_pass or doc.page_count < 1:
+                        raise RebuildWorkflowError("section_reading_pdf_invalid")
+                    checks[file.id] = (expected_basis, reading_hash, doc.page_count)
+            except (fitz.FileDataError, fitz.EmptyFileError, OSError) as exc:
+                raise RebuildWorkflowError("section_reading_pdf_invalid") from exc
+        actual_basis, reading_hash, pages = checks[file.id]
+        if (basis, expected_reading_hash) != (actual_basis, reading_hash):
+            raise RebuildWorkflowError("section_correction_reading_source_mismatch")
+        if any(rows[str(t.section_id)].page_end > pages
+               for t in [declaration.old_section, *declaration.new_sections]):
+            raise RebuildWorkflowError("section_physical_page_out_of_range")
+        snapshot = declaration.model_dump(mode="json")
+        digest = _digest(snapshot)
+        old_id = str(declaration.old_section.section_id)
+        prior = previous.get(old_id)
+        if prior and (not isinstance(prior.payload, dict) or
+                      prior.payload.get("declaration_sha256") != digest):
+            raise RebuildWorkflowError("section_correction_relation_conflict")
+        planned.append((old_id, snapshot, digest, reading_hash, prior))
+
+    items = []
+    for old_id, snapshot, digest, reading_hash, prior in planned:
+        if prior is None:
+            event_id = uuid5(NAMESPACE_URL, f"literature-ai:{CORRECTION_VERSION}:{paper_id}:{old_id}")
+            session.add(AuditLog(id=event_id, paper_id=paper_id, action=CORRECTION_EVENT,
+                                source=CORRECTION_VERSION, target_type="paper_section",
+                                target_id=old_id, payload={"version": CORRECTION_VERSION,
+                                    "declaration": snapshot, "declaration_sha256": digest,
+                                    "reading_pdf_sha256": reading_hash, "actor": actor,
+                                    "request_id": payload.request_id, "request_sha256": request_hash}))
+        else:
+            event_id = prior.id
+        items.append({"old_section_id": old_id, "audit_id": str(event_id),
+                      "new_section_ids": [t["section_id"] for t in snapshot["new_sections"]],
+                      "status": "existing" if prior else "created"})
+    result = {"paper_id": str(paper_id), "request_id": payload.request_id,
+              "created": sum(prior is None for *_, prior in planned), "replayed": False,
+              "items": items, "scientific_acceptance": "not_implied"}
+    session.add(AuditLog(paper_id=paper_id, action=CORRECTION_RECEIPT,
+                        source=CORRECTION_VERSION, target_type="paper_sections",
+                        target_id=payload.request_id, payload={"version": CORRECTION_VERSION,
+                            "actor": actor, "request_sha256": request_hash, "result": result}))
+    session.flush()
+    return result
 
 
 def import_sections(session: Session, paper_id: UUID, payload: RebuildSectionsImportRequest,
