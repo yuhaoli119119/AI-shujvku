@@ -7,6 +7,8 @@ from __future__ import annotations
 import copy
 import hashlib
 import zipfile
+import asyncio
+import importlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
@@ -258,3 +260,39 @@ def test_docx_requires_existing_derived_pdf_with_exact_hash(chapter_env):
     new = next(s for s in items if s["provenance"])
     assert new["provenance"]["page_basis"] == "derived_pdf"
     assert new["provenance"]["reading_pdf_sha256"] == section["reading_pdf_sha256"]
+
+
+def test_actual_lifespan_established_postgres_only_reads(chapter_env, monkeypatch):
+    env = chapter_env
+    main = importlib.import_module("app.main")
+    from app.db import session as db
+    from app.utils import active_database
+    registry = env["tmp_path"] / "test-registry.json"
+    registry.write_text('{"active_library":"默认文献库","libraries":[]}', encoding="utf-8")
+    monkeypatch.setattr(active_database, "canonical_registry_path", lambda: registry)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("lifespan must not initialize/migrate")
+    monkeypatch.setattr(db, "init_db", forbidden)
+    monkeypatch.setattr(main, "apply_persisted_settings_to_runtime", lambda: None)
+    engine = db.get_engine(env["settings"].database_url)
+    statements = []
+    def observe(conn, cursor, statement, parameters, context, executemany):
+        assert statement.startswith("SELECT ") or statement == "SET TRANSACTION READ ONLY", statement
+        statements.append(statement)
+    event.listen(engine, "before_cursor_execute", observe)
+    actual_info = main.get_active_database_info
+    observed_info = []
+    def capture_info():
+        result = actual_info(); observed_info.append(result); return result
+    monkeypatch.setattr(main, "get_active_database_info", capture_info)
+    async def start():
+        async with main.lifespan(main.app):
+            assert observed_info[0]["configured_db_papers_total"] == 2
+            assert observed_info[0]["active_library"] == "默认文献库"
+            assert observed_info[0]["db_kind"] == "postgresql"
+    try:
+        asyncio.run(start())
+    finally:
+        event.remove(engine, "before_cursor_execute", observe)
+    assert statements[0] == "SET TRANSACTION READ ONLY"
+    assert counts(env) == [1, 0]

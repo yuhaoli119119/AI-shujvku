@@ -31,14 +31,41 @@ from app.db.session import session_scope
 from app.oauth import router as oauth_router
 from app.security.exports import enforce_export_boundary
 from app.security.share import enforce_share_protection
-from app.utils.active_database import activate_active_library_database
+from app.utils.active_database import get_active_database_info
+
+
+def _check_section_schema_readonly():
+    """A code restart must not initialize/migrate the established business DB."""
+    from sqlalchemy import select, text
+    from app.db.models import AuditLog, Paper, PaperSection, RebuildPaperFile
+    from app.db.session import get_engine
+
+    settings = get_settings()
+    if not settings.database_url.strip().lower().startswith("postgresql"):
+        raise RuntimeError("Only PostgreSQL is supported. Configure LITAI_DATABASE_URL.")
+    try:
+        with get_engine(settings.database_url).connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("SET TRANSACTION READ ONLY"))
+                for model in (Paper, PaperSection, RebuildPaperFile, AuditLog):
+                    connection.execute(select(model).limit(0))
+            finally:
+                transaction.rollback()
+    except Exception as exc:
+        raise RuntimeError(
+            "database_schema_not_ready: chapters require established papers, paper_sections, "
+            "rebuild_paper_files and audit_logs with compatible columns; explicit setup or migration "
+            "must be coordinated before startup"
+        ) from exc
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = 200
 
-    info = activate_active_library_database()
+    _check_section_schema_readonly()
+    info = get_active_database_info()
     startup_logger = logging.getLogger("app.startup")
     startup_logger.info(
         "Database source-of-truth: kind=%s, library=%s, configured=%s",
