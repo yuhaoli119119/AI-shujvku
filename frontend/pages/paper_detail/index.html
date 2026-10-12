@@ -652,7 +652,7 @@
             </div>
           </div>
           <div id="tab-sections" class="tab-pane"><div class="panel-card"><div class="panel-title">解析章节</div><div id="sectionsList"></div></div></div>
-          <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图片</div><div id="figuresList"></div></div></div>
+          <div id="tab-figures" class="tab-pane"><div class="panel-card"><div class="panel-title">图片</div><label for="pdFigureSearch">搜索图片</label><input id="pdFigureSearch" type="search" placeholder="搜索图号、子图标签或解读" style="width:100%;margin:8px 0;" oninput="searchPaperFigures(this.value)"><p class="muted" id="pdFigureSearchStatus" role="status"></p><div id="figuresList"></div></div></div>
           <div id="tab-tables" class="tab-pane"><div class="panel-card"><div class="panel-title">原文表格</div><div id="tablesList"></div></div></div>
           <div id="tab-dft" class="tab-pane">
             <div id="pdCurrentData"></div>
@@ -987,6 +987,7 @@
       const params = new URLSearchParams(window.location.search);
       state.paperId = params.get("id") || params.get("paper_id");
       state.returnTo = safeReturnTo(params.get("return_to"));
+      state.figureSearch = params.get("image_search") || (resolveDetailTab(params.get("tab")) === "figures" ? params.get("target_id") : "") || "";
       const rawPage = parseInt(params.get("pdf_page") || "", 10);
       state.deepLink = {
         tab: params.get("tab") || "",
@@ -2688,7 +2689,7 @@
 
       if (link.targetId) {
         const byId = await waitForElement(
-          '#tab-' + cssEscape(tab) + ' [data-record-id="' + cssEscape(link.targetId) + '"]',
+          '#tab-' + cssEscape(tab) + ' [data-record-id="' + cssEscape(link.targetId) + '"], #tab-' + cssEscape(tab) + ' [data-current-asset="' + cssEscape(link.targetId) + '"]',
           10, 120
         );
         if (highlightDeepLinkTarget(byId, "#tab-" + tab)) return;
@@ -3320,9 +3321,51 @@
           <details><summary>跨页来源明细（${records.length} 段）</summary><ul>${provenance}</ul></details>
         </section>${asset ? renderFigureReadingHtml(currentScientificReading(asset, false)) : ''}</div>`;
     }
-    function renderCurrentFigures() {
-      const paper = state.paper, list = document.getElementById('figuresList'), tableList = document.getElementById('tablesList');
-      const hasCurrent = currentResultsPresent(), inventory = visualInventory();
+    function isDefaultMainFigure(figure) {
+      const asset = figure._currentAsset;
+      if (asset) {
+        const file = currentSourceFile(asset.file_id);
+        return asset.asset_type === 'figure' && !String(asset.subfigure_label || '').trim() &&
+          file?.role === 'main' && currentDisplayRole(file) === 'main' &&
+          asset.paper_id === state.paperId;
+      }
+      // Legacy PaperFigure has no asset_type. Use its stored figure label and
+      // source identity, never the caption/title or scientific role as a guess.
+      if (figure.paper_id !== state.paperId || figure.related_paper_id ||
+          figure.asset_type === 'subfigure' || String(figure.subfigure_label || '').trim()) return false;
+      if (figure.file_id && currentDisplayRole(currentSourceFile(figure.file_id)) !== 'main') return false;
+      return /^(?:fig(?:ure)?|图)[\s_.-]*(?:candidate[\s_.-]*)?\d+$/i.test(String(figure.figure_label || '').trim()) ||
+        /^(?:graphical[\s_]*abstract|图形摘要|图文摘要)$/i.test(String(figure.figure_label || '').trim());
+    }
+    function figureSearchText(figure) {
+      const asset = figure._currentAsset;
+      const file = asset ? currentSourceFile(asset.file_id) : null;
+      const strings = value => typeof value === 'string' ? value : Array.isArray(value)
+        ? value.map(strings).join(' ') : value && typeof value === 'object'
+          ? Object.values(value).map(strings).join(' ') : '';
+      return [figure.id, figure.figure_label, figure.caption, figure.content_summary,
+        strings(figure.reading_explanation), asset?.id, asset?.asset_key, asset?.figure_label,
+        asset?.subfigure_label, asset?.caption, strings(asset?.reading_explanation),
+        strings(figure._fallbackReadingFigure?.reading_explanation), file?.original_filename,
+        file ? currentDisplayRole(file) === 'si' ? 'SI 补充资料' : '正文' : '',
+        // Figure 1 + panel a can also be found with "Figure1a" or "Figure 1 (a)".
+        asset ? (asset.figure_label || '') + (asset.subfigure_label || '') : ''].join(' ');
+    }
+    function selectGalleryFigures(figures, query) {
+      const normalize = text => String(text || '').toLocaleLowerCase().replace(/[\s_.()（）-]+/g, '');
+      const terms = String(query || '').trim().split(/\s+/).filter(Boolean).map(normalize);
+      return terms.length ? figures.filter(figure => {
+        const text = normalize(figureSearchText(figure));
+        return terms.every(term => text.includes(term));
+      }) : figures.filter(isDefaultMainFigure);
+    }
+    function searchPaperFigures(query) {
+      state.figureSearch = query;
+      closeFigureLightbox();
+      renderFigureGallery(visualInventory());
+    }
+    function renderFigureGallery(inventory) {
+      const list = document.getElementById('figuresList');
       state.galleryFigures = []; state.galleryGroups = [];
       const cards = (figures, label) => {
         const start = state.galleryFigures.length;
@@ -3332,12 +3375,26 @@
           renderFigureDetailCard(figure, start + index)).join('') + '</div>';
       };
       const status = state.rebuildStatus === 'failed' ? `<p class="warning">当前图表读取失败，未确认是否完整：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前图表…</p>' : '';
-      list.innerHTML = status + (inventory.figures.length ? cards(inventory.figures, '图片') : '<div class="empty-state">未保存图片。</div>');
+      const query = state.figureSearch || '', searching = !!query.trim();
+      const searchable = searching ? inventory.figures.concat(inventory.historicalFigures) : inventory.figures;
+      const visible = selectGalleryFigures(searchable, query);
+      document.getElementById('pdFigureSearch').value = query;
+      document.getElementById('pdFigureSearchStatus').textContent = searching
+        ? `找到 ${visible.length} 张图片（搜索全部正文、子图及 SI）`
+        : `正文整图 ${visible.length} 张；搜索可查看子图及 SI。`;
+      list.innerHTML = status + (visible.length ? cards(visible, searching ? '搜索结果' : '正文整图') :
+        `<div class="empty-state">${searching ? '没有匹配的图片。' : '尚无可确认的正文整图；可搜索已保存图片或打开图表资料。'}</div>`);
+    }
+    function renderCurrentFigures() {
+      const tableList = document.getElementById('tablesList');
+      const hasCurrent = currentResultsPresent(), inventory = visualInventory();
+      renderFigureGallery(inventory);
+      const status = state.rebuildStatus === 'failed' ? `<p class="warning">当前图表读取失败，未确认是否完整：${esc(state.rebuildError)}</p>` : state.rebuildStatus !== 'ready' ? '<p class="muted">正在读取当前图表…</p>' : '';
       const tableGroups = groupTableEntries(inventory);
       tableList.innerHTML = status + tableGroups.map(renderTableGroup).join('') +
         (!tableGroups.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
-      document.getElementById('cntFigures').textContent = inventory.figures.length + tableGroups.length;
-      document.getElementById('cntFiguresDesc').textContent = `${inventory.figures.length} 图 · ${tableGroups.length} 表（含已关联 SI；同一逻辑表跨页已合并为单表）`;
+      document.getElementById('cntFigures').textContent = inventory.figures.filter(isDefaultMainFigure).length;
+      document.getElementById('cntFiguresDesc').textContent = `正文整图 ${inventory.figures.filter(isDefaultMainFigure).length} 张 · 全部图片 ${inventory.figures.length} 张可搜索 · ${tableGroups.length} 表`;
       renderCurrentData();
       document.getElementById('pdDftMetricLabel').textContent = '当前数据';
       document.getElementById('pdDftTabLabel').textContent = '计算数据';
