@@ -3345,7 +3345,7 @@
           ? Object.values(value).map(strings).join(' ') : '';
       return [figure.id, figure.figure_label, figure.caption, figure.content_summary,
         strings(figure.reading_explanation), asset?.id, asset?.asset_key, asset?.figure_label,
-        asset?.subfigure_label, asset?.caption, strings(asset?.reading_explanation),
+        asset?.subfigure_label, asset?.caption, asset?.explanation, asset?.context_text, strings(asset?.reading_explanation),
         strings(figure._fallbackReadingFigure?.reading_explanation), file?.original_filename,
         file ? currentDisplayRole(file) === 'si' ? 'SI 补充资料' : '正文' : '',
         // Figure 1 + panel a can also be found with "Figure1a" or "Figure 1 (a)".
@@ -3354,10 +3354,27 @@
     function selectGalleryFigures(figures, query) {
       const normalize = text => String(text || '').toLocaleLowerCase().replace(/[\s_.()（）-]+/g, '');
       const terms = String(query || '').trim().split(/\s+/).filter(Boolean).map(normalize);
-      return terms.length ? figures.filter(figure => {
+      if (!terms.length) {
+        const main = figures.filter(isDefaultMainFigure);
+        // A sourced whole figure takes precedence over an undocumented draft
+        // of the same figure/page. Keep every draft in the search inventory.
+        return main.filter(figure => {
+          const asset = figure._currentAsset;
+          if (!asset || currentScientificReading(asset, false).type === 'current_scientific') return true;
+          const label = visualLabelKey(asset.figure_label, 'figure');
+          return !label || !main.some(other => {
+            const candidate = other._currentAsset;
+            return candidate && candidate !== asset && candidate.file_id === asset.file_id &&
+              visualLabelKey(candidate.figure_label, 'figure') === label &&
+              JSON.stringify([...(candidate.page_numbers || [])].sort((a,b)=>a-b)) === JSON.stringify([...(asset.page_numbers || [])].sort((a,b)=>a-b)) &&
+              currentScientificReading(candidate, false).type === 'current_scientific';
+          });
+        });
+      }
+      return figures.filter(figure => {
         const text = normalize(figureSearchText(figure));
         return terms.every(term => text.includes(term));
-      }) : figures.filter(isDefaultMainFigure);
+      });
     }
     function searchPaperFigures(query) {
       state.figureSearch = query;
@@ -3393,8 +3410,8 @@
       const tableGroups = groupTableEntries(inventory);
       tableList.innerHTML = status + tableGroups.map(renderTableGroup).join('') +
         (!tableGroups.length ? '<div class="empty-state">尚未保存表格，请核对正文及已关联 SI；这不代表原文没有表格。</div>' : '');
-      document.getElementById('cntFigures').textContent = inventory.figures.filter(isDefaultMainFigure).length;
-      document.getElementById('cntFiguresDesc').textContent = `正文整图 ${inventory.figures.filter(isDefaultMainFigure).length} 张 · 全部图片 ${inventory.figures.length} 张可搜索 · ${tableGroups.length} 表`;
+      document.getElementById('cntFigures').textContent = selectGalleryFigures(inventory.figures, '').length;
+      document.getElementById('cntFiguresDesc').textContent = `正文整图 ${selectGalleryFigures(inventory.figures, '').length} 张 · 全部图片 ${inventory.figures.length} 张可搜索 · ${tableGroups.length} 表`;
       renderCurrentData();
       document.getElementById('pdDftMetricLabel').textContent = '当前数据';
       document.getElementById('pdDftTabLabel').textContent = '计算数据';

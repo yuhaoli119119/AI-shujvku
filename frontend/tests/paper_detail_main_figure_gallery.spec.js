@@ -10,7 +10,7 @@ const files = [
   {id:'related', paper_id:'si-paper', role:'main'},
 ];
 const assets = [
-  {id:'whole', paper_id:'paper', file_id:'main', asset_type:'figure', figure_label:'Figure 1', page_numbers:[2], image_path:'whole.png'},
+  {id:'whole', paper_id:'paper', file_id:'main', asset_type:'figure', figure_label:'Figure 1', page_numbers:[2], image_path:'whole.png', reading_explanation:{detailed_explanation_zh:'有来源的正文整图解读'}},
   {id:'panel', paper_id:'paper', file_id:'main', asset_type:'subfigure', figure_label:'Figure 1', subfigure_label:'a', page_numbers:[2], image_path:'panel.png', reading_explanation:{summary_zh:'轨道杂化关键词', detailed_explanation_zh:'保留的子图中文解读'}},
   {id:'panel-no-label', paper_id:'paper', file_id:'main', asset_type:'subfigure', figure_label:'Figure 2', page_numbers:[3]},
   {id:'panel-old-type', paper_id:'paper', file_id:'main', asset_type:'figure', figure_label:'Figure 3', subfigure_label:'b', page_numbers:[3]},
@@ -19,7 +19,7 @@ const assets = [
   {id:'unknown-source', paper_id:'paper', file_id:'missing', asset_type:'figure', figure_label:'Figure 4', page_numbers:[4]},
 ];
 function context() {
-  const c = {state:{paperId:'paper'}, currentSourceFile:id=>files.find(f=>f.id===id), currentDisplayRole:f=>f?.role==='si'||f?.paper_id!=='paper'?'si':f?.role};
+  const c = {visualLabelKey:label=>String(label||'').toLowerCase().replace(/[^0-9]/g,''), currentScientificReading:a=>({type:a.reading_explanation?.detailed_explanation_zh?'current_scientific':'current_incomplete'}), state:{paperId:'paper'}, currentSourceFile:id=>files.find(f=>f.id===id), currentDisplayRole:f=>f?.role==='si'||f?.paper_id!=='paper'?'si':f?.role};
   vm.createContext(c); vm.runInContext(helpers,c); return c;
 }
 test('default admits only main whole assets and structured legacy whole labels; full input is preserved', () => {
@@ -43,6 +43,17 @@ test('default admits only main whole assets and structured legacy whole labels; 
   expect(c.result[0]._currentAsset.id).toBe('si-whole');
   vm.runInContext('result=selectGalleryFigures(figures, "")',c);
   expect(c.result).toHaveLength(3);
+  expect(JSON.stringify(c.figures)).toBe(before);
+});
+
+test('sourced whole figures replace undocumented same-source drafts only in default display', () => {
+  const c=context();
+  c.figures=[{_currentAsset:{...assets[0],id:'draft',reading_explanation:null}}, {_currentAsset:assets[0]}];
+  const before=JSON.stringify(c.figures);
+  vm.runInContext('result=selectGalleryFigures(figures, "")',c);
+  expect(c.result.map(f=>f._currentAsset.id)).toEqual(['whole']);
+  vm.runInContext('result=selectGalleryFigures(figures, "draft")',c);
+  expect(c.result[0]._currentAsset.id).toBe('draft');
   expect(JSON.stringify(c.figures)).toBe(before);
 });
 
