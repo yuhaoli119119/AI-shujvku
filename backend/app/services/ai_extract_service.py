@@ -137,18 +137,19 @@ def _build_prompt(
 
 ## 工作包地址（一次读取全部上下文）
 GET {origin}{work_package_url}
-该接口返回论文信息、反应模板、已关联文件列表、已有图表对象、已有数据行，
+该接口返回论文信息、已有章节与来源覆盖、章节写契约、反应模板、已关联文件列表、已有图表对象、已有数据行，
 以及写入口说明。
 
 ## 写入口（逐条调用，不要批量）
 1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import
 2. 图表裁图: POST {origin}/api/rebuild/papers/{paper_id}/assets/crop
 3. 数据行写入: POST {origin}/api/rebuild/rows/import
+4. 章节写入: POST {origin}/api/rebuild/papers/{paper_id}/sections/import（工作台会话 + X-CSRF-Token；按 section_write_contract）
 
 ## 工作要求（严格遵守）
 1. **只处理 paper_id={paper_id} 这一篇论文**，不得跨论文合并来源。
 2. **不启动旧解析链**（不要调用 /api/papers/*/parse 或 docling 等接口）。
-3. **不改数据库 schema**；只通过上述写入口写入图表对象和数据行。
+3. **不改数据库 schema**；只通过上述写入口写入章节、图表对象和数据行。
 4. **不删除任何已有数据**。
 5. **逐图解释**：从真实 PDF 裁图，保留页码与来源。短 explanation 仅补充；完整结果用 assets/import 或 crop 的 reading_explanation 对象保存：summary_zh、detailed_explanation_zh、subfigures（label/description/methods/findings）、evidence_locators（自身 file_id、page、quote；visual 可用 visual_observation）、uncertainties_zh。只写已核实内容，缺项留待补，禁止固定句冒充详解；不覆盖旧 PaperFigure 或移植不明来源解读。
 6. **每个数值必须有来源**：标注页码、表号/图号、或引文；无法确定来源的留空。
@@ -156,11 +157,12 @@ GET {origin}{work_package_url}
 8. **不同条件分行**：同一材料在不同测试条件下的数据应分成不同的数据行。
 9. **实验与 DFT 分开**：data_type 分别用 experimental 和 dft。
 10. **按反应模板填表**：SRR / HER / OER / ORR / CO2RR，每个反应的专属字段按模板填写。
+11. **章节科学写入由 DS 任务负责**：非 DS 模型仅报告章节缺口交 DS，不填科学章节。DS 先读 sections / section_coverage，保留成熟章节，仅增未覆盖正文/SI。text 保存完整章节原文，explanation_zh 单独保存有依据的中文解读；绑定本篇 file_id、原文件 SHA256、真实物理页、每页原句和具体段落定位。DOCX 只能用已有派生 PDF 并给 exact SHA256，不冒充原生 PDF 页。保存请求字节与稳定 request_id、file-local section_key，未知写结果重放原请求；409时读回，不覆盖旧章节，证据确有冲突时新 key + conflicts_with_section_ids 保留双方。未报告项不猜；接口成功不代表独立科学验收。
 
 ## 完成标志
-当所有图表对象和数据行写入完成后，在最终回复中输出：
+当所有章节、图表对象和数据行写入完成后，在最终回复中输出：
 EXTRACT_DONE: assets=<数量> rows=<数量> values=<数量> sources=<数量>
-另逐项报告 reading_coverage 与未完成内容；执行结束不等于内容完整或独立科学验收。
+另报告 sections=<数量> 与各 file_id 的章节范围、reading_coverage 和未完成内容；执行结束不等于内容完整或独立科学验收。
 """
 
     return prompt, objective

@@ -122,7 +122,8 @@ class PaperDetailReadonlyService:
                         'related_paper_title':other.title if other else None, 'writeback_paper_id':paper_id})
                 base['tables'].append(item)
             if not compact:
-                base['sections'] = [_stored(row, api.PaperSectionResponse) for row in self._rows(models.PaperSection, paper_id)]
+                from app.services.rebuild_sections import list_sections
+                base['sections'] = [api.PaperSectionResponse(**section) for section in list_sections(self.session, paper_id)]
                 base['references'] = [_stored(row, api.ReferenceEntryResponse) for row in self._rows(models.ReferenceEntry, paper_id)]
                 notes = list(self.session.scalars(select(models.PaperNote).where(models.PaperNote.paper_id == paper_id).order_by(models.PaperNote.created_at.desc(), models.PaperNote.id).limit(30)))
                 base['paper_notes'] = [{c.key: getattr(n,c.key) for c in n.__table__.columns} for n in notes if n.source != 'translation_preview']

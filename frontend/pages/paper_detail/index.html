@@ -3381,6 +3381,26 @@
       area.hidden = !area.innerHTML;
     }
 
+    function renderSectionEvidence(section) {
+      const source = section.provenance;
+      let html = section.explanation_zh
+        ? `<details><summary>中文解读（待独立核验）</summary><div class="prewrap">${esc(section.explanation_zh)}</div></details>` : "";
+      if (source && source.file_id) {
+        const base = `/api/rebuild/files/${encodeURIComponent(source.file_id)}`;
+        const label = source.role === "si" ? "SI" : "正文";
+        const pageLabel = source.page_basis === "derived_pdf" ? "派生 PDF 物理页" : "PDF 物理页";
+        const evidence = (source.sources || []).map(item => `
+          <div class="muted"><a href="${base}/preview#page=${encodeURIComponent(item.page_number)}&toolbar=1" target="_blank" rel="noopener">${esc(pageLabel)} ${esc(item.page_number)}</a> · ${esc(item.locator || "")}</div>
+          <div class="prewrap">${esc(item.quote || "")}</div>`).join("");
+        html += `<details><summary>章节来源：${esc(label)} · ${esc(source.original_filename || "")}</summary>${evidence}
+          <a href="${base}/download" target="_blank" rel="noopener">原始文件</a></details>`;
+      }
+      if ((section.conflicts_with_section_ids || []).length) {
+        html += '<div class="muted">存在与已保留章节的冲突，双方内容均保留，待独立核对。</div>';
+      }
+      return html;
+    }
+
     function renderPaperDetails() {
       const paper = state.paper;
       showPaperContent();
@@ -3486,6 +3506,7 @@
               <div class="section-title">${index + 1}. ${esc(section.section_title || section.section_type || "未命名章节")}</div>
               <div class="prewrap">${esc(section.text || "")}</div>
               <div class="muted">页码：${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</div>
+              ${renderSectionEvidence(section)}
             </div>
           `).join("")
         : '<div class="empty-state">暂无解析章节。</div>';

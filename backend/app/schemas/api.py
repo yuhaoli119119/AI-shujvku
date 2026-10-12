@@ -75,6 +75,11 @@ class PaperSectionResponse(BaseModel):
     section_number: str | None = None
     parent_heading: str | None = None
     heading_path: list[str] = Field(default_factory=list)
+    section_key: str | None = None
+    explanation_zh: str | None = None
+    provenance: dict[str, Any] | None = None
+    conflicts_with_section_ids: list[UUID] = Field(default_factory=list)
+    scientific_acceptance: str = "not_implied"
 
     model_config = {"from_attributes": True}
 

@@ -31,6 +31,7 @@ from app.schemas.rebuild import (
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
     RebuildRowIdentityCorrectionRequest,
+    RebuildSectionsImportRequest,
 )
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
@@ -248,17 +249,82 @@ async def rebuild_paper(paper_id: UUID, session: Session = Depends(get_db_sessio
         raise _http_error(exc) from exc
 
 
+async def _require_work_package_session(request: Request) -> SessionState:
+    return await require_session(request, settings=get_settings())
+
+
+async def _require_section_write_session(request: Request) -> SessionState:
+    auth = await _require_work_package_session(request)
+    if not origin_allowed(request, get_settings()):
+        raise HTTPException(status_code=403, detail="cross_origin_request_blocked")
+    if not csrf_token_valid(request, auth):
+        raise HTTPException(status_code=403, detail="csrf_token_invalid")
+    try:
+        json.dumps(await request.json(), allow_nan=False)
+    except (ValueError, TypeError, RecursionError) as exc:
+        raise HTTPException(status_code=422, detail="section_body_must_be_finite_json") from exc
+    return auth
+
+
+@router.get("/papers/{paper_id}/sections")
+async def rebuild_sections(
+    paper_id: UUID,
+    session: Session = Depends(get_db_session),
+    _auth: SessionState = Depends(_require_work_package_session),
+) -> dict[str, Any]:
+    from app.services.rebuild_sections import list_sections, section_coverage
+    try:
+        files = list_files(session, paper_id)
+        sections = list_sections(session, paper_id)
+        return {"items": sections, "section_coverage": section_coverage(sections, files)}
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/papers/{paper_id}/sections/import")
+async def import_rebuild_sections(
+    paper_id: UUID,
+    payload: RebuildSectionsImportRequest,
+    session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
+) -> dict[str, Any]:
+    from app.services.rebuild_sections import import_sections
+    try:
+        result = import_sections(session, paper_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        error = str(exc)
+        status = 404 if error in {"paper_not_found", "file_not_found"} else (
+            409 if error in {"section_request_id_reused", "section_key_conflict", "section_id_collision",
+                             "section_stored_content_conflict", "source_sha256_mismatch",
+                             "section_reading_pdf_sha256_mismatch", "derived_pdf_preview_unavailable"} else 400)
+        raise HTTPException(status_code=status, detail=error) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.get("/papers/{paper_id}/ai-work-package")
 async def rebuild_ai_work_package(
     paper_id: UUID,
     session: Session = Depends(get_db_session),
+    _auth: SessionState = Depends(_require_work_package_session),
 ) -> dict[str, Any]:
     """Give an external AI one read call for paper context, assets and rows."""
     try:
+        from app.services.rebuild_sections import list_sections, section_coverage, section_write_contract
+        files = list_files(session, paper_id)
+        sections = list_sections(session, paper_id)
         return {
             "paper": get_paper(session, paper_id),
+            "sections": sections,
+            "section_coverage": section_coverage(sections, files),
+            "section_write_contract": section_write_contract(paper_id),
             "templates": reaction_templates(),
-            "files": list_files(session, paper_id),
+            "files": files,
             "assets": list_assets(session, paper_id),
             "rows": list_rows(session, paper_id=paper_id, limit=500),
             "write_endpoints": {
@@ -267,6 +333,7 @@ async def rebuild_ai_work_package(
                 "data_rows": "/api/rebuild/rows/import",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "processing_status": "/api/rebuild/papers/{paper_id}/processing-status",
+                "sections": "/api/rebuild/papers/{paper_id}/sections/import",
             },
             "processing_status_contract": {
                 "method": "PUT", "authentication": "workbench session",

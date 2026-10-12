@@ -4,6 +4,69 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+
+
+class RebuildSectionSourceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    page_number: int = Field(ge=1)
+    locator: str = Field(min_length=1, max_length=4000)
+    quote: str = Field(min_length=1, max_length=20000)
+
+    @model_validator(mode="after")
+    def require_location(self):
+        if not self.locator.strip() or not self.quote.strip():
+            raise ValueError("section_source_quote_and_locator_required")
+        return self
+
+
+class RebuildSectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_key: str = Field(min_length=1, max_length=128)
+    file_id: UUID
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    page_basis: Literal["source_pdf", "derived_pdf"]
+    reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    section_title: str = Field(min_length=1, max_length=4000)
+    section_type: str | None = Field(default=None, max_length=64)
+    text: str = Field(min_length=1, max_length=1000000)
+    explanation_zh: str = Field(min_length=1, max_length=200000)
+    page_start: int = Field(ge=1, strict=True)
+    page_end: int = Field(ge=1, strict=True)
+    section_level: int | None = Field(default=None, ge=1, le=16, strict=True)
+    section_number: str | None = Field(default=None, max_length=64)
+    parent_heading: str | None = Field(default=None, max_length=4000)
+    heading_path: list[str] = Field(default_factory=list, max_length=16)
+    sources: list[RebuildSectionSourceInput] = Field(min_length=1, max_length=1000)
+    conflicts_with_section_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def require_section_evidence(self):
+        for value in (self.section_key, self.section_title, self.text, self.explanation_zh):
+            if not value.strip():
+                raise ValueError("section_content_required")
+        if self.page_end < self.page_start:
+            raise ValueError("section_page_range_invalid")
+        if self.page_end - self.page_start + 1 > len(self.sources):
+            raise ValueError("section_source_required_for_each_physical_page")
+        pages = {source.page_number for source in self.sources}
+        if pages != set(range(self.page_start, self.page_end + 1)):
+            raise ValueError("section_source_required_for_each_physical_page")
+        if self.page_basis == "derived_pdf" and self.reading_pdf_sha256 is None:
+            raise ValueError("derived_pdf_sha256_required")
+        return self
+
+
+class RebuildSectionsImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    sections: list[RebuildSectionInput] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def reject_duplicate_keys(self):
+        keys = [(section.file_id, section.section_key) for section in self.sections]
+        if len(keys) != len(set(keys)):
+            raise ValueError("section_key_repeated_in_request")
+        return self
 import json
 
 
