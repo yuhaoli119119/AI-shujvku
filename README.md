@@ -1,5 +1,14 @@
 # Literature AI
 
+## 最新更新
+
+### 2026-10-16
+
+- 优化数据分析页面加载和矩阵切换响应。
+- 新增“刷新小图”，修复快速点击时旧散点图与当前选择不一致，刷新矩阵保留所选变量对。
+
+[完整更新记录](docs/releases/release-notes.md)
+
 唯一项目目录：`/opt/AI-shujvku/literature-ai`。`/opt/literature-ai` 是同一目录的别名。
 
 这里同时是 Git 仓库、代码修改位置和服务器项目目录。代码仓库为 [yuhaoli119119/AI-shujvku](https://github.com/yuhaoli119119/AI-shujvku)。

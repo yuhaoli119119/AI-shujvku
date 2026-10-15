@@ -9,7 +9,7 @@
   <link rel="stylesheet" href="../../shared/components.css">
   <link rel="stylesheet" href="../../shared/topnav.css">
   <link rel="stylesheet" href="../../shared/responsive.css">
-  <link rel="stylesheet" href="./page.css?v=20261011-matrix-alias-fix">
+  <link rel="stylesheet" href="./page.css?v=20261016-analysis-performance">
   <script src="../../shared/topnav.js?v=20261004-original-v2"></script>
   <script>ThemeManager.init();</script>
 </head>
@@ -413,7 +413,7 @@
 
           <p class="matrix-method-note">配对规则：同篇文献、同一催化剂与位点；不同计算条件分别统计。相关性仅用于探索，不代表因果关系。</p>
           <!-- Bottom Drill-Down Card for Selected Pair -->
-          <div id="matrixDetailCard" class="matrix-detail-card">
+          <div id="matrixDetailCard" class="matrix-detail-card" aria-busy="false">
             <div class="detail-card-header">
               <div class="detail-title-group">
                 <span class="eyebrow-text">选中变量对下钻详情</span>
@@ -432,8 +432,9 @@
             <div class="detail-card-body">
               <!-- Col 1: Mini Scatter Plot Preview -->
               <div class="detail-col mini-plot-col">
+                <div class="mini-plot-toolbar"><span>所选变量对散点图</span><button id="refreshMatrixPair" class="btn" type="button" disabled>刷新小图</button></div>
                 <div class="mini-plot-wrapper">
-                  <svg id="miniScatterSvg" viewBox="0 0 300 200" class="mini-scatter-svg">
+                  <svg id="miniScatterSvg" role="img" aria-label="所选变量对散点图" viewBox="0 0 300 200" class="mini-scatter-svg">
                     <g id="miniGridLayer"></g>
                     <g id="miniLineLayer"></g>
                     <g id="miniPointsLayer"></g>
@@ -685,6 +686,6 @@
   </main>
 
   <script src="../../shared/view-state.js"></script>
-  <script src="./page.js?v=20261011-matrix-alias-fix"></script>
+  <script src="./page.js?v=20261016-analysis-performance"></script>
 </body>
 </html>

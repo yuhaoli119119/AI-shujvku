@@ -1,6 +1,7 @@
 """Pair split extraction rows without crossing paper or material identity."""
 import json
 import hashlib
+from collections import defaultdict
 
 from app.services.rebuild_analysis_fields import source_ids
 
@@ -61,14 +62,21 @@ def context(left, right):
 def pair_rows(rows, x_field, y_field):
     lefts = [fields[x_field] for fields in rows.values() if x_field in fields]
     rights = [fields[y_field] for fields in rows.values() if y_field in fields]
+    # Preserve the original candidate order and same-row precedence. Identity
+    # indices only narrow the scan; compatible() still applies every original
+    # condition and exclusion, including ambiguous/bad alternatives.
+    by_row, by_material = defaultdict(list), defaultdict(list)
+    for right in rights:
+        by_row[right['rebuild_row_id']].append(right)
+        by_material[(right['paper_id'], right.get('catalyst_name'))].append(right)
     pairs, excluded = [], []
     seen = set()
     for left in lefts:
         if not left['exploratory_eligible']:
             excluded.append((left, [], left['exclusion_reason']))
             continue
-        same_row = [r for r in rights if r['rebuild_row_id'] == left['rebuild_row_id']]
-        candidates = same_row or [r for r in rights if compatible(left, r)]
+        same_row = by_row[left['rebuild_row_id']]
+        candidates = same_row or [r for r in by_material[(left['paper_id'], left.get('catalyst_name'))] if compatible(left, r)]
         # Preserve exclusions instead of silently ignoring conflicting/estimated
         # alternatives and pretending there was only one measurement.
         bad = next((r['exclusion_reason'] for r in candidates if not r['exploratory_eligible']), None)

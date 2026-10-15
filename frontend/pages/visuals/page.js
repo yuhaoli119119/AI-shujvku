@@ -237,19 +237,19 @@
   const responseCache = new Map();
   let responseCacheEpoch = 0;
   function invalidateResponses() { responseCacheEpoch++; responseCache.clear(); }
-  let correlationController;
+  let correlationController, matrixController, pairController;
   let detailLimit = 50;
-  async function getJSON(url, signal) {
+  async function getJSON(url, signal, { fresh = false } = {}) {
     const epoch = responseCacheEpoch;
     const cached = responseCache.get(url);
-    if (cached && Date.now() - cached.time < 300000) return cached.data;
+    if (!fresh && cached && Date.now() - cached.time < 300000) return cached.data;
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     if (signal) { if (signal.aborted) controller.abort(); else signal.addEventListener("abort", onAbort, {once:true}); }
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
     try {
-      const response = await fetch(url, { signal:controller.signal, headers: { Accept: "application/json" } });
+      const response = await fetch(url, { signal:controller.signal, cache: fresh ? "no-store" : "default", headers: { Accept: "application/json" } });
       if (!response.ok) {
         let detail = "";
         try { const err = await response.json(); detail = err.detail ? "：" + err.detail : ""; } catch (_) {}
@@ -314,6 +314,8 @@
     resetRevisionPolling();
     ++state.requestId;
     correlationController?.abort();
+    matrixController?.abort();
+    pairController?.abort();
     state.lastCorrelation = null;
     state.matrixData = null;
     state.selectedMatrixCell = null;
@@ -329,7 +331,6 @@
     const statusElem = $("globalStatus");
     if (statusElem) statusElem.textContent = `已切换到文献库：${newLib || "全部"}`;
 
-    if (state.currentTab !== "relations") loadOverview();
     if (state.currentTab === "relations") {
       loadCorrelation();
     } else if (state.currentTab === "matrix") {
@@ -342,7 +343,7 @@
   /* ============================================================
      Tab 切换机制
      ============================================================ */
-  function switchTab(targetTab) {
+  function switchTab(targetTab, { load = true } = {}) {
     if (state.currentTab === targetTab) return;
     state.currentTab = targetTab;
 
@@ -359,12 +360,13 @@
     });
 
     syncVisualUrl();
+    if (!load) return;
     if (targetTab === "relations") {
-      if (!state.lastCorrelation) loadCorrelation();
+      if (!state.lastCorrelation) return loadCorrelation();
     } else if (targetTab === "matrix") {
-      if (!state.matrixData) loadMatrix();
+      if (!state.matrixData) return loadMatrix();
     } else if (targetTab === "dataset") {
-      loadDatasetTab();
+      return loadDatasetTab();
     }
   }
 
@@ -1084,6 +1086,11 @@
   let matrixRequest = 0, datasetRequest = 0, pairRequest = 0;
   async function loadMatrix() {
     const ticket = ++matrixRequest, library = state.libraryName;
+    matrixController?.abort();
+    const controller = matrixController = new AbortController();
+    ++pairRequest;
+    pairController?.abort();
+    clearMatrixDetail("正在更新矩阵…");
     const minN = parseInt($("matrixMinN")?.value || "3", 10);
     state.matrixMinN = minN;
     const tbody = $("matrixBody");
@@ -1105,12 +1112,14 @@
       const family = $("matrixFamilySelect")?.value;
       if (family) params.set("corr_family", family);
 
-      const data = await getJSON("/api/visuals/overview?" + params.toString());
+      const data = await getJSON("/api/visuals/overview?" + params.toString(), controller.signal);
       if (ticket !== matrixRequest || library !== state.libraryName) return;
       state.matrixData = data.descriptor_correlation || {};
       renderMatrix();
     } catch (err) {
-      if (ticket !== matrixRequest || library !== state.libraryName) return;
+      if (ticket !== matrixRequest || library !== state.libraryName || err.name === "AbortError") return;
+      clearMatrixDetail("矩阵加载失败，请点击上方刷新重试");
+      setMatrixDetailBusy(false);
       console.error("加载相关性矩阵失败:", err);
       if (tbody) tbody.innerHTML = `<tr><td class="empty-cell">加载相关性矩阵失败：${esc(err.message)}</td></tr>`;
     }
@@ -1267,19 +1276,47 @@
       td.addEventListener('pointerenter', highlight);
       td.addEventListener('focus', highlight);
     });
-    tbody.addEventListener('pointerleave', () => tbody.querySelectorAll('.is-axis-active').forEach(el => el.classList.remove('is-axis-active')));
-    const firstReady = tbody.querySelector('.heatmap-cell.is-ready-cell');
+    tbody.onpointerleave = () => tbody.querySelectorAll('.is-axis-active').forEach(el => el.classList.remove('is-axis-active'));
+    const previous = state.selectedMatrixCell;
+    const firstReady = [...tbody.querySelectorAll('td[role="button"]')].find(td => previous && td.dataset.x === previous.x && td.dataset.y === previous.y) || tbody.querySelector('.heatmap-cell.is-ready-cell');
     if (firstReady) {
       firstReady.classList.add("is-active-cell");
       selectMatrixPair(firstReady.getAttribute("data-x"), firstReady.getAttribute("data-y"));
+    } else {
+      state.selectedMatrixCell = null;
+      clearMatrixDetail("当前筛选条件下暂无可分析的变量对");
+      setMatrixDetailBusy(false);
     }
   }
 
-  async function selectMatrixPair(xProp, yProp) {
+  function setMatrixDetailBusy(busy) {
+    $("matrixDetailCard")?.setAttribute("aria-busy", String(busy));
+    if ($("refreshMatrixPair")) $("refreshMatrixPair").disabled = busy || !state.selectedMatrixCell;
+  }
+
+  function clearMatrixDetail(message) {
+    state.matrixDetailData = null;
+    renderMiniPlot({ points: [] });
+    if ($("miniEmptyText")) $("miniEmptyText").textContent = message;
+    ["rangeXValue", "rangeYValue", "rangeNValue"].forEach(id => { if ($(id)) $(id).textContent = "—"; });
+    if ($("matrixPaperList")) $("matrixPaperList").innerHTML = "";
+    if ($("paperListCount")) $("paperListCount").textContent = "0";
+    if ($("detailBadgeR")) $("detailBadgeR").textContent = "—";
+    if ($("detailBadgeN")) $("detailBadgeN").textContent = "—";
+    if ($("interpretText")) $("interpretText").textContent = message;
+    setMatrixDetailBusy(true);
+  }
+
+  async function selectMatrixPair(xProp, yProp, { fresh = false } = {}) {
     const ticket = ++pairRequest, library = state.libraryName;
+    pairController?.abort();
+    const controller = pairController = new AbortController();
     state.selectedMatrixCell = { x: xProp, y: yProp };
     const xMeta = getFieldMeta(xProp);
     const yMeta = getFieldMeta(yProp);
+    clearMatrixDetail("正在读取所选变量对…");
+    if ($("rangeXLabel")) $("rangeXLabel").textContent = xMeta.labelZh;
+    if ($("rangeYLabel")) $("rangeYLabel").textContent = yMeta.labelZh;
 
     if ($("detailPairTitle")) $("detailPairTitle").textContent = `${xMeta.labelZh} × ${yMeta.labelZh}`;
     if ($("detailBadgeR")) $("detailBadgeR").textContent = "计算中…";
@@ -1304,7 +1341,7 @@
       const family = $("matrixFamilySelect")?.value;
       if (family) params.set("material_family", family);
 
-      const pairData = await getJSON("/api/visuals/correlation-pairs?" + params.toString());
+      const pairData = await getJSON("/api/visuals/correlation-pairs?" + params.toString(), controller.signal, { fresh });
       if (ticket !== pairRequest || library !== state.libraryName) return;
       state.matrixDetailData = pairData;
 
@@ -1339,8 +1376,12 @@
       renderMiniPlot(pairData);
       renderMatrixPaperList(pairData);
     } catch (err) {
+      if (ticket !== pairRequest || library !== state.libraryName || err.name === "AbortError") return;
       console.warn("读取变量对下钻详情失败:", err);
+      clearMatrixDetail("读取失败，点击刷新小图重试");
       if ($("interpretText")) $("interpretText").textContent = "读取该变量对数据失败：" + err.message;
+    } finally {
+      if (ticket === pairRequest && library === state.libraryName) setMatrixDetailBusy(false);
     }
   }
 
@@ -1674,13 +1715,18 @@
     $("matrixFamilySelect")?.addEventListener("change", loadMatrix);
     $("matrixMinN")?.addEventListener("change", loadMatrix);
 
+    $("refreshMatrixPair")?.addEventListener("click", () => {
+      const pair = state.selectedMatrixCell;
+      if (pair) selectMatrixPair(pair.x, pair.y, { fresh: true });
+    });
+
     $("jumpToExploreBtn")?.addEventListener("click", () => {
       if (!state.selectedMatrixCell) return;
       const { x, y } = state.selectedMatrixCell;
       const exploreX = MATRIX_TO_EXPLORE_FIELD_MAP[x] || x;
       const exploreY = MATRIX_TO_EXPLORE_FIELD_MAP[y] || y;
 
-      switchTab("relations");
+      switchTab("relations", { load: false });
       if ($("xField") && state.fields.some((f) => f.key === exploreX)) $("xField").value = exploreX;
       if ($("yField") && state.fields.some((f) => f.key === exploreY)) $("yField").value = exploreY;
       loadCorrelation();
@@ -1733,6 +1779,8 @@
       // Prevent an earlier response from overwriting the refreshed source data.
       ++state.requestId; ++matrixRequest; ++pairRequest; ++datasetRequest;
       correlationController?.abort();
+      matrixController?.abort();
+      pairController?.abort();
       await loadFields(true);
       if (generation !== revisionGeneration || scope !== state.libraryName || document.hidden) return;
       if (state.currentTab === "matrix") await loadMatrix();
@@ -1779,8 +1827,8 @@
       viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
       state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "core";
       ViewState.bindDetailLinks("visuals");
-      if (viewState.tab && viewState.tab !== "relations") switchTab(viewState.tab);
-      await loadCorrelation();
+      if (viewState.tab && viewState.tab !== "relations") await switchTab(viewState.tab);
+      else await loadCorrelation();
       startRevisionPolling();
     } catch (error) {
       const statusEl = $("relationStatus");
