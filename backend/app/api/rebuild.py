@@ -15,7 +15,7 @@ import csv
 import io
 from sqlalchemy.orm import Session
 from sqlalchemy import select
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from pydantic import ValidationError
 
 from app.config import Settings, get_settings
@@ -31,10 +31,12 @@ from app.schemas.rebuild import (
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
     RebuildSourceCorrectionRequest,
+    RebuildDedupPreviewRequest, RebuildDedupApplyRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
+from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
 from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
@@ -363,10 +365,13 @@ async def rebuild_ai_work_package(
                 "data_rows": "/api/rebuild/rows/import",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
+                "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
+                "value_dedup_apply": "/api/rebuild/papers/{paper_id}/value-dedup/apply",
                 "processing_status": "/api/rebuild/papers/{paper_id}/processing-status",
                 "sections": "/api/rebuild/papers/{paper_id}/sections/import",
             },
             "source_correction_contract": source_correction_contract(),
+            "value_dedup_contract": dedup_contract(),
             "processing_status_contract": {
                 "method": "PUT", "authentication": "workbench session",
                 "body": {"run_id": "stable id for this attempt", "agent": "AI name", "status": "parsing then parsed/partial/failed", "message": "completion or remaining work", "file_ids": "IDs of files covered by this completed attempt"},
@@ -907,3 +912,32 @@ async def rebuild_analysis_csv(run_id: UUID, session: Session = Depends(get_db_s
             "X-Analysis-Run-Id": str(run.id),
         },
     )
+
+
+@router.post("/papers/{paper_id}/value-dedup/preview")
+async def preview_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupPreviewRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        return preview_dedup(session, paper_id, payload)
+    except RebuildWorkflowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/papers/{paper_id}/value-dedup/apply")
+async def apply_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupApplyRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        result = apply_dedup(session, paper_id, payload, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (IntegrityError, DataError, OperationalError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="dedup_database_constraint_or_lock_conflict") from exc
+    except Exception:
+        session.rollback()
+        raise

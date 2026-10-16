@@ -351,3 +351,27 @@ class RebuildSourceCorrectionRequest(BaseModel):
     request_id: UUID
     correction_reason: str = Field(min_length=1, max_length=4000)
     source: RebuildSourceIdentity
+
+
+class RebuildDedupPair(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    keep_value_id: UUID
+    duplicate_value_id: UUID
+    same_fact: Literal[True]
+    reason: str = Field(min_length=1, max_length=4000)
+    # Explicit scientific identity assertion, including any differing field/condition.
+    identity_assertion: str = Field(min_length=1, max_length=4000)
+
+
+class RebuildDedupPreviewRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    pairs: list[RebuildDedupPair] = Field(min_length=1, max_length=20)
+
+
+class RebuildDedupApplyRequest(RebuildDedupPreviewRequest):
+    expected_plan_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    confirm_delete_value_ids: list[UUID]
+    confirm_delete_row_ids: list[UUID]
+    expected_move_source_ids: list[UUID]
+    request_id: UUID
+    reason: str = Field(min_length=1, max_length=4000)
