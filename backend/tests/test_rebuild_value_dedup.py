@@ -256,3 +256,24 @@ def test_external_preferred_moved_source_rejected(data):
         s.add(RebuildDataValue(paper_id=other,row_id=r.id,field_name='outside',preferred_source_id=source.id));s.commit()
         with pytest.raises(RebuildWorkflowError,match='external_preferred_source_conflict'):
             preview_dedup(s,pid,body)
+
+
+
+def test_request_id_reuse_across_papers_is_global_conflict(data):
+    factory,pid,other,body=data
+    with factory() as s:
+        original=request(s,pid,body)
+        apply_dedup(s,pid,original,actor='trusted');s.commit()
+        vals=[]
+        for n in range(2):
+            row=RebuildDataRow(paper_id=other,row_key='pair-'+str(n),material='Other',reaction='SRR',active_site_type='single_atom',data_type='dft')
+            s.add(row);s.flush()
+            v=RebuildDataValue(paper_id=other,row_id=row.id,field_name='x',raw_value='1.0',numeric_value=1.0,unit='eV',created_at=datetime(2020,1,1)+timedelta(days=n))
+            s.add(v);s.flush();vals.append(v.id)
+        s.commit()
+        other_body=RebuildDedupPreviewRequest(pairs=[dict(keep_value_id=vals[0],duplicate_value_id=vals[1],same_fact=True,reason='confirmed',identity_assertion='same fact')])
+        req=request(s,other,other_body).model_copy(update={'request_id':original.request_id})
+        before=snapshot(s)
+        with pytest.raises(RebuildWorkflowError,match='request_id_reused'):
+            apply_dedup(s,other,req,actor='trusted')
+        s.commit();assert snapshot(s)==before

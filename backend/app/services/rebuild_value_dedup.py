@@ -56,7 +56,7 @@ def dedup_contract():
             'Paper/rows/values/sources are locked and preview recomputed; related reference tables take short transaction read locks to prevent reference races.',
             'External active references, malformed ownership, stale state or counts reject atomically with 409.',
             'Full retired row/value and all source before/after images, trusted actor/time/reason/request/revision are appended to merge_history; no fake scientific conflict.',
-            'Same request_id + actor + payload replays without writes; changed actor/payload conflicts. request_id is scoped to paper.',
+            'Same request_id + actor + payload replays without writes; changed actor/payload conflicts. request_id is global across merge requests.',
             'After an uncertain response read the authenticated work package and canonical merge_history before retrying.'
         ],
     }
@@ -214,7 +214,7 @@ def preview_dedup(session: Session, paper_id: UUID, payload):
 def apply_dedup(session: Session, paper_id: UUID, payload, *, actor: str):
     if not actor or not actor.strip() or not payload.reason.strip():
         _fail('actor_reason_required')
-    fingerprint = _hash(payload.model_dump(mode='json'))
+    fingerprint = _hash({'paper_id': str(paper_id), 'payload': payload.model_dump(mode='json')})
     with session.begin_nested():
         # Paper first, matching existing scientific writers; then reference read
         # locks before reading rows, so concurrent JSON/reference inserts cannot
@@ -235,7 +235,7 @@ def apply_dedup(session: Session, paper_id: UUID, payload, *, actor: str):
             elif isinstance(node, list):
                 for child in node:
                     yield from receipts(child)
-        for value in state[RebuildDataValue]:
+        for value in session.scalars(select(RebuildDataValue).where(RebuildDataValue.conflict.is_not(None)).execution_options(populate_existing=True)):
             for event in receipts(value.conflict or {}):
                 if event.get('request_id') == str(payload.request_id):
                     if (event.get('actor'), event.get('request_fingerprint')) != (actor, fingerprint):
