@@ -30,10 +30,12 @@ from app.schemas.rebuild import (
     RebuildVisualAssetCropRequest,
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
+    RebuildSourceCorrectionRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
+from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
 from app.services.legacy_data_transfer import LegacyTransferRequest
@@ -80,8 +82,8 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found"} else (
-        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found"} else (
+        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -360,9 +362,11 @@ async def rebuild_ai_work_package(
                 "asset_crop": "/api/rebuild/papers/{paper_id}/assets/crop",
                 "data_rows": "/api/rebuild/rows/import",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
+                "source_correction": "/api/rebuild/sources/{source_id}",
                 "processing_status": "/api/rebuild/papers/{paper_id}/processing-status",
                 "sections": "/api/rebuild/papers/{paper_id}/sections/import",
             },
+            "source_correction_contract": source_correction_contract(),
             "processing_status_contract": {
                 "method": "PUT", "authentication": "workbench session",
                 "body": {"run_id": "stable id for this attempt", "agent": "AI name", "status": "parsing then parsed/partial/failed", "message": "completion or remaining work", "file_ids": "IDs of files covered by this completed attempt"},
@@ -796,6 +800,34 @@ async def transfer_history(paper_id: UUID, payload: LegacyTransferRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_identity_correction_session)) -> dict[str, Any]:
     raise HTTPException(status_code=410, detail="旧提取数据已停用，请从原 PDF 通过新 AI 提取流程重新取数。")
+
+
+@router.get("/sources/{source_id}")
+async def read_rebuild_source(source_id: UUID, session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_work_package_session)) -> dict[str, Any]:
+    try:
+        return source_state(session, source_id)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.put("/sources/{source_id}")
+async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrectionRequest,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        result = correct_source(session, source_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except (IntegrityError, DataError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="source_database_constraint_conflict") from exc
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.get("/values/{value_id}")

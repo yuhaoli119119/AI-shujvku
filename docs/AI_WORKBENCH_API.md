@@ -128,3 +128,20 @@ HTTP 200 仅表示批次处理并提交完成，不表示全部导入成功。�
 导入顶层 complete 等于本次每个行结果 complete 的逻辑与，不以 errors 是否为空代替，不检查本请求之外的历史行。身份待定行即使 values=[]、仅补备注或正常属性，仍为 complete=false、rows_partial，并在该行结果给出 pending_reason；errors 追加 part=row、outcome=pending 的行级原因，包含 canonical row_key 和 pending_identity_fields，供定向补正。省略待补字段不能解除待定。
 
 前端显示待定原因、行键和待补字段；即使响应其他标志不一致，rows_partial>0 或任一行 complete=false 也显示未完整处理。正确补正身份后，后续保持完整身份的空字段重试可完整成功；未参与本次请求的其他待定行不构成门禁。字段级 errors 保留，新行级诊断不改变已保存内容。
+
+
+## 正式来源修正（2026-10-16）
+
+已登记来源的归属、资产和表格坐标修正使用独立入口，不能用数值纠错追加一个新来源来代替。
+
+- `GET /api/rebuild/sources/{source_id}`：需要工作台登录；返回完整原来源（含原 `source_key`、所属 paper/row/value UUID）、`source_revision`、首选来源 UUID 和该来源的修正历史。
+- `PUT /api/rebuild/sources/{source_id}`：需要工作台登录、同源请求和 `X-CSRF-Token`。body 包含 `paper_id`、fresh `expected_revision`、新 `request_id`、非空 `correction_reason`、完整 `source` 替换对象。禁止额外字段和客户端指定 key/actor。
+- `source` 必须明确给出全部字段：`file_id`（同篇已登记文件，必填）、`asset_id`、`source_kind`、`page_number`、`label`、`table_row`、`table_column`、`quote`、`estimate_basis`；除 file_id/source_kind 外均可明确为 null，不能省略。
+- 来源类型沿用 explicit/estimated/derived/table/text/figure。文件和资产必须属于同一 paper，资产的 file_id 必须等于请求 file_id；来源必须有可定位的页、资产、标签或引文。estimated/derived 必须保留依据，不能替 explicit 数值改为估算来源。
+- `page_number` 为原始 PDF 的 1-based 物理页，会核对原文件 SHA256、文件类型和真实页数。DOCX 来源须为 null，不能借用派生阅读 PDF 的页码。表格坐标为 0-based 非负整数，table 类型须同时给行列；其他类型须为 null。
+- revision 覆盖完整存储来源、原 key 和该来源全部历史；陈旧 revision 返回 409。完整身份重算 key，撞到同一 value 的另一来源（包括旧 key 的同身份来源）返回 409，不合并、不删除。
+- 原子更新只涉及该来源及所属 value 的 `conflict.source_corrections` 追加历史；source/value UUID、preferred_source_id、数值、精度、材料和原有冲突历史保持。历史保留完整 before/after、原 key、新 key、可信登录 actor、原因和 UTC 时间；无 schema migration。
+- 发送前持久化完整请求。同一 value 下相同 request_id、body 和 actor 的重试不再写入，返回当前状态；变更内容或 actor 返回 409。未知结果先 GET 检查历史 request_id，再决定是否原样重试。返回 revision 是当前状态，不保证仍为首次请求落地时的 revision。
+- 不存在返回 404；来源不充分、跨 paper、资产文件不匹配、非法类型/页/坐标等拒绝且不写。输入格式错误为 422，鉴权失败为 401，CSRF/Origin 失败为 403，key/revision/数据库约束冲突为 409。
+
+`ai-work-package.write_endpoints.source_correction` 与 `source_correction_contract` 公布上述合同。此接口提供正式代码渠道；上线不代表任何论文已修正或科学验收通过，生产纠错仍须单篇授权和独立验收。

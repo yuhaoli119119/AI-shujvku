@@ -326,3 +326,28 @@ class ProcessingStatusReport(BaseModel):
     message: str = Field(default='', max_length=2000)
     no_extractable_content_reason: str | None = Field(default=None, max_length=2000)
     file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+
+class RebuildSourceIdentity(BaseModel):
+    """Complete replacement; omitted fields cannot silently clear provenance."""
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: UUID
+    asset_id: UUID | None
+    source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
+    page_number: int | None = Field(ge=1, le=2147483647, strict=True)
+    label: str | None = Field(max_length=128)
+    table_row: int | None = Field(ge=0, le=2147483647, strict=True)
+    table_column: int | None = Field(ge=0, le=2147483647, strict=True)
+    quote: str | None
+    estimate_basis: str | None
+
+
+class RebuildSourceCorrectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    paper_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_id: UUID
+    correction_reason: str = Field(min_length=1, max_length=4000)
+    source: RebuildSourceIdentity
