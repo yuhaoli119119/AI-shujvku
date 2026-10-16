@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.config import Settings
+from app.services.rebuild_table_content import table_content, validate_table_provenance
 from app.services.paper_codes import main_paper_clause, lock_catalog_numbering
 from app.db.models import (
     Paper,
@@ -457,12 +458,35 @@ def prepare_visual_asset(
             RebuildVisualAsset.asset_key == payload.asset_key,
         )
     )
-    data = payload.model_dump(exclude_unset=True)
+    data = payload.model_dump(exclude_unset=True, exclude={"request_id", "task_id"})
     explicit_present = "reading_explanation" in data
     explicit_reading = data.pop("reading_explanation", None)
     old_provenance = existing.provenance if existing is not None and isinstance(existing.provenance, dict) else {}
     supplied = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     provenance = {**old_provenance, **supplied} if data.get("provenance") is not None else dict(old_provenance)
+    table_fields = ("table_data", "table_markdown", "table_sources")
+    changed_table_source = existing is not None and any(
+        key in data and data[key] != getattr(existing, key) for key in ("file_id", "page_numbers", "caption"))
+    if data.get("asset_type", getattr(existing, "asset_type", None)) == "table" and (
+        any(key in supplied for key in table_fields) or
+        changed_table_source and any(key in provenance for key in table_fields)
+    ):
+        try:
+            validate_table_provenance(provenance,
+                file_id=data.get("file_id", getattr(existing, "file_id", None)),
+                page_numbers=data.get("page_numbers", getattr(existing, "page_numbers", [])),
+                caption=data.get("caption", getattr(existing, "caption", None)))
+            if provenance.get("table_sources"):
+                from app.services.rebuild_file_preview import resolve_reading_pdf
+                import fitz
+                source_file = get_file(session, data.get("file_id", getattr(existing, "file_id", None)))
+                with fitz.open(resolve_reading_pdf(source_file, settings)) as document:
+                    if any(source["page_number"] > document.page_count for source in provenance["table_sources"]):
+                        raise RebuildWorkflowError("table_source_page_out_of_range")
+        except ValidationError as exc:
+            raise RebuildWorkflowError("invalid_table_body:" + json.dumps(exc.errors(include_input=False, include_context=False))) from exc
+        except ValueError as exc:
+            raise RebuildWorkflowError(str(exc)) from exc
     declared = [supplied[key] for key in ("reading_explanation", "scientific_reading") if key in supplied]
     if explicit_present:
         declared.insert(0, explicit_reading)
@@ -490,11 +514,15 @@ def prepare_visual_asset(
 
 def upsert_visual_asset(session: Session, *, paper_id: UUID, payload: RebuildVisualAssetRequest, settings: Settings, prepared: tuple | None = None) -> tuple[RebuildVisualAsset, bool]:
     existing, data = prepared if prepared is not None else prepare_visual_asset(session, paper_id=paper_id, payload=payload, settings=settings)
+    from app.services.rebuild_mutation_audit import capture_before_item
+    capture_before_item(session, existing.id if existing else None)
     if existing is None:
         record = RebuildVisualAsset(paper_id=paper_id, **data)
         session.add(record)
         session.flush()
         return record, True
+    if all(getattr(existing, key) == value for key, value in data.items()):
+        return existing, False
     for key, value in data.items():
         setattr(existing, key, value)
     existing.version += 1
@@ -521,6 +549,7 @@ def serialize_asset(asset: RebuildVisualAsset) -> dict[str, Any]:
         "y_axis_unit": asset.y_axis_unit,
         "material_mapping": asset.material_mapping,
         "context_text": asset.context_text,
+        "table_content": table_content(asset),
         "explanation": asset.explanation,
         "reading_explanation": (asset.provenance if isinstance(asset.provenance, dict) else {}).get("reading_explanation") or (asset.provenance if isinstance(asset.provenance, dict) else {}).get("scientific_reading"),
         "unreadable_fields": asset.unreadable_fields or [],
@@ -1110,6 +1139,8 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
         raise RebuildWorkflowError("ambiguous_legacy_rows:retry_with_canonical_row_key:" +
                                    ",".join(sorted(r.row_key for r in matching)))
     created = not matching
+    from app.services.rebuild_mutation_audit import capture_before_item
+    capture_before_item(session, matching[0].id if matching else None)
     if created:
         generated_key = (fingerprint if condition.get("identity_context") and not dimension_errors
                          else _stable_hash("row", [fingerprint, submission]))
@@ -1387,7 +1418,7 @@ def list_rows(
     limit: int = 100,
     offset: int = 0,
 ) -> dict[str, Any]:
-    statement = select(RebuildDataRow).order_by(RebuildDataRow.created_at.desc())
+    statement = select(RebuildDataRow).order_by(RebuildDataRow.created_at.desc(), RebuildDataRow.id)
     if reaction:
         statement = statement.where(RebuildDataRow.reaction == reaction)
     if material:
@@ -1402,7 +1433,10 @@ def list_rows(
         statement = statement.where(RebuildDataRow.paper_id == paper_id)
     total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = session.scalars(statement.limit(limit).offset(offset)).all()
-    return {"total": total, "items": [serialize_row(session, row) for row in rows]}
+    next_offset = offset + len(rows) if offset + len(rows) < total else None
+    return {"total": total, "items": [serialize_row(session, row) for row in rows],
+            "limit": limit, "offset": offset, "has_more": next_offset is not None,
+            "next_offset": next_offset}
 
 
 def _linear_regression(points: list[dict[str, float]]) -> dict[str, Any] | None:

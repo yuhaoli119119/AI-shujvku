@@ -124,6 +124,8 @@ def report_processing(session, paper, report):
     Completion reflects committed results, not a claim of scientific acceptance.
     """
     job_id = 'extparse-' + hashlib.sha256((str(paper.id)+'|'+report.run_id).encode()).hexdigest()[:32]
+    from app.services.rebuild_queue import lock_scheduler, paper_busy, TYPE as PIPELINE_TYPE
+    lock_scheduler(session)
     # Serialize same-paper reports so concurrent creation is idempotent.
     session.scalar(select(models.Paper).where(models.Paper.id==paper.id).with_for_update())
     job = session.get(models.WorkflowJob,job_id)
@@ -133,6 +135,14 @@ def report_processing(session, paper, report):
         expected = 'partial' if (job.progress or {}).get('content_status')=='partial' else 'parsed' if job.status=='completed' else 'failed'
         if report.status != expected: raise ValueError('terminal_run_is_immutable_use_new_run_id')
         return processing_statuses(session,[paper.id])[paper.id]
+    occupied = paper_busy(session, paper.id, excluding=job_id)
+    if occupied:
+        same_writer = (occupied.type == PIPELINE_TYPE and occupied.payload.get('stage') == 'writer'
+                       and report.run_id == occupied.job_id) or (
+                       occupied.type == 'ai_extract_rebuild' and report.run_id in
+                       {occupied.job_id, (occupied.payload or {}).get('attempt_token')})
+        if not same_writer:
+            raise ValueError('paper_has_other_unresolved_writer_or_reviewer')
     status = processing_statuses(session,[paper.id])[paper.id]
     if report.status=='parsed' and not status['has_results'] and not report.no_extractable_content_reason:
         raise ValueError('completion_requires_results_or_no_extractable_content_reason')

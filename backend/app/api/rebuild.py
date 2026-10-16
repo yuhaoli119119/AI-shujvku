@@ -79,13 +79,17 @@ from app.services.ai_extract_service import (
 )
 
 
+from app.schemas.rebuild import (ExtractionFreezeRequest, ExtractionReviewRequest, ReviewProgressRequest, RebuildQueueControlRequest,
+                                RebuildQueueEnqueueRequest, RebuildQueueClaimRequest, RebuildQueueAttemptRequest)
+
+
 router = APIRouter(tags=["rebuild"])
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found"} else (
-        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached"} else (
+        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -286,6 +290,189 @@ async def rebuild_sections(
         raise _http_error(exc) from exc
 
 
+def _queue_error(exc):
+    detail = str(exc)
+    return HTTPException(status_code=403 if detail == "rebuild_queue_disabled" else 404 if detail == "paper_not_found" else 409, detail=detail)
+
+
+@router.get("/queue")
+async def rebuild_queue_snapshot(session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+                                 _auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.rebuild_queue import snapshot
+    return snapshot(session, settings)
+
+
+@router.put("/queue/control")
+async def rebuild_queue_control(payload: RebuildQueueControlRequest, session: Session = Depends(get_db_session),
+                                 settings: Settings = Depends(get_settings), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_queue import set_control
+    try:
+        result = set_control(session, paused=payload.paused, limits=payload.limits, actor=auth.username, settings=settings)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback(); raise _queue_error(exc) from exc
+    except Exception:
+        session.rollback(); raise
+
+
+@router.post("/papers/{paper_id}/queue")
+async def enqueue_rebuild_attempt(paper_id: UUID, payload: RebuildQueueEnqueueRequest,
+                                 session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+                                 auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_queue import enqueue
+    try:
+        result = enqueue(session, paper_id, payload, actor=auth.username, settings=settings)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback(); raise _queue_error(exc) from exc
+    except Exception:
+        session.rollback(); raise
+
+
+@router.post("/queue/claim")
+async def claim_rebuild_attempt(payload: RebuildQueueClaimRequest, session: Session = Depends(get_db_session),
+                               settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_queue import claim_next
+    try:
+        result = claim_next(session, stage=payload.stage, worker_id=payload.worker_id, settings=settings)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback(); raise _queue_error(exc) from exc
+    except Exception:
+        session.rollback(); raise
+
+
+@router.post("/queue/{job_id}/dispatch-intent")
+async def prepare_rebuild_dispatch(job_id: str, payload: RebuildQueueAttemptRequest, session: Session = Depends(get_db_session),
+                                   settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_queue import prepare_dispatch
+    try:
+        result = prepare_dispatch(session, job_id, worker_id=payload.worker_id, attempt_token=str(payload.attempt_token), settings=settings)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback(); raise _queue_error(exc) from exc
+    except Exception:
+        session.rollback(); raise
+
+
+@router.post("/queue/{job_id}/readback")
+async def readback_rebuild_attempt(job_id: str, payload: RebuildQueueAttemptRequest, session: Session = Depends(get_db_session),
+                                   settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_queue_native import reconcile_attempt
+    try:
+        result = await reconcile_attempt(session, job_id, attempt_token=str(payload.attempt_token), settings=settings,
+                                         manual_recheck=payload.manual_recheck)
+        session.commit()
+        if settings.rebuild_native_stop_enabled:
+            from app.db.models import WorkflowJob
+            current = session.get(WorkflowJob, job_id)
+            if current and current.status == "needs_attention":
+                session.rollback()
+                from app.services.rebuild_native_stop import protective_stop
+                result["native_stop"] = await protective_stop(settings.database_url, job_id, settings=settings)
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback(); raise _queue_error(exc) from exc
+    except Exception:
+        session.rollback(); raise
+
+
+@router.post("/native-attempts/{job_id}/stop")
+async def controlled_native_attempt_stop(
+    job_id: str, payload: RebuildQueueAttemptRequest,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    _auth: SessionState = Depends(_require_section_write_session),
+):
+    from app.db.models import WorkflowJob
+    from app.services.rebuild_native_stop import protective_stop
+    job = session.get(WorkflowJob, job_id)
+    if job is None or (job.payload or {}).get("attempt_token") != str(payload.attempt_token):
+        raise HTTPException(status_code=409, detail="native_stop_attempt_identity_mismatch")
+    session.rollback()
+    try:
+        return await protective_stop(settings.database_url, job_id, settings=settings)
+    except RebuildWorkflowError as exc:
+        raise _queue_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/acceptance")
+async def get_rebuild_acceptance(
+    paper_id: UUID, session: Session = Depends(get_db_session),
+    _auth: SessionState = Depends(_require_work_package_session),
+):
+    from app.services.rebuild_acceptance import acceptance_status, contract
+    try:
+        _required_paper(session, paper_id)
+        from app.services.rebuild_acceptance import current_snapshot
+        return {"acceptance": acceptance_status(session, paper_id), "contract": contract(),
+                "current_revision": current_snapshot(session, paper_id)[0]["revision"]}
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/papers/{paper_id}/acceptance/freeze")
+async def freeze_rebuild_extraction(
+    paper_id: UUID, payload: ExtractionFreezeRequest,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
+):
+    from app.services.rebuild_acceptance import freeze
+    try:
+        result = freeze(session, paper_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/papers/{paper_id}/acceptance/{freeze_id}/review-progress")
+async def report_independent_review_progress(
+    paper_id: UUID, freeze_id: str, payload: ReviewProgressRequest, request: Request,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
+):
+    from app.services.rebuild_review_progress import record_progress
+    try:
+        result = record_progress(session, paper_id, freeze_id, payload, settings, actor=auth.username,
+                                 authorization=request.headers.get("X-Reviewer-Authorization"))
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/papers/{paper_id}/acceptance/{freeze_id}/reviews")
+async def review_rebuild_extraction(
+    paper_id: UUID, freeze_id: str, payload: ExtractionReviewRequest, request: Request,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
+):
+    from app.services.rebuild_acceptance import review
+    try:
+        result = review(session, paper_id, freeze_id, payload, settings, actor=auth.username,
+                        authorization=request.headers.get("X-Reviewer-Authorization"))
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.post("/papers/{paper_id}/sections/import")
 async def import_rebuild_sections(
     paper_id: UUID,
@@ -342,15 +529,26 @@ async def declare_rebuild_section_corrections(
 @router.get("/papers/{paper_id}/ai-work-package")
 async def rebuild_ai_work_package(
     paper_id: UUID,
+    rows_limit: int = Query(default=500, ge=1, le=500),
+    rows_offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db_session),
     _auth: SessionState = Depends(_require_work_package_session),
 ) -> dict[str, Any]:
     """Give an external AI one read call for paper context, assets and rows."""
     try:
         from app.services.rebuild_sections import list_sections, section_coverage, section_write_contract
+        from app.services.rebuild_acceptance import acceptance_status, current_snapshot, contract as acceptance_contract
+        from app.services.rebuild_table_content import table_write_contract
         files = list_files(session, paper_id)
         sections = list_sections(session, paper_id)
+        rows = list_rows(session, paper_id=paper_id, limit=rows_limit, offset=rows_offset)
+        rows["next_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?rows_limit={rows_limit}&rows_offset={rows['next_offset']}"
+                             if rows["has_more"] else None)
         return {
+            "table_write_contract": table_write_contract(),
+            "output_revision": current_snapshot(session, paper_id)[0]["revision"],
+            "acceptance": acceptance_status(session, paper_id),
+            "acceptance_contract": acceptance_contract(),
             "paper": get_paper(session, paper_id),
             "sections": sections,
             "section_coverage": section_coverage(sections, files),
@@ -358,7 +556,12 @@ async def rebuild_ai_work_package(
             "templates": reaction_templates(),
             "files": files,
             "assets": list_assets(session, paper_id),
-            "rows": list_rows(session, paper_id=paper_id, limit=500),
+            "rows": rows,
+            "coordinator_tools": {"python_module": "app.services.literature_tools", "read_only_cli": "scripts/literature_tools.py",
+                                  "pdf_chunk_rules": "/api/rebuild/files/{file_id}/text-pages", "automatic_scientific_decisions": False},
+            "read_endpoints": {"text_pages": "/api/rebuild/files/{file_id}/text-pages?offset=0&limit=5",
+                               "render_page": "/api/rebuild/files/{file_id}/render-page?page=1&dpi=120",
+                               "asset_inventory": "/api/rebuild/files/{file_id}/asset-inventory", "queue": "/api/rebuild/queue"},
             "write_endpoints": {
                 "asset_explanations": "/api/rebuild/papers/{paper_id}/assets/import",
                 "asset_crop": "/api/rebuild/papers/{paper_id}/assets/crop",
@@ -438,6 +641,57 @@ async def rebuild_files(paper_id: UUID, session: Session = Depends(get_db_sessio
         raise _http_error(exc) from exc
 
 
+@router.get("/files/{file_id}/text-pages")
+async def read_rebuild_text_pages(
+    file_id: UUID, offset: int = Query(default=0, ge=0), limit: int = Query(default=5, ge=1, le=20),
+    source_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    reading_pdf_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    _auth: SessionState = Depends(_require_work_package_session),
+):
+    from app.services.rebuild_read_cache import paginated_text, chunk_packet_contract
+    try:
+        result = paginated_text(get_file(session, file_id), settings, offset=offset, limit=limit,
+                                expected_source=source_sha256, expected_reading=reading_pdf_sha256)
+        result["next_page"] = (f"/api/rebuild/files/{file_id}/text-pages?offset={result['next_offset']}&limit={limit}&source_sha256={result['source_sha256']}&reading_pdf_sha256={result['reading_pdf_sha256']}"
+                               if result["has_more"] else None)
+        return {**result, "chunk_contract": chunk_packet_contract()}
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/files/{file_id}/render-page")
+async def read_rebuild_rendered_page(
+    file_id: UUID, page: int = Query(ge=1), dpi: int = Query(default=120, ge=72, le=160),
+    source_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    reading_pdf_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    _auth: SessionState = Depends(_require_work_package_session),
+):
+    from app.services.rebuild_read_cache import rendered_page
+    try:
+        path, identity = rendered_page(get_file(session, file_id), settings, page=page, dpi=dpi,
+                                       expected_source=source_sha256, expected_reading=reading_pdf_sha256)
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, no-store",
+                            "X-Source-SHA256": identity["source_sha256"], "X-Reading-PDF-SHA256": identity["reading_pdf_sha256"],
+                            "ETag": '"' + identity["render_sha256"] + '"'})
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/files/{file_id}/asset-inventory")
+async def read_rebuild_asset_inventory(
+    file_id: UUID, inventory_revision: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    _auth: SessionState = Depends(_require_work_package_session),
+):
+    from app.services.rebuild_read_cache import asset_inventory
+    try:
+        return asset_inventory(session, get_file(session, file_id), settings, inventory_revision=inventory_revision)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
 @router.get("/files/{file_id}/preview")
 async def rebuild_file_preview(
     file_id: UUID,
@@ -506,35 +760,61 @@ async def rebuild_assets(paper_id: UUID, session: Session = Depends(get_db_sessi
         raise _http_error(exc) from exc
 
 
+def _audited_response(session, request, payload, paper_id, operation, actor, mutate):
+    from app.services.rebuild_mutation_audit import audit_ids, run_audited
+    try:
+        request_id, task_id = audit_ids(request, payload)
+        result = run_audited(session, paper_id=paper_id, operation=operation, payload=payload,
+                             actor=actor, request_id=request_id, task_id=task_id, mutate=mutate)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.post("/papers/{paper_id}/assets/import")
 async def import_rebuild_assets(
-    paper_id: UUID,
-    payload: RebuildAssetsImportRequest,
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
+    paper_id: UUID, payload: RebuildAssetsImportRequest, request: Request,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
+    return _audited_response(session, request, payload, paper_id, "assets.import", auth.username,
+                             lambda: _import_assets(session, paper_id, payload, settings))
+
+
+def _import_assets(session, paper_id, payload, settings):
     results: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
-    for index, asset_payload in enumerate(payload.assets):
+    for index, raw in enumerate(payload.assets):
         try:
             with session.begin_nested():
+                asset_payload = RebuildVisualAssetRequest.model_validate(raw)
                 asset, created = upsert_visual_asset(
                     session,
                     paper_id=paper_id,
                     payload=asset_payload,
                     settings=settings,
                 )
-                results.append(
-                    {
-                        "index": index,
-                        "asset_key": asset.asset_key,
-                        "asset_id": str(asset.id),
-                        "created": created,
-                    }
-                )
-        except RebuildWorkflowError as exc:
-            errors.append({"index": index, "error": str(exc)})
-    session.commit()
+            from app.services.rebuild_mutation_audit import capture_item
+            item_events = capture_item(session, index=index, entity_id=asset.id)
+            results.append(
+                {
+                    "index": index,
+                    "audit_event_ids": item_events,
+                    "asset_key": asset.asset_key,
+                    "asset_id": str(asset.id),
+                    "created": created,
+                    "outcome": "created" if created else "updated",
+                }
+            )
+        except (ValidationError, RebuildWorkflowError, DataError, IntegrityError) as exc:
+            reason = ("database_constraint_rejected" if isinstance(exc, (DataError, IntegrityError)) else
+                      json.dumps(exc.errors(include_input=False, include_context=False), ensure_ascii=False) if isinstance(exc, ValidationError) else str(exc))
+            errors.append({"index": index, "outcome": "rejected", "error": reason})
     return {
         "paper_id": str(paper_id),
         "assets_submitted": len(payload.assets),
@@ -543,28 +823,32 @@ async def import_rebuild_assets(
         "errors": errors,
     }
 
+
 @router.post("/papers/{paper_id}/assets")
 async def create_or_update_rebuild_asset(
-    paper_id: UUID,
-    payload: RebuildVisualAssetRequest,
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
+    paper_id: UUID, payload: RebuildVisualAssetRequest, request: Request,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
-    try:
+    def mutate():
         asset, created = upsert_visual_asset(session, paper_id=paper_id, payload=payload, settings=settings)
-    except RebuildWorkflowError as exc:
-        raise _http_error(exc) from exc
-    session.commit()
-    return {"asset": serialize_asset(asset), "created": created}
+        from app.services.rebuild_mutation_audit import capture_item
+        events = capture_item(session, index=None, entity_id=asset.id)
+        return {"asset": serialize_asset(asset), "created": created, "audit_event_ids": events}
+    return _audited_response(session, request, payload, paper_id, "assets.upsert", auth.username, mutate)
 
 
 @router.post("/papers/{paper_id}/assets/crop")
 async def create_rebuild_asset_from_pdf_crop(
-    paper_id: UUID,
-    payload: RebuildVisualAssetCropRequest,
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
+    paper_id: UUID, payload: RebuildVisualAssetCropRequest, request: Request,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
+    return _audited_response(session, request, payload, paper_id, "assets.crop", auth.username,
+                             lambda: _crop_asset(session, paper_id, payload, settings))
+
+
+def _crop_asset(session, paper_id, payload, settings):
     try:
         if payload.file_id is None:
             raise HTTPException(status_code=400, detail="file_id_required_for_crop")
@@ -616,18 +900,25 @@ async def create_rebuild_asset_from_pdf_crop(
         safe_key = re.sub(r"[^A-Za-z0-9_.-]+", "-", payload.asset_key).strip(".-") or "asset"
         target_dir = settings.storage_paths["figures"] / "rebuild" / str(paper_id)
         target_dir.mkdir(parents=True, exist_ok=True)
-        image_path = target_dir / f"{safe_key}.png"
-        relative_path = image_path.resolve().relative_to(settings.storage_root.resolve()).as_posix()
         buffer = io.BytesIO()
         output_image.save(buffer, format="PNG", optimize=True)
         png_bytes = buffer.getvalue()
+        png_sha256 = hashlib.sha256(png_bytes).hexdigest()
+        image_path = target_dir / f"{safe_key[:96]}-{png_sha256}.png"
+        relative_path = image_path.resolve().relative_to(settings.storage_root.resolve()).as_posix()
         pixels_changed = not image_path.is_file() or image_path.read_bytes() != png_bytes
         base_payload["image_path"] = relative_path
         source_payload = RebuildVisualAssetRequest(**base_payload)
         prepared = prepare_visual_asset(session, paper_id=paper_id, payload=source_payload,
                                         settings=settings, force_source_changed=pixels_changed)
         # Source/reading rejection above leaves original PNG and DB untouched.
-        image_path.write_bytes(png_bytes)
+        # Immutable content paths keep the previous image intact on DB/audit rollback.
+        # A failed commit can leave an unreferenced file, never a false success.
+        if not image_path.exists():
+            with image_path.open("xb") as handle:
+                handle.write(png_bytes)
+        elif image_path.read_bytes() != png_bytes:
+            raise RebuildWorkflowError("crop_content_hash_collision")
         asset, created = upsert_visual_asset(session, paper_id=paper_id, payload=source_payload,
                                             settings=settings, prepared=prepared)
     except HTTPException:
@@ -636,8 +927,10 @@ async def create_rebuild_asset_from_pdf_crop(
         raise _http_error(exc) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"crop_failed:{type(exc).__name__}") from exc
-    session.commit()
-    return {"asset": serialize_asset(asset), "created": created, "rendered_pages": len(payload.regions)}
+    from app.services.rebuild_mutation_audit import capture_item
+    events = capture_item(session, index=None, entity_id=asset.id)
+    return {"asset": serialize_asset(asset), "created": created, "rendered_pages": len(payload.regions), "audit_event_ids": events}
+
 
 
 @router.get("/assets/{asset_id}")
@@ -684,9 +977,15 @@ async def rebuild_data_rows(
 
 @router.post("/rows/import")
 async def import_rebuild_rows(
-    payload: RebuildRowsImportRequest,
+    payload: RebuildRowsImportRequest, request: Request,
     session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
+    return _audited_response(session, request, payload, payload.paper_id, "rows.import", auth.username,
+                             lambda: _import_rows(session, payload))
+
+
+def _import_rows(session, payload):
     try:
         _required_paper(session, payload.paper_id)
     except RebuildWorkflowError as exc:
@@ -698,6 +997,8 @@ async def import_rebuild_rows(
             with session.begin_nested():
                 row_payload = RebuildDataRowInput.model_validate(raw)
                 result = import_data_row(session, payload.paper_id, row_payload)
+            from app.services.rebuild_mutation_audit import capture_item
+            result["audit_event_ids"] = capture_item(session, index=index, entity_id=result["row_id"])
             result["row_index"] = index
             results.append(result)
             for part in ("values", "properties"):
@@ -714,12 +1015,12 @@ async def import_rebuild_rows(
                 result["pending_reason"] = reason["error"]
                 errors.append(reason)
         except (ValidationError, RebuildWorkflowError, DataError, IntegrityError) as exc:
-            reason = "database_constraint_rejected" if isinstance(exc, (DataError, IntegrityError)) else str(exc)
+            reason = ("database_constraint_rejected" if isinstance(exc, (DataError, IntegrityError)) else
+                      json.dumps(exc.errors(include_input=False, include_context=False), ensure_ascii=False) if isinstance(exc, ValidationError) else str(exc))
             detail = {"row_index": index, "row_key": raw.get("row_key") if isinstance(raw, dict) else None,
                       "outcome": "rejected", "complete": False, "error": reason}
             results.append(detail)
             errors.append(detail)
-    session.commit()
     counts = {name: sum(r["outcome"] == name for r in results)
               for name in ("written", "duplicate", "partial", "rejected")}
     return {
@@ -733,6 +1034,7 @@ async def import_rebuild_rows(
         "results": results,
         "errors": errors,
     }
+
 
 
 async def _require_identity_correction_session(request: Request) -> SessionState:

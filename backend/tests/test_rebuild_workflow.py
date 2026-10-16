@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Paper, RebuildDataValue, RebuildPaperFile, WorkflowJob
 from app.main import app
+from test_rebuild_mutation_audit import audit_env
 from app.schemas.rebuild import (
     RebuildAnalysisRequest,
     RebuildDataRowInput,
@@ -124,6 +125,7 @@ def test_rebuild_import_prefers_explicit_value_and_preserves_conflicts(setup_tes
                 }
             ],
         )
+        estimated.row_key = "same-scientific-fact-fixture"
         result = import_data_row(session, paper.id, estimated)
         assert result["status"] == "created"
         session.commit()
@@ -141,6 +143,7 @@ def test_rebuild_import_prefers_explicit_value_and_preserves_conflicts(setup_tes
                 }
             ],
         )
+        explicit.row_key = "same-scientific-fact-fixture"
         result = import_data_row(session, paper.id, explicit)
         assert result["values"][0]["status"] == "explicit_value_promoted"
         session.commit()
@@ -158,6 +161,7 @@ def test_rebuild_import_prefers_explicit_value_and_preserves_conflicts(setup_tes
                 }
             ],
         )
+        conflicting.row_key = "same-scientific-fact-fixture"
         result = import_data_row(session, paper.id, conflicting)
         assert result["values"][0]["status"] == "value_conflict_preserved"
         session.commit()
@@ -241,12 +245,11 @@ def test_rebuild_analysis_excludes_mixed_units_and_handles_constant(setup_test_d
 
 
 def test_rebuild_crop_merges_cross_page_regions_and_csv_export(
-    setup_test_db, monkeypatch, tmp_path
+    setup_test_db, monkeypatch, tmp_path, audit_env
 ):
     import fitz
     from app.config import get_settings
 
-    monkeypatch.setenv("LITAI_AUTH_ENABLED", "false")
     get_settings.cache_clear()
     factory = sessionmaker(bind=setup_test_db, autoflush=False, autocommit=False, future=True)
     with factory() as session:
@@ -262,7 +265,7 @@ def test_rebuild_crop_merges_cross_page_regions_and_csv_export(
     document.save(pdf_path)
     document.close()
 
-    client = TestClient(app)
+    client = audit_env["client"]
     if True:
         upload = client.post(
             f"/api/rebuild/papers/{paper_id}/files",

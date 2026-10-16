@@ -157,6 +157,12 @@ class Settings(BaseSettings):
     codex_web_fallback_model: str = "cn:glm-5.3-flash"
     codex_web_cwd: str = "/opt/literature-ai"
     codex_web_dispatch_timeout_seconds: float = 30.0
+    # Explicitly opt in after deployment/independent acceptance. Never starts on import.
+    rebuild_queue_enabled: bool = False
+    # Separate coordinator authority; a shared workbench login cannot mint grants.
+    # No key is generated, installed or changed by application startup.
+    rebuild_review_authority_key_file: str = ""
+    rebuild_native_stop_enabled: bool = False
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

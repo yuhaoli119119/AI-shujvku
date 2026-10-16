@@ -329,7 +329,11 @@ function renderJobStatus() {
   const phaseMsg = jobPhaseMessage(job.phase, job.status);
   const modeLabel = job.dispatch_mode === "codex_web_ordinary" && job.model === "gpt-6-luna" ? "Luna 普通任务" : job.dispatch_mode === "codex_web_target" && job.model === "cn:deepseek-v4.1-flash" ? "DeepSeek 目标任务" : "模式待核实";
 
-  if (job.status === "failed") {
+  if (job.needs_attention) {
+    const nativeStop = job.native_stop?.verified_stop ? "原生任务已核实停止。" : "原生任务尚未确认停止，可能仍消耗额度；需受控暂停并核对。";
+    statusArea.innerHTML = `<div class="ai-status-failed">任务需要人工核对：未观察到新的已验证进展，已停止应用侧自动回读。${esc(nativeStop)}保留当前任务，不会自动重派或切换模型。</div>`;
+    resultArea.hidden = true;
+  } else if (job.status === "failed") {
     statusArea.innerHTML = `<div class="ai-status-failed">提取失败：${esc(job.error || "未知原因")} · ${esc(modeLabel)}；请查看当前任务核实，不会自动重建。</div>`;
     resultArea.hidden = true;
   } else if (job.status === "completed") {
@@ -396,7 +400,7 @@ async function startAiExtract() {
     }
     renderJobStatus();
     renderJobArea();
-    if (job.status === "running" || job.status === "queued" || job.status === "dispatching") {
+    if (!job.needs_attention && (job.status === "running" || job.status === "queued" || job.status === "dispatching")) {
       startPolling(paper.id);
     }
   } catch (error) {
@@ -432,6 +436,7 @@ async function pollJobStatus(paperId) {
     }
     renderJobStatus();
     renderJobArea();
+    if (job.needs_attention) { stopPolling(); return; }
     if (job.status === "completed" || job.status === "failed") {
       stopPolling();
       await selectPaper(paperId);
@@ -452,7 +457,7 @@ async function checkExistingJob(paperId) {
     }
     renderJobStatus();
     renderJobArea();
-    if (job.status === "running" || job.status === "queued" || job.status === "dispatching") {
+    if (!job.needs_attention && (job.status === "running" || job.status === "queued" || job.status === "dispatching")) {
       startPolling(paperId);
     } else {
       stopPolling();
@@ -466,6 +471,39 @@ async function checkExistingJob(paperId) {
 }
 
 
+function queueSummaryText(snapshot) {
+  const control = snapshot.control || {}, capabilities = snapshot.capabilities || {};
+  return (capabilities.enabled ? '队列已启用' : '队列尚未启用') + ' · ' + (control.paused ? '已暂停' : '可由协调任务继续') +
+    '。自动续接尚未开放；打开页面不会启动提取或验收。';
+}
+
+async function loadQueue() {
+  try {
+    const result = await api('/api/rebuild/queue');
+    $('queueSummary').textContent = queueSummaryText(result);
+    $('queueResume').disabled = !result.capabilities.enabled || !result.control.paused;
+    $('queuePause').disabled = result.control.paused;
+    const metrics = result.metrics || {};
+    const rate = metrics.accepted_papers_per_hour == null ? '尚无可用测量' : Number(metrics.accepted_papers_per_hour).toFixed(2) + ' 篇 / 小时';
+    $('queueMetrics').textContent = `独立验收通过 ${metrics.accepted_papers || 0} 篇 · 待验收 ${metrics.review_backlog || 0} · 返工 ${metrics.rework_receipts || 0} · 验收吞吐 ${rate} · 实际用量${metrics.measured_usage_tokens == null ? '尚未提供' : metrics.measured_usage_tokens}`;
+    const labels = {pending:'待处理',claimed:'已占用',dispatch_intent:'准备派发',running:'执行中',unknown:'结果待核实',needs_attention:'需要人工核对',extracted:'已提取，待独立验收',accepted:'独立验收通过',partial:'部分完成 / 原文冲突',needsfix:'需要修正',review_incomplete:'独立验收未完成',failed:'执行失败'};
+    $('queueItems').innerHTML = result.items.length ? result.items.map(item => `<div class="rebuild-result-item"><span>${esc(item.stage === 'reviewer' ? '独立验收' : '提取')} · ${esc(labels[item.status] || '待核实')}</span><a href="../paper_detail/index.html?id=${encodeURIComponent(item.paper_id)}">${esc(item.paper_id)}</a></div>`).join('') : '<div class="rebuild-empty">当前没有队列待办</div>';
+  } catch (_) {
+    $('queueSummary').textContent = '队列读取失败，状态待核实；未启动任何任务。';
+    $('queueResume').disabled = true;
+  }
+}
+
+async function changeQueuePause(paused) {
+  $('queuePause').disabled = true; $('queueResume').disabled = true;
+  try {
+    await api('/api/rebuild/queue/control', {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({paused})});
+    await loadQueue();
+  } catch (_) {
+    $('queueSummary').textContent = '队列控制结果未确认，请刷新待办核对；不会自动重试。';
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   TopNav.init({ currentPage: "ai-extract", mountId: "topnav-mount" });
   $("searchBtn").addEventListener("click", () => { state.query = $("searchInput").value.trim(); loadPapers(); });
@@ -478,4 +516,8 @@ document.addEventListener("DOMContentLoaded", () => {
   renderSteps();
   renderJobArea();
   loadPapers();
+  $('queueRefresh').addEventListener('click', loadQueue);
+  $('queuePause').addEventListener('click', () => changeQueuePause(true));
+  $('queueResume').addEventListener('click', () => changeQueuePause(false));
+  loadQueue();
 });

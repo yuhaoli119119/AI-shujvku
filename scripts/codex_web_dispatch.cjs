@@ -3,7 +3,7 @@
  * codex_web_dispatch.cjs — 通过 Codex-web 现有本机 IPC 桥派发/跟踪 Codex-web 任务（目标模式）
  *
  * 设计约束（务必遵守）：
- *  - 只复用现有 Codex-web 服务（ws://[::1]:49000/__backend/ipc），不修改、不重启、不新起 app-server 冒充它。
+ *  - 只复用现有 Codex-web 服务（ws://127.0.0.1:8214/__backend/ipc），不修改、不重启、不新起 app-server 冒充它。
  *  - 每次连接由 Codex-web 自行创建独立 renderer 窗口；桥已初始化，不需要 initialize。
  *  - 只允许 thread/start 新建、thread/goal/set 设目标、turn/start 发指令、thread/read + thread/goal/get 读取；
  *    thread/resume 仅用于恢复自己创建的任务。绝不使用 thread/fork，绝不加载其它会话。
@@ -35,7 +35,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const WS_URI = process.env.CODEX_WEB_IPC_URI || "ws://[::1]:49000/__backend/ipc";
+const WS_URI = process.env.CODEX_WEB_IPC_URI || "ws://127.0.0.1:8214/__backend/ipc";
 const HOST_ID = process.env.CODEX_WEB_HOST_ID || "local";
 const CHANNEL_FROM_VIEW = "codex_desktop:message-from-view";
 const CHANNEL_FOR_VIEW = "codex_desktop:message-for-view";
@@ -102,6 +102,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function safeIpcEndpoint(uri) {
+  try {
+    const parsed = new URL(uri);
+    parsed.username = ''; parsed.password = ''; parsed.search = ''; parsed.hash = '';
+    return parsed.toString();
+  } catch (_) { return '(invalid IPC URI)'; }
+}
+
+function connectionDiagnostic(uri, error) {
+  const message = String(error?.message || error || 'connection failed');
+  const reason = /401|403/.test(message)
+    ? '收到认证拒绝；核对 CODEX_WEB_IPC_URI 是否误指向认证代理。现有本机原生桥默认是 ws://127.0.0.1:8214/__backend/ipc；保留鉴权，未重试。'
+    : /timeout|超时/i.test(message) ? '连接超时；先核对现有 IPC 桥状态，未重试。'
+    : '连接失败；先核对现有 IPC 桥地址及服务状态，未重试。';
+  return `[dispatch] 无法连接 IPC 桥 ${safeIpcEndpoint(uri)}: ${reason}`;
+}
+
 function uniqueId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
@@ -119,7 +136,7 @@ class Bridge {
   connect(timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(
-        () => reject(new Error(`连接超时: ${this.uri}`)),
+        () => reject(new Error(`连接超时: ${safeIpcEndpoint(this.uri)}`)),
         timeoutMs
       );
       let socket;
@@ -452,7 +469,7 @@ async function withBridge(fn) {
   try {
     await bridge.connect();
   } catch (err) {
-    console.error(`[dispatch] 无法连接 IPC 桥 ${WS_URI}: ${err.message}`);
+    console.error(connectionDiagnostic(WS_URI, err));
     process.exit(1);
   }
   try {
@@ -857,4 +874,5 @@ async function main() {
   }
 }
 
-main();
+module.exports = {Bridge, WS_URI, safeIpcEndpoint, connectionDiagnostic};
+if (require.main === module) main();

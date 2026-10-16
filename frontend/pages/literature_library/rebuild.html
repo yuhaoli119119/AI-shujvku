@@ -49,6 +49,17 @@
         <div class="ai-extract-status" id="aiExtractStatus" hidden></div>
         <div class="ai-extract-result" id="aiExtractResult" hidden></div>
       </div>
+      <details class="advanced-tools" id="queuePanel">
+        <summary class="advanced-tools-summary">处理队列与独立验收待办</summary>
+        <p class="advanced-tools-note" id="queueSummary" role="status">队列状态待读取。打开本页不会启动队列。</p>
+        <div class="rebuild-actions">
+          <button class="rebuild-btn ghost" id="queueRefresh" type="button">刷新待办</button>
+          <button class="rebuild-btn ghost" id="queuePause" type="button">暂停队列</button>
+          <button class="rebuild-btn ghost" id="queueResume" type="button" disabled>继续队列</button>
+        </div>
+        <div id="queueMetrics" class="rebuild-hint"></div>
+        <div id="queueItems" class="rebuild-result-list"></div>
+      </details>
       <details class="advanced-tools" id="advancedTools">
         <summary class="advanced-tools-summary">图表整理与模板数据 / 手动工具</summary>
         <p class="advanced-tools-note">查看源 PDF、整理图表、按反应模板填表并汇总分析；各步可独立使用。</p>
@@ -114,6 +125,6 @@
     </section>
   </div>
 </main>
-<script src="./rebuild.js?v=20261011-processing-20261009-effective-model" defer></script>
+<script src="./rebuild.js?v=20261017-queue-receipts" defer></script>
 </body>
 </html>

@@ -151,7 +151,7 @@ def _verify_start_effective(started: dict[str, Any], model: str, provider: str) 
 
 
 def _verify_goal(result: dict[str, Any], thread_id: str, *, active: bool,
-                 objective: str | None = None) -> None:
+                 objective: str | None = None, token_budget: int | None = None) -> None:
     if result.get("threadId", thread_id) != thread_id or "goal" not in result:
         raise CodexWebDispatchError("goal identity missing or mismatched; readback required")
     goal = result["goal"]
@@ -160,12 +160,15 @@ def _verify_goal(result: dict[str, Any], thread_id: str, *, active: bool,
             raise CodexWebDispatchError("goal not confirmed active for original thread; readback required")
         if objective is not None and goal.get("objective") != objective:
             raise CodexWebDispatchError("goal objective missing or mismatched; readback required")
+        if token_budget is not None and goal.get("tokenBudget") != token_budget:
+            raise CodexWebDispatchError("goal token budget missing or mismatched; readback required")
     elif goal is not None:
         raise CodexWebDispatchError("ordinary thread goal is not confirmed null; readback required")
 
 
 async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | None = None,
                          model: str | None = None,
+                         token_budget: int | None = None,
                          on_event: Callable[[dict[str, Any]], None] | None = None) -> DispatchResult:
     """One attempt only: Luna ordinary or DeepSeek active-goal mode.
 
@@ -175,6 +178,8 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
     runtime = settings or get_settings()
     chosen_model = model or runtime.codex_web_default_model
     mode = dispatch_mode_for_model(chosen_model)
+    if token_budget is not None and (type(token_budget) is not int or token_budget < 1 or mode != "codex_web_target"):
+        raise CodexWebDispatchError("explicit_native_goal_token_budget_requires_target_mode")
     chosen_provider = MODEL_PROVIDERS[chosen_model]
     if on_event is None:
         raise CodexWebDispatchError("durable_dispatch_journal_required")
@@ -201,12 +206,15 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
                       "actual_inference_verified":False})
             goal_status = None
             if mode == "codex_web_target":
-                result = await _call(ws,"thread/goal/set",{"threadId":thread_id,"objective":objective,"status":"active"},timeout,on_event)
-                _verify_goal(result, thread_id, active=True, objective=objective)
+                goal_params = {"threadId":thread_id,"objective":objective,"status":"active"}
+                if token_budget is not None:
+                    goal_params["tokenBudget"] = token_budget
+                result = await _call(ws,"thread/goal/set",goal_params,timeout,on_event)
+                _verify_goal(result, thread_id, active=True, objective=objective, token_budget=token_budget)
                 goal_status = "active"
             goal_readback = await _call(ws,"thread/goal/get",{"threadId":thread_id},timeout,on_event)
             _verify_goal(goal_readback, thread_id, active=mode == "codex_web_target",
-                         objective=objective if mode == "codex_web_target" else None)
+                         objective=objective if mode == "codex_web_target" else None, token_budget=token_budget)
             if mode == "codex_web_target":
                 # Active goals may auto-wake. Never add a turn after observing that.
                 # This read is not a compare-and-swap with turn/start.
@@ -251,6 +259,19 @@ class ThreadStatus:
     final_report: str | None
     turn_id: str | None = None
     thread_id: str | None = None
+    item_count: int | None = None
+    tokens_used: int | None = None
+    turn_ids: tuple[str, ...] | None = None
+    cwd: str | None = None
+
+
+def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
+    if status is None or not start_turn_id or status.thread_id != thread_id:
+        return False
+    if status.turn_id == start_turn_id:
+        return True
+    ids = getattr(status, "turn_ids", None) or ()
+    return bool(allow_goal_continuations and start_turn_id in ids and status.turn_id in ids)
 
 
 async def read_thread_status(
@@ -281,11 +302,15 @@ async def read_thread_status(
             if thread.get("id") != thread_id:
                 raise CodexWebDispatchError("thread/read identity mismatch")
             goal_status = None
+            tokens_used = None
             if include_goal:
                 try:
                     goal_result = await _call(ws,"thread/goal/get",{"threadId":thread_id},timeout)
                     goal = goal_result.get("goal")
                     goal_status = goal.get("status") if isinstance(goal,dict) else None
+                    if isinstance(goal, dict) and goal.get("threadId") == thread_id:
+                        usage = goal.get("tokensUsed")
+                        tokens_used = usage if type(usage) is int and usage >= 0 else None
                 except CodexWebDispatchError:
                     pass
 
@@ -322,6 +347,10 @@ async def read_thread_status(
                 final_report=final_report,
                 turn_id=last_turn.get("id") if isinstance(last_turn,dict) else None,
                 thread_id=thread_id,
+                item_count=len(items) if isinstance(last_turn.get("items"), list) else None,
+                tokens_used=tokens_used,
+                turn_ids=tuple(turn["id"] for turn in turns if isinstance(turn, dict) and isinstance(turn.get("id"), str)),
+                cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
             )
     except (CodexWebDispatchError, OSError, WebSocketException) as exc:
         logger.debug(

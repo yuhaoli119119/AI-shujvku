@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -179,6 +179,9 @@ class RebuildDataRowInput(BaseModel):
 class RebuildRowsImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    request_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    task_id: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+
     paper_id: UUID
     rows: list[Any] = Field(min_length=1, max_length=200)
 
@@ -244,7 +247,10 @@ class RebuildRowIdentityCorrectionRequest(BaseModel):
 class RebuildAssetsImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    assets: list[RebuildVisualAssetRequest] = Field(min_length=1, max_length=200)
+    request_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    task_id: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
+
+    assets: list[Any] = Field(min_length=1, max_length=200)
 
 
 class RebuildValueCorrectionRequest(BaseModel):
@@ -265,6 +271,9 @@ class RebuildValueCorrectionRequest(BaseModel):
 
 class RebuildVisualAssetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    request_id: str | None = Field(default=None, min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    task_id: str | None = Field(default=None, min_length=1, max_length=160, pattern=r"^[A-Za-z0-9_.:-]+$")
 
     asset_key: str = Field(min_length=1, max_length=255)
     asset_type: VisualAssetType
@@ -326,6 +335,103 @@ class ProcessingStatusReport(BaseModel):
     message: str = Field(default='', max_length=2000)
     no_extractable_content_reason: str | None = Field(default=None, max_length=2000)
     file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+
+class ExtractionFileCoverage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    file_id: UUID
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reading_pdf_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    covered_pages: list[Annotated[int, Field(strict=True, ge=1)]] = Field(max_length=20000)
+    remaining_reason: str | None = Field(default=None, max_length=4000)
+    no_extractable_content_reason: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def valid_pages(self):
+        if any(type(page) is not int or page < 1 for page in self.covered_pages):
+            raise ValueError("coverage_pages_must_be_physical_positive_integers")
+        if len(set(self.covered_pages)) != len(self.covered_pages):
+            raise ValueError("coverage_pages_repeated")
+        return self
+
+
+class ExtractionFreezeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    task_id: str = Field(min_length=1, max_length=160)
+    coverage: list[ExtractionFileCoverage] = Field(min_length=1, max_length=100)
+
+
+class ExtractionReviewEvidence(RebuildSectionSourceInput):
+    model_config = ConfigDict(extra="forbid", strict=False)
+    file_id: UUID
+    page_number: int = Field(ge=1, strict=True)
+
+
+class ExtractionReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    reviewer_task_id: str = Field(min_length=1, max_length=160)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    decision: Literal["accepted", "needsfix", "partial", "review_incomplete"]
+    message: str = Field(min_length=1, max_length=20000)
+    # Explicit independent evidence, never inferred from a native turn/status.
+    reviewed_file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    evidence_locators: list[ExtractionReviewEvidence] = Field(default_factory=list, max_length=1000)
+    unresolved_conflicts: list[str] = Field(default_factory=list, max_length=1000)
+
+    @model_validator(mode="after")
+    def nonblank_review(self):
+        if not self.message.strip() or not self.reviewer_task_id.strip():
+            raise ValueError("review_identity_and_message_required")
+        if self.decision == "accepted" and (not self.reviewed_file_ids or not self.evidence_locators):
+            raise ValueError("accepted_review_evidence_required")
+        return self
+
+
+class ReviewProgressRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    reviewer_task_id: str = Field(min_length=1, max_length=160)
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    artifact_path: str = Field(min_length=1, max_length=1024)
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RebuildQueueControlRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    paused: bool
+    limits: dict[str, int | None] | None = None
+
+
+class RebuildQueueEnqueueRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
+    batch_id: str | None = Field(default=None, max_length=160)
+    stage: Literal["writer", "reviewer"]
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    freeze_id: str | None = Field(default=None, max_length=64)
+    model: Literal["cn:deepseek-v4.1-flash"] = "cn:deepseek-v4.1-flash"
+    token_allowance: int = Field(ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def explicit_review_freeze(self):
+        if self.stage == "reviewer" and not self.freeze_id:
+            raise ValueError("queue_review_freeze_required")
+        return self
+
+
+class RebuildQueueClaimRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    stage: Literal["writer", "reviewer"]
+    worker_id: str = Field(min_length=1, max_length=160)
+
+
+class RebuildQueueAttemptRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_token: UUID
+    worker_id: str = Field(min_length=1, max_length=160)
+    manual_recheck: bool = False
 
 
 class RebuildSourceIdentity(BaseModel):

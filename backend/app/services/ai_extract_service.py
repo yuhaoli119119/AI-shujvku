@@ -223,6 +223,9 @@ def serialize_job(job: WorkflowJob, session: Session | None = None) -> dict[str,
         "phase": progress.get("phase"),
         "attempt_token": payload.get("attempt_token"),
         "needs_check": progress.get("needs_check", False),
+        "needs_attention": progress.get("needs_attention", False),
+        "evidence_guard": progress.get("evidence_guard"),
+        "native_stop": progress.get("native_stop"),
         "error": job.error,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "updated_at": job.updated_at.isoformat() if job.updated_at else None,
@@ -263,9 +266,16 @@ async def create_ai_extract_job(
     of creating a duplicate.
     """
     # Same-paper requests serialize before checking or inserting any job intent.
+    from app.services.rebuild_queue import lock_scheduler, paper_busy, TYPE as PIPELINE_TYPE
+    lock_scheduler(session)
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise AiExtractError("paper_not_found")
+    occupied = paper_busy(session, paper_id)
+    if occupied is not None and occupied.type == PIPELINE_TYPE:
+        raise AiExtractError("paper_has_unresolved_pipeline_attempt")
+    if occupied is not None and occupied.type == "rebuild_external_extract":
+        raise AiExtractError("paper_has_unresolved_external_writer_attempt")
     existing = has_running_job(session, paper_id)
     if existing is not None:
         result = serialize_job(existing, session)
@@ -280,16 +290,19 @@ async def create_ai_extract_job(
                         "DeepSeek V4.1 flash 目标任务：派发器已设置 active 目标，必须保留目标模式，不得另建目标。")
     prompt = (f"本轮派发边界：model={chosen_model}；mode={chosen_mode}；attempt_token={attempt_token}。\n"
               f"{mode_instruction} 不创建子任务、子代理，不 fork，不换模型，不部署或重启服务。\n"
+              f"如回报 processing-status，run_id 固定为 {attempt_token}，不另造外部 writer 身份。\n"
               "EXTRACT_DONE 与产物总数只表示本任务结束待科学验收，不表示用户或协调者科学验收通过。\n\n" + prompt)
     if chosen_mode == "codex_web_target":
         if not prompt.strip() or len(prompt) > 4000:
             raise AiExtractError("目标任务说明超过 4000 字符或为空，未创建任务；请调整输入后重试。")
         # An active goal can wake before turn/start: give both paths identical scope.
         objective = prompt
+    from app.services.rebuild_progress_guard import initial_guard, evidence_signature
+    evidence_guard = initial_guard(evidence_signature(session, paper_id))
     job = WorkflowJob(job_id=_job_id(),type=JOB_TYPE,status="dispatching",library_name=paper.library_name,
         payload={"paper_id":str(paper_id),"attempt_token":attempt_token,"chosen_model":chosen_model,
                  "chosen_mode":chosen_mode,"file_ids":[str(fid) for fid in session.scalars(select(RebuildPaperFile.id).where(RebuildPaperFile.paper_id==paper_id))],"dispatch_intent_at":_utcnow().isoformat()},
-        progress={"phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
+        progress={"evidence_guard": evidence_guard, "phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
                   "dispatch_started":False,"events":[],"actual_inference_verified":False,
                   "model_verification_status":"pending_start_ack"})
     session.add(job)
@@ -394,6 +407,8 @@ async def sync_job_status(
     if job.status not in RUNNING_STATUSES:
         return job
     progress = dict(job.progress or {})
+    if progress.get("needs_attention"):
+        return job  # Explicit reconciliation is required; no perpetual native reads.
     thread_id = progress.get("thread_id")
     if not thread_id:
         # Missing identity after restart/unknown start cannot be recovered by creating.
@@ -402,25 +417,49 @@ async def sync_job_status(
                         "automatic_retry":False}
         session.flush()
         return job
-    from app.services.codex_web_dispatch import read_thread_status
+    from app.services.codex_web_dispatch import read_thread_status, matches_owned_attempt
     mode = progress.get("dispatch_mode") or (job.payload or {}).get("chosen_mode")
     status = await read_thread_status(thread_id,settings=settings,include_goal=mode != "codex_web_ordinary")
     # Do not hold a DB lock while awaiting IPC; merge fresh progress after readback.
     session.refresh(job, with_for_update=True)
     progress = dict(job.progress or {})
-    if status is None:
-        return job
-    observed = {"thread_id":status.thread_id,"turn_id":status.turn_id,"turn_status":status.turn_status,
-                "goal_status":status.goal_status,"read_at":_utcnow().isoformat()}
+    observed = {"thread_id": getattr(status, "thread_id", None), "turn_id": getattr(status, "turn_id", None),
+                "turn_status": getattr(status, "turn_status", None), "goal_status": getattr(status, "goal_status", None),
+                "item_count": getattr(status, "item_count", None), "read_at": _utcnow().isoformat()}
     progress["readback"] = observed
     progress["status_checked_at"] = _utcnow().isoformat()
-    if (status.thread_id != thread_id or not progress.get("turn_id") or
-        status.turn_id != progress.get("turn_id") or not mode):
+    from app.services.rebuild_progress_guard import observe, evidence_signature
+    paper_id_str = (job.payload or {}).get("paper_id")
+    if paper_id_str:
+        progress["evidence_guard"] = observe(progress.get("evidence_guard"), evidence_signature(session, UUID(paper_id_str)), observed)
+        if progress["evidence_guard"]["needs_attention"]:
+            job.progress = {**progress, "phase": "needs_attention", "needs_attention": True,
+                            "needs_check": True, "automatic_retry": False}
+            session.flush()
+            if getattr(settings, "rebuild_native_stop_enabled", False):
+                # This read-through path owns only job-status metadata. Release
+                # its row lock before the durable stop adapter journals RPCs.
+                session.commit()
+                from app.services.rebuild_native_stop import protective_stop
+                await protective_stop(settings.database_url, job.job_id, settings=settings)
+                session.refresh(job)
+            return job
+    if status is None:
+        job.progress = {**progress, "phase": "needs_check", "needs_check": True, "automatic_retry": False}
+        session.flush()
+        return job
+    if not mode or not matches_owned_attempt(status, thread_id, progress.get("turn_id"),
+                                             allow_goal_continuations=mode == "codex_web_target"):
         job.progress = {**progress,"phase":"needs_check","needs_check":True,"automatic_retry":False}
         session.flush()
         return job  # Unknown turn reply stays unknown; no turn mutation/replay.
     turn_status = (status.turn_status or "").lower()
     if turn_status == "completed" and (mode == "codex_web_ordinary" or status.goal_status in {"complete","completed"}):
+        if not (progress.get("evidence_guard") or {}).get("business_advanced"):
+            job.progress = {**progress, "phase": "awaiting_evidence", "needs_check": True,
+                            "automatic_retry": False, "completion_blocked": "no_new_business_evidence"}
+            session.flush()
+            return job
         paper_id_str = (job.payload or {}).get("paper_id")
         summary = _result_summary(session, UUID(paper_id_str)) if paper_id_str else {}
         if status.final_report:
