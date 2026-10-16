@@ -141,17 +141,24 @@ def test_reject_zero_mutation(data,mutation,error):
         s.commit();assert snapshot(s)==before
 
 
-def test_atomic_rollback_after_first_delete_even_if_caller_commits(data,monkeypatch):
+def test_atomic_rollback_after_first_delete_even_if_caller_commits(data):
+    from sqlalchemy import event
     factory,pid,other,body=data
     with factory() as s:
-        req=request(s,pid,body);before=snapshot(s);original=s.flush;count=0
-        def fail(*a,**kw):
-            nonlocal count
-            count+=1;original(*a,**kw)
-            if count==3:raise RuntimeError('injected after SQL')
-        monkeypatch.setattr(s,'flush',fail)
-        with pytest.raises(RuntimeError,match='injected'):apply_dedup(s,pid,req,actor='trusted')
-        monkeypatch.setattr(s,'flush',original);s.commit();assert snapshot(s)==before
+        req=request(s,pid,body);before=snapshot(s);executed=[]
+        def fail_after_sql(conn,cursor,statement,parameters,context,executemany):
+            executed.append(statement)
+            if statement.lstrip().startswith('DELETE FROM rebuild_data_values'):
+                raise RuntimeError('injected after value DELETE executed')
+        engine=s.get_bind();event.listen(engine,'after_cursor_execute',fail_after_sql)
+        try:
+            with pytest.raises(RuntimeError,match='after value DELETE executed'):
+                apply_dedup(s,pid,req,actor='trusted')
+        finally:
+            event.remove(engine,'after_cursor_execute',fail_after_sql)
+        assert any(sql.lstrip().startswith('UPDATE rebuild_value_sources') for sql in executed)
+        assert any(sql.lstrip().startswith('DELETE FROM rebuild_data_values') for sql in executed)
+        s.commit();assert snapshot(s)==before
 
 
 def test_concurrent_cas_single_winner(data):
@@ -277,3 +284,19 @@ def test_request_id_reuse_across_papers_is_global_conflict(data):
         with pytest.raises(RebuildWorkflowError,match='request_id_reused'):
             apply_dedup(s,other,req,actor='trusted')
         s.commit();assert snapshot(s)==before
+
+
+
+def test_actual_delete_count_mismatch_rolls_back_preceding_moves_and_audit(data):
+    factory,pid,other,body=data
+    with factory() as s:
+        req=request(s,pid,body);before=snapshot(s)
+        # Transaction-local fixture DDL; rolled back below, never production.
+        s.execute(text('CREATE FUNCTION skip_dedup_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END $$'))
+        s.execute(text('CREATE TRIGGER skip_dedup_delete BEFORE DELETE ON rebuild_data_values FOR EACH ROW EXECUTE FUNCTION skip_dedup_delete()'))
+        with pytest.raises(RebuildWorkflowError,match='delete_count_conflict'):
+            apply_dedup(s,pid,req,actor='trusted')
+        # Check before rolling back the outer fixture DDL: service savepoint
+        # must already have undone every source move and canonical audit.
+        assert snapshot(s)==before
+        s.rollback()
