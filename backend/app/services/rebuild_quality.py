@@ -278,7 +278,12 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
 
 
 def producer_contract():
-    return {"version": VERSION, "drafts_allowed": True, "complete_requires": "Check known stored integrity, full registered source coverage and formal table representations; never infer unseen PDF contents from counts.",
+    return {"version": VERSION, "drafts_allowed": True,
+            "row_import": {"preflight_endpoint": "/api/rebuild/rows/import/preflight", "import_endpoint": "/api/rebuild/rows/import",
+                           "preflight": "Same body/auth/CSRF as import; rolled-back simulation, no receipt/IDs/reservation. Revalidates current source/identity/conflicts. State can change afterwards.",
+                           "result": "Check complete/outcome/summary and every errors row_index/row_key/field_index; HTTP200 is not all-success. Pending/conflict may already be persisted.",
+                           "recovery": "Read back current canonical row first. recovery is advisory only; explicitly fix rejected fields, preserve full identity/condition and use NEW request_id. Conflicts/pending/uncertain identity block automatic recovery.",
+                           "unknown_result": "Retry EXACT original body and SAME request_id; replay returns original receipt, never a current-state guarantee."}, "complete_requires": "Check known stored integrity, full registered source coverage and formal table representations; never infer unseen PDF contents from counts.",
             "table_example": {"asset_type": "table", "file_id": "registered-file-uuid", "figure_label": "Table S13", "page_numbers": [71, 72],
                 "provenance": {"table_data": {"columns": ["Object", "Time"], "rows": [["s", "1.00s"], ["unreported", None]]},
                     "table_sources": [{"file_id": "same-registered-file-uuid", "page_number": 71, "role": "caption", "locator": "exact caption location"},

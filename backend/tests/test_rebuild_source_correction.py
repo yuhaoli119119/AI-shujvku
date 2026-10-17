@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db.models import Paper, RebuildDataValue, RebuildValueSource, RebuildPaperFile, RebuildVisualAsset
 from app.schemas.rebuild import RebuildDataRowInput, RebuildSourceCorrectionRequest
 from app.services.rebuild_workflow_service import import_data_row, RebuildWorkflowError, _source_key, serialize_source
@@ -19,7 +19,11 @@ from app.services.rebuild_source_correction import correct_source, source_state
 
 
 @pytest.fixture
-def fixture(setup_test_db, tmp_path):
+def fixture(setup_test_db, tmp_path, monkeypatch):
+    # Import and source correction now share actual registered-PDF checks.
+    # Keep both services on the same synthetic storage root.
+    monkeypatch.setenv("LITAI_STORAGE_ROOT", str(tmp_path))
+    get_settings.cache_clear()
     factory = sessionmaker(bind=setup_test_db, expire_on_commit=False)
     doc = fitz.open(); doc.new_page(); doc.new_page(); doc.save(tmp_path / 'original.pdf'); doc.close()
     content = (tmp_path / 'original.pdf').read_bytes()

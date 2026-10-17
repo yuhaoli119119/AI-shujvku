@@ -147,3 +147,19 @@ HTTP 200 仅表示批次处理并提交完成，不表示全部导入成功。�
 - 不存在返回 404；来源不充分、跨 paper、资产文件不匹配、非法类型/页/坐标等拒绝且不写。输入格式错误为 422，鉴权失败为 401，CSRF/Origin 失败为 403，key/revision/数据库约束冲突为 409。
 
 `ai-work-package.write_endpoints.source_correction` 与 `source_correction_contract` 公布上述合同。此接口提供正式代码渠道；上线不代表任何论文已修正或科学验收通过，生产纠错仍须单篇授权和独立验收。
+
+
+### 导入预检查与失败项补交（2026-10-18；实际可用版本以发布回执为准）
+
+先将完整 `{paper_id, rows, request_id?, task_id?}` 发到 `POST /api/rebuild/rows/import/preflight`。会话、Origin、CSRF 与正式导入相同。它在独立事务中运行相同导入器，包含同批重复/冲突、真实来源/身份/字符数值校验，然后无条件回滚，不写科学数据、审计或幂等回执，也不占 request_id。使用已登记文件的现有物理 PDF（DOCX 仅使用已安装预览）核对页界，不生成文件。原来不带 file_id/asset 文件关联的可定位来源继续兼容，这种来源不宣称已核对物理页。
+
+返回 `mode=preflight, simulation=true, persisted=false`；试执行 UUID 均省略，正式结果里的 `persisted/not_persisted/empty_persisted` 在预检查中改名为 `would_persist/would_not_persist/would_persist_empty`。row_key 只是候选身份，不能作为已存行的凭证。预检查会占用数据库行锁并读取文件，成本接近导入；只是当时状态，不保证后续可写，正式导入重新验证。
+
+正式导入保留旧 counts/complete/results/errors/HTTP200，新增 `outcome=all_success|partial_success|all_rejected`、`summary`。全部成功包含重复项；已保存空值行也计为 persisted。summary.values 只统计已经执行行内的字段，整行拒绝不虚构字段执行；pending 与 conflict 可能已经持久化，不能当未执行或可自动覆盖。`write_outcome` 保留 pending 之前的真实写入/重复/冲突结果。errors 的 row_index 和 field_index 是原请求的零基索引，另带 canonical row_key/row_id（整行拒绝时 canonical 未知）。
+
+`recovery` 仅为建议，没有自动执行/retry API。对于身份确定、无冲突、被拒绝且当前仍未存在的字段，可返回 `row_template`：保留当前 canonical row_key、完整身份/condition 和原失败字段；不重写成功值和 properties，不猜原文/数值/单位/来源。必须先读回当前行/来源/冲突，再依据原文明确修正模板中的失败内容、预检查，以新 request_id 提交。维度在原 values/properties 声明时，模板以完整 condition 保留，不能裁掉。pending 维度、冲突、整行拒绝、重复失败字段或字段已被同批后项写入时返回 blocked 与具体原因，按 steps 人工核实，不能用换 key/重试覆盖。
+
+未知写结果：保留原请求，**同一请求体 + 同一 request_id** 安全重试查原回执（重放不是当前状态）。已确认失败的纠正：读回并只补失败项，**新 request_id + 稳定 canonical row_key**；改体复用旧 ID 仍拒绝。预检查不消耗 ID，亦不是正式回执；与正式导入之间状态变化必须重新校验和处理冲突。
+
+
+前端未知结果保护（2026-10-18 补充）：已有未知提交查回时，401/403/409/422 等拒绝只说明本次查回未成功，不能证明之前未写入；此时仍阻止改体/新 ID。只有收到与原请求 ID、论文、行数和逐行结果相匹配的完整审计回执才解除保护；2xx 但 JSON 解析失败、缺少 complete/results 或回执身份/计数不符，一律继续标未知。初次请求明确的事务前 4xx 拒绝按已知拒绝处理。`unknownImportBody` **仅为当前页面内存保护**，不提供刷新或跨会话持久锁；原请求完整文本和 request_id 必须由用户/AI 自行保存，不能依赖刷新后保护仍在。保留原体原 ID 查回规则，不新增凭据存储或服务端恢复状态。

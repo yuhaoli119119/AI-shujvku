@@ -319,32 +319,114 @@ async function submitCorrection(event) {
   }
 }
 
+let unknownImportBody = null;
+
+async function preflightRows() {
+  let payload;
+  try { payload = JSON.parse($("importJson").value); }
+  catch (_) { status("JSON 格式不正确", "error"); return; }
+  $("preflightBtn").disabled = true;
+  $("importBtn").disabled = true;
+  status("正在预检查（不保存）…", "progress");
+  try {
+    const result = await api("/api/rebuild/rows/import/preflight", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+    });
+    const details = (result.errors || []).map(e => `第 ${e.row_index + 1} 行${e.field ? ` / ${e.field}` : ""}：${e.error || e.status || e.outcome}`);
+    status(`预检查：${result.summary?.message || (result.complete ? "全部可处理" : "存在需处理项")}。模拟可保存 ${result.summary?.rows?.would_persist ?? 0} 行；拒绝 ${result.rows_rejected ?? 0} 行。${details.join("；")}。未保存任何数据；实际导入时重新校验，期间状态可能变化。`, result.complete ? "" : "error");
+  } catch (error) {
+    status(`预检查失败（未保存）：${error.message}`, "error");
+  } finally {
+    $("preflightBtn").disabled = false;
+    $("importBtn").disabled = false;
+  }
+}
+
+// A 2xx status alone is not a write receipt. Check the original request
+// identity and the complete legacy result envelope before lifting protection.
+function validImportReceipt(result, payload) {
+  const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  const count = value => Number.isInteger(value) && value >= 0;
+  if (!object(result) || !Array.isArray(payload.rows) || result.paper_id !== payload.paper_id ||
+      result.rows_submitted !== payload.rows.length || typeof result.complete !== "boolean" ||
+      !Array.isArray(result.results) || result.results.length !== payload.rows.length ||
+      !Array.isArray(result.errors) || !object(result.audit) || result.audit.request_id !== payload.request_id ||
+      typeof result.audit.replayed !== "boolean" || !Array.isArray(result.audit.event_ids) ||
+      !result.audit.event_ids.every(id => typeof id === "string") ||
+      (payload.task_id != null && result.audit.task_id !== payload.task_id)) return false;
+  const outcomes = { written: "rows_imported", duplicate: "rows_duplicate", partial: "rows_partial", rejected: "rows_rejected" };
+  if (!Object.values(outcomes).every(key => count(result[key])) ||
+      Object.values(outcomes).reduce((total, key) => total + result[key], 0) !== result.rows_submitted) return false;
+  if (!result.results.every((row, index) => object(row) && row.row_index === index &&
+      Object.hasOwn(outcomes, row.outcome) && typeof row.complete === "boolean" &&
+      row.complete === ["written", "duplicate"].includes(row.outcome) &&
+      (row.outcome === "rejected" || (typeof row.row_key === "string" && typeof row.row_id === "string" &&
+        Array.isArray(row.values) && row.values.every(object) && Array.isArray(row.properties) && row.properties.every(object))))) return false;
+  if (result.complete !== result.results.every(row => row.complete) ||
+      !Object.entries(outcomes).every(([outcome, key]) => result[key] === result.results.filter(row => row.outcome === outcome).length) ||
+      !result.errors.every(error => object(error) && count(error.row_index) && error.row_index < payload.rows.length)) return false;
+  if (result.summary != null && (!object(result.summary) || typeof result.summary.message !== "string" ||
+      (result.summary.values != null && (!object(result.summary.values) ||
+       !["persisted", "duplicate", "pending", "conflict", "not_persisted"].every(key => count(result.summary.values[key])))))) return false;
+  return true;
+}
+
 async function importRows() {
   let payload;
   try { payload = JSON.parse($("importJson").value); }
   catch (_) { status("JSON 格式不正确", "error"); return; }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    status("导入请求必须是包含 paper_id 和 rows 的 JSON 对象", "error");
+    return;
+  }
+  // Keep the exact request in the textarea so a lost response can be retried
+  // with the same id/body, including after copying it to another session.
+  if (unknownImportBody && JSON.stringify(payload) !== unknownImportBody) {
+    status("上次导入结果未知。请恢复并以相同 request_id 和原请求重试查回；核实回执前不要修改请求或新建 ID。", "error");
+    return;
+  }
+  if (!payload.request_id) payload.request_id = crypto.randomUUID();
+  const requestBody = JSON.stringify(payload);
+  const previousUnknownBody = unknownImportBody;
+  let receiptVerified = false;
+  $("importJson").value = JSON.stringify(payload, null, 2);
   $("importBtn").disabled = true;
+  $("preflightBtn").disabled = true;
   status("正在批量导入…", "progress");
   try {
     const result = await api("/api/rebuild/rows/import", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: requestBody,
     });
-    await loadRows();
+    if (!validImportReceipt(result, payload)) throw new Error("导入响应缺少完整且匹配原请求的回执");
+    receiptVerified = true;
+    unknownImportBody = null;
+    const refreshed = await loadRows();
     const errors = result.errors || [];
     const rows = result.results || [];
     const pending = rows.filter(row => row.identity_status === "pending");
     const details = errors.filter(e => !(e.part === "row" && pending.some(row => row.row_index === e.row_index)))
-      .map(e => `第 ${e.row_index + 1} 行${e.field ? ` / ${e.field}` : ""}：${e.error || e.status || e.outcome}`);
+      .map(e => `第 ${e.row_index + 1} 行${e.field ? ` / ${e.field}` : ""}${e.row_key ? `（行键 ${e.row_key}）` : ""}：${e.error || e.status || e.outcome}`);
     pending.forEach(row => details.push(`第 ${row.row_index + 1} 行身份待定；行键 ${row.row_key}；待补身份字段：${(row.pending_identity_fields || []).join(", ")}。请用该行键补交正确身份字段及来源`));
     const incomplete = result.complete === false || errors.length > 0 || pending.length > 0 ||
       (result.rows_partial || 0) > 0 || (result.rows_rejected || 0) > 0 || rows.some(row => row.complete === false);
-    status(`提交 ${result.rows_submitted} 行：写入 ${result.rows_imported}，重复 ${result.rows_duplicate ?? 0}，部分保存 ${result.rows_partial ?? 0}，拒绝 ${result.rows_rejected ?? 0}。${incomplete ? "本次提交尚未完整处理。" : ""}${details.length ? `需处理：${details.join("；")}。请保留行身份，仅补交失败字段；冲突需补充证据。` : ""}`, incomplete ? "error" : "");
+    const cells = result.summary?.values;
+    const cellSummary = cells ? `已执行行内字段：已存 ${cells.persisted}（重复 ${cells.duplicate}、身份待定 ${cells.pending}、冲突 ${cells.conflict}），未保存 ${cells.not_persisted}。` : "";
+    status(`${result.summary?.message || (incomplete ? "本次尚未完整处理" : "全部成功")}。提交 ${result.rows_submitted} 行：写入 ${result.rows_imported}，重复 ${result.rows_duplicate ?? 0}，部分保存 ${result.rows_partial ?? 0}，拒绝 ${result.rows_rejected ?? 0}。${cellSummary}${incomplete ? "本次提交尚未完整处理。" : ""}${refreshed ? "" : "刷新数据行失败，请稍后手动刷新；本次回执仍有效。"}${details.length ? `需处理：${details.join("；")}。请先读回 canonical 行及完整身份/条件；明确修正失败项后用新 request_id 补交，冲突和身份待定需人工核对。` : ""}`, incomplete ? "error" : "");
   } catch (error) {
-    status(`导入失败：${error.message}`, "error");
+    if (receiptVerified) {
+      status(`已核实原导入回执，但显示或刷新失败：${error.message}。请保留原请求和回执并手动刷新。`, "error");
+    } else {
+      const rejected = [400, 401, 403, 404, 409, 422].includes(error.httpStatus);
+      // A rejected lookup says nothing about the earlier unknown write. Only
+      // a verified original receipt can resolve that existing uncertainty.
+      unknownImportBody = previousUnknownBody || (rejected ? null : requestBody);
+      status(unknownImportBody ? `导入结果未确认：${error.message}。保留文本框中的原请求及 request_id，原样重试查回；查回被拒绝也不能证明原写入未发生，核实原回执前不要改体或新建 ID。` : `导入请求被拒绝：${error.message}。请核对原回执和当前行；修正已知失败项时使用新 request_id。`, "error");
+    }
   } finally {
     $("importBtn").disabled = false;
+    $("preflightBtn").disabled = false;
   }
 }
 
@@ -356,6 +438,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("reactionFilter").addEventListener("change", updateReactionHint);
   $("refreshBtn").addEventListener("click", loadRows);
   $("importBtn").addEventListener("click", importRows);
+  $("preflightBtn").addEventListener("click", preflightRows);
   $("closeModal").addEventListener("click", () => $("sourceModal").classList.remove("open"));
   $("correctionForm").addEventListener("submit", submitCorrection);
   $("sourceModal").addEventListener("click", (event) => { if (event.target === $("sourceModal")) $("sourceModal").classList.remove("open"); });

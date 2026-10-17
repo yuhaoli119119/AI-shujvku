@@ -50,7 +50,7 @@
       <details class="rebuild-tool-section"><summary>手工导入数据</summary>
       <p style="font-size:12px;color:var(--color-text-secondary)">粘贴符合 /api/rebuild/rows/import 的 JSON。来源必须写到页码/图表/表格位置，估读最多两位小数。</p>
       <textarea id="importJson" class="rebuild-control" spellcheck="false" placeholder='{"paper_id":"...","rows":[]}'></textarea>
-      <div class="rebuild-actions"><button class="rebuild-btn" id="importBtn" type="button">导入数据</button></div>
+      <div class="rebuild-actions"><button class="rebuild-btn" id="preflightBtn" type="button">预检查（不保存）</button><button class="rebuild-btn" id="importBtn" type="button">导入数据</button></div>
       </details>
     </aside>
     <section class="rebuild-panel" aria-label="数据行">
@@ -123,6 +123,6 @@
     </form>
   </div>
 </div>
-<script src="./page.js?v=20261008-identity-editor-r1" defer></script>
+<script src="./page.js?v=20261018-import-preflight-recovery-r2" defer></script>
 </body>
 </html>

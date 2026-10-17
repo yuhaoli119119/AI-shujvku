@@ -16,7 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import DataError, IntegrityError
 
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.services.rebuild_table_content import table_content, validate_table_provenance
 from app.services.paper_codes import main_paper_clause, lock_catalog_numbering
 from app.db.models import (
@@ -706,8 +706,29 @@ def _validate_value_for_paper(session: Session, paper_id: UUID, payload: dict[st
             raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
         if source.get("file_id") is not None and get_file(session, source["file_id"]).paper_id != paper_id:
             raise RebuildWorkflowError("source_file_belongs_to_other_paper")
-        if source.get("asset_id") is not None and get_asset(session, source["asset_id"]).paper_id != paper_id:
+        asset = get_asset(session, source["asset_id"]) if source.get("asset_id") is not None else None
+        if asset is not None and asset.paper_id != paper_id:
             raise RebuildWorkflowError("source_asset_belongs_to_other_paper")
+        file_id = source.get("file_id") or (asset.file_id if asset is not None else None)
+        if asset is not None and source.get("file_id") and asset.file_id and str(asset.file_id) != str(source["file_id"]):
+            raise RebuildWorkflowError("source_asset_file_mismatch")
+        if file_id is not None and source.get("page_number") is not None:
+            # Read only: DOCX requires an already-installed reading PDF. Never
+            # generate previews or write caches during import/preflight.
+            from app.services.rebuild_file_preview import resolve_reading_pdf
+            import fitz
+            record = get_file(session, file_id)
+            if record.paper_id != paper_id:
+                raise RebuildWorkflowError("source_file_belongs_to_other_paper")
+            path = resolve_reading_pdf(record, get_settings())
+            try:
+                with fitz.open(path) as document:
+                    if source["page_number"] > document.page_count:
+                        raise RebuildWorkflowError("source_page_out_of_range")
+            except RebuildWorkflowError:
+                raise
+            except (RuntimeError, ValueError) as exc:
+                raise RebuildWorkflowError("source_pdf_unreadable") from exc
 
 
 def _candidate(payload: dict[str, Any], source_ids: list[str]) -> dict[str, Any]:
@@ -1252,7 +1273,7 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
                 validated = RebuildDataValueInput.model_validate(raw).model_dump()
                 result = _import_value(session, row=row, payload=validated)
             if pending:
-                result = {**result, "status": "identity_pending", "outcome": "pending",
+                result = {**result, "write_outcome": result["outcome"], "status": "identity_pending", "outcome": "pending",
                           "error": "identity_pending:correct_dimension_using_returned_row_key"}
             results.append({**result, "field_index": index})
         except (ValidationError, RebuildWorkflowError, DataError, IntegrityError) as exc:
@@ -1262,7 +1283,7 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
     outcomes = [v["outcome"] for v in results + property_results]
     incomplete = bool(pending) or any(outcome in {"rejected", "conflict", "pending"} for outcome in outcomes)
     changed = created or notes_changed or "written" in outcomes
-    return {"row_key": row.row_key, "row_id": str(row.id),
+    return {"row_key": row.row_key, "row_id": str(row.id), "persisted": True,
             "status": "partial" if incomplete else "created" if created else "merged",
             "outcome": "partial" if incomplete else "written" if changed else "duplicate",
             "complete": not incomplete, "values": results, "properties": property_results,

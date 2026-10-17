@@ -146,8 +146,10 @@ GET {origin}{work_package_url}?view=compact
 ## 写入口（有界小批，逐项核对回执）
 1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import
 2. 图表裁图: POST {origin}/api/rebuild/papers/{paper_id}/assets/crop
-3. 数据行写入: POST {origin}/api/rebuild/rows/import
+3. 数据行先预检查（不保存）: POST {origin}/api/rebuild/rows/import/preflight；实际写入: POST {origin}/api/rebuild/rows/import
 4. 章节写入: POST {origin}/api/rebuild/papers/{paper_id}/sections/import（工作台会话 + X-CSRF-Token；按 section_write_contract）
+预检查使用相同请求体、会话与 CSRF，模拟回滚而无回执/持久化 ID，不占 request_id；仅代表当时状态，正式导入重新校验。
+正式回执须检查 outcome/summary/complete/results/errors；pending/conflict 可能已经保存，不能当未执行。recovery 仅建议：先读回 canonical 行/完整 condition/来源，明确修正未保存失败项，以新 request_id 补交；冲突、身份待定和不确定身份须人工核实，不自动覆盖或重建行。未知写结果则严格原体原 request_id 查回。
 同篇 rows/import 最多200行，建议按同一来源分成较小批；request_id/task_id 和精确请求字节先保存，未知结果只重放同请求，逐项核对 complete/errors，不以整批HTTP200计完成。不要并行写同篇或扩大执行并发。
 
 ## 工作要求（严格遵守）

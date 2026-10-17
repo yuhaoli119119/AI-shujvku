@@ -584,6 +584,7 @@ async def rebuild_ai_work_package(
                 "asset_explanations": "/api/rebuild/papers/{paper_id}/assets/import",
                 "asset_crop": "/api/rebuild/papers/{paper_id}/assets/crop",
                 "data_rows": "/api/rebuild/rows/import",
+                "data_rows_preflight": "/api/rebuild/rows/import/preflight",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
                 "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
@@ -1024,6 +1025,33 @@ async def import_rebuild_rows(
                              lambda: _import_rows(session, payload))
 
 
+@router.post("/rows/import/preflight")
+async def preflight_rebuild_rows(
+    payload: RebuildRowsImportRequest, request: Request,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session),
+) -> dict[str, Any]:
+    # Separate session owns its entire transaction; never flush/rollback the
+    # dependency session or reuse its audit context. No receipt/id reservation.
+    from app.services.rebuild_import_recovery import simulated_result
+    from app.services.rebuild_mutation_audit import audit_ids
+    try:
+        audit_ids(request, payload)  # Syntax/header consistency only; no reservation.
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+    # get_bind may be a Connection in dependency overrides. Always acquire a
+    # separate Engine connection, never join an enclosing caller transaction.
+    bind = session.get_bind()
+    engine = getattr(bind, "engine", bind)
+    with Session(bind=engine, autoflush=False) as simulation:
+        try:
+            simulation.begin()
+            result = _import_rows(simulation, payload)
+            return simulated_result(result)
+        finally:
+            simulation.rollback()
+
+
 def _import_rows(session, payload):
     try:
         _required_paper(session, payload.paper_id)
@@ -1043,11 +1071,11 @@ def _import_rows(session, payload):
             for part in ("values", "properties"):
                 for detail in result[part]:
                     if detail["outcome"] in {"rejected", "conflict", "pending"}:
-                        errors.append({"row_index": index, "row_key": result["row_key"],
+                        errors.append({"row_index": index, "row_id": result["row_id"], "row_key": result["row_key"],
                                        "part": part, **detail})
             if result.get("identity_status") == "pending":
                 reason = {
-                    "row_index": index, "row_key": result["row_key"], "part": "row",
+                    "row_index": index, "row_id": result["row_id"], "row_key": result["row_key"], "part": "row",
                     "outcome": "pending", "error": "identity_pending:correct_dimension_using_returned_row_key",
                     "pending_identity_fields": result["pending_identity_fields"],
                 }
@@ -1057,12 +1085,16 @@ def _import_rows(session, payload):
             reason = ("database_constraint_rejected" if isinstance(exc, (DataError, IntegrityError)) else
                       json.dumps(exc.errors(include_input=False, include_context=False), ensure_ascii=False) if isinstance(exc, ValidationError) else str(exc))
             detail = {"row_index": index, "row_key": raw.get("row_key") if isinstance(raw, dict) else None,
-                      "outcome": "rejected", "complete": False, "error": reason}
+                      "outcome": "rejected", "persisted": False, "complete": False, "error": reason}
             results.append(detail)
             errors.append(detail)
     counts = {name: sum(r["outcome"] == name for r in results)
               for name in ("written", "duplicate", "partial", "rejected")}
+    from app.services.rebuild_import_recovery import import_summary, recovery_advice
+    summary = import_summary(session, results)
     return {
+        "outcome": summary["outcome"], "summary": summary,
+        "recovery": recovery_advice(session, payload, results),
         "paper_id": str(payload.paper_id),
         "rows_submitted": len(payload.rows),
         "rows_imported": counts["written"],
