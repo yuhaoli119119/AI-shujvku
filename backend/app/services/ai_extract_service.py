@@ -135,16 +135,20 @@ def _build_prompt(
 - {'路径: ' + pdf_path if pdf_path else '未关联源 PDF；请先通过工作包接口查看已关联文件。'}
 - 如果有 SI PDF，也在工作包中列出。
 
-## 工作包地址（一次读取全部上下文）
-GET {origin}{work_package_url}
-该接口返回论文信息、已有章节与来源覆盖、章节写契约、反应模板、已关联文件列表、已有图表对象、已有数据行，
-以及写入口说明。
+## 工作包地址（分段读取，不把首包当全量）
+GET {origin}{work_package_url}?view=compact
+先读 totals、files、producer_contract、table_write_contract、section_write_contract 与 quality_endpoint。
+再按 pages 的 rows/assets/sections/legacy_tables 链接有界读取，直到各自 has_more=false；所有分页须保持相同 output_revision。
+已存正确的 legacy markdown 先读取并按来源核对，不重写、不把已存正文误当缺失。
+409 表示来源/结果已变化，重新开始只读分页，不混合修订；如需旧完整格式可用 view=full，但首包仍不代表所有行。
+图片按具体 file/physical page 使用 text-pages/render-page 缓存，不反复下载所有图片；章节分页保留完整原文，禁止截断证据。
 
-## 写入口（逐条调用，不要批量）
+## 写入口（有界小批，逐项核对回执）
 1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import
 2. 图表裁图: POST {origin}/api/rebuild/papers/{paper_id}/assets/crop
 3. 数据行写入: POST {origin}/api/rebuild/rows/import
 4. 章节写入: POST {origin}/api/rebuild/papers/{paper_id}/sections/import（工作台会话 + X-CSRF-Token；按 section_write_contract）
+同篇 rows/import 最多200行，建议按同一来源分成较小批；request_id/task_id 和精确请求字节先保存，未知结果只重放同请求，逐项核对 complete/errors，不以整批HTTP200计完成。不要并行写同篇或扩大执行并发。
 
 ## 工作要求（严格遵守）
 1. **只处理 paper_id={paper_id} 这一篇论文**，不得跨论文合并来源。
@@ -158,6 +162,8 @@ GET {origin}{work_package_url}
 9. **实验与 DFT 分开**：data_type 分别用 experimental 和 dft。
 10. **按反应模板填表**：SRR / HER / OER / ORR / CO2RR，每个反应的专属字段按模板填写。
 11. **章节科学写入由 DS 任务负责**：非 DS 模型仅报告章节缺口交 DS，不填科学章节。DS 先读 sections / section_coverage，保留成熟章节，仅增未覆盖正文/SI。text 保存完整章节原文，explanation_zh 单独保存有依据的中文解读；绑定本篇 file_id、原文件 SHA256、真实物理页、每页原句和具体段落定位。DOCX 只能用已有派生 PDF 并给 exact SHA256，不冒充原生 PDF 页。保存请求字节与稳定 request_id、file-local section_key，未知写结果重放原请求；409时读回，不覆盖旧章节，证据确有冲突时新 key + conflicts_with_section_ids 保留双方。未报告项不猜；接口成功不代表独立科学验收。
+12. **表格统一输出**：按 table_write_contract 在 asset.provenance 保存 table_data（columns 字符串、rows 每格字符串或 null）或原文 table_markdown，并保存 table_sources 的同 file_id、实际 caption/body 物理页、locator。跨页如 S13 表题71/正文72须同时保留；精度、s/1.00s、缺失均原样。context_text 仅可读草稿，不能声称结构化已完成；不猜行列，不双写 paper_tables、不重解析旧文献。
+13. **先检查再报告完成**：读取 quality_endpoint 的 error/warning/unknown 与具体 file/页/对象修正指引。error 未解决、表格待结构化或来源不明则报告 partial；未报告项写诚实 missing_reason，不强加科学必填字段。已存计数、HTTP200、模型 completed 均不能证明全 PDF 完整或科学 accepted；不启用队列/独立验收授权。
 
 ## 完成标志
 当所有章节、图表对象和数据行写入完成后，在最终回复中输出：

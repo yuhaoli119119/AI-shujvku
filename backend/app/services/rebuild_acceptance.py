@@ -87,6 +87,13 @@ def output_manifest(session, paper_id, *, force_physical=False, table_readings=N
                 except (RebuildWorkflowError, OSError):
                     state["image_blob"] = {"status": "unavailable"}
             manifest.append({"kind": model.__tablename__, "id": str(record.id), "sha256": _digest(state)})
+    # The section reader consumes immutable import/correction source events,
+    # not only PaperSection text. Freeze those dependencies, not live job logs.
+    for record in session.scalars(select(AuditLog).where(AuditLog.paper_id == paper_id,
+            AuditLog.action.in_(["section_imported", "section_boundary_corrected"]))
+            .order_by(AuditLog.id)):
+        manifest.append({"kind": "section_source_event", "id": str(record.id),
+                         "sha256": _digest({"source": record.source, "target_id": record.target_id, "payload": record.payload})})
     if table_readings is None:
         from app.config import get_settings
         from app.services.rebuild_table_reading import table_representations
@@ -103,6 +110,7 @@ def output_manifest(session, paper_id, *, force_physical=False, table_readings=N
 def current_snapshot(session, paper_id, *, force_physical=False):
     from app.config import get_settings
     from app.services.rebuild_table_reading import table_representations
+    from app.services.rebuild_quality import file_inventory
     files, missing = _scope(session, paper_id)
     file_manifest = [{"file_id": str(file.id), "source_sha256": file.sha256, "role": file.role,
                       "storage_path": file.storage_path, "file_size": file.file_size} for file in files]
@@ -110,15 +118,28 @@ def current_snapshot(session, paper_id, *, force_physical=False):
     manifest = output_manifest(session, paper_id, force_physical=force_physical, table_readings=readings)
     # Title/number may change; stable paper_id is the scientific identity.
     frozen = {"paper_id": str(paper_id), "files": file_manifest, "unregistered_files": missing, "output_manifest": manifest}
+    if files:
+        frozen["file_reading_identity"] = {str(key): value for key, value in file_inventory(files, get_settings(), force=force_physical).items()}
     if readings["tables"]:
         frozen["table_completeness"] = [{**{key: row[key] for key in ("asset_id", "format", "complete", "reason")},
                                         "legacy_id": row.get("legacy_id"), "file_id": row["binding"].get("file_id"),
+                                        "legacy_record_ids": [item["id"] for item in row["legacy_records"]],
+                                        "source_sha256": row["binding"].get("source_sha256"),
+                                        "physical_sha256": row["binding"].get("physical_sha256"),
                                         "physical_pages": row["binding"].get("physical_pages", [])} for row in readings["tables"]]
     return {**frozen, "revision": _digest(frozen)}, files
 
 
 def _rules(session, paper_id, snapshot, coverage):
     issues = []
+    from app.config import get_settings
+    from app.services.rebuild_quality import integrity_report
+    integrity = integrity_report(session, paper_id, get_settings(), limit=200, file_states=snapshot.get("file_reading_identity"))
+    if integrity["counts"].get("error") or integrity["counts"].get("unknown"):
+        issues.append({"code": "stored_output_integrity_incomplete", "counts": integrity["counts"],
+                       "issues": integrity["issues"], "issues_total": integrity["issues_total"],
+                       "has_more": integrity["has_more"],
+                       "quality_endpoint": f"/api/rebuild/papers/{paper_id}/quality"})
     by_id = {str(item["file_id"]): item for item in coverage}
     if snapshot["unregistered_files"]:
         issues.append({"code": "linked_si_registration_required", "files": snapshot["unregistered_files"]})
@@ -128,13 +149,14 @@ def _rules(session, paper_id, snapshot, coverage):
         item = by_id.get(file["file_id"])
         if item is None or len(item["covered_pages"]) != item["total_pages"]:
             issues.append({"code": "file_coverage_incomplete", "file_id": file["file_id"]})
+    sourced_values = set(session.scalars(select(RebuildValueSource.value_id).where(RebuildValueSource.paper_id == paper_id)))
     for value in session.scalars(select(RebuildDataValue).where(RebuildDataValue.paper_id == paper_id)):
         conflict = value.conflict or {}
         if conflict.get("status") in {"unresolved", "conflict", "pending", "value_conflict", "unit_conflict"} or conflict.get("legacy_unresolved") in {"value_conflict", "unit_conflict"} or (
             len(conflict.get("candidates", [])) > 1 and conflict.get("status") not in {"corrected_previous_retained", "evidence_history"}
         ):
             issues.append({"code": "unresolved_source_conflict", "value_id": str(value.id)})
-        if value.value_type != "missing" and session.scalar(select(RebuildValueSource.id).where(RebuildValueSource.value_id == value.id).limit(1)) is None:
+        if value.value_type != "missing" and value.id not in sourced_values:
             issues.append({"code": "value_source_missing", "value_id": str(value.id)})
     for row in session.scalars(select(RebuildDataRow).where(RebuildDataRow.paper_id == paper_id)):
         if (row.properties or {}).get("_rebuild_import", {}).get("pending_identity_fields"):
@@ -203,7 +225,7 @@ def freeze(session, paper_id, payload, settings, *, actor):
             raise RebuildWorkflowError("acceptance_remaining_reason_required")
         coverage.append({**item.model_dump(mode="json"), "total_pages": count})
     rules = _rules(session, paper_id, snapshot, coverage)
-    state = "rules_checked" if rules["passed"] else "partial" if any(issue["code"] in {"file_coverage_incomplete", "unresolved_source_conflict", "linked_si_registration_required", "table_representation_incomplete"} for issue in rules["issues"]) else "needsfix"
+    state = "rules_checked" if rules["passed"] else "partial" if any(issue["code"] in {"stored_output_integrity_incomplete", "file_coverage_incomplete", "unresolved_source_conflict", "linked_si_registration_required", "table_representation_incomplete"} for issue in rules["issues"]) else "needsfix"
     job = WorkflowJob(job_id=job_id, type=JOB_TYPE, status=state, library_name=paper.library_name,
                       payload={"paper_id": str(paper_id), "writer": actor, "writer_task_id": payload.task_id,
                                "request_sha256": request_hash, "snapshot": snapshot, "coverage": coverage},
@@ -287,13 +309,13 @@ def review(session, paper_id, job_id, payload, settings, *, actor, authorization
     return result
 
 
-def acceptance_status(session, paper_id):
+def acceptance_status(session, paper_id, *, snapshot=None):
     job = session.scalar(select(WorkflowJob).where(WorkflowJob.type == JOB_TYPE,
         WorkflowJob.payload.op("->>")("paper_id") == str(paper_id)).order_by(WorkflowJob.created_at.desc(), WorkflowJob.job_id.desc()))
     if job is None:
         return {"status": "pending", "label": LABELS["pending"], "parsed_implies_accepted": False, "reason": "no_explicit_freeze_and_review_receipt"}
     result = serialize(job)
-    current, _ = current_snapshot(session, paper_id)
+    current = snapshot if snapshot is not None else current_snapshot(session, paper_id)[0]
     if current["revision"] != result["revision"]:
         return {**result, "status": "review_incomplete", "label": LABELS["review_incomplete"],
                 "frozen_status": job.status, "stale": True, "reason": "paper_file_or_output_changed_since_freeze"}
@@ -311,6 +333,10 @@ def acceptance_status(session, paper_id):
                 reading = original if _format(original) == "pdf" else preview_cache_path(file, settings)
                 if hash_bound_file(reading) != expected[str(file.id)]:
                     raise RebuildWorkflowError("acceptance_reading_pdf_hash_mismatch")
+            from app.services.rebuild_quality import integrity_report
+            integrity = integrity_report(session, paper_id, settings, limit=1)
+            if integrity["counts"].get("error") or integrity["counts"].get("unknown"):
+                raise RebuildWorkflowError("accepted_stored_integrity_unverified")
         except (RebuildWorkflowError, OSError, ValueError, KeyError):
             return {**result, "status": "review_incomplete", "label": LABELS["review_incomplete"],
                     "frozen_status": job.status, "stale": True, "reason": "frozen_physical_source_unverified"}

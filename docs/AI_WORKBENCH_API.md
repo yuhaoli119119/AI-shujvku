@@ -9,12 +9,14 @@
    返回通用字段、反应模板、活性中心类型、实验/DFT 类型。
 2. `GET /api/rebuild/papers?q={query}`  
    搜索文献并返回 `paper_id`、文件数、图表数、数据行数。
-3. `GET /api/rebuild/papers/{paper_id}/ai-work-package`  
-   一次返回论文、模板、文件、图表对象、已有数据行和写入口。适合批量任务。
+3. `GET /api/rebuild/papers/{paper_id}/ai-work-package?view=compact`
+   推荐先读小工作包：`totals/files/pages/templates_endpoint/producer_contract/table_write_contract/section_write_contract/quality_endpoint`，再按 `pages.rows/assets/sections/legacy_tables` 链接分页。每页含 `output_revision`，继续 `next_page` 直到 `has_more=false`；相同修订才可合并，409时重新只读收集，不自动重派任务。旧 `view=full`（默认）保持完整上下文字段，但数据行仍有分页，不能把首包当全量。统一 Python API 客户端保留首次上下文，并优先用轻量行续页。
 4. 需要看原始证据时：
    - `GET /api/rebuild/files/{file_id}/preview`
    - `GET /api/rebuild/papers/{paper_id}/source-pdf/preview`
    - `GET /api/rebuild/assets/{asset_id}`
+5. `GET /api/rebuild/papers/{paper_id}/quality?limit=100&offset=0&expected_revision={revision}`
+   只读列出已存结果的 error/warning/unknown、具体对象/file/物理页、可执行修正指引；`issues_total/has_more/next_offset` 明确剩余缺项。提供表格表示、文件哈希/页数和章节来源范围摘要，不返回科学全文，不把未知项当原文未报告，也不把计数当全文完整。保存草稿继续允许；明确完整的冻结须满足来源一致性与表示门禁，独立科学验收另行判断。
 
 ## 2. 推荐写入流程
 
@@ -23,7 +25,7 @@
 2. `POST /api/rebuild/papers/{paper_id}/assets/import`  
    批量补写/修正图表号、图注、坐标单位、材料映射、上下文和逐图解释。
 3. `POST /api/rebuild/rows/import`  
-   幂等批量填表；同一 `row_key` 仅在身份一致时合并，来源追加。阶段一候选接口语义见第 5 节。
+   幂等批量填表；同一 `row_key` 仅在身份一致时合并，来源追加。来源化写入接口语义见第 5 节。
 4. `PUT /api/rebuild/values/{value_id}`  
    单元格人工/AI修正；旧值保留在冲突历史中，不静默覆盖。
 5. `POST /api/rebuild/papers/{paper_id}/ai-extract/jobs`  
@@ -54,7 +56,7 @@
 - 不同材料、位点、构型、条件、实验/DFT 不合并。
 - 冲突只影响该记录/单元格，不阻塞整篇论文。
 
-## 5. 阶段一可靠性接口（2026-10-03 源码候选，尚未部署）
+## 5. 阶段一可靠性接口（2026-10-03 合同；实际版本按发布回执）
 
 此节仅描述本次源码改动；生产仍以运行态为准，不代表已升级。
 
@@ -110,7 +112,7 @@ HTTP 200 仅表示批次处理并提交完成，不表示全部导入成功。�
 
 本阶段无数据库结构迁移；新增历史信息复用现有 JSON 列，读取兼容。回滚旧写入服务后，它仍可能覆盖候选历史或恢复旧误计数；因此回滚窗口应暂停导入并保留数据库快照，不能把代码回滚视为数据历史回滚。
 
-### 2026-10-03 独立验收 R1—R4 补修（仍为未部署候选）
+### 2026-10-03 独立验收 R1—R4 补修合同
 
 1. **旧冲突不能由普通重试消除。** 旧 existing/incoming 中可辨识的候选转入 candidates；来源无法归属则候选 source_ids 留空，保留 unattributed_legacy_source_ids。旧未决 value_conflict/unit_conflict 另记录 legacy_unresolved，普通导入始终保持未决状态，即使某个旧候选缺少细节，也不能当成已解决。前端同时检查该标记。没有新增自动裁决或历史合并流程。
 2. **身份字段先验证再提升。** values 中 adsorbate/intermediate/reaction_step/adsorption_site/identity_context 先通过字段结构、内容和来源归属校验。被拒绝的值不能进入 row.condition，也不会写成确定身份单元格。其余合法值保存于独立的身份待定行，GET/导入结果提供 identity_status=pending，元数据 pending_identity_fields 列出未定维度，identity_rejections 保留去重后的诊断；合法值结果为 outcome=pending、persisted=true，批次 complete=false，行计入 rows_partial。它们确实保存，但不得被解释成已经归属于被拒绝的物种。分析查询暂时排除这些行，其他行照常分析。
@@ -123,7 +125,7 @@ HTTP 200 仅表示批次处理并提交完成，不表示全部导入成功。�
 
 此次补修无需数据库结构迁移，schema 请求外形不变。新增 outcome=pending/identity_status 是对“已持久化但身份尚未确定”的明确表达，不能计入完整成功。所有补修及测试只在源码和隔离环境，尚未生产或真实浏览器验收。
 
-### R5：本次请求完整性汇总（源码补修，未部署）
+### R5：请求完整性汇总合同（实际版本按发布回执）
 
 导入顶层 complete 等于本次每个行结果 complete 的逻辑与，不以 errors 是否为空代替，不检查本请求之外的历史行。身份待定行即使 values=[]、仅补备注或正常属性，仍为 complete=false、rows_partial，并在该行结果给出 pending_reason；errors 追加 part=row、outcome=pending 的行级原因，包含 canonical row_key 和 pending_identity_fields，供定向补正。省略待补字段不能解除待定。
 

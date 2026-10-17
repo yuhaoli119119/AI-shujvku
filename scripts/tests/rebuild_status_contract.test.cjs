@@ -32,6 +32,27 @@ test('raw-only table rule remains partial and explicitly pending representation'
   assert(value.includes('表格待结构化')&&value.includes('原始文本可查看复制'));
   assert(!value.includes('独立验收通过'));
 });
+test('stored quality shows actionable identities/unknowns and keeps raw text inert',()=>{
+  const context=vm.createContext({esc:value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))});
+  vm.runInContext(extract(detail,'storedQualityHtml'),context);
+  const html=context.storedQualityHtml({counts:{error:1,unknown:2},issues_total:3,
+    issues:[{severity:'error',code:'physical_page_out_of_range',kind:'source',id:'source-1',file_id:'file-1',page:99,action_zh:'<img src=x onerror=alert(1)>'}],
+    table_completeness:[{complete:false,asset_id:'table-1',file_id:'file-1',physical_pages:[71,72],reason:'pending_structure'}],
+    has_more:true,next_offset:1,output_revision:'a'.repeat(64)});
+  assert(html.includes('错误 1')&&html.includes('未知 2')&&html.includes('file-1')&&html.includes('71, 72'));
+  assert(!html.includes('<img')&&html.includes('&lt;img'));
+  assert(html.includes('下一页缺项')&&html.includes('不能猜测行列')&&html.includes('全文覆盖仍须'));
+});
+test('quality UI performs only an explicit read and ignores stale detail responses',async()=>{
+  let requests=[];const area={textContent:'',innerHTML:''};let current=true;
+  const context=vm.createContext({state:{paperId:'paper',detailGeneration:1},document:{getElementById:()=>area},
+    fetchJSON:async path=>{requests.push(path);return {issues:[]};},currentDetailIs:()=>current,storedQualityHtml:()=>'<p>read only</p>'});
+  vm.runInContext(extract(detail,'loadStoredQuality').replace(/^function /,'async function '),context);
+  assert.equal(requests.length,0);await context.loadStoredQuality();
+  assert.equal(requests.length,1);assert(requests[0].startsWith('/api/rebuild/papers/paper/quality?'));
+  assert.equal(area.innerHTML,'<p>read only</p>');current=false;area.innerHTML='current paper';
+  await context.loadStoredQuality();assert.equal(area.innerHTML,'current paper');
+});
 test('needs_attention stops the frontend native status timer without treating it as success',async()=>{
   let stopped=0, started=0;
   const context=vm.createContext({state:{selectedId:'paper',selected:{}},api:async()=>({status:'running',needs_attention:true}),

@@ -4,14 +4,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from functools import lru_cache
 
 import fitz
 from sqlalchemy import select
 
 from app.db.models import Paper, PaperRelationship, PaperTable, RebuildPaperFile, RebuildVisualAsset
 from app.services.catalog_attachments import SI_RELATIONSHIPS
-from app.services.rebuild_file_preview import _sha256
 from app.services.rebuild_table_content import representation_complete, table_content
 from app.services.rebuild_workflow_service import resolve_file_path, RebuildWorkflowError
 from app.utils.artifact_paths import resolve_paper_pdf_path
@@ -23,18 +21,13 @@ def _digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, default=str, ensure_ascii=False).encode()).hexdigest()
 
 
-@lru_cache(maxsize=512)
-def _cached_hash(path, device, inode, size, mtime_ns, ctime_ns):
-    from pathlib import Path
-    return _sha256(Path(path))
-
-
 def _physical(path, *, force=False):
     if path is None or not path.is_file() or path.suffix.lower() != ".pdf":
         return None
-    stat = path.stat()
-    return _sha256(path) if force else _cached_hash(str(path.resolve()), stat.st_dev, stat.st_ino,
-                                                  stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+    # Share the existing stat-bound hash cache with acceptance/quality readers.
+    # Explicit freeze/review still forces physical hashing.
+    from app.services.rebuild_acceptance import hash_bound_file
+    return hash_bound_file(path, force=force)
 
 
 def table_label(value):

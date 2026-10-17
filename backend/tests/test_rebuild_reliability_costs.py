@@ -49,11 +49,14 @@ def test_repeated_status_read_uses_stat_bound_image_hash_cache(audit_env, monkey
     monkeypatch.setattr(rebuild_acceptance, "_sha256", count)
     for _ in range(3):
         assert env["client"].get(base(env)).status_code == 200
-    assert len(calls) == 1, calls
     image = env["settings"].storage_root / response.json()["asset"]["image_path"]
+    assert calls.count(str(image)) == 1, calls
+    # Source PDF and output image now share one stat-bound cache, and the
+    # reading-PDF identity is part of every revision, not merely table fallback.
+    assert len(calls) == 2, calls
     image.write_bytes(image.read_bytes() + b"synthetic-new-image-version")
     assert env["client"].get(base(env)).json()["acceptance"]["stale"]
-    assert len(calls) == 2
+    assert calls.count(str(image)) == 2 and len(calls) == 3
     print("three_status_reads: PNG_content_reads=1; changed_file_rehash=1")
 
 

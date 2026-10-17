@@ -580,6 +580,11 @@
             </div>
             <div id="paperBadges" class="pd-badges"></div>
             <div id="pdAcceptanceStatus" class="muted" aria-live="polite">科学验收：待读取；已解析不代表验收通过。</div>
+            <details><summary>检查已存结果缺项（只读）</summary>
+              <p class="muted">检查已保存的来源和格式，不代表全文提取或科学验收通过。</p>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality()">读取缺项清单</button>
+              <div id="pdStoredQuality" aria-live="polite"></div>
+            </details>
           </div>
           <div class="pd-actions">
             <button class="btn btn-primary btn-sm" type="button" id="pdViewPdfBtn" onclick="viewPaperPdf()">查看 PDF</button>
@@ -2875,6 +2880,41 @@
         if (currentDetailIs(paperId, generation) && area) area.textContent = acceptanceStatusText(result.acceptance);
       } catch (_) {
         if (currentDetailIs(paperId, generation) && area) area.textContent = '科学验收：读取失败，待核实；已解析不代表验收通过。';
+      }
+    }
+    function storedQualityHtml(result) {
+      const severity = {error:'错误',warning:'待核对',unknown:'未知'};
+      const names = {source_value_row_paper_mismatch:'来源与数据行/值归属不一致',source_asset_file_mismatch:'来源和图表文件不一致',
+        value_row_paper_mismatch:'值与数据行归属不一致',missing_value_reason_or_payload_invalid:'缺失值理由或内容不合法',
+        value_source_missing:'数值缺少来源',source_file_unknown:'来源文件未知',source_physical_page_unknown:'来源物理页未知',
+        physical_page_out_of_range:'物理页超出 PDF 范围',physical_page_invalid:'物理页不合法',
+        asset_file_identity_unverified:'图表来源文件待核实',source_file_identity_mismatch:'来源文件归属不一致',
+        source_asset_identity_mismatch:'来源图表归属不一致',source_sha256_mismatch:'原文件哈希发生变化',
+        subfigure_parent_missing_or_ambiguous:'子图与整图对应待核实',preferred_source_wrong_value:'首选来源不属于该值',
+        asset_physical_pages_unknown:'图表物理页未知',physical_pdf_unavailable:'原文件或阅读 PDF 暂不可核实',
+        source_page_outside_asset_pages:'来源页与图表标记范围待核对',stored_row_identity_conflict:'数据行身份声明存在冲突',
+        section_source_or_record_changed:'章节原文与来源记录不一致',nonfinite_numeric_value:'数值不是有限数',
+        estimate_basis_missing:'估计或推导依据缺失',duplicate_row_alias:'数据行别名存在歧义',
+        table_representation_incomplete:'表格表示待结构化或来源待核实',
+        file_extraction_coverage_unknown:'正文/SI 提取覆盖范围未知或部分完成',
+        legacy_section_file_scope_unknown:'历史章节的文件覆盖范围未知',source_file_size_mismatch:'原文件大小与登记不一致'};
+      const counts = Object.entries(result.counts || {}).map(([key,value]) => `${esc(severity[key] || key)} ${esc(value)}`).join(' · ');
+      const tables = (result.table_completeness || []).filter(item => !item.complete);
+      const revision = /^[0-9a-f]{64}$/.test(result.output_revision || '') ? result.output_revision : '';
+      return `<p>${counts || '已存关联检查未发现错误'}；${esc(result.issues_total)} 项。表格表示待补 ${tables.length} 项。全文覆盖仍须逐文件、逐物理页核对。</p>` +
+        '<ul>' + (result.issues || []).map(item => `<li>${esc(severity[item.severity] || item.severity)} · ${esc(names[item.code] || item.code)} · ${esc(item.kind)} ${esc(item.id)}${item.file_id ? ' · file '+esc(item.file_id) : ''}${item.page ? ' · 第 '+esc(item.page)+' 页' : ''}<br>${esc(item.action_zh || '请打开对应原文件，核对所列对象与物理页；保留原值和冲突，仅按已核实证据修正。')}</li>`).join('') + '</ul>' +
+        (tables.length ? '<ul>'+tables.map(item=>`<li>表格待结构化或来源待核实 · ${esc(item.asset_id || item.legacy_id)} · file ${esc(item.file_id || '未知')} · 物理页 ${esc((item.physical_pages || []).join(', ') || '未知')} · ${esc(item.reason)}。请依据原文补充正式表格表示与同文件来源，不能猜测行列。</li>`).join('')+'</ul>' : '') +
+        (result.has_more && revision && Number.isSafeInteger(result.next_offset) && result.next_offset >= 0 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality(${result.next_offset},'${revision}')">下一页缺项</button>` : '');
+    }
+    async function loadStoredQuality(offset = 0, revision = '') {
+      const paperId = state.paperId, generation = state.detailGeneration;
+      const area = document.getElementById('pdStoredQuality'); if (!area) return;
+      area.textContent = '正在只读检查已存结果…';
+      try {
+        const result = await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/quality?limit=50&offset=${offset}${revision ? '&expected_revision='+encodeURIComponent(revision) : ''}`);
+        if (currentDetailIs(paperId,generation)) area.innerHTML = storedQualityHtml(result);
+      } catch (_) {
+        if (currentDetailIs(paperId,generation)) area.textContent = '结果已变化或检查失败；请从第一页重新读取，暂不判断完整。';
       }
     }
     async function ensureFullDetail(tab) {

@@ -566,7 +566,7 @@ def list_assets(session: Session, paper_id: UUID) -> list[dict[str, Any]]:
     records = session.scalars(
         select(RebuildVisualAsset)
         .where(RebuildVisualAsset.paper_id == paper_id)
-        .order_by(RebuildVisualAsset.figure_label, RebuildVisualAsset.subfigure_label)
+        .order_by(RebuildVisualAsset.figure_label, RebuildVisualAsset.subfigure_label, RebuildVisualAsset.id)
     ).all()
     return [serialize_asset(asset) for asset in records]
 
@@ -882,12 +882,13 @@ def row_identity_state(row: RebuildDataRow) -> dict[str, Any]:
     }
 
 
-def row_identity_revision(session: Session, row: RebuildDataRow) -> str:
+def row_identity_revision(session: Session, row: RebuildDataRow, *, values=None) -> str:
     # Include redundant identity declarations and the correction generation so
     # an ABA correction or a concurrent identity-cell import cannot pass CAS.
     values = session.scalars(select(RebuildDataValue).where(
         RebuildDataValue.row_id == row.id, RebuildDataValue.field_name.in_(DIMENSION_FIELDS)
-    ).order_by(RebuildDataValue.field_name)).all()
+    ).order_by(RebuildDataValue.field_name)).all() if values is None else sorted(
+        (value for value in values if value.field_name in DIMENSION_FIELDS), key=lambda value: value.field_name)
     meta = (row.properties or {}).get(IMPORT_META, {})
     state = {
         "row_id": str(row.id), "paper_id": str(row.paper_id), "row_key": row.row_key,
@@ -1038,8 +1039,8 @@ def _identity_condition(data: dict[str, Any]) -> dict[str, Any]:
     return condition
 
 
-def _stored_identity(session: Session, row: RebuildDataRow) -> dict[str, Any]:
-    values = session.scalars(select(RebuildDataValue).where(RebuildDataValue.row_id == row.id)).all()
+def _stored_identity(session: Session, row: RebuildDataRow, *, values=None) -> dict[str, Any]:
+    values = session.scalars(select(RebuildDataValue).where(RebuildDataValue.row_id == row.id)).all() if values is None else values
     data = {field: getattr(row, field) for field in IDENTITY_FIELDS}
     data.update(condition=row.condition, properties=row.properties,
                 values=[{"field_name": v.field_name, "raw_value": v.raw_value, "value_type": v.value_type} for v in values])
@@ -1096,7 +1097,12 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
     # Absent dimensions are unknown, not a claim that two samples are identical.
     # A stable key/context asserts the fact; identical submissions are always retries.
     submission = _stable_hash("submission", {key: value for key, value in data.items() if key != "row_key"})
-    rows = session.scalars(select(RebuildDataRow).where(RebuildDataRow.paper_id == paper_id)).all()
+    # Resolve an explicit canonical key first. A known key cannot alias another
+    # fact, so importing it need not reload every row in a large paper.
+    rows = list(session.scalars(select(RebuildDataRow).where(
+        RebuildDataRow.paper_id == paper_id, RebuildDataRow.row_key == requested_key))) if requested_key else []
+    if not rows:
+        rows = session.scalars(select(RebuildDataRow).where(RebuildDataRow.paper_id == paper_id)).all()
     canonical = [r for r in rows if requested_key and r.row_key == requested_key]
     aliases = [r for r in rows if requested_key and requested_key in
                (r.properties or {}).get(IMPORT_META, {}).get("aliases", [])]
@@ -1106,11 +1112,16 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
                                    ",".join(sorted(r.row_key for r in targeted)))
     matching = []
     recovering = False
+    identity_values_by_row = {}
+    if rows:
+        for value in session.scalars(select(RebuildDataValue).where(
+                RebuildDataValue.row_id.in_([row.id for row in rows]), RebuildDataValue.field_name.in_(DIMENSION_FIELDS))):
+            identity_values_by_row.setdefault(value.row_id, []).append(value)
     for candidate in targeted or rows:
         meta = (candidate.properties or {}).get(IMPORT_META, {})
         pending = set(meta.get("pending_identity_fields", []))
         try:
-            stored = _stored_identity(session, candidate)
+            stored = _stored_identity(session, candidate, values=identity_values_by_row.get(candidate.id, []))
             same = stored == identity
             # Only an explicit key may resolve a row that THIS importer marked
             # provisional. No normal/history row may have its identity rewritten.
@@ -1377,18 +1388,18 @@ def serialize_value(value: RebuildDataValue, sources: list[RebuildValueSource]) 
     }
 
 
-def serialize_row(session: Session, row: RebuildDataRow) -> dict[str, Any]:
+def serialize_row(session: Session, row: RebuildDataRow, *, values=None, sources=None, paper=None) -> dict[str, Any]:
     values = session.scalars(
         select(RebuildDataValue).where(RebuildDataValue.row_id == row.id).order_by(RebuildDataValue.field_name)
-    ).all()
+    ).all() if values is None else values
     source_map: dict[UUID, list[RebuildValueSource]] = {}
     if values:
         sources = session.scalars(
             select(RebuildValueSource).where(RebuildValueSource.row_id == row.id).order_by(RebuildValueSource.created_at)
-        ).all()
+        ).all() if sources is None else sources
         for source in sources:
             source_map.setdefault(source.value_id, []).append(source)
-    paper = session.get(Paper, row.paper_id)
+    paper = session.get(Paper, row.paper_id) if paper is None else paper
     return {
         "id": str(row.id),
         "row_key": row.row_key,
@@ -1396,7 +1407,7 @@ def serialize_row(session: Session, row: RebuildDataRow) -> dict[str, Any]:
         "paper_code": paper.paper_code if paper else None,
         **{field: getattr(row, field) for field in IDENTITY_FIELDS},
         "condition": row.condition or {},
-        "identity_revision": row_identity_revision(session, row),
+        "identity_revision": row_identity_revision(session, row, values=values),
         "identity_status": "pending" if (row.properties or {}).get(IMPORT_META, {}).get("pending_identity_fields") else "confirmed",
         "properties": row.properties or {},
         "notes": row.notes,
@@ -1433,8 +1444,20 @@ def list_rows(
         statement = statement.where(RebuildDataRow.paper_id == paper_id)
     total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
     rows = session.scalars(statement.limit(limit).offset(offset)).all()
+    values_by_row, sources_by_row = {}, {}
+    papers = {}
+    if rows:
+        ids = [row.id for row in rows]
+        for value in session.scalars(select(RebuildDataValue).where(RebuildDataValue.row_id.in_(ids))
+                                     .order_by(RebuildDataValue.field_name, RebuildDataValue.id)):
+            values_by_row.setdefault(value.row_id, []).append(value)
+        for source in session.scalars(select(RebuildValueSource).where(RebuildValueSource.row_id.in_(ids))
+                                      .order_by(RebuildValueSource.created_at, RebuildValueSource.id)):
+            sources_by_row.setdefault(source.row_id, []).append(source)
+        papers = {paper.id: paper for paper in session.scalars(select(Paper).where(Paper.id.in_({row.paper_id for row in rows})))}
     next_offset = offset + len(rows) if offset + len(rows) < total else None
-    return {"total": total, "items": [serialize_row(session, row) for row in rows],
+    return {"total": total, "items": [serialize_row(session, row, values=values_by_row.get(row.id, []),
+                sources=sources_by_row.get(row.id, []), paper=papers.get(row.paper_id)) for row in rows],
             "limit": limit, "offset": offset, "has_more": next_offset is not None,
             "next_offset": next_offset}
 

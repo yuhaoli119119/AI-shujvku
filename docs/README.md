@@ -9,7 +9,7 @@
 | 文档 | 作用 |
 |---|---|
 | [`PIPELINE_TARGET.md`](PIPELINE_TARGET.md) | 目标流程：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析（**核心链路已实现，独立验收进行中**） |
-| [`REBUILD_RELIABILITY.md`](REBUILD_RELIABILITY.md) | 表格正文、事务写入回执、独立验收和默认关闭的持久队列；源码候选，待独立部署验收 |
+| [`REBUILD_RELIABILITY.md`](REBUILD_RELIABILITY.md) | 表格正文、分段工作包、只读质量检查、事务回执与独立验收合同；实际版本按发布回执核验，队列默认关闭 |
 | [`PAPER_PROCESSING_STATUS.md`](PAPER_PROCESSING_STATUS.md) | 统一解析状态、正文/SI 文件范围与其他 AI 状态回报 |
 | [`DATA_RULES.md`](DATA_RULES.md) | 数据规则：数值精度、分行、单元格溯源、单篇去重、冲突局部处理、分析筛字段 |
 | [`AI_WORKBENCH_API.md`](AI_WORKBENCH_API.md) | 外部 AI 批量读取/写回图表解释与来源化数据的接口与提示词 |

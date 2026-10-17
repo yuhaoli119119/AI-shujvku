@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 import csv
 import io
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from pydantic import ValidationError
 
@@ -89,7 +89,7 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
     status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached"} else (
-        409 if str(exc) in {"derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
+        409 if str(exc) in {"work_package_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -533,21 +533,39 @@ async def rebuild_ai_work_package(
     rows_offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_db_session),
     _auth: SessionState = Depends(_require_work_package_session),
+    view: str = Query(default="full", pattern="^(full|compact|rows|assets|sections|legacy_tables)$"),
+    expected_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
 ) -> dict[str, Any]:
     """Give an external AI one read call for paper context, assets and rows."""
     try:
+        # One response must describe one PostgreSQL snapshot, including its
+        # revision. Authentication uses the separate workbench session store.
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         from app.services.rebuild_sections import list_sections, section_coverage, section_write_contract
         from app.services.rebuild_acceptance import acceptance_status, current_snapshot, contract as acceptance_contract
         from app.services.rebuild_table_content import table_write_contract
+        from app.services.rebuild_work_package import bounded_view, compact_package
+        from app.services.rebuild_quality import producer_contract
+        _required_paper(session, paper_id)
+        snapshot = current_snapshot(session, paper_id)[0]
+        if expected_revision is not None and expected_revision != snapshot["revision"]:
+            raise RebuildWorkflowError("work_package_revision_changed")
+        if view == "compact":
+            return compact_package(session, paper_id, snapshot)
+        if view in {"rows", "assets", "sections", "legacy_tables"}:
+            return bounded_view(session, paper_id, view=view, snapshot=snapshot, limit=rows_limit, offset=rows_offset)
         files = list_files(session, paper_id)
         sections = list_sections(session, paper_id)
         rows = list_rows(session, paper_id=paper_id, limit=rows_limit, offset=rows_offset)
-        rows["next_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?rows_limit={rows_limit}&rows_offset={rows['next_offset']}"
+        rows["next_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?rows_limit={rows_limit}&rows_offset={rows['next_offset']}&expected_revision={snapshot['revision']}"
                              if rows["has_more"] else None)
+        rows["continuation_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?view=rows&rows_limit={rows_limit}&rows_offset={rows['next_offset']}&expected_revision={snapshot['revision']}" if rows["has_more"] else None)
         return {
             "table_write_contract": table_write_contract(),
-            "output_revision": current_snapshot(session, paper_id)[0]["revision"],
-            "acceptance": acceptance_status(session, paper_id),
+            "output_revision": snapshot["revision"],
+            "acceptance": acceptance_status(session, paper_id, snapshot=snapshot),
+            "producer_contract": producer_contract(),
+            "quality_endpoint": f"/api/rebuild/papers/{paper_id}/quality?expected_revision={snapshot['revision']}",
             "acceptance_contract": acceptance_contract(),
             "paper": get_paper(session, paper_id),
             "sections": sections,
@@ -588,6 +606,27 @@ async def rebuild_ai_work_package(
                 "retry": "Persist the exact request before sending; retry identical body and request_id after unknown outcomes. request_id is scoped to row_id. GET and compare the current row after a replay; applied_revision may be older than current_revision.",
             },
         }
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/quality")
+async def rebuild_quality_report(
+    paper_id: UUID,
+    offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=200),
+    expected_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session),
+    _auth: SessionState = Depends(_require_work_package_session),
+):
+    from app.services.rebuild_quality import quality_report
+    from app.services.rebuild_acceptance import current_snapshot
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session, paper_id)
+        snapshot = current_snapshot(session, paper_id)[0]
+        if expected_revision is not None and snapshot["revision"] != expected_revision:
+            raise RebuildWorkflowError("work_package_revision_changed")
+        return quality_report(session, paper_id, get_settings(), snapshot, offset=offset, limit=limit)
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
 

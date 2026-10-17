@@ -171,12 +171,14 @@ class WorkbenchAPI:
                 if row.get("paper_id") != paper_id or row["id"] in seen:
                     raise AdapterError("work_package_duplicate_or_foreign_row")
                 seen.add(row["id"]); all_rows.append(row)
-            next_page = rows.get("next_page")
+            next_page = rows.get("continuation_page") or rows.get("next_page")
             if bool(next_page) != bool(rows.get("has_more")):
                 raise AdapterError("work_package_pagination_contract_invalid")
             if next_page and not next_page.startswith(f"/api/rebuild/papers/{paper_id}/ai-work-package?"):
                 raise AdapterError("work_package_next_page_outside_paper")
-            package, path = page, next_page
+            if package is None:
+                package = page  # Row-only continuations must not discard initial context.
+            path = next_page
         if len(all_rows) != total:
             raise AdapterError("work_package_truncated")
         return {**package, "rows": {"total": total, "items": all_rows, "has_more": False, "next_page": None}}
