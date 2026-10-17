@@ -25,6 +25,13 @@ test('disabled queue, persistent pause and native dependency are visible without
   assert(text.includes('尚未启用')&&text.includes('已暂停')&&text.includes('不会启动'));
   assert(context.queueSummaryText({control:{paused:false},capabilities:{enabled:true}}).includes('协调任务继续'));
 });
+test('raw-only table rule remains partial and explicitly pending representation',()=>{
+  const context=vm.createContext({});vm.runInContext(extract(detail,'acceptanceStatusText'),context);
+  const value=context.acceptanceStatusText({status:'partial',progress:{rules:{passed:false,
+    issues:[{code:'table_representation_incomplete',format:'text',reason:'pending_structure'}]}}});
+  assert(value.includes('表格待结构化')&&value.includes('原始文本可查看复制'));
+  assert(!value.includes('独立验收通过'));
+});
 test('needs_attention stops the frontend native status timer without treating it as success',async()=>{
   let stopped=0, started=0;
   const context=vm.createContext({state:{selectedId:'paper',selected:{}},api:async()=>({status:'running',needs_attention:true}),

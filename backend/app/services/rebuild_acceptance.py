@@ -50,6 +50,7 @@ def contract():
             "persistence": "workflow_jobs with append-only audit_logs; explicit freeze only; no history import",
             "independence": "Different authenticated reviewer principal, or same workbench account with a separate coordinator-issued authorization bound to distinct live-verified native task handles. Payload task names alone never prove independence. No shared-login HTTP grant issuer exists.",
             "gates": ["explicit frozen paper/file/output manifest", "complete physical-page coverage", "deterministic rule checks",
+                      "formal table representation or source-bound legacy markdown; raw text remains partial",
                       "independent reviewer evidence bound to frozen revision", "no unresolved source conflicts for accepted"],
             "unknown": "pending; HTTP 200, outputs counts, turn/completed and parsed cannot promote acceptance"}
 
@@ -65,7 +66,7 @@ def _scope(session, paper_id):
     return files, missing
 
 
-def output_manifest(session, paper_id, *, force_physical=False):
+def output_manifest(session, paper_id, *, force_physical=False, table_readings=None):
     manifest = []
     for model in (RebuildVisualAsset, RebuildDataRow, RebuildDataValue, RebuildValueSource, PaperSection):
         # PostgreSQL hashes persisted row JSON in place. Status/package reads
@@ -86,16 +87,33 @@ def output_manifest(session, paper_id, *, force_physical=False):
                 except (RebuildWorkflowError, OSError):
                     state["image_blob"] = {"status": "unavailable"}
             manifest.append({"kind": model.__tablename__, "id": str(record.id), "sha256": _digest(state)})
+    if table_readings is None:
+        from app.config import get_settings
+        from app.services.rebuild_table_reading import table_representations
+        table_readings = table_representations(session, paper_id, get_settings(), force_physical=force_physical)
+    for row in table_readings["legacy_records"]:
+        manifest.append({"kind": "paper_tables", "id": row["id"], "sha256": row["sha256"]})
+    # Also freeze the legal scope and representation decisions. Adding/removing
+    # SI links or changing a PDF cannot leave a legacy-backed receipt valid.
+    if table_readings["tables"] or table_readings["legacy_records"]:
+        manifest.append({"kind": "table_representation", "id": str(paper_id), "sha256": _digest(table_readings)})
     return manifest
 
 
 def current_snapshot(session, paper_id, *, force_physical=False):
+    from app.config import get_settings
+    from app.services.rebuild_table_reading import table_representations
     files, missing = _scope(session, paper_id)
     file_manifest = [{"file_id": str(file.id), "source_sha256": file.sha256, "role": file.role,
                       "storage_path": file.storage_path, "file_size": file.file_size} for file in files]
-    manifest = output_manifest(session, paper_id, force_physical=force_physical)
+    readings = table_representations(session, paper_id, get_settings(), force_physical=force_physical)
+    manifest = output_manifest(session, paper_id, force_physical=force_physical, table_readings=readings)
     # Title/number may change; stable paper_id is the scientific identity.
     frozen = {"paper_id": str(paper_id), "files": file_manifest, "unregistered_files": missing, "output_manifest": manifest}
+    if readings["tables"]:
+        frozen["table_completeness"] = [{**{key: row[key] for key in ("asset_id", "format", "complete", "reason")},
+                                        "legacy_id": row.get("legacy_id"), "file_id": row["binding"].get("file_id"),
+                                        "physical_pages": row["binding"].get("physical_pages", [])} for row in readings["tables"]]
     return {**frozen, "revision": _digest(frozen)}, files
 
 
@@ -121,10 +139,15 @@ def _rules(session, paper_id, snapshot, coverage):
     for row in session.scalars(select(RebuildDataRow).where(RebuildDataRow.paper_id == paper_id)):
         if (row.properties or {}).get("_rebuild_import", {}).get("pending_identity_fields"):
             issues.append({"code": "identity_pending", "row_id": str(row.id)})
-    from app.services.rebuild_table_content import table_content
+    for table in snapshot.get("table_completeness", []):
+        file_coverage = by_id.get(table.get("file_id"))
+        invalid_page = file_coverage is None or not isinstance(table["physical_pages"], list) or not table["physical_pages"] or any(
+            type(page) is not int or page < 1 or page > file_coverage["total_pages"] for page in table["physical_pages"])
+        if not table["complete"] or invalid_page:
+            issues.append({"code": "table_representation_incomplete", **table, "complete": False,
+                           "reason": "table_source_unverified" if invalid_page else table["reason"],
+                           "message": "表格表示待结构化或来源待核实；原始文本可查看复制，但不代表完整表格验收通过。"})
     for asset in session.scalars(select(RebuildVisualAsset).where(RebuildVisualAsset.paper_id == paper_id)):
-        if asset.asset_type == "table" and table_content(asset)["format"] == "empty":
-            issues.append({"code": "table_body_missing", "asset_id": str(asset.id)})
         if asset.image_path:
             from app.config import get_settings
             from app.services.rebuild_workflow_service import resolve_asset_image_path
@@ -180,7 +203,7 @@ def freeze(session, paper_id, payload, settings, *, actor):
             raise RebuildWorkflowError("acceptance_remaining_reason_required")
         coverage.append({**item.model_dump(mode="json"), "total_pages": count})
     rules = _rules(session, paper_id, snapshot, coverage)
-    state = "rules_checked" if rules["passed"] else "partial" if any(issue["code"] in {"file_coverage_incomplete", "unresolved_source_conflict", "linked_si_registration_required"} for issue in rules["issues"]) else "needsfix"
+    state = "rules_checked" if rules["passed"] else "partial" if any(issue["code"] in {"file_coverage_incomplete", "unresolved_source_conflict", "linked_si_registration_required", "table_representation_incomplete"} for issue in rules["issues"]) else "needsfix"
     job = WorkflowJob(job_id=job_id, type=JOB_TYPE, status=state, library_name=paper.library_name,
                       payload={"paper_id": str(paper_id), "writer": actor, "writer_task_id": payload.task_id,
                                "request_sha256": request_hash, "snapshot": snapshot, "coverage": coverage},

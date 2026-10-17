@@ -2862,6 +2862,9 @@
         needsfix:'需要修正',accepted:'独立验收通过',partial:'原文冲突 / 部分覆盖',review_incomplete:'独立验收未完成'};
       if (!acceptance || !labels[acceptance.status]) return '科学验收：待核实；已解析不代表验收通过。';
       if (acceptance.stale) return '科学验收：独立验收未完成 · 冻结后的文件或结果发生变化，需重新验收。已解析不代表验收通过。';
+      if (acceptance.progress?.rules?.issues?.some(issue => issue.code === 'table_representation_incomplete')) {
+        return '科学验收：部分完成 · 表格待结构化或来源待核实；原始文本可查看复制，不代表完整表格验收通过。';
+      }
       return '科学验收：' + labels[acceptance.status] + '。已解析不代表验收通过。';
     }
     async function loadAcceptanceStatus(paperId, generation) {
@@ -3307,7 +3310,7 @@
           '</tbody></table></div>' + (data.footnotes || []).map(note => `<p class="prewrap">${esc(note)}</p>`).join('');
       }
       if (content.format === 'markdown') return copy + renderPipeTable(content.text);
-      return copy + '<div class="muted">原样文本（未推断行列）</div><pre class="prewrap pd-table-original"><span>' + esc(content.text) + '</span></pre>';
+      return copy + '<div class="muted">原样文本（未推断行列；待结构化）</div><pre class="prewrap pd-table-original"><span>' + esc(content.text) + '</span></pre>';
     }
     function tableEntryFromItem(item) {
       const asset = item.figure && item.figure._currentAsset ? item.figure._currentAsset : null;

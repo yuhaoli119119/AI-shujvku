@@ -35,6 +35,7 @@ test('context-only raw text preserves whitespace, XSS remains inert, clipboard i
   const c=setup(), text='\n  s 1.00s\r\n<svg onload="alert(1)"> & \'\n| not a guessed table |';
   const content=c.tableBodyContent({context_text:text},null), rendered=c.renderTableBody(content);
   assert.equal(content.format,'text');assert(!rendered.includes('<svg'));assert(!rendered.includes('<table>'));
+  assert(rendered.includes('待结构化'));
   const encoded=rendered.match(/data-table-copy="([^"]+)"/)[1].replace(/&#39;/g,"'");
   let copied;c.navigator={clipboard:{writeText:async value=>copied=value}};
   await c.copyTableOriginal({currentTarget:{getAttribute:()=>encoded}});

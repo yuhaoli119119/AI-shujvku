@@ -34,8 +34,9 @@ def test_old_outputs_pending_and_writer_cannot_accept(audit_env):
     pending = env["client"].get(base(env)).json()
     assert pending["acceptance"]["status"] == "pending" and pending["contract"]["parsed_implies_accepted"] is False
     frozen = env["client"].post(base(env) + "/freeze", json=freeze_body(env)).json()
-    assert frozen["status"] == "rules_checked" and frozen["progress"]["extraction"] == "extracted"
-    assert len(frozen["output_manifest"]) == 1
+    assert frozen["status"] == "partial" and frozen["progress"]["extraction"] == "extracted"
+    assert any(issue["code"] == "table_representation_incomplete" for issue in frozen["progress"]["rules"]["issues"])
+    assert len(frozen["output_manifest"]) == 2
     response = env["client"].post(base(env) + f'/{frozen["job_id"]}/reviews', json=review_body(env, frozen))
     assert response.status_code == 409 and response.json()["detail"] == "independent_task_authorization_required"
 
