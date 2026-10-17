@@ -3143,6 +3143,8 @@
     }
     function visualLabelKey(label, type) {
       const text = String(label || '').trim();
+      // Rebuilt table assets can store a bare label such as "S13" or "2".
+      if (type === 'table' && /^s?\d+[a-z]?$/i.test(text)) return text.toLowerCase();
       // Non-numbered front matter such as a graphical abstract has no figure
       // number, so it can never match across the original parse and the rebuild
       // asset. Give it a stable shared key so the same logical visual is not

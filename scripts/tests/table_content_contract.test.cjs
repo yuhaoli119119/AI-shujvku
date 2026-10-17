@@ -60,3 +60,63 @@ test('empty and malformed structured data remain honest; raw fallback does not i
   const md='| Type | Time |\n| --- | --- |\n| s | 1.00s |\n| missing | |\n\nOriginal footnote.';
   const rendered=c.renderTableBody({format:'markdown',text:md});assert(rendered.includes('1.00s'));assert(rendered.includes('Original footnote.'));assert.equal(c.tableClipboardText({format:'markdown',text:md}),md);
 });
+test('rebuilt tables sort main before SI and use numeric table labels',()=>{
+  const c=setup();
+  const tables=['S10','2','S2','10','S1','1'].map(label=>({figure:{_currentAsset:{
+    id:label,paper_id:'paper',file_id:label.startsWith('S')?'si':'main',
+    figure_label:'Table '+label,page_numbers:[1],context_text:'body '+label,
+  }}}));
+  const groups=c.groupTableEntries({tables,remainingTables:[]});
+  assert.deepEqual(Array.from(groups,group=>group.records[0].label),['1','2','10','s1','s2','s10']);
+});
+test('legacy main and linked SI tables also use numeric label order',()=>{
+  const c=setup();
+  const remainingTables=['S10','2','S2','10','S1','1'].map(label=>({
+    paper_id:label.startsWith('S')?'si-paper':'paper',
+    related_paper_id:label.startsWith('S')?'si-paper':null,
+    related_paper_code:label.startsWith('S')?'A077SI':null,
+    caption:'Table '+label,page:1,markdown_content:'body '+label,
+  }));
+  const groups=c.groupTableEntries({tables:[],remainingTables});
+  assert.deepEqual(Array.from(groups,group=>group.records[0].label),['1','2','10','s1','s2','s10']);
+});
+test('numeric group sorting retains cross-page order and separates source files',()=>{
+  const c=setup();
+  const item=(label,file,page)=>({figure:{_currentAsset:{id:file+'-'+page,
+    paper_id:'paper',file_id:file,figure_label:label,page_numbers:[page],context_text:'page '+page}}});
+  const groups=c.groupTableEntries({tables:[item('S13','si',72),item('S2','si',20),
+    item('S13','si',71),item('S13','another-edition',80),item('2','main',2)],remainingTables:[]});
+  assert.deepEqual(Array.from(groups,group=>group.records[0].label),['2','s2','s13','s13']);
+  const crossPage=groups.find(group=>group.records[0].asset.file_id==='si'&&group.records[0].label==='s13');
+  assert.deepEqual(Array.from(crossPage.records,entry=>entry.page),[71,72]);
+  assert.equal(crossPage.records.length,2);
+  const otherEdition=groups.find(group=>group.records[0].asset.file_id==='another-edition');
+  assert.equal(otherEdition.records.length,1);assert.notEqual(otherEdition.key,crossPage.key);
+});
+test('A077 metadata projection orders all 18 bare stored SI labels numerically',()=>{
+  const c=setup();
+  // Read-only projection of the observed asset-key order, bare labels and PDF pages.
+  // Scientific table bodies and production identifiers are deliberately unnecessary.
+  const metadata=[['S1',[67]],['S10',[70]],['S11',[71]],['S12',[71]],['S13',[71,72]],
+    ['S14',[72]],['S15',[73]],['S16',[73]],['S17',[74]],['S18',[74]],['S2',[67]],
+    ['S3',[67]],['S4',[68]],['S5',[68]],['S6',[68]],['S7',[69]],['S8',[69]],['S9',[70]]];
+  const tables=metadata.map(([figure_label,page_numbers])=>({figure:{_currentAsset:{
+    id:figure_label,paper_id:'paper',file_id:'si',asset_key:'a077-table-'+figure_label.toLowerCase(),
+    figure_label,page_numbers,caption:'Table '+figure_label+'. Original caption.',
+  }},text:null}));
+  const groups=c.groupTableEntries({tables,remainingTables:[]});
+  assert.deepEqual(Array.from(groups,group=>group.records[0].label),
+    Array.from({length:18},(_,index)=>'s'+(index+1)));
+  assert.deepEqual(Array.from(groups[12].records[0].asset.page_numbers),[71,72]);
+});
+test('bare table labels support main/SI, case and whitespace without guessing prose or figure labels',()=>{
+  const c=setup();
+  const tables=['s10','2','  s2  ','10','S1','1'].map(label=>({figure:{_currentAsset:{
+    paper_id:'paper',file_id:/s/i.test(label)?'si':'main',figure_label:label,page_numbers:[1],
+  }}}));
+  const groups=c.groupTableEntries({tables,remainingTables:[]});
+  assert.deepEqual(Array.from(groups,group=>group.records[0].label),['1','2','10','s1','s2','s10']);
+  assert.equal(c.visualLabelKey('Results for S2 catalysts','table'),null);
+  assert.equal(c.visualLabelKey('2.0','table'),null);
+  assert.equal(c.visualLabelKey('S2','figure'),null);
+});
