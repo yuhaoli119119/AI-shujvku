@@ -608,6 +608,46 @@ def _source_is_sufficient(data: dict[str, Any]) -> bool:
     return located
 
 
+# Deliberately a grammar, not an expression evaluator. Preserve the caller's
+# raw string everywhere; this projection is shared by validation and equality.
+_NUMERIC_MANTISSA = r"[+\-−]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
+_NUMERIC_EXPONENT = r"[+\-−]?[0-9]{1,6}"
+_SUPERSCRIPT_EXPONENT = r"[⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,6}"
+_SUPERSCRIPT_ASCII = str.maketrans("⁺⁻⁰¹²³⁴⁵⁶⁷⁸⁹", "+-0123456789")
+_DECIMAL_NOTATION = re.compile(
+    rf"(?P<mantissa>{_NUMERIC_MANTISSA})(?:[eE](?P<exponent>{_NUMERIC_EXPONENT}))?"
+)
+_POWER_NOTATION = re.compile(
+    rf"(?:(?P<mantissa>{_NUMERIC_MANTISSA})\s*[×·]\s*)?"
+    rf"10(?:\s*\^\s*(?P<exponent>{_NUMERIC_EXPONENT})|(?P<superscript>{_SUPERSCRIPT_EXPONENT}))"
+)
+
+
+def _raw_numeric_decimal(raw: str | None) -> Decimal | None:
+    """Return an exact decimal for supported unambiguous notation, else None.
+
+    Constructing a Decimal tuple avoids the ambient decimal precision/context
+    rounding long coefficients during exponent multiplication.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    match = _DECIMAL_NOTATION.fullmatch(text) or _POWER_NOTATION.fullmatch(text)
+    if match is None:
+        return None
+    coefficient = (match.group("mantissa") or "1").replace("−", "-")
+    exponent = match.group("exponent")
+    if exponent is None and "superscript" in match.re.groupindex:
+        exponent = match.group("superscript").translate(_SUPERSCRIPT_ASCII)
+    shift = int((exponent or "0").replace("−", "-"))
+    try:
+        decimal = Decimal(coefficient)
+        parts = decimal.as_tuple()
+        return Decimal((parts.sign, parts.digits, parts.exponent + shift))
+    except (InvalidOperation, ValueError, OverflowError):
+        return None
+
+
 def _validate_value(payload: dict[str, Any]) -> None:
     kind = payload.get("value_type", "explicit")
     raw, number = payload.get("raw_value"), payload.get("numeric_value")
@@ -624,28 +664,23 @@ def _validate_value(payload: dict[str, Any]) -> None:
         raise RebuildWorkflowError("numeric_value_must_be_finite")
     # The analysis column is binary64: compare its exact projection, not a
     # Decimal(str(float)) round trip that rejects legitimate high-precision text.
-    plain_number = re.fullmatch(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?", str(raw).strip())
+    parsed = _raw_numeric_decimal(raw)
     if number is not None:
-        if not plain_number:
+        if parsed is None:
             raise RebuildWorkflowError("numeric_value_requires_plain_numeric_raw:omit_numeric_for_text_range_or_inequality")
         try:
-            parsed = Decimal(str(raw).strip())
             projected = float(parsed)
         except (InvalidOperation, OverflowError):
+            raise RebuildWorkflowError("numeric_value_out_of_range_for_raw")
+        if not math.isfinite(projected):
             raise RebuildWorkflowError("numeric_value_out_of_range_for_raw")
         if projected != number or (projected == 0 and parsed != 0):
             raise RebuildWorkflowError("numeric_value_disagrees_with_raw")
     if kind == "estimated":
-        try:
-            decimal = Decimal(raw)
-            if not decimal.is_finite():
-                raise InvalidOperation
-        except InvalidOperation:
+        if parsed is None:
             raise RebuildWorkflowError("estimated_raw_value_must_be_numeric")
-        if decimal.as_tuple().exponent < -2 or (payload.get("precision_digits") or 0) > 2:
+        if parsed.as_tuple().exponent < -2 or (payload.get("precision_digits") or 0) > 2:
             raise RebuildWorkflowError("estimated_precision_exceeds_two_decimals")
-        if number is not None and Decimal(str(number)) != decimal:
-            raise RebuildWorkflowError("estimated_numeric_value_disagrees_with_raw")
     if kind in {"estimated", "derived"}:
         if not all(str(source.get("estimate_basis") or "").strip() for source in sources):
             raise RebuildWorkflowError("estimate_or_derivation_basis_required_for_each_source")
@@ -729,17 +764,14 @@ def _value_rank(value_type: str) -> int:
 def _value_signature(data: dict[str, Any]) -> str:
     raw = data.get("raw_value")
     # Compare exact decimals, never round or convert units. Raw text is still retained.
-    try:
-        number = Decimal(raw) if raw is not None else None
-        if number is not None and number.is_finite():
-            digits = list(number.as_tuple().digits)
-            exponent = number.as_tuple().exponent
-            while digits and digits[-1] == 0:
-                digits.pop()
-                exponent += 1
-            raw = [number.as_tuple().sign if digits else 0, digits, exponent if digits else 0]
-    except InvalidOperation:
-        pass
+    number = _raw_numeric_decimal(raw)
+    if number is not None:
+        digits = list(number.as_tuple().digits)
+        exponent = number.as_tuple().exponent
+        while digits and digits[-1] == 0:
+            digits.pop()
+            exponent += 1
+        raw = [number.as_tuple().sign if digits else 0, digits, exponent if digits else 0]
     return _canonical_json([raw, data.get("numeric_value"), data.get("unit") or ""])
 
 
