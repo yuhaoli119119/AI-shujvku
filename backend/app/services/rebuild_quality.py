@@ -257,7 +257,7 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
         if not complete:
             issues.append({"severity": "unknown", "code": "file_extraction_coverage_unknown", "kind": "file", "id": file["file_id"],
                            "file_id": file["file_id"], "action": "Formal acceptance coverage is unknown/partial and separate from the extraction plan declaration. This stage does not activate freeze/review; do not re-extract science merely to clear this issue.",
-                           "action_zh": "正式验收范围声明尚未完整（本阶段未接入），与本阶段原文清单范围声明分开。新计划声明全页也不自动成为 freeze/review；请继续核实具体清单缺项并保留正式验收未知，不要为清除此提示重复提取或重写旧结果。"})
+                           "action_zh": "正式验收范围声明与原文清单范围声明分别记录；清单声明全页不代表科学验收通过，无需因此重复提取已有结果。"})
     from app.services.extraction_coverage import report as coverage_report
     plan = coverage_report(session, paper_id, snapshot, limit=None)
     if plan['legacy_without_plan']:
