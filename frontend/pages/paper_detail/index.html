@@ -2982,8 +2982,8 @@
     function stagedChecksHtml(result) {
       const findings = {source_files_missing:'缺少来源文件',main_source_not_registered:'正文文件尚未登记',source_material_unverified:'来源文件待核实',
         coverage_plan_missing:'尚无原文对象清单',coverage_scope_unknown:'原文范围待核实',coverage_items_missing:'清单项待处理或待核实',coverage_items_empty:'清单尚无对象',
-        coverage_check_stale:'清单结果对应已过期',stored_integrity_needs_review:'已有结果的来源或结构待核实',current_output_receipt_unverified:'当前输出尚无可核实的导入对应',
-        no_current_scientific_output:'尚无可核实的科学输出',import_partial_or_recovery_unresolved:'部分导入或恢复仍未解决',write_result_unknown:'导入结果未知',
+        coverage_check_stale:'清单结果对应已过期',stored_integrity_needs_review:'已有结果的来源或结构待核实',current_output_receipt_unverified:'当前输出与导入回执的对应待核实',
+        no_current_scientific_output:'尚无可核实的科学输出',import_partial_or_recovery_unresolved:'历史导入失败项的当前恢复情况待核实',write_result_unknown:'导入结果未知',
         check_references_invalid:'核对声明含无效引用，请更正',quality_check_truncated:'检查问题过多，尚未核对完',current_scoped_check_missing:'缺少当前有效的明确范围核对记录',review_scope_incomplete:'核对声明范围不全',review_items_not_all_declared:'清单项尚未全部核对'};
       const nav = Object.entries(stagedLabels).map(([key,label]) => `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${key}')">${label}</button>`).join(' ');
       const rows = (result.items||[]).map(item => {
@@ -2997,7 +2997,7 @@
       const revision=/^[0-9a-f]{64}$/.test(result.revision||'')?result.revision:'';
       const stage=Object.hasOwn(stagedLabels,result.stage)?result.stage:'source_scope';
       const view=result.view==='receipts'?'receipts':'items';
-      return nav+`<h4>${esc(stagedLabels[stage])}</h4><p>${esc(result.advice_zh||'只读查看当前范围和待办。')}</p><p>程序检查与原文科学声明分别记录；不代表全篇提取完成或科学验收通过。已有科学结论不因缺少新记录被否定。</p>`+
+      return nav+`<h4>${esc(stagedLabels[stage])}</h4><p>${esc(result.advice_zh||'只读查看当前范围和待办。')}</p><p>程序检查与原文科学声明分别记录；不代表全篇提取完成或科学验收通过。已有科学结论不因缺少新记录被否定。</p><p>旧修正未必能由现有回执自动确认，待核实不等于数据错误；请结合原文和人工复核记录判断。</p>`+
         `<ul>${rows||'<li>本页没有条目；不能据此判断完整。</li>'}</ul><p>本页 ${esc((result.items||[]).length)} / 共 ${esc(result.total)} 条</p>`+
         (result.has_more&&revision?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${stage}',${Number(result.next_offset)},'${revision}','${view}')">下一页阶段条目</button>`:'')+
         (stage==='extract'?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('extract',0,'','receipts')">查看真实导入回执</button>`:'')+
