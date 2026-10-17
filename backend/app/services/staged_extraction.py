@@ -119,20 +119,26 @@ def assess(session,paper_id,ctx,*,source_scope=(),item_keys=(),receipt_ids=(),un
         if receipt is None or str(event.id) not in receipt.payload.get('result',{}).get('audit',{}).get('event_ids',[]):continue
         key=(event.target_type,event.target_id)
         if key in current and data.get('after')==current[key]:proved[key]=receipt
-    partial=[]
+    from app.services.rebuild_recovery_evidence import augment_proofs, resolve_failure
+    extra_proofs, trusted = augment_proofs(session,paper_id,current,rows,values,sources_by_value,audits,receipt_keys)
+    partial=[]; recovered=[]
     for receipt in receipts.values():
         result=receipt.payload.get('result',{})
+        if not isinstance(result,dict) or not isinstance(result.get('errors',[]),list):
+            partial.append({'receipt_id':str(receipt.id),'reason':'unsupported_receipt_shape'});continue
         for error in result.get('errors',[]):
-            row=rows.get(error.get('row_id'));value=values.get((error.get('row_id'),error.get('field')))
-            proof=proved.get((RebuildDataValue.__tablename__,str(value.id))) if value else None
-            repaired=bool(row and value and proof and proof.created_at>receipt.created_at and
-                proof.id!=receipt.id and proof.payload.get('outcome')=='succeeded' and
-                not (row.properties or {}).get('_rebuild_import',{}).get('pending_identity_fields') and
-                not _fact_problems(value,sources_by_value[str(value.id)]))
-            if not repaired:partial.append({'receipt_id':str(receipt.id),'request_id':receipt.target_id,'row_index':error.get('row_index'),
-                                          'row_key':error.get('row_key'),'field':error.get('field'),'reason':error.get('error') or error.get('outcome')})
-        if (result.get('complete') is False or receipt.payload.get('outcome')!='succeeded') and not result.get('errors'):partial.append({'receipt_id':str(receipt.id),'reason':'incomplete_receipt'})
-    unproved=[{'kind':kind,'id':key} for kind,key in current if (kind,key) not in proved]
+            if not isinstance(error,dict):
+                partial.append({'receipt_id':str(receipt.id),'reason':'unsupported_error_shape'});continue
+            resolution=resolve_failure(session,paper_id,receipt,error,rows,values,sources_by_value,proved,extra_proofs,trusted)
+            if resolution['recovered']:
+                recovered.append({'receipt_id':str(receipt.id),**resolution})
+            else:
+                partial.append({'receipt_id':str(receipt.id),'request_id':receipt.target_id,'row_index':error.get('row_index'),
+                    'row_key':error.get('row_key'),'field':error.get('field') or error.get('field_name'),
+                    'reason':error.get('error') or error.get('outcome'),'evidence_gap':resolution['reason']})
+        if (result.get('complete') is False or receipt.payload.get('outcome')!='succeeded') and not result.get('errors'):
+            partial.append({'receipt_id':str(receipt.id),'reason':'incomplete_receipt'})
+    unproved=[{'kind':kind,'id':key} for kind,key in current if (kind,key) not in proved and (kind,key) not in extra_proofs]
     # Chapters use their existing immutable source/receipt protocol. The quality
     # checker validates the stored text, page identity and physical source hash.
     from app.services.rebuild_sections import _checked_snapshot,EVENT as SECTION_EVENT,VERSION as SECTION_VERSION
@@ -184,7 +190,8 @@ def assess(session,paper_id,ctx,*,source_scope=(),item_keys=(),receipt_ids=(),un
         'next_stage':next_stage,'next_label':LABELS[next_stage],
         'advice_zh':'当前声明范围的程序关联检查未发现阻碍，可携范围交接复核；不代表全篇提取成功或科学验收通过。' if ready else
                     f'建议继续{LABELS[next_stage]}，先处理明确缺项或未核实回执；既有文献的科学结论不因此被否定。',
-        'coverage':{k:coverage['summary'][k] for k in ('status','total','counts','stale_items','scope_unknown')},'receipt_scope':{'current_entities':len(current),'proved_entities':len(proved),
+        'coverage':{k:coverage['summary'][k] for k in ('status','total','counts','stale_items','scope_unknown')},'receipt_scope':{'current_entities':len(current),'proved_entities':len(set(proved)|set(extra_proofs)),
+             'cas_proved_entities':len(set(extra_proofs)-set(proved)),'recovered_total':len(recovered),'recovered_sample':recovered[:20],
              'unverified_total':len(unproved),'unverified_sample':unproved[:20],'partial_unresolved_total':len(partial),
              'partial_sample':partial[:20],'unknown_total':len(unresolved),'unknown_sample':unresolved[:20]},
         'scientific_declaration':'not_independently_verified','scientific_acceptance':'not_implied',
@@ -234,7 +241,7 @@ def package(session,paper_id,ctx,stage,view='items',offset=0,limit=25,expected_r
           'reconcile':['quality_endpoint','producer_contract.row_import.recovery'],
           'handoff':['scoped declarations and actual receipt evidence; independent science review remains separate']}
     result['contract_refs']=refs[stage]
-    result['resources']={'checks':base+'/extraction-checks','coverage':base+'/coverage-plan?limit=25',
+    result['resources']={'history_reconciliation':base+'/history-reconciliation?view=attempts&limit=25','checks':base+'/extraction-checks','coverage':base+'/coverage-plan?limit=25',
         'quality':base+'/quality?expected_revision='+snapshot['revision'],
         'text_pages':'/api/rebuild/files/{file_id}/text-pages?offset=0&limit=5','page_image':'/api/rebuild/files/{file_id}/render-page?page=1&dpi=120'}
     if view.endswith('_contract'):

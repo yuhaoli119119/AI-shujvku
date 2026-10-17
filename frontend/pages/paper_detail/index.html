@@ -588,6 +588,8 @@
               <div id="pdCoveragePlan" aria-live="polite"></div>
               <button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('source_scope')">查看分段提取与检查记录</button>
               <div id="pdStagedChecks" aria-live="polite"></div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('attempts')">查看历史尝试与验收报告索引</button>
+              <div id="pdHistoryReconciliation" aria-live="polite"></div>
             </details>
           </div>
           <div class="pd-actions">
@@ -2845,6 +2847,8 @@
       if (document.getElementById('pdCoverageOutputDialog').open) document.getElementById('pdCoverageOutputDialog').close();
       document.getElementById('pdCoveragePlan').textContent = '';
       document.getElementById('pdStagedChecks').textContent = '';
+      document.getElementById('pdHistoryReconciliation').textContent = '';
+      historyReconciliationRead++;
       stagedChecksRead++;
       document.getElementById('pdStoredQuality').textContent = '';
       state.paper = null; state.rebuildGridViews={}; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
@@ -2977,12 +2981,49 @@
         if (currentDetailIs(paperId,generation)) area.textContent = '清单或输出已变化，或读取失败；请从第一页重新核对，暂不判断完整。';
       }
     }
+    let historyReconciliationRead = 0;
+    function historyReconciliationHtml(result) {
+      const attempts=result.view==='attempts';
+      const comparison={version_unknown:'历史版本未知',stale:'与当前版本不一致',current_version_match_only:'仅声明范围版本匹配，未授予当前验收',current_version_scope_unknown:'版本匹配但原文范围仍未知',unknown:'证据待核实'};
+      const verdict={accepted:'历史结论：通过',accepted_partial:'历史结论：部分通过',pass_with_limitations:'历史结论：有局限通过',PASS_WITH_LIMITATIONS:'历史结论：有局限通过',needs_fix:'历史结论：需修正',unverified:'历史结论：未核实',failed:'历史结论：失败'};
+      const scope={unknown:'范围未知',stale:'范围或来源版本已变化',partial_declared:'部分原文范围声明',full_declared:'全页范围声明（不证明对象穷尽）'};
+      const rows=(result.items||[]).map(item => {
+        if(attempts) return `<li>${esc(item.record_role==='latest_recorded'?'最新库内尝试记录':'历史尝试记录')} · ${esc(item.observation?.label||'执行状态未知')} · 原状态 ${esc(item.raw_status)}`+
+          (item.selection_status==='superseded_declaration_only'?'<p>有明确替代声明；不证明原生已停止，也不解除占用。</p>':item.selection_status==='stale_declaration'?'<p>替代声明已过期，请按当前证据核对。</p>':'')+
+          `<details><summary>尝试定位</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify({job_id:item.job_id,run_id:item.run_id,attempt_token:item.attempt_token,thread_id:item.thread_id,turn_id:item.turn_id,observation:item.observation,created_at:item.created_at,updated_at:item.updated_at},null,2))}</pre></details></li>`;
+        return `<li>历史报告 · ${esc(Object.hasOwn(verdict,item.historical_verdict_as_reported)?verdict[item.historical_verdict_as_reported]:(item.historical_verdict_as_reported||'原报告科学结论未机器确认'))} · ${esc(comparison[item.comparison]||'待核实')} · ${esc(scope[item.scope_status]||'范围未知')}<p>${item.semantic_basis==='supported_original_report_fields'?'原报告字段已核对（未独立科学重验）':'仅操作者声明，原报告语义未机器确认；不从封套推定原报告科学通过或当前版本匹配。'}</p>`+
+          (item.semantic_basis!=='supported_original_report_fields'&&item.operator_declared_verdict?`<p>索引操作者声明（不等于原报告机器核验结论）：${esc(item.operator_declared_verdict)}</p>`:'')+
+          `<p>文件与哈希：${esc(item.usable_for_index?'已核对文件字节，不代表科学复核':'尚不能验证，不能登记为可信索引')}</p>`+
+          `<p>局限：${esc((item.limitations||[]).join('；')||'请核对原报告范围，不从缺少局限说明推断完整。')}</p>`+
+          `<details><summary>报告与范围定位</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify({report_id:item.report_id,historical_verdict_as_reported:item.historical_verdict_as_reported,report_sha256:item.report_sha256,original_sha256:item.original_sha256,observed_output_revision:item.historical_output_revision,operator_declared_verdict:item.operator_declared_verdict,operator_declared_output_revision:item.operator_declared_output_revision,original_contract:item.original_contract,original_identity_fields:item.original_identity_fields,original_version_fields:item.original_version_fields,original_verdict_fields:item.original_verdict_fields,scope_basis:item.scope_basis,source_scope:item.source_scope,error:item.error},null,2))}</pre></details></li>`;
+      }).join('');
+      const registrations=(result.recent_registrations||[]).map(item => `<li>${esc(item.kind==='attempt_supersession'?'替代声明':'历史报告登记')} · ${esc(item.freshness==='current_binding_only'?'登记绑定相同（不等于当前验收）':'登记绑定已过期')} · ${esc(item.actor)}<details><summary>登记定位</summary>${esc(item.record_id)} · ${esc(item.report_id)} · ${esc(item.created_at)}</details></li>`).join('');
+      const pin=/^[0-9a-f]{64}$/.test(result.revision||'')?result.revision:'';
+      const view=attempts?'attempts':'reports';
+      return `<button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('attempts')">历史尝试</button> <button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('reports')">历史验收报告</button>`+
+        `<h4>${attempts?'尝试记录与执行观测':'历史报告与当前版本'}</h4><p>${esc(result.notice_zh||'历史证据不等于当前执行或当前验收。')}</p>`+
+        `<p>旧原生句柄不可读时仍为未知；本页不回查、不启动或停止任务。记录中的完成不等于科学通过，任何声明均不解除占用。</p>`+
+        (!attempts&&result.catalog_status!=='available'?'<p>历史报告索引尚未完成核准，或证据校验未通过；旧报告可结合原文和人工复核记录判断，不自动登记为当前验收。</p>':'')+
+        `<ul>${rows||'<li>尚无本页可列证据；缺新记录不否定已有图表、章节或科学结论。</li>'}</ul><p>本页 ${esc((result.items||[]).length)} / 共 ${esc(result.total)} 条；原始未决任务记录 ${esc(result.raw_active_records)} 条。</p><h4>最近登记与声明</h4><ul>${registrations||'<li>尚无登记；不否定既有科学结论。</li>'}</ul>`+
+        (result.has_more&&pin?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('${view}',${Number(result.next_offset)},'${pin}')">下一页历史索引</button>`:'');
+    }
+    async function loadHistoryReconciliation(view='attempts',offset=0,revision='') {
+      const paperId=state.paperId,generation=state.detailGeneration,read=++historyReconciliationRead;
+      const area=document.getElementById('pdHistoryReconciliation');area.textContent='正在只读核对历史索引…';
+      try {
+        const query=new URLSearchParams({view,offset:String(offset),limit:'25'});if(revision)query.set('expected_revision',revision);
+        const result=await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/history-reconciliation?${query}`);
+        if(currentDetailIs(paperId,generation)&&read===historyReconciliationRead)area.innerHTML=historyReconciliationHtml(result);
+      } catch (_) {
+        if(currentDetailIs(paperId,generation)&&read===historyReconciliationRead)area.textContent='历史记录、报告或当前版本已变化，或读取失败；请从第一页重读，暂不判断执行和验收。';
+      }
+    }
     let stagedChecksRead = 0;
     const stagedLabels = {source_scope:'来源范围',coverage:'原文清单',extract:'提取与补项',reconcile:'结果核对',handoff:'交接准备'};
     function stagedChecksHtml(result) {
       const findings = {source_files_missing:'缺少来源文件',main_source_not_registered:'正文文件尚未登记',source_material_unverified:'来源文件待核实',
         coverage_plan_missing:'尚无原文对象清单',coverage_scope_unknown:'原文范围待核实',coverage_items_missing:'清单项待处理或待核实',coverage_items_empty:'清单尚无对象',
-        coverage_check_stale:'清单结果对应已过期',stored_integrity_needs_review:'已有结果的来源或结构待核实',current_output_receipt_unverified:'当前输出与导入回执的对应待核实',
+        coverage_check_stale:'清单结果对应已过期',stored_integrity_needs_review:'已有结果的来源或结构待核实',current_output_receipt_unverified:'当前输出与导入或修正证据的对应待核实',
         no_current_scientific_output:'尚无可核实的科学输出',import_partial_or_recovery_unresolved:'历史导入失败项的当前恢复情况待核实',write_result_unknown:'导入结果未知',
         check_references_invalid:'核对声明含无效引用，请更正',quality_check_truncated:'检查问题过多，尚未核对完',current_scoped_check_missing:'缺少当前有效的明确范围核对记录',review_scope_incomplete:'核对声明范围不全',review_items_not_all_declared:'清单项尚未全部核对'};
       const nav = Object.entries(stagedLabels).map(([key,label]) => `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${key}')">${label}</button>`).join(' ');
@@ -2997,7 +3038,7 @@
       const revision=/^[0-9a-f]{64}$/.test(result.revision||'')?result.revision:'';
       const stage=Object.hasOwn(stagedLabels,result.stage)?result.stage:'source_scope';
       const view=result.view==='receipts'?'receipts':'items';
-      return nav+`<h4>${esc(stagedLabels[stage])}</h4><p>${esc(result.advice_zh||'只读查看当前范围和待办。')}</p><p>程序检查与原文科学声明分别记录；不代表全篇提取完成或科学验收通过。已有科学结论不因缺少新记录被否定。</p><p>旧修正未必能由现有回执自动确认，待核实不等于数据错误；请结合原文和人工复核记录判断。</p>`+
+      return nav+`<h4>${esc(stagedLabels[stage])}</h4><p>${esc(result.advice_zh||'只读查看当前范围和待办。')}</p><p>程序检查与原文科学声明分别记录；不代表全篇提取完成或科学验收通过。已有科学结论不因缺少新记录被否定。</p><p>旧修正未必能由现有导入或修正记录自动确认，待核实不等于数据错误；请结合原文和人工复核记录判断。</p>`+
         `<ul>${rows||'<li>本页没有条目；不能据此判断完整。</li>'}</ul><p>本页 ${esc((result.items||[]).length)} / 共 ${esc(result.total)} 条</p>`+
         (result.has_more&&revision?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${stage}',${Number(result.next_offset)},'${revision}','${view}')">下一页阶段条目</button>`:'')+
         (stage==='extract'?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('extract',0,'','receipts')">查看真实导入回执</button>`:'')+

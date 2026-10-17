@@ -43,7 +43,13 @@ def resolve_status(counts, latest_output=None, job=None, latest_file=None, now=N
                 status, message = 'failed', '最新提取任务失败；已有结果保留，请检查任务记录。'
         if status in ('parsing','queued','needs_check') and progress.get('message'):
             message += ' ' + str(progress['message'])[:500]
-    return {'status':status,'label':LABELS[status],'message':message,'counts':counts,
+    label = LABELS[status]
+    if job and job.status in ('queued','dispatching','running'):
+        label = '排队记录（执行待核实）' if job.status=='queued' else '提取记录（执行待核实）'
+        message = '库内原始任务状态为 '+job.status+'；当前原生执行未在本接口独立证实，不能据旧记录、超时或已有结果判断正在执行或安全停止。'
+    return {'status':status,'label':label,'message':message,'counts':counts,
+            'job_status_as_recorded':job.status if job else None,'native_current_execution':'unknown_not_proven_here',
+            'occupancy_changed':False,
             'job_id':job.job_id if job else None,'job_status':job.status if job else None,
             'has_results':has_output,'scientific_acceptance':'not_implied'}
 

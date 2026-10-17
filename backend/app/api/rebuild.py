@@ -89,7 +89,7 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
     status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached", "coverage_linked_output_not_found", "stage_import_receipt_not_found"} else (
-        409 if str(exc) in {"work_package_revision_changed", "stage_request_id_reused", "stage_check_revision_changed", "stage_binding_changed", "stage_page_revision_required", "stage_page_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
+        409 if str(exc) in {"work_package_revision_changed", "stage_request_id_reused", "history_revision_changed", "history_binding_changed", "history_request_id_reused", "history_page_revision_required", "stage_check_revision_changed", "stage_binding_changed", "stage_page_revision_required", "stage_page_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -803,6 +803,74 @@ async def write_extraction_check(paper_id: UUID, payload: StageCheckRequest,
         _locked_paper(session,paper_id)
         receipt,assessment=save_check(session,paper_id,payload,_stage_context(session,paper_id,auth.username,force=True),auth.username)
         if receipt is None:raise HTTPException(422,detail={"code":"stage_check_references_invalid","errors":assessment['reference_errors']})
+        session.commit()
+        return receipt
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+from app.schemas.history_reconciliation import HistoryRegistration
+
+
+def _history_context(session, paper_id, settings, actor, force=False):
+    from app.services.history_reconciliation import context
+    from app.services.rebuild_acceptance import current_snapshot
+    _required_paper(session,paper_id)
+    return context(session,paper_id,settings,current_snapshot(session,paper_id,force_physical=force)[0],actor)
+
+
+@router.get("/papers/{paper_id}/history-reconciliation")
+async def read_history_reconciliation(paper_id: UUID, view: Literal["attempts","reports"] = "attempts",
+    offset: int = Query(0,ge=0), limit: int = Query(25,ge=1,le=100),
+    expected_revision: str | None = Query(None,pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.history_reconciliation import package
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        return package(paper_id,_history_context(session,paper_id,settings,auth.username),view,offset,limit,expected_revision)
+    except RebuildWorkflowError as exc:raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/history-reconciliation/records/{record_id}")
+async def read_history_record(paper_id: UUID, record_id: UUID,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.history_reconciliation import record_summary
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        ctx=_history_context(session,paper_id,settings,auth.username)
+        record=next((e for e in ctx['records'] if e.id==record_id),None)
+        if record is None:raise HTTPException(404,detail="history_record_not_found")
+        return record_summary(record,ctx,full=True)
+    except RebuildWorkflowError as exc:raise _http_error(exc) from exc
+
+
+@router.post("/papers/{paper_id}/history-reconciliation/preview")
+async def preview_history_registration(paper_id: UUID, payload: HistoryRegistration,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.history_reconciliation import preview
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        return preview(payload,_history_context(session,paper_id,settings,auth.username))
+    except RebuildWorkflowError as exc:raise _http_error(exc) from exc
+
+
+@router.put("/papers/{paper_id}/history-reconciliation")
+async def save_history_registration(paper_id: UUID, payload: HistoryRegistration,
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.history_reconciliation import save
+    from app.services.rebuild_acceptance import _locked_paper
+    try:
+        _locked_paper(session,paper_id)
+        receipt,result=save(session,paper_id,payload,_history_context(session,paper_id,settings,auth.username,force=True),auth.username)
+        if receipt is None:raise HTTPException(422,detail={'code':'history_registration_invalid','errors':result['errors']})
         session.commit()
         return receipt
     except RebuildWorkflowError as exc:

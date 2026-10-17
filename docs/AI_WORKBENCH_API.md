@@ -230,3 +230,28 @@ row/value的匹配来源还必须同时属于该value、该row和该paper；不�
 未知请求须保存原operation、request_id、原 `run_audited` 指纹、reason。指纹是原已验证model的 `model_dump(mode='json',exclude_unset=True)` 加当时task_id形成 `{body,task_id}`，使用原服务相同json.dumps(sort_keys=True,ensure_ascii=False,allow_nan=False)默认分隔符后SHA256，不能拿元数据请求哈希替代。**原体必须先持久化**；无法重建原指纹时保留待人工核实，不另造新请求冒充恢复。台账按原actor/operation/id/指纹保存；不能省略或换账号隐去同篇未知，只由匹配真实回执确认结果，partial仍单独核对。不把HTTP200、模型一句完成、计数或空errors视为全部成功。
 
 回执头还给出原complete、errors_total及只读errors_endpoint。`GET .../extraction-import-receipts/{receipt_id}?limit=25` 只读读取同篇正式回执的原失败项；每页最多100项，续页必须携本回执revision，缺/旧pin为409。原outcome/complete均显式标为as_recorded，不声称当前恢复。无失败项不代表全篇完成。详情页复用已有只读弹窗查看失败项及续页，无写表单。
+
+## 历史尝试与历史验收索引（受控承接）
+
+`GET /api/rebuild/papers/{paper_id}/history-reconciliation?view=attempts|reports&limit=25` 正常会话、RR READ ONLY，不访问原生/WorkBuddy后端、不恢复或停止线程。原WorkflowJob及状态保留；稳定job_id/run_id/attempt_token/thread_id/turn_id分别显示，latest_recorded只指最新库内记录。旧running、超时、有结果、后来的completed/历史accepted均不证明当前执行或安全停止。原completed/failed只称ended_as_recorded；现存完整verified_stop回执匹配原身份/终态/goal和时间时只称stopped_as_observed（历史观测，本轮未回查）。缺字段、不可读或不曾回查保持当前未知。`can_unlock=false/occupancy_changed=false`固定，不影响原队列/锁/原生授权。
+
+报告候选来自服务端固定`settings.storage_root.parent/history_evidence/catalog.json`，缺失时明确catalog_unavailable_or_invalid，无自动扫描/导入台账。客户端不能给路径、上传报告或传可信/accepted/native状态。此目录/文件须由总指挥逐篇核准安排；当前代码任务不在生产创建该目录、不保存生产登记。目录及所有组件不能symlink；固定相对普通文件、无../绝对/隐藏/反斜杠路径、大小上限、完整FD/字节hash核验，API只返回白名单索引/范围/哈希，不返回任意原文件正文/绝对路径。
+
+catalog格式为`{format:"history_catalog_v1",entries:[{report_id,paper_id,evidence:{path,sha256}}]}`。每条evidence文件为`history_evidence_v1`结构化封套：paper_id、original:{path,sha256}真实原报告、historical_verdict、observed_output_revision|null、source_scope:[{file_id,role,source_sha256,reading_pdf_sha256,pages,locator}]、limitations、attempt_links。未知版本/范围不能由当前计数补齐；封套由服务端核准目录提供，不是客户端自报可信状态。结构化原报告若显式paper_id/verdict/observed_output_revision与封套冲突则拒绝；原文件实际存在及hash一致也只验证文件字节，不独立验证科学含义。
+
+报告始终区分historical_verdict_as_reported与current_acceptance=not_granted；版本为version_unknown/stale/current_version_match_only/current_version_scope_unknown，范围unknown/stale/partial_declared/full_declared。全页声明仍不证明对象穷尽，旧报告accepted不自动变成当前有效accepted。正式独立review/freeze/同账号grant仍延后、不在本接口激活或绕过。没有新登记不否定已有图表、章节或科学结论。
+
+POST同路径`/preview`和PUT同路径，均会话+Origin+CSRF/有限JSON；预检只读不占ID。body仅`request_id,expected_revision,expected_binding,report_id,expected_report_sha256,kind,note`；expected_binding复用stage checks，expected_revision来自本历史索引。kind为report_index或attempt_supersession；后者还给old_job_id/new_job_id，必须同篇稳定身份、new记录较新，且受控报告attempt_links精确包含二者job/run/attempt身份。只形成工作选择的替代声明，不证明原生停止，也不解除占用。一般人工note不能作为native证明。
+
+PUT仅追加history_reconciliation_recorded专用AuditLog，保留原WorkflowJob/回执/科学表；没有新表或迁移。Paper锁下CAS；同ID原体同actor重放原回执，异体/actor或版本冲突409；非法引用422。重放回执是as_recorded，不代表当前freshness。`GET .../records/{record_id}`定点读原登记/绑定及当前freshness。来源、科学输出、计划、具体报告证据或引用job版本变更使相应登记stale；metadata自身不进入科学revision。历史列表分页有界、续页必须携expected_revision，缺/旧pin409，不混合版本。
+
+旧失败核对复用原mutation receipt/event及value.conflict.correction_requests/source_corrections；不接受客户端proof。缺row_id时只从原回执results或同item_index真实事件取唯一canonical row；字段、原身份、同篇来源、原alias唯一性、时间和当前合法输出均须成立。重复alias、身份漂移、跨篇/断链/先后不明/缺审计仍待核实。当前值原字符/分析数值、精度、单位、missing/type及原来源校验不放宽。值CAS要求能从真实导入事件独立重算expected_revision并重建原请求指纹；原协议缺少多次CAS之间完整时间/冲突快照时不猜历史版本。来源CAS可核对完整before/after、连续expected_revision、原指纹和当前实体，也支持有合法值CAS锚点的新来源随后更正。原回执保留；识别恢复仅表示当前字段与后续真实写入证据对应，不等于科学验收。尚无法对应的旧失败继续待人工核实，不改科学值或靠计数清空。
+
+
+历史原报告字段合同 `report_level_aliases_v1`：只识别顶层 `paper_id`、`paper.paper_id`、`paper.id` 这三个稳定UUID身份路径，以及顶层 `observed_output_revision/output_revision/revision` 科学修订别名。存在多个身份或版本时须互相一致且与本篇/封套一致；矛盾拒绝。顶层 `scientific_verdict/extraction_verdict/verdict/decision` 为支持的整篇结论路径，仅有限词表按大小写归族（accepted/PASS、accepted_partial、PASS_WITH_LIMITATIONS、partial、needs_fix、needs_review、failed/rejected等分开保留）。多个字段/封套结论须同族，partial/limited不能改叫accepted。返回的historical_verdict_as_reported为原报告实际原值，不是封套替换值。
+
+`status` 只有明确format/record_type/report_type等于 `scientific_review_v1|article_acceptance_v1|independent_scientific_review` 才可作为支持的整篇科学结论。无该标识的status=partial等仅约束保守冲突，不可单独证明科学结论；running/queued/completed/done/success等一般任务状态绝不推导科学通过。不泛搜嵌套checks/results/fresh_db_readback/子项的通过或版本来确定整篇。真实已核形状ROOT_ARTICLE_ACCEPTANCE使用paper_id/revision/extraction_verdict；B050类REVIEW使用paper.paper_id/verdict但缺科学revision时仍version_unknown，不能从其子项读回填补。
+
+缺原报告稳定身份、未知结构/结论、数组、MD/TXT等只保留 `semantic_basis=operator_declaration_only`。字节/hash仍可核对并登记索引，但原报告科学结论与版本不由封套补齐：`historical_verdict_as_reported=null/historical_output_revision=null/comparison=version_unknown`，封套值仅放 `operator_declared_verdict/operator_declared_output_revision`；页面明确“仅操作者声明，原报告语义未机器确认”。支持身份/结论但缺原版本时仍version_unknown。source_scope的basis始终是操作者范围声明与当前文件身份核对，不声称已解析原报告范围或证明科学正确。
+
+旧错误恢复还要求全部已提供row_id、row_index、row_key与原结果/同项事件及该行有证据的历史/当前别名一致；不得通过row_id交集丢弃矛盾候选，或以别名全局唯一替代“属于同一行”。旧results无显式row_index时，仅原one-result-per-submitted-row计数合同允许位置索引，或用原同项事件/明确身份；缺依据、错误index或跨行key继续待核实。有原审计锚点的合法旧alias仍可对应，不凭当前同名猜行。
