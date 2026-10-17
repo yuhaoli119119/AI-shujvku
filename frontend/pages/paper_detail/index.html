@@ -586,6 +586,8 @@
               <button class="btn btn-ghost btn-sm" type="button" onclick="loadCoveragePlan()">查看原文覆盖清单</button>
               <div id="pdStoredQuality" aria-live="polite"></div>
               <div id="pdCoveragePlan" aria-live="polite"></div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('source_scope')">查看分段提取与检查记录</button>
+              <div id="pdStagedChecks" aria-live="polite"></div>
             </details>
           </div>
           <div class="pd-actions">
@@ -2842,6 +2844,8 @@
       closeFigureLightbox(); closeDftEditDialog();
       if (document.getElementById('pdCoverageOutputDialog').open) document.getElementById('pdCoverageOutputDialog').close();
       document.getElementById('pdCoveragePlan').textContent = '';
+      document.getElementById('pdStagedChecks').textContent = '';
+      stagedChecksRead++;
       document.getElementById('pdStoredQuality').textContent = '';
       state.paper = null; state.rebuildGridViews={}; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
       state.fullDetailLoaded = false; state.fullDetailPromise = null;
@@ -2972,6 +2976,57 @@
       } catch (_) {
         if (currentDetailIs(paperId,generation)) area.textContent = '清单或输出已变化，或读取失败；请从第一页重新核对，暂不判断完整。';
       }
+    }
+    let stagedChecksRead = 0;
+    const stagedLabels = {source_scope:'来源范围',coverage:'原文清单',extract:'提取与补项',reconcile:'结果核对',handoff:'交接准备'};
+    function stagedChecksHtml(result) {
+      const findings = {source_files_missing:'缺少来源文件',main_source_not_registered:'正文文件尚未登记',source_material_unverified:'来源文件待核实',
+        coverage_plan_missing:'尚无原文对象清单',coverage_scope_unknown:'原文范围待核实',coverage_items_missing:'清单项待处理或待核实',coverage_items_empty:'清单尚无对象',
+        coverage_check_stale:'清单结果对应已过期',stored_integrity_needs_review:'已有结果的来源或结构待核实',current_output_receipt_unverified:'当前输出尚无可核实的导入对应',
+        no_current_scientific_output:'尚无可核实的科学输出',import_partial_or_recovery_unresolved:'部分导入或恢复仍未解决',write_result_unknown:'导入结果未知',
+        check_references_invalid:'核对声明含无效引用，请更正',quality_check_truncated:'检查问题过多，尚未核对完',current_scoped_check_missing:'缺少当前有效的明确范围核对记录',review_scope_incomplete:'核对声明范围不全',review_items_not_all_declared:'清单项尚未全部核对'};
+      const nav = Object.entries(stagedLabels).map(([key,label]) => `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${key}')">${label}</button>`).join(' ');
+      const rows = (result.items||[]).map(item => {
+        if (item.code) return `<li>${esc(findings[item.code]||'待核实事项')}：${esc(item.count)}</li>`;
+        if (item.file_id && item.physical_pages !== undefined) return `<li>${esc(item.role==='main'?'正文':'补充材料')} · ${esc(item.original_filename||'来源文件')} · ${esc(item.physical_pages)} 物理页 · ${esc(item.status==='verified'?'物理文件已核实':'物理文件待核实')}</li>`;
+        if (item.receipt_id) return `<li>导入结果：${esc(({succeeded:'回执无报错，仍须核对实际输出',partial:'部分写入，待恢复',rejected:'已拒绝，待处理'})[item.outcome]||'待核实')} · 失败项 ${esc(item.errors_total ?? '未知')}`+
+          (/^[0-9a-f-]{36}$/.test(item.receipt_id)?`<button class="btn btn-ghost btn-sm" type="button" onclick="openImportReceipt('${item.receipt_id}')">只读查看回执失败项</button>`:'')+`<details><summary>回执定位</summary>${esc(item.receipt_id)} · ${esc(item.request_id)}</details></li>`;
+        return `<li>${esc(item.title||item.item_key)} · ${esc(({extracted:'已对应，未科学验收',pending:'待处理',unknown:'待核实',not_reported:'原文未报告',not_applicable:'不适用'})[item.effective_state]||'待核实')} · 物理页 ${esc((item.source?.pages||[]).join(', '))}</li>`;
+      }).join('');
+      const checks=(result.latest_checks||[]).map(item => `<li>${esc(stagedLabels[item.stage]||'核对')} · ${item.freshness==='current'?'绑定版本仍有效':'已过期，请重新核对'} · 声明 ${esc(item.review_scope.files)} 文件 / ${esc(item.review_scope.items)} 清单项 · ${esc(item.actor)}<details><summary>核对定位</summary>${esc(item.id)} · ${esc(item.created_at)}</details></li>`).join('');
+      const revision=/^[0-9a-f]{64}$/.test(result.revision||'')?result.revision:'';
+      const stage=Object.hasOwn(stagedLabels,result.stage)?result.stage:'source_scope';
+      const view=result.view==='receipts'?'receipts':'items';
+      return nav+`<h4>${esc(stagedLabels[stage])}</h4><p>${esc(result.advice_zh||'只读查看当前范围和待办。')}</p><p>程序检查与原文科学声明分别记录；不代表全篇提取完成或科学验收通过。已有科学结论不因缺少新记录被否定。</p>`+
+        `<ul>${rows||'<li>本页没有条目；不能据此判断完整。</li>'}</ul><p>本页 ${esc((result.items||[]).length)} / 共 ${esc(result.total)} 条</p>`+
+        (result.has_more&&revision?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('${stage}',${Number(result.next_offset)},'${revision}','${view}')">下一页阶段条目</button>`:'')+
+        (stage==='extract'?`<button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('extract',0,'','receipts')">查看真实导入回执</button>`:'')+
+        `<h4>最近范围声明与核对</h4><ul>${checks||'<li>尚无此类记录，原有接口可继续使用。</li>'}</ul><details><summary>版本与定位</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(result.binding,null,2))}</pre></details>`;
+    }
+    async function loadStagedChecks(stage='source_scope',offset=0,revision='',view='items') {
+      const paperId=state.paperId,generation=state.detailGeneration,read=++stagedChecksRead;
+      const area=document.getElementById('pdStagedChecks');area.textContent='正在只读核对阶段范围…';
+      try {
+        const query=new URLSearchParams({stage,view,offset:String(offset),limit:'25'});if(revision)query.set('expected_revision',revision);
+        const result=await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/staged-work-package?${query}`);
+        if(currentDetailIs(paperId,generation)&&read===stagedChecksRead)area.innerHTML=stagedChecksHtml(result);
+      } catch (_) {
+        if(currentDetailIs(paperId,generation)&&read===stagedChecksRead)area.textContent='来源、计划或输出已变化，或读取失败；请从当前阶段第一页重新核对，暂不判断完整。';
+      }
+    }
+    async function openImportReceipt(id,offset=0,revision='') {
+      const paperId=state.paperId,generation=state.detailGeneration,read=++coverageOutputRead;
+      const dialog=document.getElementById('pdCoverageOutputDialog'),area=document.getElementById('pdCoverageOutputContent');
+      area.textContent='正在只读读取原导入回执…';if(!dialog.open)dialog.showModal();
+      try {
+        const result=await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/extraction-import-receipts/${encodeURIComponent(id)}?limit=25&offset=${offset}${revision?'&expected_revision='+encodeURIComponent(revision):''}`);
+        if(!currentDetailIs(paperId,generation)||read!==coverageOutputRead)return;
+        const pin=/^[0-9a-f]{64}$/.test(result.revision||'')?result.revision:'';
+        area.innerHTML='<h3>原导入回执的失败项</h3><p>这是当时的回执；是否已恢复须核对当前输出及后续回执。没有失败项也不代表全篇完成或科学验收通过。</p>'+
+          `<p>共 ${esc(result.errors_total)} 项失败，本页 ${esc((result.errors||[]).length)} 项。</p>`+
+          `<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(JSON.stringify(result.errors||[],null,2))}</pre>`+
+          (result.has_more&&pin?`<button class="btn btn-ghost btn-sm" type="button" onclick="openImportReceipt('${id}',${Number(result.next_offset)},'${pin}')">下一页回执失败项</button>`:'');
+      } catch (_) {if(currentDetailIs(paperId,generation)&&read===coverageOutputRead)area.textContent='回执读取失败或版本已变化，请重新核对；暂不判断导入是否完成。';}
     }
     let coverageOutputRead = 0;
     function coverageOutputHtml(result) {

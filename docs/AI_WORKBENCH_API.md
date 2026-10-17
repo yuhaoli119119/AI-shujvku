@@ -195,3 +195,38 @@ row项只表示在声明来源文件、全部声明物理页及origin范围内�
 quality的 `file_extraction_coverage_unknown` 属于“正式验收范围声明”，与本阶段“原文清单范围声明”分开。新计划全页声明不清除此unknown，不创建或更改freeze/review；页面分别说明，不要求为了清除此提示重新提取。coverage_plan.summary只反映原文清单，formal acceptance逻辑/状态保持原样。
 
 row/value的匹配来源还必须同时属于该value、该row和该paper；不能借parent row错配的来源证明row已对应。
+
+## 分段工作包与范围检查记录（不自动执行）
+
+`GET /api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25` 需正常会话，REPEATABLE READ READ ONLY。阶段为来源 `source_scope`、清单 `coverage`、补项 `extract`、核对 `reconcile`、交接 `handoff`；是只读索引与建议，不是执行器、队列或科学验收。默认只返回相关合同引用、版本、有限条目和最近每阶段一条检查摘要。原文和完整结果由已有修订绑定端点读取，索引不会把截断原文冒充证据。`extract&view=receipts` 分页读取正式导入回执头；要读写入合同可分别用 `view=rows_contract|table_contract|section_contract`，一次只返回已有的一类合同。章节继续仅由DS执行。
+
+跟随 `next_page` 到 `has_more=false`；offset>0必须携 `expected_revision`。pin包含阶段/视图、来源/输出、计划generation+revision、科学导入/章节事件及回执、检查版本和同篇未知声明台账；旧pin或缺pin为409。从头重读，不混合版本。所有计数只说明所列范围，不证明源对象全量。来源阶段仍复用既有输出快照，因此不宣称数据库计算只读文件索引或生产性能提升。
+
+`GET .../extraction-checks` 返回当前binding、check_revision和最近每阶段检查；`GET .../extraction-checks/{record_id}` 定点读取完整原声明、绑定、原assessment及当前freshness。没有检查记录的旧文献仍可使用原API，未知状态不否定既有科学结论。任何历史assessment均标为 `assessment_as_recorded`，先看freshness；stale不能沿用，原请求重放也不是当前状态证明。
+
+`POST .../extraction-checks/preview` 与 `PUT .../extraction-checks` 同一请求，均需正常会话+Origin+CSRF及有限JSON。preview为只读，不占ID。PUT仅追加一条 `staged_extraction_check_recorded` AuditLog；无表迁移，无WorkflowJob/科学实体/状态/正式验收修改。Paper锁下CAS绑定当前来源、输出、计划和真实回执；`expected_check_revision`还防检查记录并发覆盖。同ID/原提供字段/actor原样重放原回执，异体或异actor409；伪造actor为422。
+
+请求结构（值从上述GET读取，不编造SHA）：
+
+```json
+{
+  "request_id":"persist-before-send-unique-id",
+  "stage":"reconcile",
+  "expected_check_revision":null,
+  "expected_binding":{
+    "output_revision":"64hex", "source_revision":"64hex", "receipt_revision":"64hex",
+    "plan_revision":null, "plan_generation":null, "known_unknown_revision":"64hex"
+  },
+  "source_scope":[{"file_id":"uuid","source_sha256":"64hex","reading_pdf_sha256":"64hex","pages":[1,2],"locator":"实际核对范围"}],
+  "item_keys":["实际计划item_key"], "receipt_ids":["实际本篇导入回执uuid"],
+  "unknown_requests":[], "review_statement":"实际原文核查范围和仍有的限制"
+}
+```
+
+跨篇文件/回执、错误SHA/页/清单key、空白声明拒绝且不写。合法但范围不全可以保存为checkpoint，不能得到可交接建议。检查声明的原PDF科学语义始终 `not_independently_verified`，即使程序关联检查无阻碍，也只表示当前明确范围可携交接复核，始终 `scientific_acceptance=not_implied`。GET还要求同actor当前有效的reconcile/handoff明确范围记录，不能用空问题列表自动得出交接建议。正式验收范围unknown单独显示，不要求为此启动freeze/review。
+
+真实证明取自同篇正式receipt及其event_ids，并把事件after与当前row/value/source/asset逐字段比对；旧成功回执不能证明后来输出。章节复用既有不可变来源事件与回执校验。历史无对应审计/不支持的旧修正保留待核实，不补造审计、不否定原结论。partial需读回实际失败项，字段级失败仅在后来成功回执证明当前合法值时解除；不能定位的整行/资产拒绝、身份或冲突仍保守待核实，本功能不新增恢复执行。
+
+未知请求须保存原operation、request_id、原 `run_audited` 指纹、reason。指纹是原已验证model的 `model_dump(mode='json',exclude_unset=True)` 加当时task_id形成 `{body,task_id}`，使用原服务相同json.dumps(sort_keys=True,ensure_ascii=False,allow_nan=False)默认分隔符后SHA256，不能拿元数据请求哈希替代。**原体必须先持久化**；无法重建原指纹时保留待人工核实，不另造新请求冒充恢复。台账按原actor/operation/id/指纹保存；不能省略或换账号隐去同篇未知，只由匹配真实回执确认结果，partial仍单独核对。不把HTTP200、模型一句完成、计数或空errors视为全部成功。
+
+回执头还给出原complete、errors_total及只读errors_endpoint。`GET .../extraction-import-receipts/{receipt_id}?limit=25` 只读读取同篇正式回执的原失败项；每页最多100项，续页必须携本回执revision，缺/旧pin为409。原outcome/complete均显式标为as_recorded，不声称当前恢复。无失败项不代表全篇完成。详情页复用已有只读弹窗查看失败项及续页，无写表单。

@@ -214,7 +214,7 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             "unreported_fields": "not_required_without_source_evidence", "scientific_acceptance": "not_implied", "read_only": True}
 
 
-def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100):
+def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100, coverage_plan_report=None):
     """One paginated checklist across integrity, tables and known coverage gaps.
 
     Reuse the caller's table snapshot. No extra table/PDF representation scan,
@@ -259,7 +259,7 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
                            "file_id": file["file_id"], "action": "Formal acceptance coverage is unknown/partial and separate from the extraction plan declaration. This stage does not activate freeze/review; do not re-extract science merely to clear this issue.",
                            "action_zh": "正式验收范围声明与原文清单范围声明分别记录；清单声明全页不代表科学验收通过，无需因此重复提取已有结果。"})
     from app.services.extraction_coverage import report as coverage_report
-    plan = coverage_report(session, paper_id, snapshot, limit=None)
+    plan = coverage_plan_report if coverage_plan_report is not None else coverage_report(session, paper_id, snapshot, limit=None)
     if plan['legacy_without_plan']:
         issues.append({'severity':'unknown', 'code':'coverage_plan_missing', 'kind':'coverage_plan', 'id':str(paper_id),
                        'action_zh':'尚无原文对象与材料条件清单。请先阅读正文和SI，声明实际对象和已核查范围；不能用已有结果数量反推全篇完整。'})
@@ -298,7 +298,8 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
 
 def producer_contract():
     from app.services.extraction_coverage import contract as coverage_contract
-    return {"version": VERSION, "drafts_allowed": True, "coverage_plan":coverage_contract(),
+    from app.services.staged_extraction import contract as staged_contract
+    return {"version": VERSION, "drafts_allowed": True, "coverage_plan":coverage_contract(), "staged_checks":staged_contract(),
             "row_import": {"preflight_endpoint": "/api/rebuild/rows/import/preflight", "import_endpoint": "/api/rebuild/rows/import",
                            "preflight": "Same body/auth/CSRF as import; rolled-back simulation, no receipt/IDs/reservation. Revalidates current source/identity/conflicts. State can change afterwards.",
                            "result": "Check complete/outcome/summary and every errors row_index/row_key/field_index; HTTP200 is not all-success. Pending/conflict may already be persisted.",

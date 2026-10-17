@@ -136,13 +136,13 @@ def _build_prompt(
 - 如果有 SI PDF，也在工作包中列出。
 
 ## 工作包地址（分段读取，不把首包当全量）
-GET {origin}{work_package_url}?view=compact
-先读totals/files/producer_contract/table_write_contract/section_write_contract/quality_endpoint。
-按pages的rows/assets/sections/legacy_tables续读至has_more=false，output_revision须一致；409后重新只读收集，不混修订。
+GET {origin}/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25
+先按stage_index和当前contract_refs读有限包及单类合同；必要时读{work_package_url}?view=compact的pages索引。
+rows/assets/sections/legacy_tables续读至has_more=false，output_revision须一致；409后重新只读收集，不混修订。
 保留已存正确legacy markdown；view=full仍需分页。按file/physical page复用text-pages/render-page缓存，章节原文不截断。
 
-## 原文覆盖清单
-按producer_contract.coverage_plan分页读清单→核实原PDF/SI→预检/保存声明。仅列明确对象/材料条件，精确链接输出，只补缺项；不从计数反推全篇、不造组合。原表/性质行、图像/章节分别核对。未报告附核查范围和方法，未知不猜；stale须重核，计划不是accepted，不启动任务。
+## 分段提取与检查
+按producer_contract.staged_checks从来源→清单→补项→核对→交接；只读相关合同/缺项，核实原PDF/SI后显式保存范围与绑定。仅列原文明确对象/材料条件并精确链接输出，不造组合；图/表/章节分别核对。未报告附范围/方法，未知不猜；核对实际回执及输出，partial/unknown先恢复。stale重核，模型完成/计数/空errors不等于成功；元数据不代表全篇或科学通过，不启动任务。
 
 ## 写入口（有界小批，逐项核对回执）
 1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import

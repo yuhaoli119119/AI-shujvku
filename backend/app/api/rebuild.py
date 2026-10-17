@@ -88,8 +88,8 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached", "coverage_linked_output_not_found"} else (
-        409 if str(exc) in {"work_package_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached", "coverage_linked_output_not_found", "stage_import_receipt_not_found"} else (
+        409 if str(exc) in {"work_package_revision_changed", "stage_request_id_reused", "stage_check_revision_changed", "stage_binding_changed", "stage_page_revision_required", "stage_page_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -701,6 +701,108 @@ async def write_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
         receipt, report = save_plan(session, paper_id, payload, current_snapshot(session, paper_id, force_physical=True)[0], actor=auth.username)
         if receipt is None:
             raise HTTPException(status_code=422, detail={'code':'coverage_plan_invalid', 'errors':report['errors']})
+        session.commit()
+        return receipt
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+from app.schemas.staged_extraction import Stage, StageCheckRequest
+
+
+def _stage_context(session, paper_id, actor, *, force=False):
+    from app.services.rebuild_acceptance import current_snapshot
+    from app.services.staged_extraction import context
+    _required_paper(session, paper_id)
+    return context(session, paper_id, current_snapshot(session, paper_id, force_physical=force)[0], actor)
+
+
+@router.get("/papers/{paper_id}/staged-work-package")
+async def read_staged_package(paper_id: UUID, stage: Stage = "source_scope",
+    view: Literal["items", "receipts", "rows_contract", "table_contract", "section_contract"] = "items", offset: int = Query(0, ge=0), limit: int = Query(25, ge=1, le=100),
+    expected_revision: str | None = Query(None, pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.staged_extraction import package
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        return package(session, paper_id, _stage_context(session,paper_id,auth.username), stage,view,offset,limit,expected_revision)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/extraction-import-receipts/{receipt_id}")
+async def read_extraction_import_receipt(paper_id: UUID, receipt_id: UUID,
+    offset: int = Query(0, ge=0), limit: int = Query(25, ge=1, le=100),
+    expected_revision: str | None = Query(None, pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.staged_extraction import receipt_errors
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session,paper_id)
+        return receipt_errors(session,paper_id,receipt_id,offset=offset,limit=limit,expected_revision=expected_revision)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/extraction-checks")
+async def read_extraction_checks(paper_id: UUID,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.staged_extraction import record_summary, contract
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        ctx=_stage_context(session,paper_id,auth.username)
+        return {"paper_id":str(paper_id),"binding":ctx['binding'],"check_revision":ctx['check_revision'],
+                "records":[record_summary(e,ctx) for e in ctx['records']],"contract":contract(paper_id),
+                "read_only":True,"scientific_acceptance":"not_implied"}
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/extraction-checks/{record_id}")
+async def read_extraction_check(paper_id: UUID, record_id: UUID,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.db.models import AuditLog
+    from app.services.staged_extraction import record_summary, EVENT, VERSION
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        ctx=_stage_context(session,paper_id,auth.username)
+        record=session.scalar(select(AuditLog).where(AuditLog.id==record_id,AuditLog.paper_id==paper_id,AuditLog.action==EVENT,AuditLog.source==VERSION))
+        if not record:raise HTTPException(404,detail="stage_check_not_found")
+        return record_summary(record,ctx,full=True)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/papers/{paper_id}/extraction-checks/preview")
+async def preview_extraction_check(paper_id: UUID, payload: StageCheckRequest,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.staged_extraction import assess
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        ctx=_stage_context(session,paper_id,auth.username)
+        if payload.expected_check_revision!=ctx['check_revision']:raise RebuildWorkflowError('stage_check_revision_changed')
+        if payload.expected_binding.model_dump(mode='json')!=ctx['binding']:raise RebuildWorkflowError('stage_binding_changed')
+        body=payload.model_dump(mode='json')
+        assessment,binding=assess(session,paper_id,ctx,source_scope=body['source_scope'],item_keys=body['item_keys'],
+            receipt_ids=body['receipt_ids'],unknown_requests=body['unknown_requests'],statement=body['review_statement'])
+        return {"assessment":assessment,"binding_if_saved":binding,"read_only":True,"scientific_acceptance":"not_implied"}
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.put("/papers/{paper_id}/extraction-checks")
+async def write_extraction_check(paper_id: UUID, payload: StageCheckRequest,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.staged_extraction import save_check
+    from app.services.rebuild_acceptance import _locked_paper
+    try:
+        _locked_paper(session,paper_id)
+        receipt,assessment=save_check(session,paper_id,payload,_stage_context(session,paper_id,auth.username,force=True),auth.username)
+        if receipt is None:raise HTTPException(422,detail={"code":"stage_check_references_invalid","errors":assessment['reference_errors']})
         session.commit()
         return receipt
     except RebuildWorkflowError as exc:
