@@ -583,7 +583,9 @@
             <details><summary>检查已存结果缺项（只读）</summary>
               <p class="muted">检查已保存的来源和格式，不代表全文提取或科学验收通过。</p>
               <button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality()">读取缺项清单</button>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCoveragePlan()">查看原文覆盖清单</button>
               <div id="pdStoredQuality" aria-live="polite"></div>
+              <div id="pdCoveragePlan" aria-live="polite"></div>
             </details>
           </div>
           <div class="pd-actions">
@@ -732,6 +734,10 @@
       </div>
       <button class="pd-lightbox-close" onclick="closeFigureLightbox(event)" title="关闭 (ESC)">✕</button>
     </div>
+  <dialog id="pdCoverageOutputDialog" style="width:min(900px,94vw);max-height:85vh;overflow:auto;border:1px solid var(--color-border);border-radius:12px;padding:24px">
+    <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('pdCoverageOutputDialog').close()">关闭只读详情</button>
+    <div id="pdCoverageOutputContent" aria-live="polite"></div>
+  </dialog>
   <script>
     const API_BASE = "/api/papers";
     const DFT_RESULTS_PAGE_SIZE = 100;
@@ -2834,6 +2840,9 @@
     async function loadPaperData() {
       const paperId = state.paperId, generation = ++state.detailGeneration;
       closeFigureLightbox(); closeDftEditDialog();
+      if (document.getElementById('pdCoverageOutputDialog').open) document.getElementById('pdCoverageOutputDialog').close();
+      document.getElementById('pdCoveragePlan').textContent = '';
+      document.getElementById('pdStoredQuality').textContent = '';
       state.paper = null; state.rebuildGridViews={}; state.defaultDataTabApplied=false; state.rebuildFamilyIds=[paperId];
       state.fullDetailLoaded = false; state.fullDetailPromise = null;
       state.dftResultsPromise = null; state.dftResultsError = null;
@@ -2896,25 +2905,99 @@
         section_source_or_record_changed:'章节原文与来源记录不一致',nonfinite_numeric_value:'数值不是有限数',
         estimate_basis_missing:'估计或推导依据缺失',duplicate_row_alias:'数据行别名存在歧义',
         table_representation_incomplete:'表格表示待结构化或来源待核实',
-        file_extraction_coverage_unknown:'正文/SI 提取覆盖范围未知或部分完成',
+        coverage_plan_missing:'尚无原文对象清单',coverage_plan_scope_unknown:'清单范围尚未声明完整',
+        coverage_plan_item_missing:'具体清单项待处理或待核实',coverage_plan_check_stale:'清单结果对应已过期',
+        file_extraction_coverage_unknown:'正式验收范围声明未知或部分完成',
         legacy_section_file_scope_unknown:'历史章节的文件覆盖范围未知',source_file_size_mismatch:'原文件大小与登记不一致'};
       const counts = Object.entries(result.counts || {}).map(([key,value]) => `${esc(severity[key] || key)} ${esc(value)}`).join(' · ');
       const tables = (result.table_completeness || []).filter(item => !item.complete);
       const revision = /^[0-9a-f]{64}$/.test(result.output_revision || '') ? result.output_revision : '';
-      return `<p>${counts || '已存关联检查未发现错误'}；${esc(result.issues_total)} 项。表格表示待补 ${tables.length} 项。全文覆盖仍须逐文件、逐物理页核对。</p>` +
-        '<ul>' + (result.issues || []).map(item => `<li>${esc(severity[item.severity] || item.severity)} · ${esc(names[item.code] || item.code)} · ${esc(item.kind)} ${esc(item.id)}${item.file_id ? ' · file '+esc(item.file_id) : ''}${item.page ? ' · 第 '+esc(item.page)+' 页' : ''}<br>${esc(item.action_zh || '请打开对应原文件，核对所列对象与物理页；保留原值和冲突，仅按已核实证据修正。')}</li>`).join('') + '</ul>' +
+      const coverageRevision = /^[0-9a-f]{64}$/.test(result.quality_revision || '') ? result.quality_revision : '';
+      return `<p>${counts || '已存关联检查未发现错误'}；${esc(result.issues_total)} 项。表格表示待补 ${tables.length} 项。全文覆盖仍须逐文件、逐物理页核对。原文清单范围与正式验收范围分开；本阶段不启用正式验收。</p>` +
+        '<ul>' + (result.issues || []).map(item => `<li>${esc(severity[item.severity] || item.severity)} · ${esc(names[item.code] || item.code)} · ${esc(item.title || item.kind)} ${esc(item.id)}${item.file_id ? ' · file '+esc(item.file_id) : ''}${item.page ? ' · 第 '+esc(item.page)+' 页' : ''}<br>${esc(item.action_zh || '请打开对应原文件，核对所列对象与物理页；保留原值和冲突，仅按已核实证据修正。')}</li>`).join('') + '</ul>' +
         (tables.length ? '<ul>'+tables.map(item=>`<li>表格待结构化或来源待核实 · ${esc(item.asset_id || item.legacy_id)} · file ${esc(item.file_id || '未知')} · 物理页 ${esc((item.physical_pages || []).join(', ') || '未知')} · ${esc(item.reason)}。请依据原文补充正式表格表示与同文件来源，不能猜测行列。</li>`).join('')+'</ul>' : '') +
-        (result.has_more && revision && Number.isSafeInteger(result.next_offset) && result.next_offset >= 0 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality(${result.next_offset},'${revision}')">下一页缺项</button>` : '');
+        (result.has_more && revision && Number.isSafeInteger(result.next_offset) && result.next_offset >= 0 ? `<button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality(${result.next_offset},'${revision}','${coverageRevision}')">下一页缺项</button>` : '');
     }
-    async function loadStoredQuality(offset = 0, revision = '') {
+    async function loadStoredQuality(offset = 0, revision = '', coverageRevision = '') {
       const paperId = state.paperId, generation = state.detailGeneration;
       const area = document.getElementById('pdStoredQuality'); if (!area) return;
       area.textContent = '正在只读检查已存结果…';
       try {
-        const result = await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/quality?limit=50&offset=${offset}${revision ? '&expected_revision='+encodeURIComponent(revision) : ''}`);
+        const result = await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/quality?limit=50&offset=${offset}${revision ? '&expected_revision='+encodeURIComponent(revision) : ''}${coverageRevision ? '&expected_coverage_revision='+encodeURIComponent(coverageRevision) : ''}`);
         if (currentDetailIs(paperId,generation)) area.innerHTML = storedQualityHtml(result);
       } catch (_) {
         if (currentDetailIs(paperId,generation)) area.textContent = '结果已变化或检查失败；请从第一页重新读取，暂不判断完整。';
+      }
+    }
+    function coveragePlanHtml(result) {
+      if (result.legacy_without_plan) return '<p>尚无原文对象清单，覆盖范围未知。请先依据正文与补充材料声明对象和材料条件，已有数据数量不能证明没有遗漏。</p>';
+      const labels = {pending:'未处理',extracted:'已有提取对应',not_reported:'核查范围内原文未报告',unknown:'未知',not_applicable:'不适用'};
+      const counts = Object.entries(result.summary.counts || {}).map(([key,value]) => `${esc(labels[key] || key)} ${esc(value)}`).join(' · ');
+      const revision = /^[0-9a-f]{64}$/.test(result.revision || '') ? result.revision : '';
+      return `<p>声明 ${esc(result.summary.total)} 项：${counts}。核对过期 ${esc(result.summary.stale_items)} 项。清单是依据原文作出的声明，不代表全篇无遗漏或科学验收通过。</p>` +
+        '<p>本阶段原文清单范围声明（不等于正式验收范围）</p><ul>' + result.summary.files.map(file => `<li>${esc(file.original_filename)} · 已声明物理页 ${esc(file.declared_pages.join(', ') || '无')}；未声明页 ${esc(file.undeclared_pages.join(', ') || (file.status === 'unknown' ? '范围待核实' : '无'))}</li>`).join('') + '</ul>' +
+        '<ul>' + result.items.map(item => `<li><strong>${esc(item.title)}</strong>（${esc(item.item_key)}）· ${esc(item.freshness === 'stale' ? '对应核对已过期，须重核' : labels[item.effective_state])} · 物理页 ${esc(item.source.pages.join(', '))}<br>${esc(item.source.locator)}${item.reason ? '；'+esc(item.reason.detail) : ''}${item.link && revision && /^[A-Za-z0-9_.:-]{1,160}$/.test(item.item_key) ? `<br><button class="btn btn-ghost btn-sm" type="button" onclick="openCoverageOutput('${item.item_key}','${revision}')">只读查看对应结果</button>` : ''}</li>`).join('') + '</ul>' +
+        (result.has_more && revision ? `<button class="btn btn-ghost btn-sm" type="button" onclick="loadCoveragePlan(${Number(result.next_offset)},'${revision}')">下一页清单</button>` : '');
+    }
+    async function loadCoveragePlan(offset = 0, revision = '') {
+      const paperId = state.paperId, generation = state.detailGeneration;
+      const area = document.getElementById('pdCoveragePlan'); if (!area) return;
+      area.textContent = '正在只读核对原文清单与对应结果…';
+      try {
+        const result = await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/coverage-plan?limit=50&offset=${offset}${revision ? '&expected_revision='+encodeURIComponent(revision) : ''}`);
+        if (currentDetailIs(paperId,generation)) area.innerHTML = coveragePlanHtml(result);
+      } catch (_) {
+        if (currentDetailIs(paperId,generation)) area.textContent = '清单或输出已变化，或读取失败；请从第一页重新核对，暂不判断完整。';
+      }
+    }
+    let coverageOutputRead = 0;
+    function coverageOutputHtml(result) {
+      const output = result.output || {};
+      const source = result.source || {};
+      const entry = (label,value) => `<p><strong>${esc(label)}</strong>：${esc(value == null ? '未知' : value)}</p>`;
+      const pre = value => `<pre style="white-space:pre-wrap;overflow-wrap:anywhere">${esc(value)}</pre>`;
+      const sourceHtml = (item,selected=false) => '<li>' + (selected ? '<strong>本计划关联来源</strong> · ' : '') +
+        `来源 ID ${esc(item.id)} · 文件 ${esc(item.file_id || '未知')} · 物理页 ${esc(item.page_number ?? '未知')} · ${esc(item.label || '')}` +
+        (item.table_row != null ? ` · 表行 ${esc(item.table_row)} / 列 ${esc(item.table_column ?? '未知')}（从0计）` : '') +
+        (item.quote ? pre(item.quote) : '') + (item.estimate_basis ? entry('估读/派生依据',item.estimate_basis) : '') + '</li>';
+      const valueHtml = value => `<li><strong>${esc(value.field_name)}</strong> · 值 ID ${esc(value.id)} · ${esc(value.raw_value ?? value.missing_reason ?? '未知')} ${esc(value.unit || '')} · ${esc(value.value_type)}` +
+        (value.conflict?.status && value.conflict.status !== 'evidence_history' ? entry('当前冲突状态',value.conflict.status) : '') +
+        '<ul>' + (value.sources || []).map(item => sourceHtml(item,item.id === result.link?.source_id)).join('') + '</ul></li>';
+      let body = `<p>只读对应详情，不修改任何结果。${result.freshness === 'stale' ? '核对已过期，请依据当前原文重新核实。' : '已有对应不代表科学验收通过。'}</p>`;
+      body += entry('清单项',`${result.title}（${result.item_key}）`) + entry('计划来源',`${result.file?.original_filename || source.file_id} · 物理页 ${(source.pages || []).join(', ')}`) + entry('原文位置',source.locator);
+      if (source.quote) body += pre(source.quote);
+      if (result.file) body += `<p><a href="/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview#page=${Number(source.pages[0])}" target="_blank" rel="noopener">查看对应原文件</a></p>`;
+      if ((result.problems || []).length) body += '<p>当前对应仍有来源或结构问题，请先回看原文与对应结果；不能据此判定完成。</p>';
+      if (output.row) {
+        body += entry('数据行 ID',output.row.id) + entry('行键',output.row.row_key) + entry('材料',output.row.material) + entry('条件',JSON.stringify(output.row.condition || {}));
+        body += '<ul>' + (output.value ? [output.value] : output.row.values || []).map(valueHtml).join('') + '</ul>';
+      }
+      if (output.asset) {
+        const asset = output.asset;
+        body += entry('图表 ID',asset.id) + entry('图表标识',asset.asset_key) + entry('图表标签',[asset.figure_label,asset.subfigure_label].filter(Boolean).join(' ')) + entry('图表物理页',(asset.page_numbers || []).join(', '));
+        if (output.image_endpoint) body += `<img style="max-width:100%;height:auto" src="/api/rebuild/assets/${encodeURIComponent(asset.id)}" alt="对应原图">`;
+        const table = asset.table_content;
+        if (table?.format === 'structured') body += '<table class="table"><thead><tr>' + table.data.columns.map(cell=>`<th>${esc(cell)}</th>`).join('') + '</tr></thead><tbody>' + table.data.rows.map(row=>'<tr>'+row.map(cell=>`<td>${esc(cell ?? '')}</td>`).join('')+'</tr>').join('')+'</tbody></table>';
+        else if (table?.text) body += pre(table.text);
+        body += '<ul>' + (table?.sources || []).map(item=>`<li>文件 ${esc(item.file_id)} · 物理页 ${esc(item.page_number)} · ${esc(item.locator)}${item.quote ? pre(item.quote) : ''}</li>`).join('') + '</ul>';
+        if (asset.explanation) body += entry('已有解读',asset.explanation);
+      }
+      if (output.section) {
+        body += entry('章节 ID',output.section.id) + entry('原文章节',output.section.section_title) + pre(output.section.text);
+        body += '<ul>' + (output.section_source?.section?.sources || []).map(item=>`<li>物理页 ${esc(item.page_number)} · ${esc(item.locator)}${item.quote ? pre(item.quote) : ''}</li>`).join('') + '</ul>';
+      }
+      return body;
+    }
+    async function openCoverageOutput(itemKey,revision) {
+      const paperId = state.paperId, generation = state.detailGeneration, read = ++coverageOutputRead;
+      const dialog = document.getElementById('pdCoverageOutputDialog'), area = document.getElementById('pdCoverageOutputContent');
+      area.textContent = '正在只读读取精确对应结果…';
+      if (!dialog.open) dialog.showModal();
+      try {
+        const result = await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/coverage-plan/items/${encodeURIComponent(itemKey)}/output?expected_revision=${encodeURIComponent(revision)}`);
+        if (currentDetailIs(paperId,generation) && read === coverageOutputRead && dialog.open) area.innerHTML = coverageOutputHtml(result);
+      } catch (_) {
+        if (currentDetailIs(paperId,generation) && read === coverageOutputRead && dialog.open) area.textContent = '对应结果或清单已变化，或读取失败；请重新读取清单后再打开，暂不判断完整。';
       }
     }
     async function ensureFullDetail(tab) {

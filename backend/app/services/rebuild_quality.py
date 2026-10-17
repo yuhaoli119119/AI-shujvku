@@ -253,11 +253,28 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
         complete = bool(valid and len(set(pages)) == total)
         coverage_summary.append({"file_id": file["file_id"], "role": file["role"], "physical_pages": total,
                                  "status": "declared_full_not_independently_accepted" if complete else "unknown_or_partial",
-                                 "declared_covered_pages": pages if valid else [], "scientific_acceptance": "not_implied"})
+                                 "declared_covered_pages": pages if valid else [], "scope_kind":"formal_acceptance_declaration", "scientific_acceptance": "not_implied"})
         if not complete:
             issues.append({"severity": "unknown", "code": "file_extraction_coverage_unknown", "kind": "file", "id": file["file_id"],
-                           "file_id": file["file_id"], "action": "Read all registered main/SI physical pages and record honest covered/remaining scope; stored counts cannot prove full extraction.",
-                           "action_zh": "本文件尚无当前修订绑定的完整物理页覆盖声明；正文和 SI 须逐页核对并说明剩余范围，已有图表或数据计数不能代替全文覆盖。"})
+                           "file_id": file["file_id"], "action": "Formal acceptance coverage is unknown/partial and separate from the extraction plan declaration. This stage does not activate freeze/review; do not re-extract science merely to clear this issue.",
+                           "action_zh": "正式验收范围声明尚未完整（本阶段未接入），与本阶段原文清单范围声明分开。新计划声明全页也不自动成为 freeze/review；请继续核实具体清单缺项并保留正式验收未知，不要为清除此提示重复提取或重写旧结果。"})
+    from app.services.extraction_coverage import report as coverage_report
+    plan = coverage_report(session, paper_id, snapshot, limit=None)
+    if plan['legacy_without_plan']:
+        issues.append({'severity':'unknown', 'code':'coverage_plan_missing', 'kind':'coverage_plan', 'id':str(paper_id),
+                       'action_zh':'尚无原文对象与材料条件清单。请先阅读正文和SI，声明实际对象和已核查范围；不能用已有结果数量反推全篇完整。'})
+    for scope in plan['summary']['files']:
+        if scope['status']=='unknown':
+            issues.append({'severity':'unknown', 'code':'coverage_plan_scope_unknown', 'kind':'coverage_plan', 'id':scope['file_id'],
+                           'file_id':scope['file_id'], 'action_zh':'本文件仍有未声明或无法核实的物理页范围；请只读核对原文后补范围声明，不据文本层为空断言无数据。'})
+    for item in plan['items']:
+        if item['effective_state'] in {'pending','unknown'}:
+            issues.append({'severity':'unknown', 'code':'coverage_plan_check_stale' if item['freshness']=='stale' else 'coverage_plan_item_missing',
+                           'kind':item['kind'], 'id':item['item_key'], 'file_id':item['source']['file_id'],
+                           'title':item['title'], 'declared_state':item['state'], 'effective_state':item['effective_state'],
+                           'reason':item['reason'], 'problems':item['problems'],
+                           'action_zh':('对应结果或原文件已变化，请读回当前输出并重新核对本项，不能沿用旧提取完成声明。' if item['freshness']=='stale' else
+                                        '请核对原文中本对象及材料条件，仅补所列缺项；原文未报告、未知与不适用须分别注明依据，图像或表格缺项不能用章节文字抵消。')})
     actions = {"physical_page_out_of_range": "核对该文件的真实物理页数，按原始证据修正对应来源页；不要自动换到邻页。",
                "source_asset_file_mismatch": "核对图表实际所属 PDF，来源与图表应绑定同一文件；保留冲突，不能借用另一文件。",
                "missing_value_reason_or_payload_invalid": "原文未报告项保持 missing，并填写真实 missing_reason；不要补造数值。",
@@ -270,7 +287,9 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
     return {**result, "status": status, "counts": counts, "issues_total": len(issues), "issues": issues[offset:offset + limit],
             "offset": offset, "limit": limit, "has_more": offset + limit < len(issues),
             "next_offset": offset + limit if offset + limit < len(issues) else None,
-            "output_revision": snapshot["revision"], "table_completeness": tables,
+            "output_revision": snapshot["revision"], "quality_revision": plan['revision'],
+            "coverage_plan": {key:plan[key] for key in ('plan_revision','revision','summary','legacy_without_plan','checked_output_revision','next_page')},
+            "table_completeness": tables,
             "dimensions": {"stored_integrity": graph_counts, "table_representation": {"total": len(tables), "incomplete": len(pending)},
                            "section_file_scope": {"total": result["section_scope"]["stored_sections"], "legacy_unknown": len(result["section_scope"]["legacy_section_ids"])},
                            "file_extraction_coverage": coverage_summary},
@@ -278,7 +297,8 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
 
 
 def producer_contract():
-    return {"version": VERSION, "drafts_allowed": True,
+    from app.services.extraction_coverage import contract as coverage_contract
+    return {"version": VERSION, "drafts_allowed": True, "coverage_plan":coverage_contract(),
             "row_import": {"preflight_endpoint": "/api/rebuild/rows/import/preflight", "import_endpoint": "/api/rebuild/rows/import",
                            "preflight": "Same body/auth/CSRF as import; rolled-back simulation, no receipt/IDs/reservation. Revalidates current source/identity/conflicts. State can change afterwards.",
                            "result": "Check complete/outcome/summary and every errors row_index/row_key/field_index; HTTP200 is not all-success. Pending/conflict may already be persisted.",

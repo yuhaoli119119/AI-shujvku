@@ -163,3 +163,35 @@ HTTP 200 仅表示批次处理并提交完成，不表示全部导入成功。�
 
 
 前端未知结果保护（2026-10-18 补充）：已有未知提交查回时，401/403/409/422 等拒绝只说明本次查回未成功，不能证明之前未写入；此时仍阻止改体/新 ID。只有收到与原请求 ID、论文、行数和逐行结果相匹配的完整审计回执才解除保护；2xx 但 JSON 解析失败、缺少 complete/results 或回执身份/计数不符，一律继续标未知。初次请求明确的事务前 4xx 拒绝按已知拒绝处理。`unknownImportBody` **仅为当前页面内存保护**，不提供刷新或跨会话持久锁；原请求完整文本和 request_id 必须由用户/AI 自行保存，不能依赖刷新后保护仍在。保留原体原 ID 查回规则，不新增凭据存储或服务端恢复状态。
+
+
+### 原文对象/材料条件覆盖计划（2026-10-18；实际可用版本以发布回执为准）
+
+本功能只声明预期对象与具体结果对应，不调度步骤、不启用队列或正式科学验收，不修改已有科学输出。原始完整表格和科研性质数据行是不同计划项，章节已读不能替代图像处理。不得从计数、关键词搜索、read-cache库存、已有结果或模型一句“完成”反推完整原文清单；仅声明原PDF明确存在的材料/构型/位点/条件组合，不造笛卡尔积。
+
+`GET /api/rebuild/papers/{paper_id}/coverage-plan?limit=50` 正常会话只读，按稳定item_key排序。`summary`总计始终来自全清单；items分页，跟随next_page直到has_more=false，每页固定revision（包含plan版本和当前output_revision）。计划/输出变化续页409，从头读。无计划旧文献legacy_without_plan=true、scope未知，不会自动回填。quality增加覆盖计划缺项/范围未知/结果核对过期；quality续页同时传expected_revision（科学输出）和expected_coverage_revision（quality_revision，含计划版本）。compact工作包仅公布有界端点和producer_contract.coverage_plan，不重复塞完整清单。
+
+`POST .../coverage-plan/preview` 和 `PUT .../coverage-plan` 请求相同，均需会话+Origin+CSRF及有限JSON。preview只读不占ID/不写审计；PUT仅追加extraction_coverage_plan_saved专用AuditLog事件。全文替换声明，旧事件保留：`request_id`、`expected_plan_revision`（初次null）、`expected_output_revision`、`files`、`items`。同ID同体同演员重放原回执；改体/演员、旧CAS或旧output修订409且不写。原请求/演员/哈希与计划版本均审计，无DDL/WorkflowJob/科学实体写入。计划metadata不进入科学output_revision，避免自失效；结果对应核对另外绑定checked_output_revision。后续文件/输出/条件变化使旧对应stale/unknown，必须按当前版本原文重核后显式保存，不能沿用“已提取”冒充accepted。
+
+files每项为`file_id, source_sha256, reading_pdf_sha256, declared_pages, scope_note`。哈希/物理页从现有工作包/file_inventory核实；PDF阅读页用原PDF，DOCX只接受已存在阅读PDF，不生成预览。未列文件/未声明页和未登记SI保持未知。item引用这些文件声明继承原始/阅读SHA，不重复制原文库存。
+
+items每项：`item_key,title,kind,source,identity,condition,field_name?,label?,subfigure_label?,expected_columns?,origin,state,reason?,link?`。kind为row/value/table/figure/subfigure/section。source为`file_id,pages,locator,quote?,table_row?,table_column?`，跨页表只能同文件多物理页。identity仅声明明确的行身份字段（material等），condition是明确条件的子集；只作原样比较，不猜同义词。value须field_name；row/value须material。稳定item_key不能换成不同材料/条件/文件/种类，另一个对象用新key，历史变更可审计。
+
+state为pending/extracted/not_reported/unknown/not_applicable。所有非extracted项必须reason=`{code,detail,checked_pages?,method?}`；not_reported还必须有覆盖本对象source.pages的checked_pages与核查方法method，不要求原文有“不报告”的句子；不能因无链接自动转成not_reported。未知不填0，不适用写真实理由。origin为reported/estimated/derived/image_pending，图像待处理不能报extracted。
+
+extracted必须精确link：value需row_id/value_id/source_id，可带canonical row_key；row需row_id（有匹配本文件页的已存科学值与来源）；table/figure/subfigure需asset_id，可带asset_key；section需section_id及可核对的章节导入来源。程序检查同paper/file/pages、值所属行/field、明确material/condition与表坐标、资产类型/标签。table复用正式表表示及来源核验，声明expected_columns时须结构化列完全一致；图/子图须实际图像和解读，材料条件特定图的material_mapping须原样匹配。section只能证明章节来源，不能作为材料条件性质值的替代。不能重复借同一个值/图等填满不同项。错误extracted预检valid=false，PUT422拒绝整份metadata；不会自动修输出。
+
+`declared_items_accounted_for`只表示这份明确声明中的项目已对应或已有未报告/不适用说明；始终scientific_acceptance=not_implied。页范围声明齐全也不能证明源对象全量或科学正确。旧文章不自动生成清单；保存计划不等于科学验收通过。
+
+覆盖计划续页offset>0必须传expected_revision；已有计划时quality续页还必须传expected_coverage_revision，缺少返回400，旧pin返回409。计划GET同时返回原files声明、当前核查scope与declaration审计信息；原请求指纹保留实际提供字段（默认字段显式补入也视为改体），规范JSON哈希不对任意condition键作脱敏后再计算，避免不同请求哈希碰撞。输出修订变化使旧extracted/not_reported/not_applicable核对过期；pending仍待处理。row/value的reported/estimated/derived与实际值类型分别核对，图表/章节本体的extracted仅支持reported；图像数值估读请作为单独value项声明，不以图片存在代替估读事实。
+
+覆盖计划缺项不会在本阶段自动改写或撤销既有正式科学验收回执；两套状态分离，不能把计划对应通过当作accepted，也不能借既有accepted掩盖新清单中的具体未处理项。
+
+
+第二阶段初审补正：清单“只读查看对应结果”使用 `GET .../coverage-plan/items/{item_key}/output?expected_revision={清单revision}`，正常会话、只读事务，按计划中的精确row/value/source/asset/section ID定点取对象，不依赖数据表首页、不无限翻页、不打开身份编辑。详情返回当前实际ID、原值/表正文/章节原文与来源；清单/输出旧pin为409，缺对象404。该接口复用既有序列化和核对，只读详情不执行任何科学修改。
+
+row项只表示在声明来源文件、全部声明物理页及origin范围内有至少一个合法匹配事实，不声称整行性质齐全；与value项共用原值/数值/来源规则及未裁决冲突检查。冲突/非法数值不能证明row已对应，但另一个真正合法的匹配事实可以；具体字段仍应分别声明value项。稳定item_key约束跨全部历史版本有效：从新版本移除声明并不删除历史，也不释放key；相同身份可重新声明，换文件/材料/条件/种类等必须新key。历史核查一次批量投影身份字段，不按item逐次查询，不创建科学DDL或回填旧数据。
+
+quality的 `file_extraction_coverage_unknown` 属于“正式验收范围声明”，与本阶段“原文清单范围声明”分开。新计划全页声明不清除此unknown，不创建或更改freeze/review；页面分别说明，不要求为了清除此提示重新提取。coverage_plan.summary只反映原文清单，formal acceptance逻辑/状态保持原样。
+
+row/value的匹配来源还必须同时属于该value、该row和该paper；不能借parent row错配的来源证明row已对应。

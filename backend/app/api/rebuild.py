@@ -88,8 +88,8 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
-    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached"} else (
-        409 if str(exc) in {"work_package_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
+    status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached", "coverage_linked_output_not_found"} else (
+        409 if str(exc) in {"work_package_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -585,6 +585,7 @@ async def rebuild_ai_work_package(
                 "asset_crop": "/api/rebuild/papers/{paper_id}/assets/crop",
                 "data_rows": "/api/rebuild/rows/import",
                 "data_rows_preflight": "/api/rebuild/rows/import/preflight",
+                "coverage_plan": f"/api/rebuild/papers/{paper_id}/coverage-plan",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
                 "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
@@ -615,6 +616,7 @@ async def rebuild_ai_work_package(
 async def rebuild_quality_report(
     paper_id: UUID,
     offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=200),
+    expected_coverage_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
     expected_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
     session: Session = Depends(get_db_session),
     _auth: SessionState = Depends(_require_work_package_session),
@@ -627,9 +629,86 @@ async def rebuild_quality_report(
         snapshot = current_snapshot(session, paper_id)[0]
         if expected_revision is not None and snapshot["revision"] != expected_revision:
             raise RebuildWorkflowError("work_package_revision_changed")
-        return quality_report(session, paper_id, get_settings(), snapshot, offset=offset, limit=limit)
+        result = quality_report(session, paper_id, get_settings(), snapshot, offset=offset, limit=limit)
+        if offset and result['coverage_plan']['plan_revision'] is not None and expected_coverage_revision is None:
+            raise RebuildWorkflowError('coverage_read_revision_required')
+        if expected_coverage_revision is not None and result['quality_revision'] != expected_coverage_revision:
+            raise RebuildWorkflowError('coverage_read_revision_changed')
+        return result
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
+
+
+from app.schemas.extraction_coverage import CoveragePlanRequest
+
+
+@router.get("/papers/{paper_id}/coverage-plan")
+async def read_coverage_plan(paper_id: UUID,
+    offset: int = Query(default=0, ge=0), limit: int = Query(default=50, ge=1, le=200),
+    expected_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.extraction_coverage import report
+    from app.services.rebuild_acceptance import current_snapshot
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session, paper_id)
+        return report(session, paper_id, current_snapshot(session, paper_id)[0], offset=offset, limit=limit,
+                      expected_revision=expected_revision)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.get("/papers/{paper_id}/coverage-plan/items/{item_key}/output")
+async def read_coverage_output(paper_id: UUID, item_key: str,
+    expected_revision: str = Query(pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.extraction_coverage import output_detail
+    from app.services.rebuild_acceptance import current_snapshot
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session,paper_id)
+        return output_detail(session,paper_id,current_snapshot(session,paper_id)[0],item_key,expected_revision)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.post("/papers/{paper_id}/coverage-plan/preview")
+async def preview_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.extraction_coverage import evaluate, latest
+    from app.services.rebuild_acceptance import current_snapshot
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session, paper_id)
+        snapshot = current_snapshot(session, paper_id)[0]; previous = latest(session, paper_id)
+        if payload.expected_plan_revision != (previous.payload['plan_revision'] if previous else None):
+            raise RebuildWorkflowError('coverage_plan_revision_changed')
+        if payload.expected_output_revision != snapshot['revision']:
+            raise RebuildWorkflowError('coverage_output_revision_changed')
+        plan = payload.model_dump(mode='json')
+        return evaluate(session, paper_id, plan, snapshot, previous=previous.payload['plan'] if previous else None)
+    except RebuildWorkflowError as exc:
+        raise _http_error(exc) from exc
+
+
+@router.put("/papers/{paper_id}/coverage-plan")
+async def write_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.extraction_coverage import save_plan
+    from app.services.rebuild_acceptance import current_snapshot, _locked_paper
+    try:
+        _locked_paper(session, paper_id)
+        receipt, report = save_plan(session, paper_id, payload, current_snapshot(session, paper_id, force_physical=True)[0], actor=auth.username)
+        if receipt is None:
+            raise HTTPException(status_code=422, detail={'code':'coverage_plan_invalid', 'errors':report['errors']})
+        session.commit()
+        return receipt
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.post("/papers/{paper_id}/files")

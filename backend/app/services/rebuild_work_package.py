@@ -94,6 +94,7 @@ def compact_package(session, paper_id, snapshot):
             "output_revision": revision, "totals": totals, "files": [serialize_file(file) for file in files],
             "pages": {name: endpoint(paper_id, view=name, rows_limit=50, rows_offset=0, expected_revision=revision) for name in totals},
             "quality_endpoint": f"/api/rebuild/papers/{paper_id}/quality?expected_revision={revision}",
+            "coverage_plan_endpoint": f"/api/rebuild/papers/{paper_id}/coverage-plan?limit=50",
             "templates_endpoint": "/api/rebuild/templates",
             "read_endpoints": {"text_pages": "/api/rebuild/files/{file_id}/text-pages?offset=0&limit=5",
                                "render_page": "/api/rebuild/files/{file_id}/render-page?page=1&dpi=120",

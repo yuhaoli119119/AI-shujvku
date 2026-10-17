@@ -137,20 +137,21 @@ def _build_prompt(
 
 ## 工作包地址（分段读取，不把首包当全量）
 GET {origin}{work_package_url}?view=compact
-先读 totals、files、producer_contract、table_write_contract、section_write_contract 与 quality_endpoint。
-再按 pages 的 rows/assets/sections/legacy_tables 链接有界读取，直到各自 has_more=false；所有分页须保持相同 output_revision。
-已存正确的 legacy markdown 先读取并按来源核对，不重写、不把已存正文误当缺失。
-409 表示来源/结果已变化，重新开始只读分页，不混合修订；如需旧完整格式可用 view=full，但首包仍不代表所有行。
-图片按具体 file/physical page 使用 text-pages/render-page 缓存，不反复下载所有图片；章节分页保留完整原文，禁止截断证据。
+先读totals/files/producer_contract/table_write_contract/section_write_contract/quality_endpoint。
+按pages的rows/assets/sections/legacy_tables续读至has_more=false，output_revision须一致；409后重新只读收集，不混修订。
+保留已存正确legacy markdown；view=full仍需分页。按file/physical page复用text-pages/render-page缓存，章节原文不截断。
+
+## 原文覆盖清单
+按producer_contract.coverage_plan分页读清单→核实原PDF/SI→预检/保存声明。仅列明确对象/材料条件，精确链接输出，只补缺项；不从计数反推全篇、不造组合。原表/性质行、图像/章节分别核对。未报告附核查范围和方法，未知不猜；stale须重核，计划不是accepted，不启动任务。
 
 ## 写入口（有界小批，逐项核对回执）
 1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import
 2. 图表裁图: POST {origin}/api/rebuild/papers/{paper_id}/assets/crop
 3. 数据行先预检查（不保存）: POST {origin}/api/rebuild/rows/import/preflight；实际写入: POST {origin}/api/rebuild/rows/import
 4. 章节写入: POST {origin}/api/rebuild/papers/{paper_id}/sections/import（工作台会话 + X-CSRF-Token；按 section_write_contract）
-预检查使用相同请求体、会话与 CSRF，模拟回滚而无回执/持久化 ID，不占 request_id；仅代表当时状态，正式导入重新校验。
-正式回执须检查 outcome/summary/complete/results/errors；pending/conflict 可能已经保存，不能当未执行。recovery 仅建议：先读回 canonical 行/完整 condition/来源，明确修正未保存失败项，以新 request_id 补交；冲突、身份待定和不确定身份须人工核实，不自动覆盖或重建行。未知写结果则严格原体原 request_id 查回。
-同篇 rows/import 最多200行，建议按同一来源分成较小批；request_id/task_id 和精确请求字节先保存，未知结果只重放同请求，逐项核对 complete/errors，不以整批HTTP200计完成。不要并行写同篇或扩大执行并发。
+预检查与导入同体/鉴权/CSRF，模拟回滚、不占ID，结果仅当时有效。正式回执逐项检查outcome/summary/complete/results/errors；pending/conflict可能已存。
+recovery仅建议：先读回canonical身份/完整condition/来源，明确修正失败项后新ID补交；冲突/待定/不确定身份须人工核实，不覆盖或重建。未知结果严格原体原request_id查回。
+同篇最多200行，按来源小批；保存精确请求字节/request_id/task_id，HTTP200非全成功，不并行写同篇或扩并发。
 
 ## 工作要求（严格遵守）
 1. **只处理 paper_id={paper_id} 这一篇论文**，不得跨论文合并来源。
