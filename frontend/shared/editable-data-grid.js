@@ -132,6 +132,28 @@
     const link = source.file_id ? `/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview${Number.isInteger(page) && page > 0 ? '#page=' + page : ''}` : '';
     return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${page > 0 ? 'PDF 第 ' + page + ' 页' : '页码未记录'}</div><blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
   }
+  // Match the backend's raw-number grammar without changing the stored text.
+  // Python str.strip()/regex whitespace includes NEL and excludes BOM.
+  const numericSpace = '[\\u0009-\\u000d\\u001c-\\u0020\\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+  const numericMantissa = '[+\\-−]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)';
+  const numericExponent = '[+\\-−]?[0-9]{1,6}';
+  const superscriptExponent = '[⁺⁻]?[⁰¹²³⁴⁵⁶⁷⁸⁹]{1,6}';
+  const numericTrim = new RegExp(`^${numericSpace}+|${numericSpace}+$`, 'g');
+  const decimalNotation = new RegExp(`^(${numericMantissa})(?:[eE](${numericExponent}))?$`);
+  const powerNotation = new RegExp(`^(?:(${numericMantissa})${numericSpace}*[×·]${numericSpace}*)?10(?:${numericSpace}*\\^${numericSpace}*(${numericExponent})|(${superscriptExponent}))$`);
+  const superscriptAscii = Object.fromEntries(Array.from('⁺⁻⁰¹²³⁴⁵⁶⁷⁸⁹', (glyph,index) => [glyph,'+-0123456789'[index]]));
+  function rawNumericProjection(raw) {
+    const text=String(raw).replace(numericTrim,'');
+    const match=decimalNotation.exec(text) || powerNotation.exec(text);
+    // JS $ may match before a final newline; require the entire input as Python does.
+    if(!match || match[0]!==text)return null;
+    const coefficient=(match[1] || '1').replace(/−/g,'-');
+    const exponent=(match[2] || (match[3] && Array.from(match[3],glyph=>superscriptAscii[glyph]).join('')) || '0').replace(/−/g,'-');
+    // Parse the full coefficient/exponent once: coefficient * 10**exponent would
+    // round twice and may underflow/overflow an otherwise representable value.
+    const number=Number(`${coefficient}e${exponent}`);
+    return Number.isFinite(number) && !(number===0 && /[1-9]/.test(coefficient)) ? number : null;
+  }
   async function editValue(row,value,options) {
     const panel = dialog(`${row.material} · ${options.templates?.common_fields?.find(f=>f.name===value.field_name)?.label || Object.values(options.templates?.reactions || {}).flatMap(t=>t.fields || []).find(f=>f.name===value.field_name)?.label || metricLabel(value.field_name)}`), body=panel.querySelector('[data-body]');
     body.textContent='正在读取来源…';
@@ -139,11 +161,11 @@
     try {files=(await api(`/api/rebuild/papers/${row.paper_id}/files`)).items;} catch(error) {body.textContent=`来源读取失败：${error.message}`; return;}
     const source = value.sources?.find(s => s.id === value.preferred_source_id) || value.sources?.[0] || {};
     const input = (name,label,v,type='text') => `<label>${label}<input name="${name}" type="${type}" ${type==='number' ? 'step="any"' : ''} value="${esc(v ?? '')}"></label>`;
-    body.innerHTML = `<div>${(value.sources || []).map(s => sourceHtml(s,files,row.paper_id,options.familyId)).join('') || '未保存来源'}</div><details><summary>修改历史与冲突</summary><pre>${esc(JSON.stringify(value.conflict || {},null,2))}</pre></details><form>${input('raw_value','原值（保留精度）',value.raw_value)}${input('numeric_value','数值（空白表示缺失）',value.numeric_value,'number')}${input('unit','单位',value.unit)}<label>值类型<select name="value_type">${['explicit','estimated','derived','missing'].map(t=>`<option value="${t}" ${t===value.value_type?'selected':''}>${({explicit:'原文明确值',estimated:'估读值',derived:'推导值',missing:'缺失'})[t]}</option>`).join('')}</select></label>${input('missing_reason','缺失原因',value.missing_reason)}${input('notes','备注',value.notes)}<label>来源文件<select name="file_id"><option value="">来源文件未标注</option>${files.map(f=>`<option value="${esc(f.id)}" ${f.id===source.file_id?'selected':''}>${displayRole(f,row.paper_id,options.familyId)==='si'?'SI':'正文'} · ${esc(f.original_filename)}</option>`).join('')}</select></label>${input('page_number','PDF 页码',source.page_number,'number')}${input('label','图表号／表号',source.label)}<label>原文引文<textarea name="quote">${esc(source.quote || '')}</textarea></label><label>修改理由<textarea name="correction_reason" required></textarea></label><button type="submit">保存修改</button><p data-status role="status"></p></form>`;
+    body.innerHTML = `<div>${(value.sources || []).map(s => sourceHtml(s,files,row.paper_id,options.familyId)).join('') || '未保存来源'}</div><details><summary>修改历史与冲突</summary><pre>${esc(JSON.stringify(value.conflict || {},null,2))}</pre></details><form>${input('raw_value','原值（保留精度）',value.raw_value)}${input('numeric_value','数值（无法确定时留空）',value.numeric_value,'number')}${input('unit','单位',value.unit)}<label>值类型<select name="value_type">${['explicit','estimated','derived','missing'].map(t=>`<option value="${t}" ${t===value.value_type?'selected':''}>${({explicit:'原文明确值',estimated:'估读值',derived:'推导值',missing:'缺失'})[t]}</option>`).join('')}</select></label>${input('missing_reason','缺失原因',value.missing_reason)}${input('notes','备注',value.notes)}<label>来源文件<select name="file_id"><option value="">来源文件未标注</option>${files.map(f=>`<option value="${esc(f.id)}" ${f.id===source.file_id?'selected':''}>${displayRole(f,row.paper_id,options.familyId)==='si'?'SI':'正文'} · ${esc(f.original_filename)}</option>`).join('')}</select></label>${input('page_number','PDF 页码',source.page_number,'number')}${input('label','图表号／表号',source.label)}<label>原文引文<textarea name="quote">${esc(source.quote || '')}</textarea></label><label>修改理由<textarea name="correction_reason" required></textarea></label><button type="submit">保存修改</button><p data-status role="status"></p></form>`;
     const form=body.querySelector('form'), status=form.querySelector('[data-status]'), key=`litai.value-correction.${value.id}`;
     const rawInput=form.elements.namedItem('raw_value'),numericInput=form.elements.namedItem('numeric_value');
     numericInput.readOnly=true;numericInput.setAttribute('aria-label','数值（由原值自动读取）');
-    rawInput.addEventListener('input',()=>{const raw=rawInput.value.trim();numericInput.value=/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(raw) && Number.isFinite(Number(raw)) ? String(Number(raw)) : '';});
+    rawInput.addEventListener('input',()=>{const number=rawNumericProjection(rawInput.value);numericInput.value=number===null ? '' : String(number);});
     const pending=sessionStorage.getItem(key);
     if(pending) {status.textContent='上次保存结果尚未确认。重试将先回读，并使用原请求。'; Array.from(form.elements).forEach(e=>{if(e.type!=='submit')e.disabled=true;});}
     form.onsubmit=async event=> {
