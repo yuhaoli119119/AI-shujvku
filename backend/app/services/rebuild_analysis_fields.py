@@ -5,8 +5,9 @@ scores and method parameters are deliberately not catalyst descriptors here.
 """
 from collections import defaultdict
 from math import isclose
+from copy import deepcopy
 
-from app.normalizers.chemistry_normalizer import canonicalize_adsorbate
+from app.normalizers.chemistry_normalizer import ADSORBATE_MAP, canonicalize_adsorbate
 
 
 # key, Chinese label, canonical unit, exact raw aliases
@@ -42,6 +43,20 @@ ALIASES = {alias: key for key, _, _, aliases in FIELDS for alias in (key, *alias
 PRESET_FIELDS = {'li2s_adsorption_energy', 'li2s_dissociation_barrier',
                  'li2s_bader_charge_transfer', 'li_s_bond_max', 'd_band_center', 'rds_delta_g'}
 
+# Explicit species requirements for dedicated variables, including canonical
+# names and their raw aliases. Unrecognized/missing objects are not conflicts.
+FIELD_SPECIES = {key: 'Li2S' for key in (
+    'li2s_adsorption_energy', 'li2s_dissociation_barrier', 'li2s_bader_charge_transfer',
+    'li2s_delithiation_barrier', 'li_s_bond_max', 'li1_s_bond_length', 'li2_s_bond_length')}
+FIELD_SPECIES.update({species.lower() + '_adsorption_energy': species
+                      for species in ('S8', 'Li2S8', 'Li2S6', 'Li2S4', 'Li2S2')})
+KNOWN_SPECIES = set(ADSORBATE_MAP.values()) - {'LiPS'}
+
+
+def declared_species(record):
+    text = record.get('adsorbate') or ''
+    return canonicalize_adsorbate(text.translate(str.maketrans('₀₁₂₃₄₅₆₇₈₉', '0123456789')))
+
 
 def source_ids(cell):
     return cell.get('source_record_ids') or [cell['record_id']]
@@ -53,6 +68,13 @@ def merge(cells, field):
     result['source_record_ids'] = list(dict.fromkeys(i for c in cells for i in source_ids(c)))
     result['raw_field_names'] = list(dict.fromkeys(c['field_name'] for c in cells))
     reason = next((c['exclusion_reason'] for c in cells if c['exclusion_reason']), None)
+    expected = FIELD_SPECIES.get(field)
+    if expected and any((actual := declared_species(c)) in KNOWN_SPECIES
+                        and actual != expected for c in cells):
+        reason = 'field_adsorbate_conflict'
+        # Keep every original candidate, reason, raw value and source, including
+        # conflicting aliases; this projection never modifies stored records.
+        result['raw_evidence'] = deepcopy(cells)
     unit = DEFINITIONS[field]['unit']
     if not reason and any(c['target']['normalized_unit'] != unit for c in cells):
         reason = 'incompatible_analysis_unit'
@@ -71,9 +93,9 @@ def project_rows(records):
         candidates = defaultdict(list)
         for record in row:
             raw = record['field_name']
-            species = canonicalize_adsorbate(record.get('adsorbate') or '')
+            species = declared_species(record)
             field = ALIASES.get(raw)
-            if raw in {'li1_s_bond_length_angstrom', 'li2_s_bond_length_angstrom'} and species != 'Li2S':
+            if raw in {'li1_s_bond_length_angstrom', 'li2_s_bond_length_angstrom'} and species not in KNOWN_SPECIES:
                 field = None
             # A known adsorbate gives one canonical variable, not both a
             # generic alias and its species-specific projection.

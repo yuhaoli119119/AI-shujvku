@@ -616,6 +616,8 @@ async def rebuild_ai_work_package(
 async def rebuild_quality_report(
     paper_id: UUID,
     offset: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=200),
+    include_asset_mechanics: bool = Query(default=False),
+    asset_offset: int = Query(default=0, ge=0), asset_limit: int = Query(default=32, ge=1, le=32),
     expected_coverage_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
     expected_revision: str | None = Query(default=None, pattern="^[0-9a-f]{64}$"),
     session: Session = Depends(get_db_session),
@@ -627,9 +629,13 @@ async def rebuild_quality_report(
         session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
         _required_paper(session, paper_id)
         snapshot = current_snapshot(session, paper_id)[0]
+        if include_asset_mechanics and asset_offset and expected_revision is None:
+            raise RebuildWorkflowError("work_package_revision_required")
         if expected_revision is not None and snapshot["revision"] != expected_revision:
             raise RebuildWorkflowError("work_package_revision_changed")
-        result = quality_report(session, paper_id, get_settings(), snapshot, offset=offset, limit=limit)
+        result = quality_report(session, paper_id, get_settings(), snapshot, offset=offset, limit=limit,
+                                include_asset_mechanics=include_asset_mechanics,
+                                asset_offset=asset_offset, asset_limit=asset_limit)
         if offset and result['coverage_plan']['plan_revision'] is not None and expected_coverage_revision is None:
             raise RebuildWorkflowError('coverage_read_revision_required')
         if expected_coverage_revision is not None and result['quality_revision'] != expected_coverage_revision:

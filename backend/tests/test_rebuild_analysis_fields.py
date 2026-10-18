@@ -102,3 +102,60 @@ def test_unclassified_adsorption_preserved_but_not_a_matrix_axis():
     assert 'adsorption_energy' not in {v['key'] for v in matrix['variables']}
     assert 'li2s_adsorption_energy' in {v['key'] for v in matrix['variables']}
     svc.session.commit.assert_not_called()
+
+
+@pytest.mark.parametrize('raw,field,unit', [
+    ('adsorption_energy_li2s_ev', 'li2s_adsorption_energy', 'eV'),
+    ('li2s_decomposition_barrier_ev', 'li2s_dissociation_barrier', 'eV'),
+    ('li2s_delithiation_barrier_ev', 'li2s_delithiation_barrier', 'eV'),
+    ('li2s_bader_charge_transfer', 'li2s_bader_charge_transfer', 'e'),
+    ('li1_s_bond_length_angstrom', 'li1_s_bond_length', 'Å'),
+    ('li_s_bond_max', 'li_s_bond_max', 'Å'),
+    ('adsorption_energy_s8_ev', 's8_adsorption_energy', 'eV'),
+    ('adsorption_energy_li2s8_ev', 'li2s8_adsorption_energy', 'eV'),
+    ('adsorption_energy_li2s6_ev', 'li2s6_adsorption_energy', 'eV'),
+    ('adsorption_energy_li2s4_ev', 'li2s4_adsorption_energy', 'eV'),
+    ('adsorption_energy_li2s2_ev', 'li2s2_adsorption_energy', 'eV'),
+])
+def test_dedicated_species_conflicts_excluded_with_original_evidence(raw, field, unit):
+    from copy import deepcopy
+    from app.services.rebuild_analysis_pairing import pair_rows
+    original = cell(raw, .5, adsorbate='CO2', unit=unit, reason='existing_conflict')
+    original.update(raw_value='0.500', sources=[{'quote': 'original', 'page_number': 3}])
+    before = deepcopy(original)
+    projected = project_rows([original])['one'][field]
+    assert not projected['exploratory_eligible']
+    assert projected['exclusion_reason'] == 'field_adsorbate_conflict'
+    assert projected['raw_evidence'] == [before]
+    assert projected['raw_field_names'] == [raw]
+    assert source_ids(projected) == [original['record_id']]
+    assert original == before
+    pairs, excluded, _, _ = pair_rows({'one': {field: projected}}, field, 'd_band_center')
+    assert pairs == [] and excluded[0][2] == 'field_adsorbate_conflict'
+
+
+@pytest.mark.parametrize('species', ['Li2S', '*Li2S', 'Li₂S*', None, 'unknown', 'LiPS'])
+def test_dedicated_field_consistent_or_unknown_does_not_invent_object(species):
+    original = cell('li2s_decomposition_barrier_ev', .5, adsorbate=species)
+    result = project_rows([original])['one']['li2s_dissociation_barrier']
+    assert result['exploratory_eligible'] and result['exclusion_reason'] is None
+    assert result['adsorbate'] == species
+
+
+def test_conflicting_species_aliases_preserve_all_raw_candidates():
+    a = cell('li2s_decomposition_barrier_ev', .5)
+    b = cell('li2s_dissociation_barrier_ev', .8, adsorbate='Li2S4')
+    result = project_rows([a, b])['one']['li2s_dissociation_barrier']
+    assert result['exclusion_reason'] == 'field_adsorbate_conflict'
+    assert result['raw_evidence'] == [a, b]
+    assert len(source_ids(result)) == 2
+
+
+def test_li2s_field_with_explicit_li2s4_is_excluded_and_generic_is_unchanged():
+    original = cell('adsorption_energy_li2s_ev', -2, adsorbate='Li2S4')
+    result = project_rows([original])['one']['li2s_adsorption_energy']
+    assert result['exclusion_reason'] == 'field_adsorbate_conflict'
+    assert result['raw_evidence'] == [original]
+    generic = cell('adsorption_energy_ev', -2, adsorbate='unresolved original object')
+    result = project_rows([generic])['one']['adsorption_energy']
+    assert result['exploratory_eligible'] and result['adsorbate'] == generic['adsorbate']

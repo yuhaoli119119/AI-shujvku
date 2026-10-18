@@ -163,7 +163,7 @@ recovery仅建议：先读回canonical身份/完整condition/来源，明确修�
 7. **缺失留空**：不要编造数据；缺失字段写 missing_reason 说明原因。
 8. **不同条件分行**：同一材料在不同测试条件下的数据应分成不同的数据行。
 9. **实验与 DFT 分开**：data_type 分别用 experimental 和 dft。
-10. **按反应模板填表**：SRR / HER / OER / ORR / CO2RR，每个反应的专属字段按模板填写。
+10. **按反应模板填表**：SRR / HER / OER / ORR / CO2RR，每个反应的专属字段按模板填写；读取 producer_contract.field_semantics（templates.field_semantics 同源）区分字段适用/不适用及未知项，允许合法自定义字段，不猜对象或步骤。
 11. **章节科学写入由 DS 任务负责**：非 DS 模型仅报告章节缺口交 DS，不填科学章节。DS 先读 sections / section_coverage，保留成熟章节，仅增未覆盖正文/SI。text 保存完整章节原文，explanation_zh 单独保存有依据的中文解读；绑定本篇 file_id、原文件 SHA256、真实物理页、每页原句和具体段落定位。DOCX 只能用已有派生 PDF 并给 exact SHA256，不冒充原生 PDF 页。保存请求字节与稳定 request_id、file-local section_key，未知写结果重放原请求；409时读回，不覆盖旧章节，证据确有冲突时新 key + conflicts_with_section_ids 保留双方。未报告项不猜；接口成功不代表独立科学验收。
 12. **表格统一输出**：按 table_write_contract 在 asset.provenance 保存 table_data（columns 字符串、rows 每格字符串或 null）或原文 table_markdown，并保存 table_sources 的同 file_id、实际 caption/body 物理页、locator。跨页如 S13 表题71/正文72须同时保留；精度、s/1.00s、缺失均原样。context_text 仅可读草稿，不能声称结构化已完成；不猜行列，不双写 paper_tables、不重解析旧文献。
 13. **先检查再报告完成**：读取 quality_endpoint 的 error/warning/unknown 与具体 file/页/对象修正指引。error 未解决、表格待结构化或来源不明则报告 partial；未报告项写诚实 missing_reason，不强加科学必填字段。已存计数、HTTP200、模型 completed 均不能证明全 PDF 完整或科学 accepted；不启用队列/独立验收授权。

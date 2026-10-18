@@ -79,6 +79,10 @@ writer 无进展按真实语义输出、经过验证的覆盖和回执变化判�
 
 `GET quality` 是已存结果检查，不执行原生任务、不写科学记录、不生成缺失科学内容。它批量检查 row/value/source/paper/file/asset 关联、首选来源、缺失理由、非有限数值、估计依据、图与子图归属、物理页与章节导入原文一致性，返回 error/warning/unknown。未知历史章节的文件范围另列，不要求补造历史审计或科学必填字段。全文/SI 完整覆盖仍须有真实物理页证据；页数、对象数、HTTP200 或模型 completed 都不能代替。
 
+2026-10-18 C4 存量图资产独立机械诊断（部署状态以发布回执为准，不代表正式科学验收）：`integrity_report` / `quality_report` 默认不请求新检查，始终在独立 `asset_mechanics` 返回 `not_requested` 与未查数量；原 status/counts/issues 只表示原有关系/来源完整性，不能解释成几何、图片或科学完整已验。正式验收原调用和gates不变。显式只读入口：`GET /api/rebuild/papers/{paper_id}/quality?include_asset_mechanics=true&asset_offset=0&asset_limit=32`；结果有自己的 status/counts/issues，坏例 errors、预算或未知格式 unknown，不混入原完整性/正式接受规则。按asset ID顺序检查指定切片（最多32条），返回 selected_asset_ids、前后/切片外未查数与 next_asset_offset；续查携带 `expected_revision=output_revision`，数据库变更拒绝混页，不提供跨请求物理文件快照保证。原 offset/limit 只分页旧问题，不能作为资产续查。UI暂未接入显式诊断，按 producer_contract 直接调用。
+
+机械诊断仅对明确 `units=normalized_page_fraction` 的 x0/y0/x1/y1 或 `regions[].bbox=[x0,y0,x1,y1]` 检查有限数、0..1边界和严格顺序；未知/历史单位和未识别格式 unknown，不转换。每bbox最多100个region。有image_path检查storage根、存在、可解码和正尺寸，区分越根、missing、corrupt与unknown；无图图像草稿unknown，纯文本表不要求图片/bbox，保存合同不变。每页最多32次图片尝试，每图16MiB/1600万像素，累计64MiB/3200万像素；超额、多帧或非PNG/JPEG/WEBP/TIFF/GIF/BMP为unknown。256项LRU绑定路径/dev/inode/size/mtime/ctime/像素余量，读中变化unknown。切片通过仅适用于列明资产，切片外及预算未查均未核实；没有全库通过或正式验收含义。既有全篇关联查询/源文件哈希与页数成本未改；无PDF渲染、目录遍历、重新裁图或科学写。坐标和尺寸有效不能证明轴/图例/图体完整，已知Figure 4d、SI Figure S2科学裁切坏例不能由此发现。
+
 已知错误或未核实来源使新冻结保持 partial，不能直接 accepted；warning 不自动裁决科学冲突。章节原文使用到的导入/边界更正来源事件也进入 manifest，避免来源事件变化不使冻结失效。旧验收记录不改写，读取时按当前依赖提示重新核验。质量清单可按修订分页，界面仅由用户主动读取，不新增轮询或任务。
 
 生产者须消费 producer_contract：图/子图同文件真实页，表格 table_data/table_markdown + table_sources（context_text仅草稿），章节按既有完整原文/独立解释/同文件哈希合同，值按精确身份与来源保存，未报告项诚实 missing_reason。统一输出只是机械合同，科学提取仍暂停；不自动转换历史 raw 表格、不双写 paper_tables、不扩大并发或接入队列/authority。

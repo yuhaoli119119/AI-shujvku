@@ -3,18 +3,171 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from functools import lru_cache
+import io
 import math
+import stat as stat_mode
+import warnings
 
 import fitz
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import or_, select
 
 from app.db.models import (RebuildDataRow, RebuildDataValue, RebuildValueSource,
                            RebuildVisualAsset, RebuildPaperFile, PaperSection, AuditLog)
 from app.services.rebuild_acceptance import hash_bound_file
 from app.services.rebuild_file_preview import _format, preview_cache_path
-from app.services.rebuild_workflow_service import RebuildWorkflowError, resolve_file_path
+from app.services.rebuild_workflow_service import RebuildWorkflowError, resolve_file_path, resolve_asset_image_path
 
 VERSION = "stored_output_quality_v1"
+
+# Per-report physical work is bounded separately from issue pagination. These
+# conservative limits leave large/late images unknown, never implicitly passed.
+IMAGE_CHECK_LIMIT = 32
+IMAGE_BYTE_LIMIT = 16 * 1024 * 1024
+IMAGE_TOTAL_BYTES = 64 * 1024 * 1024
+IMAGE_PIXEL_LIMIT = 16_000_000
+IMAGE_TOTAL_PIXELS = 32_000_000
+BBOX_REGION_LIMIT = 100
+
+
+def _bbox_check(bbox):
+    """Only the explicitly declared normalized contract is interpretable."""
+    if not isinstance(bbox, dict) or bbox.get("units") != "normalized_page_fraction":
+        return "unknown", "asset_bbox_unknown"
+    if "regions" in bbox:
+        regions = bbox["regions"]
+        if not isinstance(regions, list) or not regions:
+            return "unknown", "asset_bbox_unknown"
+        if len(regions) > BBOX_REGION_LIMIT:
+            return "unknown", "asset_bbox_budget_exceeded"
+    else:
+        regions = [bbox]
+    unknown = False
+    for region in regions:
+        if not isinstance(region, dict) or region.get("units", bbox["units"]) != bbox["units"]:
+            unknown = True
+            continue
+        coordinates = region.get("bbox") if "regions" in bbox else [region.get(key) for key in ("x0", "y0", "x1", "y1")]
+        if not isinstance(coordinates, (list, tuple)) or len(coordinates) != 4:
+            unknown = True
+            continue
+        if not all(type(value) in (int, float) for value in coordinates):
+            unknown = True
+            continue
+        # Avoid float conversion overflow for large JSON integers.
+        if not all(not isinstance(value, float) or math.isfinite(value) for value in coordinates):
+            return "error", "asset_bbox_nonfinite"
+        x0, y0, x1, y1 = coordinates
+        if not (0 <= x0 <= 1 and 0 <= x1 <= 1 and 0 <= y0 <= 1 and 0 <= y1 <= 1):
+            return "error", "asset_bbox_out_of_bounds"
+        if not (x0 < x1 and y0 < y1):
+            return "error", "asset_bbox_reversed_or_empty"
+    return ("unknown", "asset_bbox_unknown") if unknown else (None, None)
+
+
+@lru_cache(maxsize=256)
+def _image_at_stat(path, device, inode, size, mtime_ns, ctime_ns, pixel_allowance):
+    """Bounded raster decode; cache successes and failures by file identity."""
+    pixels = 0
+    try:
+        with open(path, "rb") as source:
+            encoded = source.read(min(size, IMAGE_BYTE_LIMIT) + 1)
+        if len(encoded) != size:
+            return "unknown", "asset_image_changed_during_check", 0
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(encoded)) as image:
+                # Only raster decoders; never invoke document/EPS rendering.
+                if image.format not in {"PNG", "JPEG", "WEBP", "TIFF", "GIF", "BMP"}:
+                    return "unknown", "asset_image_format_unknown", 0
+                width, height = image.size
+                if width <= 0 or height <= 0:
+                    return "error", "asset_image_dimensions_invalid", 0
+                pixels = width * height
+                if pixels > min(IMAGE_PIXEL_LIMIT, pixel_allowance):
+                    return "unknown", "asset_image_budget_exceeded", 0
+                # Multi-frame validation is not a bounded single raster check.
+                if getattr(image, "n_frames", 1) != 1:
+                    return "unknown", "asset_image_multiframe_unknown", 0
+                image.verify()
+            with Image.open(io.BytesIO(encoded)) as image:
+                image.load()
+        return None, None, pixels
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning):
+        return "unknown", "asset_image_budget_exceeded", 0
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError, EOFError):
+        return "error", "asset_image_corrupt", pixels
+
+
+def _asset_image_check(asset, settings, budget):
+    if not getattr(asset, "image_path", None):
+        return (None, None) if asset.asset_type == "table" else ("unknown", "asset_image_unknown")
+    if budget["checks"] >= IMAGE_CHECK_LIMIT:
+        return "unknown", "asset_image_budget_exceeded"
+    budget["checks"] += 1
+    try:
+        root = settings.storage_root.resolve()
+        candidate = (root / asset.image_path).resolve()
+        if not candidate.is_relative_to(root):
+            return "error", "asset_image_outside_storage_root"
+        path = resolve_asset_image_path(asset, settings)
+        current = path.stat()
+        if not stat_mode.S_ISREG(current.st_mode):
+            return "unknown", "asset_image_unavailable"
+        if current.st_size > IMAGE_BYTE_LIMIT or budget["bytes"] + current.st_size > IMAGE_TOTAL_BYTES:
+            return "unknown", "asset_image_budget_exceeded"
+        budget["bytes"] += current.st_size
+        severity, code, pixels = _image_at_stat(str(path), current.st_dev, current.st_ino,
+            current.st_size, current.st_mtime_ns, current.st_ctime_ns, IMAGE_TOTAL_PIXELS - budget["pixels"])
+        budget["pixels"] += pixels
+        after = path.stat()
+        if (current.st_dev, current.st_ino, current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            return "unknown", "asset_image_changed_during_check"
+        return severity, code
+    except RebuildWorkflowError:
+        return "error", "asset_image_missing"
+    except (OSError, ValueError, TypeError, RuntimeError):
+        return "unknown", "asset_image_unavailable"
+
+
+def _asset_mechanics(assets, settings, *, requested=False, offset=0, limit=32):
+    """Optional slice diagnostics, outside the established acceptance contract."""
+    if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= IMAGE_CHECK_LIMIT:
+        raise RebuildWorkflowError("asset_mechanics_range_invalid")
+    selected = assets[offset:offset + limit] if requested else []
+    budget = {"checks": 0, "bytes": 0, "pixels": 0}
+    issues = []
+    for asset in selected:
+        checks = []
+        bbox = getattr(asset, "bbox", None)
+        if bbox is not None or asset.asset_type != "table":
+            checks.append(_bbox_check(bbox))
+        checks.append(_asset_image_check(asset, settings, budget))
+        for severity, code in checks:
+            if code:
+                issues.append({"severity": severity, "code": code, "kind": "asset", "id": str(asset.id),
+                    "action": "Review original coordinates and the stored raster within storage root; preserve unknown units. Mechanical validity does not establish complete axes, legends or scientific content; do not recrop automatically."})
+    counts = dict(Counter(item["severity"] for item in issues))
+    end = min(offset + len(selected), len(assets)) if requested else 0
+    return {"requested": requested,
+        "status": ("not_requested" if not requested else "not_checked" if not selected else "errors" if counts.get("error") else
+                   "unknown" if counts.get("unknown") else "slice_checks_passed"),
+        "counts": counts, "issues": issues, "issues_total": len(issues),
+        "scope": {"ordering": "asset_id_ascending", "asset_total": len(assets),
+            "asset_offset": offset, "asset_limit": limit,
+            "selected_asset_ids": [str(asset.id) for asset in selected], "selected_count": len(selected),
+            "not_checked_outside_slice_count": len(assets) - len(selected),
+            "not_checked_before_count": min(offset, len(assets)) if requested else 0,
+            "not_checked_after_count": len(assets) - end,
+            "has_more": end < len(assets), "next_asset_offset": end if end < len(assets) else None,
+            "unverified_selected_asset_ids": sorted({item["id"] for item in issues}),
+            "image_attempts": budget["checks"], "image_attempt_limit": IMAGE_CHECK_LIMIT,
+            "image_byte_limit": IMAGE_BYTE_LIMIT, "image_total_byte_limit": IMAGE_TOTAL_BYTES,
+            "image_pixel_limit": IMAGE_PIXEL_LIMIT, "image_total_pixel_limit": IMAGE_TOTAL_PIXELS,
+            "bbox_region_limit": BBOX_REGION_LIMIT},
+        "scientific_visual_completeness": "not_checked", "formal_acceptance": "not_evaluated",
+        "summary_rule": "Optional diagnostics only for selected asset IDs. Not requested/outside-slice/budget-limited assets are unverified. Slice success and stored_checks_passed do not assert full asset mechanics, scientific completeness or formal acceptance."}
 
 
 @lru_cache(maxsize=512)
@@ -55,7 +208,8 @@ def file_inventory(files, settings, *, force=False):
     return result
 
 
-def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_states=None):
+def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_states=None,
+                     include_asset_mechanics=False, asset_offset=0, asset_limit=32):
     """Batch graph reads. Missing source knowledge stays unknown, not invented.
 
     Save endpoints still allow drafts. Errors block a completeness claim;
@@ -207,14 +361,17 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             "counts": counts, "issues_total": len(issues), "issues": issues if limit is None else issues[offset:offset + limit], "offset": offset, "limit": limit,
             "has_more": limit is not None and offset + limit < len(issues), "next_offset": offset + limit if limit is not None and offset + limit < len(issues) else None,
             "stored_counts": {"rows": len(rows), "values": len(values), "sources": len(sources), "assets": len(assets)},
-            "files": list(physical.values()), "full_pdf_completeness": "unknown_until_explicit_physical_page_coverage_and_independent_review",
+            "files": list(physical.values()), "asset_mechanics": _asset_mechanics(assets, settings,
+                requested=include_asset_mechanics, offset=asset_offset, limit=asset_limit),
+            "full_pdf_completeness": "unknown_until_explicit_physical_page_coverage_and_independent_review",
             "section_scope": {"stored_sections": len(sections), "legacy_without_file_provenance": len(legacy_sections),
                 "legacy_section_ids": legacy_sections, "file_page_evidence": [{"file_id": str(file_id), "stored_evidence_pages": sorted(pages)} for file_id, pages in section_pages.items()],
                 "rule": "Stored section evidence only; unknown legacy source coverage is not a new mandatory scientific field or proof that pages were fully extracted."},
             "unreported_fields": "not_required_without_source_evidence", "scientific_acceptance": "not_implied", "read_only": True}
 
 
-def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100, coverage_plan_report=None):
+def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100, coverage_plan_report=None,
+                   include_asset_mechanics=False, asset_offset=0, asset_limit=32):
     """One paginated checklist across integrity, tables and known coverage gaps.
 
     Reuse the caller's table snapshot. No extra table/PDF representation scan,
@@ -222,7 +379,8 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
     """
     from app.db.models import WorkflowJob
     from app.services.rebuild_acceptance import JOB_TYPE
-    result = integrity_report(session, paper_id, settings, limit=None, file_states=snapshot.get("file_reading_identity"))
+    result = integrity_report(session, paper_id, settings, limit=None, file_states=snapshot.get("file_reading_identity"),
+        include_asset_mechanics=include_asset_mechanics, asset_offset=asset_offset, asset_limit=asset_limit)
     graph_counts = result["counts"]
     issues = result["issues"]
     tables = snapshot.get("table_completeness", [])
@@ -297,9 +455,10 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
 
 
 def producer_contract():
+    from app.services.rebuild_field_semantics import field_semantics_contract
     from app.services.extraction_coverage import contract as coverage_contract
     from app.services.staged_extraction import contract as staged_contract
-    return {"version": VERSION, "drafts_allowed": True, "coverage_plan":coverage_contract(), "staged_checks":staged_contract(),
+    return {"version": VERSION, "drafts_allowed": True, "field_semantics": field_semantics_contract(), "coverage_plan":coverage_contract(), "staged_checks":staged_contract(),
             "row_import": {"preflight_endpoint": "/api/rebuild/rows/import/preflight", "import_endpoint": "/api/rebuild/rows/import",
                            "preflight": "Same body/auth/CSRF as import; rolled-back simulation, no receipt/IDs/reservation. Revalidates current source/identity/conflicts. State can change afterwards.",
                            "result": "Check complete/outcome/summary and every errors row_index/row_key/field_index; HTTP200 is not all-success. Pending/conflict may already be persisted.",
@@ -310,6 +469,11 @@ def producer_contract():
                     "table_sources": [{"file_id": "same-registered-file-uuid", "page_number": 71, "role": "caption", "locator": "exact caption location"},
                                       {"file_id": "same-registered-file-uuid", "page_number": 72, "role": "body", "locator": "exact body location"}]}},
             "table_rule": "Submit original table_data (all cells strings/null) or original table_markdown plus table_sources for real caption/body pages. context_text is readable draft only; never guess cells, precision, units or missing values.",
+            "asset_mechanics": {
+                "endpoint_template": "/api/rebuild/papers/{paper_id}/quality?include_asset_mechanics=true&asset_offset=0&asset_limit=32",
+                "default": "not_requested", "result_key": "asset_mechanics",
+                "continuation": "Use asset_mechanics.scope.next_asset_offset and expected_revision=output_revision; asset_limit is at most 32. Existing offset/limit paginate legacy issues only.",
+                "scope": "Independent per-slice status/issues; does not change stored-integrity counts or formal acceptance rules. Outside-slice, budget-limited and unknown records remain unverified. No scientific visual completeness claim."},
             "figures": "Keep whole figure/subfigure identities in the same paper/file with actual physical pages and explicit labels; no cross-file inheritance.",
             "values": "One scientific fact per row identity/condition; source row/value/paper/asset/file must agree. Unreported items use missing_reason, not invented required numbers.",
             "sections": "Follow section_write_contract for complete original text, separate explanation and exact source/hash/pages. Unknown legacy coverage stays unknown.",

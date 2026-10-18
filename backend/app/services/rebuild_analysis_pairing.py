@@ -1,6 +1,7 @@
 """Pair split extraction rows without crossing paper or material identity."""
 import json
 import hashlib
+from copy import deepcopy
 from collections import defaultdict
 
 from app.services.rebuild_analysis_fields import source_ids
@@ -53,6 +54,7 @@ def context(left, right):
     return {'source_family': 'rebuild', 'paper_id': left['paper_id'],
             'reaction_type': left.get('reaction'), 'data_type': left.get('data_type'),
             'x_method': method(left), 'y_method': method(right),
+            'x_condition': deepcopy(condition(left)), 'y_condition': deepcopy(condition(right)),
             'x_adsorbate': left.get('adsorbate'), 'y_adsorbate': right.get('adsorbate'),
             'x_unit': left['target']['normalized_unit'], 'y_unit': right['target']['normalized_unit'],
             'x_reaction_step': condition(left).get('reaction_step'),

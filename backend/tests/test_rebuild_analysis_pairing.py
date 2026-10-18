@@ -112,3 +112,34 @@ def test_equal_values_from_distinct_sources_remain_pairable():
     x=cell('x',-2,'one');y=cell('y',-2,'one')
     pairs,excluded,_,_=pair_rows({'one':{'x':x,'y':y}},'x','y')
     assert len(pairs)==1 and excluded==[]
+
+
+def test_pair_context_keeps_full_conditions_without_rejecting_stage_differences():
+    from app.services.rebuild_analysis_pairing import context
+    x = cell('x', -2, 'geometry')
+    y = cell('y', -1, 'dos')
+    xc = {'functional': 'PBE', 'geometry_k_point_mesh': '3x3x1',
+          'single_point': {'kmesh': [5, 5, 1]}, 'raw_unknown': ['原文', {'precision': '1.00'}]}
+    yc = {'functional': 'PBE', 'dos_k_point_mesh': '15x15x1',
+          'geometry_k_point_mesh': '5x5x1', 'reaction_step': 'A → B'}
+    x['analysis_context']['condition_key'] = json.dumps(xc)
+    y['analysis_context']['condition_key'] = json.dumps(yc)
+    pairs, excluded, _, _ = pair_rows({'x': {'x': x}, 'y': {'y': y}}, 'x', 'y')
+    assert len(pairs) == 1 and excluded == []
+    result = context(*pairs[0])
+    assert result['x_condition'] == xc and result['y_condition'] == yc
+    assert result['x_method'] == result['y_method'] == {'functional': 'PBE'}
+    svc = AnalysisReadonlyService(MagicMock())
+    x['field_name'] = 'li2s_adsorption_energy'; y['field_name'] = 'd_band_center'
+    svc.records = [x, y]; svc._loaded = ([], {}, {'total_dft_rows': 2})
+    point = svc.correlation(x_field=x['field_name'], y_field=y['field_name'])['points'][0]
+    assert point['semantic_context']['x_condition'] == xc
+    assert point['semantic_context']['y_condition'] == yc
+
+
+def test_equal_measurements_with_different_raw_conditions_remain_ambiguous():
+    x = cell('x', -2, 'x'); a = cell('y', -1, 'a'); b = cell('y', -1, 'b')
+    a['analysis_context']['condition_key'] = '{"dos_k_point_mesh":"9x9x1"}'
+    b['analysis_context']['condition_key'] = '{"dos_k_point_mesh":"15x15x1"}'
+    pairs, excluded, _, _ = pair_rows({'x': {'x': x}, 'a': {'y': a}, 'b': {'y': b}}, 'x', 'y')
+    assert pairs == [] and excluded[0][2] == 'ambiguous_same_material_measurements'

@@ -22,7 +22,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.db import models as m
-from app.normalizers.chemistry_normalizer import canonicalize_adsorbate, get_property_taxonomy
+from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.catalyst_analysis_service import CatalystAnalysisService, _ReadyRow, _candidate_groups, _stats
 from app.services.dft_ml_policy import analysis_entity_id
 from app.services.rebuild_analysis_fields import DEFINITIONS, PRESET_FIELDS, project_rows, source_ids
@@ -218,14 +218,13 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                     # These are transient projections, never ORM changes. Known
                     # rebuild identity remains within its own paper and row.
                     prop, ads = value.field_name, (r.properties or {}).get('adsorbate') or (r.condition or {}).get('adsorbate') or adsorbate_cells.get(r.id)
+                    # Field aliases describe the quantity, not evidence for its
+                    # object. Keep explicit/unknown/missing adsorbates intact so
+                    # project_rows can detect dedicated-field contradictions.
                     if prop.endswith('_adsorption_energy'):
-                        ads = canonicalize_adsorbate(prop.removesuffix('_adsorption_energy')); prop = 'adsorption_energy'
-                    elif prop == 'li2s_dissociation_barrier':
-                        ads = 'Li2S'
+                        prop = 'adsorption_energy'
                     elif prop == 'li2s_bader_charge_transfer':
-                        prop, ads = 'bader_charge_transfer', 'Li2S'
-                    elif prop in {'li1_s_bond_length', 'li2_s_bond_length'}:
-                        ads = 'Li2S'
+                        prop = 'bader_charge_transfer'
                     identity = {'subject': {'property_context': {'configuration':r.configuration}, 'canonical_atom_pair': 'Li1-S' if value.field_name == 'li1_s_bond_length' else 'Li2-S' if value.field_name == 'li2_s_bond_length' else None}}
                     row = SimpleNamespace(id=value.id, paper_id=r.paper_id, catalyst_sample_id=None, adsorbate=ads, property_type=prop, value=value.numeric_value, unit=value.unit, reaction_step=(r.properties or {}).get('reaction_step'), reaction_type=r.reaction, source_section=None, source_figure=None, evidence_text='\n'.join(s.get('quote') or '' for s in by_value[value.id]), confidence=None, candidate_status='stored_rebuild', evidence_payload={'analysis_entity_id':str(r.id)}, identity_payload=identity, identity_version=2, value_kind=value.value_type)
                     cat = SimpleNamespace(id='rebuild:' + str(r.id), paper_id=r.paper_id, name=r.material, catalyst_type=r.active_site_type, metal_centers=[], coordination=r.active_site, support=r.support)

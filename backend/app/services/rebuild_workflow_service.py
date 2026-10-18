@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, aliased
 from sqlalchemy.exc import DataError, IntegrityError
 
 from app.config import Settings, get_settings
+from app.services.rebuild_field_semantics import RECOMMENDED_FIELDS, field_semantics_contract
 from app.services.rebuild_table_content import table_content, validate_table_provenance
 from app.services.paper_codes import main_paper_clause, lock_catalog_numbering
 from app.db.models import (
@@ -142,6 +143,7 @@ class RebuildWorkflowError(ValueError):
 def reaction_templates() -> dict[str, Any]:
     return {
         "version": TEMPLATE_VERSION,
+        "field_semantics": field_semantics_contract(),
         "active_site_types": [
             {"value": "single_atom", "label": "单原子"},
             {"value": "dual_atom", "label": "双原子"},
@@ -158,7 +160,7 @@ def reaction_templates() -> dict[str, Any]:
         "reactions": {
             reaction: {"label": label, "fields": fields}
             for reaction, (label, fields) in {
-                "SRR": ("硫氧化还原反应", REACTION_TEMPLATE_FIELDS["SRR"]),
+                "SRR": ("硫氧化还原反应", REACTION_TEMPLATE_FIELDS["SRR"] + RECOMMENDED_FIELDS),
                 "HER": ("析氢反应", REACTION_TEMPLATE_FIELDS["HER"]),
                 "OER": ("析氧反应", REACTION_TEMPLATE_FIELDS["OER"]),
                 "ORR": ("氧还原反应", REACTION_TEMPLATE_FIELDS["ORR"]),
