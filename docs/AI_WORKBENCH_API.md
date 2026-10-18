@@ -33,6 +33,8 @@
 6. `GET /api/rebuild/papers/{paper_id}/ai-extract/jobs/latest`  
    查询最近一次一键提取任务状态/进度/结果。
 
+本提交兼容行为（以发布回执核实是否生效）：图表资产的顶层可选 `reading_explanation` 省略或为 `null` 都表示没有新增结构化解读，不清除已有富解读；源文件、页码、图片或 bbox 改变仍将旧解读标为 stale。空对象、无效结构及互相冲突的显式解读仍拒绝；`provenance.reading_explanation` / `scientific_reading` 的显式空值也仍拒绝。不得以 `null` 清空已有解读。
+
 ## 3. 外部 AI 提示词模板
 
 ```text

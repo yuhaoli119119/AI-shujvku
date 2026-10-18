@@ -290,7 +290,9 @@ class RebuildVisualAssetRequest(BaseModel):
     material_mapping: dict[str, Any] | None = None
     context_text: str | None = None
     explanation: str | None = None
-    reading_explanation: dict[str, Any] | None = None
+    reading_explanation: dict[str, Any] | None = Field(
+        default=None, description="Null means no new reading; preserves any existing structured reading. Empty or conflicting declarations are rejected."
+    )
     unreadable_fields: list[str] = Field(default_factory=list)
     provenance: dict[str, Any] | None = None
     status: Literal["draft", "reviewed", "corrected", "unreadable"] = "draft"
@@ -335,6 +337,12 @@ class ProcessingStatusReport(BaseModel):
     message: str = Field(default='', max_length=2000)
     no_extractable_content_reason: str | None = Field(default=None, max_length=2000)
     file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+
+
+class ProcessingStatusReportEnvelope(BaseModel):
+    """Compatibility with clients using the formerly embedded request body."""
+    model_config = ConfigDict(extra="forbid")
+    payload: ProcessingStatusReport
 
 
 class ExtractionFileCoverage(BaseModel):

@@ -21,6 +21,8 @@
 {"run_id":"one-stable-attempt-id","agent":"AI name","status":"parsing","file_ids":["file UUID"],"message":"正在处理正文"}
 ```
 
+本提交兼容行为（以发布回执核实是否生效）：接受上述平铺请求，也兼容 `{"payload":{...上述字段...}}`；不能混合两种格式，不接受请求体中的 `settings`。仍校验同一工作台登录会话，状态业务约束不变。当前生产版本须按实时 OpenAPI 核对；已知旧版仅接受 `payload` 包装。
+
 同一尝试保持 run_id 不变；所有写回提交后回报 parsed、partial 或 failed。终态不能被改回解析中；新的尝试用新 run_id。parsed 应给实际完成的 file_ids，必须有对应文件结果，或给 `no_extractable_content_reason` 说明已经阅读但没有适用可提取内容。不能空回报完成，也不能引用其他论文文件。重试终态不产生重复任务。
 
 所有新流程资产与单元格来源都参与实时投影，直接通过新写入口写回的其他 AI 结果无需依赖旧解析状态字段。任务开始前、结果尚未写入时，外部 AI 必须回报 parsing，系统不能猜测外部进程的工作状态。

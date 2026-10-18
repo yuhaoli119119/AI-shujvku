@@ -23,6 +23,7 @@ from app.db.session import get_db_session
 from app.db.models import RebuildValueSource, RebuildDataValue
 from app.schemas.rebuild import (
     ProcessingStatusReport,
+    ProcessingStatusReportEnvelope,
     RebuildAssetsImportRequest,
     RebuildAnalysisRequest,
     RebuildRowsImportRequest,
@@ -199,15 +200,21 @@ async def current_processing_statuses(
     return {'items':[{'paper_id':str(pid),'processing_status':status} for pid,status in statuses.items()]}
 
 
+async def _require_work_package_session(request: Request) -> SessionState:
+    return await require_session(request, settings=get_settings())
+
+
 @router.put("/papers/{paper_id}/processing-status")
 async def report_paper_processing_status(
     paper_id: UUID,
-    payload: ProcessingStatusReport,
+    payload: ProcessingStatusReport | ProcessingStatusReportEnvelope,
     session: Session = Depends(get_db_session),
-    _auth: SessionState = Depends(require_session),
+    _auth: SessionState = Depends(_require_work_package_session),
 ):
     from app.services.paper_processing_status import report_processing
     from app.services.rebuild_workflow_service import _required_paper
+    if isinstance(payload, ProcessingStatusReportEnvelope):
+        payload = payload.payload
     try:
         result = report_processing(session,_required_paper(session,paper_id),payload)
         session.commit()
@@ -256,10 +263,6 @@ async def rebuild_paper(paper_id: UUID, session: Session = Depends(get_db_sessio
         return get_paper(session, paper_id)
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
-
-
-async def _require_work_package_session(request: Request) -> SessionState:
-    return await require_session(request, settings=get_settings())
 
 
 async def _require_section_write_session(request: Request) -> SessionState:

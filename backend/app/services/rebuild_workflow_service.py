@@ -461,8 +461,10 @@ def prepare_visual_asset(
         )
     )
     data = payload.model_dump(exclude_unset=True, exclude={"request_id", "task_id"})
-    explicit_present = "reading_explanation" in data
     explicit_reading = data.pop("reading_explanation", None)
+    # The nullable transport field means "no new reading", never "clear".
+    # Provenance declarations remain explicit and retain their conflict checks.
+    explicit_present = explicit_reading is not None
     old_provenance = existing.provenance if existing is not None and isinstance(existing.provenance, dict) else {}
     supplied = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     provenance = {**old_provenance, **supplied} if data.get("provenance") is not None else dict(old_provenance)
