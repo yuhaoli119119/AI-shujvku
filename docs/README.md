@@ -19,6 +19,7 @@
 | [`CODEX_WEB_DISPATCH.md`](CODEX_WEB_DISPATCH.md) | 总指挥 → Codex-web 派发流程（目标模式）、脚本用法、安全与并发约束 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 现行系统结构：运行位置、服务、数据资产、访问与鉴权 |
 | [`MCP_ACCESS.md`](MCP_ACCESS.md) | MCP 外部接入现状（端点、鉴权、能力分层、key 位置） |
+| [`DOWNLOAD_STAGING_CLEANUP.md`](DOWNLOAD_STAGING_CLEANUP.md) | 下载暂存 7 天自动清理、哈希安全门槛与 systemd 定时器 |
 | [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md) | 工作台真实登录（2026-09-21 上线）；**现行且保持不动** |
 
 上游规则（先读）：`AGENTS.md`（协作规则、角色与派发、安全与删除边界）、`README.md`（仓库/目录入口）、

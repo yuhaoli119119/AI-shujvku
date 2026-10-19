@@ -1,0 +1,19 @@
+[Unit]
+Description=Clean expired Literature AI download staging files
+After=docker.service
+Requires=docker.service
+StartLimitIntervalSec=1h
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+User=2401liyuhao
+Group=2401liyuhao
+WorkingDirectory=/opt/AI-shujvku/literature-ai
+ExecStart=/usr/bin/python3 /opt/AI-shujvku/literature-ai/deploy-state/download-staging-cleanup/current/cleanup_download_staging.py --project-root /opt/AI-shujvku/literature-ai --retention-days 7 --apply
+Restart=on-failure
+RestartSec=5min
+TimeoutStartSec=30min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

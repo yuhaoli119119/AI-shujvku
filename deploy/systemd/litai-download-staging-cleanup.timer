@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Literature AI download staging cleanup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=15min
+AccuracySec=1min
+Unit=litai-download-staging-cleanup.service
+
+[Install]
+WantedBy=timers.target

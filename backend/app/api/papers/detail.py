@@ -45,6 +45,7 @@ from app.schemas.api import (
     PaperKnowledgeContextResponse,
 )
 from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code, lock_catalog_numbering
+from app.services.artifact_delete_lock import artifact_delete_lock
 from pydantic import BaseModel, Field
 
 class RelationshipCreateRequest(BaseModel):
@@ -178,8 +179,10 @@ def _safe_unlink(base_dir: Path, stored_path: str | None, *, category: str, sett
         return None
     if target.exists() and target.is_file():
         try:
-            target.unlink()
-            return str(target)
+            with artifact_delete_lock(settings):
+                if target.exists() and target.is_file():
+                    target.unlink()
+                    return str(target)
         except OSError:
             return None
     return None
