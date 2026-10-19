@@ -64,6 +64,12 @@ LENGTH = {'å': 1., 'a': 1., 'angstrom': 1., 'angstroms': 1., 'nm': 10., 'pm': .
 
 
 def unresolved_conflict(conflict):
+    # Lifecycle declarations are provenance audit, not scientific disagreement.
+    # Project locally: retain all stored keys and preserve conservative handling
+    # of every other legacy/unknown conflict shape. Both value eligibility and
+    # adsorbate-cell selection use this classifier.
+    if isinstance(conflict, dict):
+        conflict = {key: value for key, value in conflict.items() if key not in {'source_lifecycle', 'source_page_identities'}}
     if not conflict:
         return False
     if isinstance(conflict, dict) and conflict.get('status') in {'evidence_history', 'corrected_previous_retained'}:
@@ -209,9 +215,15 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 by_row = {r.id: r for r in rows}
                 values = [SimpleNamespace(**r) for r in self.session.execute(select(m.RebuildDataValue.__table__).where(m.RebuildDataValue.row_id.in_(by_row)).order_by(m.RebuildDataValue.id)).mappings()] if by_row else []
                 sources = [dict(r) for r in self.session.execute(select(m.RebuildValueSource.__table__).where(m.RebuildValueSource.row_id.in_(by_row))).mappings()] if by_row else []
+                from app.services.rebuild_source_lifecycle import source_is_current
+                value_map = {v.id: v for v in values}
                 by_value = defaultdict(list)
                 for item in sources:
-                    by_value[item['value_id']].append({k: v for k, v in item.items() if k != 'created_at'})
+                    if item['value_id'] not in value_map or not source_is_current(value_map[item['value_id']], item['id']):
+                        continue
+                    identity = ((value_map[item['value_id']].conflict or {}).get('source_page_identities') or {}).get(str(item['id']), {})
+                    by_value[item['value_id']].append({**{k: v for k, v in item.items() if k != 'created_at'}, **identity,
+                        'page_identity_status': 'verified' if identity else 'legacy_unverified'})
                 adsorbate_cells = {v.row_id: v.raw_value for v in values if v.field_name == 'adsorbate' and isinstance(v.raw_value, str) and v.raw_value and by_value[v.id] and not unresolved_conflict(v.conflict) and not v.is_estimated}
                 for value in values:
                     r = by_row[value.row_id]

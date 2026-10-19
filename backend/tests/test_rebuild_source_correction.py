@@ -108,7 +108,7 @@ def test_success_history_uuid_preferred_science_replay_and_aba(fixture):
     ({'asset_id':'missing'}, 'asset_not_found'),
     ({'table_row':None}, 'source_table_coordinates_required'),
     ({'source_kind':'text'}, 'source_coordinates_require_table_kind'),
-    ({'page_number':3}, 'source_physical_page_out_of_range'),
+    ({'page_number':3}, 'source_page_out_of_range'),
     ({'source_kind':'estimated','table_row':None,'table_column':None}, 'source_estimate_basis_required'),
     ({'source_kind':'estimated','table_row':None,'table_column':None,'estimate_basis':'interpolation'}, 'explicit_value_requires_explicit_evidence'),
     ({'quote':'bad\x00quote'}, 'database_constraint_rejected'),
@@ -132,7 +132,7 @@ def test_key_collision_paper_mismatch_missing_and_rollback(fixture,monkeypatch):
         req=body(s,ids)
         original=s.get(RebuildValueSource,ids.source)
         data=RebuildSourceCorrectionRequest(**req).source.model_dump()
-        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**data)
+        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**{k:v for k,v in data.items() if k not in {"page_basis","source_sha256","reading_pdf_sha256"}})
         s.add(other);s.commit();stored=snapshot(s)
         for source_id,changes,error in [(ids.source,{},'source_key_conflict'),(ids.source,{'paper_id':ids.other},'source_paper_mismatch'),(uuid4(),{},'source_not_found'),(ids.source,{'correction_reason':'  '},'correction_reason_required')]:
             with pytest.raises(RebuildWorkflowError,match=error):
@@ -162,7 +162,7 @@ def test_original_docx_cannot_claim_derived_pdf_page(fixture):
         f.sha256=hashlib.sha256(path.read_bytes()).hexdigest();s.commit()
         req=body(s,ids)
         stored=snapshot(s)
-        with pytest.raises(RebuildWorkflowError,match='source_physical_page_requires_original_pdf'):
+        with pytest.raises(RebuildWorkflowError,match='source_derived_page_identity_required'):
             correct_source(s,ids.source,RebuildSourceCorrectionRequest(**req),settings,actor='tester')
         s.commit();assert snapshot(s)==stored
         req['source']['page_number']=None
@@ -243,3 +243,14 @@ def test_file_kind_quote_and_physical_identity_all_recomputed(fixture):
         assert result['source_kind']=='figure' and result['page_number']==1
         assert result['source_corrections'][0]['before']['source_key']==before['source_key']
         assert result['id']==before['id'] and result['preferred_source_id']==before['preferred_source_id']
+
+
+def test_legacy_native_pdf_request_fingerprint_is_stable(fixture):
+    factory,settings,ids=fixture
+    with factory() as s:
+        req=body(s,ids)
+        # Exactly the pre-extension wire body: no optional page identity keys.
+        expected=hashlib.sha256(json.dumps(req,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        result=correct_source(s,ids.source,RebuildSourceCorrectionRequest(**req),settings,actor='trusted-login');s.commit()
+        assert result['source_corrections'][-1]['request_fingerprint']==expected
+        assert correct_source(s,ids.source,RebuildSourceCorrectionRequest(**req),settings,actor='trusted-login')==result

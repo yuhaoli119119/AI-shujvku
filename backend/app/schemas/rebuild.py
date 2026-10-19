@@ -69,6 +69,28 @@ class RebuildSectionsImportRequest(BaseModel):
         return self
 
 
+class RebuildSectionOrderEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_id: UUID
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sources: list[RebuildSectionSourceInput] = Field(min_length=1, max_length=20)
+
+
+class RebuildSectionOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=4000)
+    sections: list[RebuildSectionOrderEntry] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_unique_sections(self):
+        ids = [s.section_id for s in self.sections]
+        if len(set(ids)) != len(ids) or not self.reason.strip():
+            raise ValueError("section_order_unique_targets_and_reason_required")
+        return self
+
+
 class RebuildSectionCorrectionTarget(BaseModel):
     model_config = ConfigDict(extra="forbid")
     section_id: UUID
@@ -131,7 +153,10 @@ class RebuildValueSourceInput(BaseModel):
     asset_id: UUID | None = None
     source_key: str | None = Field(default=None, max_length=255)
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
-    page_number: int | None = Field(default=None, ge=1)
+    page_number: int | None = Field(default=None, ge=1, strict=True)
+    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(default=None, max_length=128)
     table_row: int | None = Field(default=None, ge=0)
     table_column: int | None = Field(default=None, ge=0)
@@ -450,6 +475,9 @@ class RebuildSourceIdentity(BaseModel):
     asset_id: UUID | None
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
     page_number: int | None = Field(ge=1, le=2147483647, strict=True)
+    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(max_length=128)
     table_row: int | None = Field(ge=0, le=2147483647, strict=True)
     table_column: int | None = Field(ge=0, le=2147483647, strict=True)
@@ -465,6 +493,15 @@ class RebuildSourceCorrectionRequest(BaseModel):
     request_id: UUID
     correction_reason: str = Field(min_length=1, max_length=4000)
     source: RebuildSourceIdentity
+
+
+class RebuildSourceLifecycleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    paper_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_id: UUID
+    reason: str = Field(min_length=1, max_length=4000)
+    action: Literal["deactivate"]
 
 
 class RebuildDedupPair(BaseModel):

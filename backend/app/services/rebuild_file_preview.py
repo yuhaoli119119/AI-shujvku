@@ -117,3 +117,55 @@ def install_derived_pdf(record: RebuildPaperFile, settings: Settings, pdf_path: 
     finally:
         temporary.unlink(missing_ok=True)
     return destination
+
+
+PAGE_IDENTITY_FIELDS = ("page_basis", "source_sha256", "reading_pdf_sha256")
+
+
+def reading_identity(record, settings):
+    """Resolve and hash existing bytes only. Never convert/install on a read."""
+    source, kind = _checked_source(record, settings)
+    path = resolve_reading_pdf(record, settings)
+    return path, {"source_sha256": record.sha256,
+                  "page_basis": "source_pdf" if kind == "pdf" else "derived_pdf",
+                  "reading_pdf_sha256": _sha256(path)}
+
+
+def validate_page_identity(record, settings, data):
+    """Normalize new writes; a DOCX page always requires an explicit double binding."""
+    _, kind = _checked_source(record, settings)
+    if data.get("source_sha256") not in (None, record.sha256):
+        raise RebuildWorkflowError("source_sha256_mismatch")
+    if data.get("page_number") is None:
+        if data.get("page_basis") is not None or data.get("reading_pdf_sha256") is not None:
+            raise RebuildWorkflowError("source_page_identity_requires_page")
+        return {"page_basis": None, "source_sha256": record.sha256, "reading_pdf_sha256": None}
+    if kind != "pdf" and (data.get("page_basis") != "derived_pdf" or
+                            data.get("source_sha256") is None or data.get("reading_pdf_sha256") is None):
+        raise RebuildWorkflowError("source_derived_page_identity_required")
+    path, identity = reading_identity(record, settings)
+    if data.get("page_basis") not in (None, identity["page_basis"]):
+        raise RebuildWorkflowError("source_page_basis_mismatch")
+    if data.get("reading_pdf_sha256") not in (None, identity["reading_pdf_sha256"]):
+        raise RebuildWorkflowError("source_reading_pdf_sha256_mismatch")
+    with fitz.open(path) as doc:
+        if doc.needs_pass or not 1 <= data["page_number"] <= doc.page_count:
+            raise RebuildWorkflowError("source_page_out_of_range")
+    return identity
+
+
+def stored_source_identity(source):
+    # Existing value JSON is the audited extension point; no schema migration.
+    from sqlalchemy.orm import object_session
+    from app.db.models import RebuildDataValue
+    session = object_session(source)
+    value = session.get(RebuildDataValue, source.value_id) if session else None
+    return dict(((value.conflict or {}).get("source_page_identities") or {}).get(str(source.id), {})) if value else {}
+
+
+def store_source_identity(value, source, data):
+    if not data.get("source_sha256"):
+        return  # A fileless quote must not acquire a verified byte identity.
+    identities = dict((value.conflict or {}).get("source_page_identities") or {})
+    identities[str(source.id)] = {k: data.get(k) for k in PAGE_IDENTITY_FIELDS}
+    value.conflict = {**(value.conflict or {}), "source_page_identities": identities}

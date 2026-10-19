@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+from collections import defaultdict
 from uuid import UUID, uuid5, NAMESPACE_URL
 
 import fitz
@@ -19,7 +21,7 @@ from pydantic import ValidationError
 from app.config import Settings
 from app.db.models import AuditLog, Paper, PaperSection, RebuildPaperFile
 from app.schemas.rebuild import (RebuildSectionsImportRequest, RebuildSectionCorrectionInput,
-                                 RebuildSectionCorrectionsRequest)
+                                 RebuildSectionCorrectionsRequest, RebuildSectionOrderRequest)
 from app.services.rebuild_workflow_service import RebuildWorkflowError, get_file
 
 EVENT = "section_imported"
@@ -120,7 +122,7 @@ def _valid_corrections(session, paper_id, rows, imports, files):
 def list_sections(session: Session, paper_id: UUID) -> list[dict]:
     """Batched reads; only explicit, source-bound declarations mark history."""
     rows = list(session.scalars(select(PaperSection).where(
-        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.id)))
+        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.section_title, PaperSection.text)))
     events = {event.target_id: event for event in _events(session, paper_id)}
     files = {str(file.id): file for file in session.scalars(select(RebuildPaperFile).where(
         RebuildPaperFile.paper_id == paper_id))}
@@ -170,7 +172,7 @@ def list_sections(session: Session, paper_id: UUID) -> list[dict]:
         by_id[old_id]["display_status"] = "extraction_boundary_history"
         for key in [old_id, *new_ids]:
             by_id[key]["correction_history"].append(relation)
-    return items
+    return _ordered_sections(session, paper_id, items, files)
 
 
 def section_coverage(sections: list[dict], files: list[dict]) -> dict:
@@ -208,6 +210,13 @@ def section_write_contract(paper_id):
         "source_rule": "The registered file must belong to this paper. Original bytes, claimed source_sha256, registered hash and size must agree. PDF pages must physically exist; every covered page needs a nonempty original quote and locator. DOCX page numbers require the existing derived reading PDF and its exact SHA256; no conversion is triggered by this API. Source quotes/full-text completeness and Chinese interpretation require independent DS verification; the code never certifies science. Missing/unreported content stays unwritten.",
         "preservation": "Append only to paper_sections and audit_logs in one transaction. No replacement, deletion, scientific-value changes or automatic parsing/status promotion. Legacy chapters keep unknown provenance; do not infer a file identity.",
         "boundary_correction": section_correction_contract(paper_id),
+        "reading_order": {
+            "url": f"/api/rebuild/papers/{paper_id}/sections/order", "method": "POST",
+            "body": {"request_id": "stable UUID", "expected_revision": "fresh section_order_revision",
+                "reason": "source-grounded reason", "sections": [{"section_id": "current source-bound UUID",
+                    "content_sha256": "provenance.content_sha256", "sources": [{"page_number": "physical page within chapter",
+                        "locator": "exact original heading position", "quote": "original heading quote"}]}]},
+            "rules": "Complete ordered list of source-bound current chapters; contiguous file/page-basis groups. Legacy unbound chapters stay unknown; history stays separate. Same actor/body replay is read-only; changed ID body or stale order revision is 409. Append audit only; never rewrite section bytes or hierarchy. Source/section changes invalidate old order. No scientific acceptance implied."},
     }
 
 
@@ -416,5 +425,215 @@ def import_sections(session: Session, paper_id: UUID, payload: RebuildSectionsIm
                          target_type="paper_sections", target_id=payload.request_id,
                          payload={"version": VERSION, "actor": actor,
                                   "request_sha256": request_hash, "result": result}))
+    session.flush()
+    return result
+
+
+ORDER_VERSION = "rebuild_section_order_v1"
+ORDER_EVENT = "section_order_declared"
+
+
+def section_content_revision(items):
+    # Source-bound chapter bytes and correction status; independent of display order.
+    return _digest(sorted([{'id': s['id'], 'status': s['display_status'],
+                            'fields': {f: s[f] for f in SECTION_FIELDS},
+                            'provenance': s.get('provenance')} for s in items], key=lambda s: s['id']))
+
+
+def _group(s):
+    p = s.get('provenance') or {}
+    return (p.get('file_id'), p.get('page_basis'), p.get('reading_pdf_sha256'))
+
+
+def _number(s):
+    # Only explicit decimal heading numbers are comparable. Roman/letter titles
+    # remain intact and can be ordered through the evidence-bound declaration.
+    n = s.get('section_number') or ''
+    if not re.fullmatch(r'\d+(?:\.\d+)*\.?', n):
+        m = re.match(r'^(\d+(?:\.\d+)*)[.)]?\s+', s['section_title'] or '')
+        n = m.group(1) if m else ''
+    return tuple(map(int, n.rstrip('.').split('.'))) if n else None
+
+
+def _heading_offsets(group, file):
+    """Use unique exact line headings in verified reading bytes, or report unknown.
+
+    Never compare offsets from different files/page bases. No fuzzy semantic
+    heading classification or automatic invented numbering is used.
+    """
+    from app.config import get_settings
+    from app.services.rebuild_file_preview import resolve_reading_pdf
+    if file is None:
+        return {}
+    try:
+        path = resolve_reading_pdf(file, get_settings())
+        content = path.read_bytes()
+        digest = hashlib.sha256(content).hexdigest()
+        if any((s.get('provenance') or {}).get('reading_pdf_sha256') != digest for s in group):
+            return {}
+        with fitz.open(stream=content, filetype='pdf') as doc:
+            texts = {}
+            result = {}
+            for s in group:
+                page = s['page_start']
+                if not isinstance(page, int) or not 1 <= page <= len(doc):
+                    continue
+                if page not in texts:
+                    texts[page] = doc[page-1].get_text('text')
+                # Whitespace and line wraps are typographic only. Require a
+                # line boundary to avoid matching a citation in a paragraph.
+                title = s.get('section_title') or ''
+                if not title.strip():
+                    continue
+                words = [r'\s*'.join(re.escape(c) for c in word) for word in title.split()]
+                pattern = r'(?m)^\s*' + r'\s+'.join(words) + r'\s*(?=\n|$)'
+                hits = list(re.finditer(pattern, texts[page], flags=re.I))
+                if len(hits) == 1:
+                    result[s['id']] = hits[0].start()
+            return result
+    except (RebuildWorkflowError, OSError, ValueError, RuntimeError):
+        return {}
+
+
+def _ordered_sections(session, paper_id, items, files):
+    groups = defaultdict(list)
+    for item in items:
+        groups[_group(item)].append(item)
+    result = []
+    # File groups are explicit in the response. Filename/file UUID determines
+    # group presentation only, never asserted as cross-document scientific order.
+    for key, group in sorted(groups.items(), key=lambda kv: (
+            0 if (files.get(kv[0][0]) and files[kv[0][0]].role == 'main') else 1,
+            (files[kv[0][0]].original_filename if kv[0][0] in files else ''), str(kv[0]))):
+        offsets = _heading_offsets(group, files.get(key[0])) if key[0] else {}
+        pages = defaultdict(list)
+        for s in group:
+            pages[s['page_start']].append(s)
+        for page, same_page in sorted(pages.items(), key=lambda kv: kv[0] or 0):
+            current = [s for s in same_page if s['display_status'] == 'current']
+            if key[0] in files and current and all(_number(s) is not None for s in current):
+                current.sort(key=lambda s: (_number(s), s['section_title'], s['text']))
+                basis = 'original_heading_number'
+            elif current and all(s['id'] in offsets for s in current) and len({offsets[s['id']] for s in current}) == len(current):
+                current.sort(key=lambda s: offsets[s['id']])
+                basis = 'verified_reading_heading_offset'
+            else:
+                # Stable content fallback, explicitly unknown, with no UUID tie-break.
+                current.sort(key=lambda s: (s['section_title'] or '', s['text'] or ''))
+                basis = 'page_then_content_order_unverified'
+            for s in current:
+                s['reading_order'] = {'basis': basis, 'file_group': list(key), 'position': None}
+                result.append(s)
+        history = [s for s in group if s['display_status'] != 'current']
+        history.sort(key=lambda s: (s['page_start'] or 0, s['section_title'] or '', s['text'] or ''))
+        for s in history:
+            s['reading_order'] = {'basis': 'history_separate', 'file_group': list(key), 'position': None}
+        result.extend(history)
+    revision = section_content_revision(items)
+    events = list(session.scalars(select(AuditLog).where(AuditLog.paper_id == paper_id,
+        AuditLog.action == ORDER_EVENT, AuditLog.source == ORDER_VERSION).order_by(AuditLog.created_at, AuditLog.id)))
+    applied_id = None
+    for event in reversed(events):
+        data = event.payload
+        if not isinstance(data, dict) or data.get('revision') != revision:
+            continue
+        declaration = data.get('declaration', {})
+        if data.get('declaration_sha256') != _digest(declaration):
+            continue
+        try:
+            payload = RebuildSectionOrderRequest.model_validate(declaration)
+            ids = [str(e.section_id) for e in payload.sections]
+            current = {s['id']: s for s in items if s['display_status'] == 'current' and s.get('provenance')}
+            if set(ids) != set(current):
+                continue
+            rank = {sid: i for i, sid in enumerate(ids)}
+            for s in current.values():
+                s['reading_order'] = {'basis': 'source_bound_declaration', 'position': rank[s['id']],
+                    'file_group': list(_group(s)), 'audit_id': str(event.id),
+                    'actor': data.get('actor'), 'reason': payload.reason,
+                    'sources': next(e.sources for e in payload.sections if str(e.section_id) == s['id'])}
+                s['reading_order']['sources'] = [e.model_dump(mode='json') for e in s['reading_order']['sources']]
+            applied_id = str(event.id)
+            result.sort(key=lambda s: (s['display_status'] != 'current', rank.get(s['id'], len(rank))))
+            break
+        except (ValueError, TypeError, KeyError):
+            continue
+    for s in result:
+        s['section_order_revision'] = _digest({'content_revision': revision, 'order_audit_id': applied_id})
+    return result
+
+
+def declare_section_order(session, paper_id, payload: RebuildSectionOrderRequest, *, actor: str):
+    if not actor or not actor.strip():
+        raise RebuildWorkflowError('section_order_actor_required')
+    if session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update()) is None:
+        raise RebuildWorkflowError('paper_not_found')
+    declaration = payload.model_dump(mode='json')
+    fingerprint = _digest(declaration)
+    receipt = session.scalar(select(AuditLog).where(AuditLog.paper_id == paper_id,
+        AuditLog.action == ORDER_EVENT, AuditLog.source == ORDER_VERSION,
+        AuditLog.target_type == 'paper_sections', AuditLog.target_id == str(payload.request_id)))
+    if receipt:
+        if receipt.payload.get('declaration_sha256') != fingerprint or receipt.payload.get('actor') != actor:
+            raise RebuildWorkflowError('section_order_request_id_reused')
+        return {**receipt.payload['result'], 'replayed': True}
+    items = list_sections(session, paper_id)
+    revision = section_content_revision(items)
+    order_revision = items[0]['section_order_revision'] if items else _digest({'content_revision': revision, 'order_audit_id': None})
+    if payload.expected_revision != order_revision:
+        raise RebuildWorkflowError('section_order_revision_conflict')
+    current = {s['id']: s for s in items if s['display_status'] == 'current' and s.get('provenance')}
+    if {str(e.section_id) for e in payload.sections} != set(current):
+        raise RebuildWorkflowError('section_order_requires_all_current_sections')
+    imports = {e.target_id: e for e in _events(session, paper_id)}
+    rows = {str(r.id): r for r in session.scalars(select(PaperSection).where(PaperSection.paper_id == paper_id))}
+    closed_groups = set()
+    previous_group = None
+    previous_page = None
+    checked_readings = {}
+    for entry in payload.sections:
+        item = current[str(entry.section_id)]
+        provenance = item.get('provenance')
+        if not provenance or entry.content_sha256 != provenance['content_sha256']:
+            raise RebuildWorkflowError('section_order_source_binding_required')
+        _checked_snapshot(rows.get(item['id']), imports.get(item['id']))
+        fid = provenance['file_id']
+        if fid not in checked_readings:
+            from app.config import get_settings
+            from app.services.rebuild_file_preview import resolve_reading_pdf
+            file = get_file(session, UUID(fid))
+            if file.paper_id != paper_id or file.sha256 != provenance['source_sha256']:
+                raise RebuildWorkflowError('section_order_source_binding_required')
+            content = resolve_reading_pdf(file, get_settings()).read_bytes()
+            reading_hash = hashlib.sha256(content).hexdigest()
+            with fitz.open(stream=content, filetype='pdf') as doc:
+                checked_readings[fid] = (reading_hash, len(doc))
+        reading_hash, pages = checked_readings[fid]
+        if reading_hash != provenance['reading_pdf_sha256'] or item['page_end'] > pages:
+            raise RebuildWorkflowError('section_order_reading_source_mismatch')
+        group = _group(item)
+        if group != previous_group:
+            if group in closed_groups:
+                raise RebuildWorkflowError('section_order_file_groups_must_be_contiguous')
+            if previous_group is not None:
+                closed_groups.add(previous_group)
+            previous_group = group
+            previous_page = None
+        if previous_page is not None and item['page_start'] < previous_page:
+            raise RebuildWorkflowError('section_order_pages_must_be_nondecreasing')
+        previous_page = item['page_start']
+        if any(not item['page_start'] <= source.page_number <= item['page_end'] for source in entry.sources):
+            raise RebuildWorkflowError('section_order_source_page_mismatch')
+    if any('\x00' in value for value in [payload.reason, *[v for entry in payload.sections for src in entry.sources for v in (src.locator, src.quote)]]):
+        raise RebuildWorkflowError('section_order_reason_invalid')
+    from uuid import uuid4
+    audit_id = uuid4()
+    result = {'paper_id': str(paper_id), 'request_id': str(payload.request_id),
+              'revision': _digest({'content_revision': revision, 'order_audit_id': str(audit_id)}), 'ordered_section_ids': [str(e.section_id) for e in payload.sections],
+              'replayed': False, 'scientific_acceptance': 'not_implied'}
+    session.add(AuditLog(id=audit_id, paper_id=paper_id, action=ORDER_EVENT, source=ORDER_VERSION,
+        target_type='paper_sections', target_id=str(payload.request_id), payload={
+            'revision': revision, 'declaration': declaration, 'declaration_sha256': fingerprint,
+            'actor': actor, 'result': result}))
     session.flush()
     return result

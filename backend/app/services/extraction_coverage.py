@@ -111,6 +111,9 @@ def _item_problems(item, graph, snapshot, identity_cache):
                'subfigure':{'asset_id','asset_key'}, 'section':{'section_id'}}[item['kind']]
     require(not any(value is not None and key not in allowed for key,value in link.items()), 'link_kind_mismatch')
     def source_matches(record,value):
+        from app.services.rebuild_source_lifecycle import source_is_current
+        if not source_is_current(value, record.id):
+            return False
         if record.value_id != value.id or record.row_id != value.row_id or record.paper_id != value.paper_id:
             return False
         asset = assets.get(str(record.asset_id)) if record.asset_id else None

@@ -31,14 +31,14 @@ from app.schemas.rebuild import (
     RebuildVisualAssetCropRequest,
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
-    RebuildSourceCorrectionRequest,
+    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSectionOrderRequest,
     RebuildDedupPreviewRequest, RebuildDedupApplyRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
 from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
-from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract
+from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
 from app.services.legacy_data_transfer import LegacyTransferRequest
@@ -90,7 +90,7 @@ MAX_UPLOAD_BYTES = 30 * 1024 * 1024
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
     status = 404 if str(exc) in {"paper_not_found", "file_not_found", "asset_not_found", "value_not_found", "row_not_found", "source_not_found", "immutable_inventory_not_cached", "coverage_linked_output_not_found", "stage_import_receipt_not_found"} else (
-        409 if str(exc) in {"work_package_revision_changed", "stage_request_id_reused", "history_revision_changed", "history_binding_changed", "history_request_id_reused", "history_page_revision_required", "stage_check_revision_changed", "stage_binding_changed", "stage_page_revision_required", "stage_page_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
+        409 if str(exc) in {"work_package_revision_changed", "stage_request_id_reused", "history_revision_changed", "history_binding_changed", "history_request_id_reused", "history_page_revision_required", "stage_check_revision_changed", "stage_binding_changed", "stage_page_revision_required", "stage_page_revision_changed", "coverage_request_id_reused", "coverage_plan_revision_changed", "coverage_output_revision_changed", "coverage_read_revision_changed", "derived_pdf_preview_unavailable", "source_sha256_mismatch", "value_revision_conflict", "value_request_id_reused", "source_revision_conflict", "source_key_conflict", "source_inactive", "source_request_id_reused", "mutation_request_id_reused", "acceptance_request_id_reused", "acceptance_frozen_revision_changed", "independent_reviewer_required", "acceptance_gates_not_satisfied", "accepted_receipt_is_immutable_freeze_new_revision", "immutable_read_source_changed", "immutable_cache_content_mismatch", "independent_task_authorization_required", "independent_task_authorization_invalid", "independent_task_authority_not_configured", "independent_task_authority_unavailable"} else 400
     )
     return HTTPException(status_code=status, detail=str(exc))
 
@@ -502,6 +502,26 @@ async def import_rebuild_sections(
         raise
 
 
+@router.post("/papers/{paper_id}/sections/order")
+async def declare_rebuild_section_order(paper_id: UUID, payload: RebuildSectionOrderRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    from app.services.rebuild_sections import declare_section_order
+    try:
+        result = declare_section_order(session, paper_id, payload, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        error = str(exc)
+        raise HTTPException(status_code=409 if error in {
+            'section_order_revision_conflict', 'section_order_request_id_reused'} else
+            404 if error == 'paper_not_found' else 400, detail=error) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.post("/papers/{paper_id}/sections/corrections")
 async def declare_rebuild_section_corrections(
     paper_id: UUID,
@@ -591,6 +611,8 @@ async def rebuild_ai_work_package(
                 "coverage_plan": f"/api/rebuild/papers/{paper_id}/coverage-plan",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
+                "source_lifecycle": "/api/rebuild/sources/{source_id}/lifecycle",
+                "section_order": f"/api/rebuild/papers/{paper_id}/sections/order",
                 "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
                 "value_dedup_apply": "/api/rebuild/papers/{paper_id}/value-dedup/apply",
                 "processing_status": "/api/rebuild/papers/{paper_id}/processing-status",
@@ -993,12 +1015,19 @@ async def read_rebuild_asset_inventory(
 @router.get("/files/{file_id}/preview")
 async def rebuild_file_preview(
     file_id: UUID,
+    source_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    reading_pdf_sha256: str | None = Query(default=None, pattern=r"^[0-9a-f]{64}$"),
+    page_basis: str | None = Query(default=None, pattern=r"^(source_pdf|derived_pdf)$"),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
     try:
         record = get_file(session, file_id)
-        path = resolve_reading_pdf(record, settings)
+        from app.services.rebuild_file_preview import reading_identity
+        path, identity = reading_identity(record, settings)
+        for key, expected in (("source_sha256", source_sha256), ("reading_pdf_sha256", reading_pdf_sha256), ("page_basis", page_basis)):
+            if expected is not None and expected != identity[key]:
+                raise RebuildWorkflowError(("source_sha256_mismatch" if key == "source_sha256" else "source_" + key + "_mismatch"))
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
     return FileResponse(
@@ -1153,12 +1182,17 @@ def _crop_asset(session, paper_id, payload, settings):
         file_record = get_file(session, payload.file_id)
         if file_record.paper_id != paper_id:
             raise HTTPException(status_code=400, detail="file_belongs_to_other_paper")
-        pdf_path = resolve_file_path(file_record, settings)
+        from app.services.rebuild_file_preview import reading_identity
+        pdf_path, page_identity = reading_identity(file_record, settings)
         # Validate complete metadata/reading before rendering or touching the fixed PNG.
         base_payload = payload.model_dump(exclude={"regions"})
         if "reading_explanation" not in payload.model_fields_set:
             base_payload.pop("reading_explanation", None)
         base_payload["page_numbers"] = sorted({region.page_number for region in payload.regions})
+        supplied_identity = (payload.provenance or {}).get("page_identity")
+        if supplied_identity is not None and supplied_identity != page_identity:
+            raise RebuildWorkflowError("source_page_identity_mismatch")
+        base_payload["provenance"] = {**(payload.provenance or {}), "page_identity": page_identity}
         source_payload = RebuildVisualAssetRequest(**base_payload)
         prepare_visual_asset(session, paper_id=paper_id, payload=source_payload, settings=settings)
 
@@ -1453,6 +1487,25 @@ async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrecti
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
         result = correct_source(session, source_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except (IntegrityError, DataError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="source_database_constraint_conflict") from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/sources/{source_id}/lifecycle")
+async def change_rebuild_source_lifecycle(source_id: UUID, payload: RebuildSourceLifecycleRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        result = deactivate_source(session, source_id, payload, actor=auth.username)
         session.commit()
         return result
     except RebuildWorkflowError as exc:

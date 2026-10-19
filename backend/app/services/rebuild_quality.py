@@ -262,9 +262,11 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             if len(parents) != 1:
                 issue("warning", "subfigure_parent_missing_or_ambiguous", "asset", asset.id,
                       "A separate whole-figure record is not mandatory for a saved crop. Review the same-file label/group if a whole-figure link is intended; this warning does not assert missing science or block by itself.")
+    from app.services.rebuild_source_lifecycle import source_is_current
     sources_by_value = defaultdict(list)
     for source in sources:
-        sources_by_value[source.value_id].append(source)
+        if source.value_id in value_map and source_is_current(value_map[source.value_id], source.id):
+            sources_by_value[source.value_id].append(source)
         value, row = value_map.get(source.value_id), row_map.get(source.row_id)
         if value is None or row is None or source.paper_id != paper_id or value.paper_id != paper_id or value.row_id != source.row_id:
             issue("error", "source_value_row_paper_mismatch", "source", source.id,

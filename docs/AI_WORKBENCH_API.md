@@ -257,3 +257,28 @@ PUT仅追加history_reconciliation_recorded专用AuditLog，保留原WorkflowJob
 缺原报告稳定身份、未知结构/结论、数组、MD/TXT等只保留 `semantic_basis=operator_declaration_only`。字节/hash仍可核对并登记索引，但原报告科学结论与版本不由封套补齐：`historical_verdict_as_reported=null/historical_output_revision=null/comparison=version_unknown`，封套值仅放 `operator_declared_verdict/operator_declared_output_revision`；页面明确“仅操作者声明，原报告语义未机器确认”。支持身份/结论但缺原版本时仍version_unknown。source_scope的basis始终是操作者范围声明与当前文件身份核对，不声称已解析原报告范围或证明科学正确。
 
 旧错误恢复还要求全部已提供row_id、row_index、row_key与原结果/同项事件及该行有证据的历史/当前别名一致；不得通过row_id交集丢弃矛盾候选，或以别名全局唯一替代“属于同一行”。旧results无显式row_index时，仅原one-result-per-submitted-row计数合同允许位置索引，或用原同项事件/明确身份；缺依据、错误index或跨行key继续待核实。有原审计锚点的合法旧alias仍可对应，不凭当前同名猜行。
+
+
+### 候选合同：来源历史化与章节顺序（2026-10-19，尚未发布）
+
+`POST /api/rebuild/sources/{source_id}/lifecycle` 使用现有工作台会话、同源及 CSRF 检查。
+请求包含 `paper_id`、GET 来源返回的 `expected_revision`（`source_revision`）、稳定 UUID `request_id`、
+`action: "deactivate"` 与非空 `reason`。CAS 冲突、同 ID 改 body/actor 返回 409；同 actor/body 重试只读回。
+不删除或改写来源、原 quote 或科学值；审计追加在 value.conflict.source_lifecycle。值/行/工作包的
+`sources` 仅含当前证据，`historical_sources` 保留停用证据，`historical_candidates` 保留仅关联停用来源的候选读回；原始审计及候选关联仍保留在库中。
+失去最后证据是 `evidence_status: "no_current_sources"`，不把科学值改成 missing。
+停用首选来源仅清空指针，不猜测其他候选；正确首选来源不受其他来源停用影响。
+无恢复入口；普通纠正、导入与去重不可静默复活停用来源。
+
+`POST /api/rebuild/papers/{paper_id}/sections/order` 同样要求工作台会话、同源及 CSRF。
+请求：UUID `request_id`、新鲜 `expected_revision`（章节返回的 `section_order_revision`）、非空 `reason`、
+按原文顺序排列的 `sections`。每项为 `section_id`、`content_sha256`（provenance 中原导入哈希）、
+`sources: [{page_number, locator, quote}]`，页必须在该章原物理页范围内。
+必须覆盖该篇所有有来源的当前章节一次；不同 file/page_basis/reading hash 分组必须连续，同组原物理起始页不能倒退。
+未绑定文件的 legacy 章节保留为未知，不得为排序伪造文件身份；边界纠正历史独立保留。
+声明追加 AuditLog，不改原文章节、页码、层级或来源。支持同 body/actor 幂等、更新后 CAS 失效；
+原章节或纠正状态变化使旧声明失效。无显式声明时，同文件同页明确十进制原章号自然排序；
+混合/无编号章仅在校验阅读件 SHA256 且找到唯一逐行原题时按阅读件文字位置排序。
+无法证明的旧数据按页与内容稳定显示并标记 `page_then_content_order_unverified`，不依赖 UUID、
+不臆测罗马/字母/无编号科学章序。它们可通过原文证据声明显式顺序。展示不再附加列表索引章号。
+科学独立验收、正式 accepted/gates/freeze/coverage-plan 合同不在本候选修改范围内。

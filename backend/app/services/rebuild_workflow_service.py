@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.rebuild_source_lifecycle import current_sources, current_conflict, source_is_current, inactive_source_ids
+
 import hashlib
 import json
 import math
@@ -498,7 +500,7 @@ def prepare_visual_asset(
         raise RebuildWorkflowError("reading_explanation_empty_or_conflicting_declarations")
     incoming = declared[0] if declared else None
     old_reading = old_provenance.get("reading_explanation") or old_provenance.get("scientific_reading")
-    source_changed = existing is not None and (force_source_changed or any(key in data and data[key] != getattr(existing, key) for key in ("file_id", "image_path", "page_numbers", "bbox")))
+    source_changed = existing is not None and (force_source_changed or ("page_identity" in supplied and supplied["page_identity"] != old_provenance.get("page_identity")) or any(key in data and data[key] != getattr(existing, key) for key in ("file_id", "image_path", "page_numbers", "bbox")))
     changed_reading = incoming is not None and (incoming != old_reading or source_changed)
     if explicit_present and incoming is not None:
         changed_reading = True
@@ -602,6 +604,9 @@ def _source_key(data: dict[str, Any]) -> str:
         "quote": data.get("quote"),
         "estimate_basis": data.get("estimate_basis"),
     }
+    # Keep historical PDF/XML keys stable; derived page identities include both hashes.
+    if data.get("page_basis") == "derived_pdf":
+        identity.update({key: data.get(key) for key in ("page_basis", "source_sha256", "reading_pdf_sha256")})
     return _stable_hash("source", identity)
 
 
@@ -706,33 +711,29 @@ def _validate_value_for_paper(session: Session, paper_id: UUID, payload: dict[st
         elif isinstance(item, list):
             queue.extend(item)
     for source in payload.get("sources", []):
-        if not _source_is_sufficient(source):
-            raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
-        if source.get("file_id") is not None and get_file(session, source["file_id"]).paper_id != paper_id:
+        _validate_source_for_paper(session, paper_id, source)
+
+
+def _validate_source_for_paper(session, paper_id, source):
+    if not _source_is_sufficient(source):
+        raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
+    if source.get("file_id") is not None and get_file(session, source["file_id"]).paper_id != paper_id:
+        raise RebuildWorkflowError("source_file_belongs_to_other_paper")
+    asset = get_asset(session, source["asset_id"]) if source.get("asset_id") is not None else None
+    if asset is not None and asset.paper_id != paper_id:
+        raise RebuildWorkflowError("source_asset_belongs_to_other_paper")
+    file_id = source.get("file_id") or (asset.file_id if asset is not None else None)
+    if asset is not None and source.get("file_id") and asset.file_id and str(asset.file_id) != str(source["file_id"]):
+        raise RebuildWorkflowError("source_asset_file_mismatch")
+    if file_id is not None:
+        from app.services.rebuild_file_preview import validate_page_identity
+        record = get_file(session, file_id)
+        if record.paper_id != paper_id:
             raise RebuildWorkflowError("source_file_belongs_to_other_paper")
-        asset = get_asset(session, source["asset_id"]) if source.get("asset_id") is not None else None
-        if asset is not None and asset.paper_id != paper_id:
-            raise RebuildWorkflowError("source_asset_belongs_to_other_paper")
-        file_id = source.get("file_id") or (asset.file_id if asset is not None else None)
-        if asset is not None and source.get("file_id") and asset.file_id and str(asset.file_id) != str(source["file_id"]):
-            raise RebuildWorkflowError("source_asset_file_mismatch")
-        if file_id is not None and source.get("page_number") is not None:
-            # Read only: DOCX requires an already-installed reading PDF. Never
-            # generate previews or write caches during import/preflight.
-            from app.services.rebuild_file_preview import resolve_reading_pdf
-            import fitz
-            record = get_file(session, file_id)
-            if record.paper_id != paper_id:
-                raise RebuildWorkflowError("source_file_belongs_to_other_paper")
-            path = resolve_reading_pdf(record, get_settings())
-            try:
-                with fitz.open(path) as document:
-                    if source["page_number"] > document.page_count:
-                        raise RebuildWorkflowError("source_page_out_of_range")
-            except RebuildWorkflowError:
-                raise
-            except (RuntimeError, ValueError) as exc:
-                raise RebuildWorkflowError("source_pdf_unreadable") from exc
+        source.update(validate_page_identity(record, get_settings(), source))
+        source["file_id"] = file_id
+    elif any(source.get(k) is not None for k in ("page_basis", "source_sha256", "reading_pdf_sha256")):
+        raise RebuildWorkflowError("source_page_identity_requires_file")
 
 
 def _candidate(payload: dict[str, Any], source_ids: list[str]) -> dict[str, Any]:
@@ -759,6 +760,13 @@ def _upsert_source(
     if not _source_is_sufficient(data):
         raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
     source_key = _source_key(data)
+    # An explicit new page binding cannot resurrect a retired legacy identity.
+    # Hash-bearing derived sources may legitimately differ only when BOTH have identities.
+    unbound_key = _source_key({**data, "page_basis": None})
+    for retired in session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)):
+        snapshot = serialize_source(retired)
+        if not source_is_current(value, retired.id) and not snapshot.get("page_basis") and _source_key(snapshot) == unbound_key:
+            raise RebuildWorkflowError("source_inactive")
     existing = session.scalar(
         select(RebuildValueSource).where(
             RebuildValueSource.value_id == value.id,
@@ -766,19 +774,25 @@ def _upsert_source(
         )
     )
     if existing is not None:
+        if not source_is_current(value, existing.id):
+            raise RebuildWorkflowError("source_inactive")
         return existing, False
     for legacy in session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)):
         if _source_key(serialize_source(legacy)) == source_key:
+            if not source_is_current(value, legacy.id):
+                raise RebuildWorkflowError("source_inactive")
             return legacy, False
     source = RebuildValueSource(
         value_id=value.id,
         row_id=row.id,
         paper_id=row.paper_id,
         source_key=source_key,
-        **{key: value for key, value in data.items() if key not in {"source_key"}},
+        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256"}},
     )
     session.add(source)
     session.flush()
+    from app.services.rebuild_file_preview import store_source_identity
+    store_source_identity(value, source, data)
     return source, True
 
 
@@ -850,12 +864,13 @@ def _import_value(
     candidates = [dict(item) for item in conflict.get("candidates", [])]
     if existing is not None and not candidates:
         # Old conflict records mixed all sources together. Preserve that uncertainty.
-        legacy_ids = [str(source.id) for source in old_sources]
-        if conflict:
+        legacy_ids = [str(source.id) for source in current_sources(value, old_sources)]
+        legacy_conflict = {k: v for k, v in conflict.items() if k != "source_page_identities"}
+        if legacy_conflict:
             conflict["unattributed_legacy_source_ids"] = legacy_ids
         _retain_candidate(candidates, _candidate(
             {key: getattr(value, key) for key in ("raw_value", "numeric_value", "unit", "value_type", "precision_digits", "missing_reason")},
-            [] if conflict else legacy_ids,
+            [] if legacy_conflict else legacy_ids,
         ))
     # Legacy candidates must participate in both display and conflict state.
     # A legacy unresolved flag is sticky on ordinary import, even when some
@@ -881,6 +896,7 @@ def _import_value(
         source, created = _upsert_source(session, value=value, row=row, data=source_data)
         incoming_ids.append(str(source.id))
         created_sources += int(created)
+    conflict.update({k: v for k, v in (value.conflict or {}).items() if k == "source_page_identities"})
     before = _canonical_json(candidates)
     _retain_candidate(candidates, _candidate(payload, incoming_ids))
     candidate_changed = before != _canonical_json(candidates)
@@ -1049,11 +1065,9 @@ def correct_row_identity(
             raise RebuildWorkflowError("identity_target_collision:" + str(other.id))
     evidence = []
     for source in payload.evidence:
-        if source.file_id and get_file(session, source.file_id).paper_id != row.paper_id:
-            raise RebuildWorkflowError("source_file_belongs_to_other_paper")
-        if source.asset_id and get_asset(session, source.asset_id).paper_id != row.paper_id:
-            raise RebuildWorkflowError("source_asset_belongs_to_other_paper")
-        evidence.append(source.model_dump(mode="json"))
+        declaration = source.model_dump()
+        _validate_source_for_paper(session, row.paper_id, declaration)
+        evidence.append(json.loads(_canonical_json(declaration)))
     for field in IDENTITY_FIELDS:
         setattr(row, field, target["identity"][field])
     row.condition = condition
@@ -1119,7 +1133,7 @@ def _same_submitted_facts(session: Session, row: RebuildDataRow, data: dict[str,
         if value is None or not _same_value(value, incoming) or value.value_type != incoming["value_type"]:
             return False
         sources = session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)).all()
-        if {_source_key(serialize_source(source)) for source in sources} != {_source_key(source) for source in incoming["sources"]}:
+        if {_source_key(serialize_source(source)) for source in current_sources(value, sources)} != {_source_key(source) for source in incoming["sources"]}:
             return False
     return True
 
@@ -1315,7 +1329,12 @@ def update_data_value(
     if row is None:
         raise RebuildWorkflowError("row_not_found")
 
-    fingerprint = hashlib.sha256(_canonical_json(payload.model_dump(mode="json")).encode()).hexdigest()
+    request_body = payload.model_dump(mode="json")
+    source_body = request_body.get("source")
+    if source_body and all(source_body.get(k) is None for k in ("page_basis", "source_sha256", "reading_pdf_sha256")):
+        for k in ("page_basis", "source_sha256", "reading_pdf_sha256"):
+            source_body.pop(k, None)
+    fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     correction_requests = list((value.conflict or {}).get("correction_requests") or [])
     for entry in correction_requests:
         if entry["request_id"] == str(payload.request_id):
@@ -1337,7 +1356,7 @@ def update_data_value(
         "missing_reason": value.missing_reason,
     }
     source_payload = data.get("source")
-    _validate_value({**data, "sources": [source_payload] if source_payload else []})
+    _validate_value_for_paper(session, value.paper_id, {**data, "sources": [source_payload] if source_payload else []})
 
     previous_conflict = dict(value.conflict or {})
     history = list(previous_conflict.get("history") or [])
@@ -1353,10 +1372,11 @@ def update_data_value(
     candidates = [dict(c) for c in previous_conflict.get("candidates", [])]
     if not candidates:
         old_sources = session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)).all()
-        legacy_ids = [str(source.id) for source in old_sources]
-        if previous_conflict:
+        legacy_ids = [str(source.id) for source in current_sources(value, old_sources)]
+        legacy_conflict = {k: v for k, v in previous_conflict.items() if k != "source_page_identities"}
+        if legacy_conflict:
             previous_conflict["unattributed_legacy_source_ids"] = legacy_ids
-        _retain_candidate(candidates, _candidate(previous, [] if previous_conflict else legacy_ids))
+        _retain_candidate(candidates, _candidate(previous, [] if legacy_conflict else legacy_ids))
     preferred_source_id = value.preferred_source_id
     if value_type != "missing":
         source_data = source_payload
@@ -1384,6 +1404,7 @@ def update_data_value(
     value.preferred_source_id = preferred_source_id
     value.conflict = {
         **previous_conflict,
+        **{k: v for k, v in (value.conflict or {}).items() if k == "source_page_identities"},
         "candidates": candidates,
         "status": "corrected_previous_retained",
         "previous": previous,
@@ -1403,7 +1424,13 @@ def update_data_value(
 
 
 def serialize_source(source: RebuildValueSource) -> dict[str, Any]:
+    from app.services.rebuild_file_preview import stored_source_identity
+    identity = stored_source_identity(source)
     return {
+        "page_basis": identity.get("page_basis"),
+        "source_sha256": identity.get("source_sha256"),
+        "reading_pdf_sha256": identity.get("reading_pdf_sha256"),
+        "page_identity_status": "verified" if identity else "legacy_unverified",
         "id": str(source.id),
         "source_key": source.source_key,
         "source_kind": source.source_kind,
@@ -1427,6 +1454,8 @@ def value_revision(value: RebuildDataValue) -> str:
 
 
 def serialize_value(value: RebuildDataValue, sources: list[RebuildValueSource]) -> dict[str, Any]:
+    active = current_sources(value, sources)
+    active_ids = {s.id for s in active}
     return {
         "id": str(value.id),
         "value_revision": value_revision(value),
@@ -1439,9 +1468,13 @@ def serialize_value(value: RebuildDataValue, sources: list[RebuildValueSource]) 
         "precision_digits": value.precision_digits,
         "is_estimated": value.is_estimated,
         "missing_reason": value.missing_reason,
-        "conflict": value.conflict,
-        "preferred_source_id": str(value.preferred_source_id) if value.preferred_source_id else None,
-        "sources": [serialize_source(source) for source in sources],
+        "conflict": current_conflict(value),
+        "preferred_source_id": str(value.preferred_source_id) if value.preferred_source_id in active_ids else None,
+        "sources": [serialize_source(source) for source in active],
+        "historical_sources": [serialize_source(source) for source in sources if source.id not in active_ids],
+        "historical_candidates": [c for c in (value.conflict or {}).get("candidates", [])
+            if c.get("source_ids") and set(c["source_ids"]) <= inactive_source_ids(value)],
+        "evidence_status": "current_sources_present" if active else "no_current_sources",
     }
 
 
@@ -1591,6 +1624,13 @@ def analyze(session: Session, payload: RebuildAnalysisRequest) -> dict[str, Any]
         func.coalesce(RebuildDataRow.properties[IMPORT_META]["pending_identity_fields"].as_string(), "[]") == "[]"
     )
     records = session.execute(statement.limit(payload.max_samples)).all()
+    evidence = {}
+    value_ids = {v.id for _, x, y in records for v in (x, y)}
+    if value_ids:
+        for source in session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id.in_(value_ids))):
+            evidence.setdefault(source.value_id, []).append(source)
+    records = [(row, x, y) for row, x, y in records if all(
+        (not inactive_source_ids(v) or current_sources(v, evidence.get(v.id, []))) for v in (x, y))]
     warnings: list[str] = []
 
     comparison_fields = set(payload.comparison_fields or ["material"])

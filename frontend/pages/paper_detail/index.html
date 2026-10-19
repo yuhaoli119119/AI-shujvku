@@ -2375,7 +2375,7 @@
       const page = figure.page || "";
       const validPage = validPdfPage(figure.page);
       const canOpenPdfPage = hasPaperPdf() && validPage !== null;
-      const pdfPageAction = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers) : canOpenPdfPage
+      const pdfPageAction = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, figure._currentAsset.provenance?.page_identity) : canOpenPdfPage
         ? `<button class="btn btn-ghost btn-sm" type="button" onclick="openPdfAtPage(${validPage})">查看原 PDF 第 ${validPage} 页</button>`
         : `<span class="muted">${hasPaperPdf() ? "缺少有效 PDF 页码" : "原 PDF 不可用"}</span>`;
       const readingData = buildFigureReadingData(figure);
@@ -3176,13 +3176,22 @@
     function currentSourceFile(fileId) {
       return state.rebuildFiles.find(file => file.id === fileId && rebuildOwnerIsKnown(file.paper_id)) || null;
     }
-    function currentPdfLinks(fileId, pages) {
+    function currentPdfLinks(fileId, pages, identity = null) {
       const file = currentSourceFile(fileId);
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
       const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
+      // A historical page is meaningful only in its stored, complete PDF identity.
+      // Missing/partial/unknown metadata must never borrow today's reading cache.
+      const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+      const verifiedPageIdentity = identity && (identity.page_identity_status === undefined || identity.page_identity_status === 'verified') &&
+        ['source_pdf','derived_pdf'].includes(identity.page_basis) && hash(identity.source_sha256) && hash(identity.reading_pdf_sha256) &&
+        identity.source_sha256 === file.sha256 && (identity.page_basis !== 'source_pdf' || identity.reading_pdf_sha256 === identity.source_sha256);
+      if (!verifiedPageIdentity && validPages.length) return '<span class="warning">旧来源页码身份未核实，请核对原件与阅读件</span>' + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
+      const binding = identity ? ['page_basis','source_sha256','reading_pdf_sha256'].filter(key => identity[key]).map(key => '&' + key + '=' + encodeURIComponent(identity[key])).join('') : '';
+      const pageLabel = identity?.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF';
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>
-        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} PDF${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
+        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${binding}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} ${pageLabel}${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
       const originalLink = `<a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载${esc(role)}原文件</a>`;
       return previewLinks + ' ' + originalLink;
     }
@@ -3316,7 +3325,7 @@
       const mismatch = asset && source.file_id && asset.file_id !== source.file_id;
       return `<div class="pd-current-source"><strong>${esc(source.label || source.source_kind || '来源')}</strong>
         ${source.quote ? `<div class="prewrap">${esc(source.quote)}</div>` : ''}
-        ${currentPdfLinks(source.file_id, [source.page_number])}
+        ${currentPdfLinks(source.file_id, [source.page_number], source)}
         ${asset ? `<a href="/api/rebuild/assets/${encodeURIComponent(asset.id)}" target="_blank" rel="noopener">关联图表 ${esc(asset.figure_label || asset.asset_key)}</a>` : source.asset_id ? '<span class="warning">关联图表未找到</span>' : ''}
         ${mismatch ? '<div class="warning">来源文件与关联图表文件不同，待核对；PDF 按已存来源文件打开。</div>' : ''}
         ${!file ? '<div class="warning">来源文件未登记</div>' : ''}
@@ -3607,7 +3616,7 @@
       const parts = records.map(entry => {
         const asset = entry.asset;
         const sourceId = entry.sourceId;
-        const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers) :
+        const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers, asset.provenance?.page_identity) :
           (sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${entry.page ? '#page=' + entry.page : ''}" target="_blank" rel="noopener">查看原 PDF${entry.page ? ' 第 ' + entry.page + ' 页' : ''}</a>` : '');
         const sources = asset?.table_content?.sources || asset?.provenance?.table_sources || [];
         const pointers = sources.map(source => `<li>${esc(source.role || 'body')} · 第 ${esc(source.page_number)} 页 · ${esc(source.locator || '')}${source.quote ? ' · ' + esc(source.quote) : ''}</li>`).join('');
@@ -3813,11 +3822,22 @@
       }).join("");
     }
 
+    function sectionDisplayTitle(section) {
+      const title = section.section_title || section.section_type || "未命名章节";
+      const number = String(section.section_number ?? "").trim();
+      // Only an explicit original number may be prefixed; never a list index.
+      const token = number.replace(/^\(/, "").replace(/[.)]$/, "");
+      if (!/^(?:\d+(?:\.\d+)*|[IVXLCDMivxlcdm]+|[A-Za-z])$/.test(token)) return title;
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      if (new RegExp("^\\s*\\(?" + escaped + "(?:[.)]|\\s|$)", "i").test(title)) return title;
+      return number + (/[.)]$/.test(number) ? " " : ". ") + title;
+    }
+
     function renderSections(sections) {
       if (!sections.length) return '<div class="empty-state">暂无解析章节。</div>';
       const cards = sections.map((section, index) => {
         const historical = section.display_status === "extraction_boundary_history";
-        const title = esc(section.section_title || section.section_type || "未命名章节");
+        const title = esc(sectionDisplayTitle(section));
         const attributes = `id="sec-item-${index}" data-record-id="${esc(section.id)}" data-section-title="${title}"`;
         const content = `<div class="prewrap">${esc(section.text || "")}</div>
           <div class="muted">页码：${esc(section.page_start || "-")} - ${esc(section.page_end || "-")}</div>
@@ -3825,7 +3845,7 @@
           ${renderSectionCorrectionHistory(section, sections)}${renderSectionEvidence(section)}`;
         return {historical, html: historical
           ? `<details class="section-item section-history-item" ${attributes}><summary class="section-title">AI提取章节边界纠正历史 · ${title}（展开保留原文）</summary>${content}</details>`
-          : `<div class="section-item" ${attributes}><div class="section-title">${index + 1}. ${title}</div>${content}</div>`};
+          : `<div class="section-item" ${attributes}><div class="section-title">${title}</div>${content}</div>`};
       });
       const history = cards.filter(card => card.historical);
       return cards.filter(card => !card.historical).map(card => card.html).join("") + (history.length
@@ -4092,7 +4112,7 @@
       img.alt = figure.figure_label || ("Figure " + (index + 1));
       labelEl.textContent = (figure.figure_label || ("Figure " + (index + 1))) + ` · ${group.label} (${index - group.start + 1} / ${group.length})`;
       pageEl.textContent = figure._currentAsset ? "已存页码：" + (figure._currentAsset.page_numbers || []).join(", ") : figure.page ? "PDF 页码: Page " + figure.page : "";
-      pdfActionEl.innerHTML = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers) : canOpenPdfPage
+      pdfActionEl.innerHTML = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, figure._currentAsset.provenance?.page_identity) : canOpenPdfPage
         ? `<button class="btn btn-ghost btn-sm" type="button" onclick="openPdfAtPage(${validPage})">查看原 PDF 第 ${validPage} 页</button>`
         : `<span class="muted">${hasPaperPdf() ? "缺少有效 PDF 页码" : "原 PDF 不可用"}</span>`;
 

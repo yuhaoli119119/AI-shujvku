@@ -300,3 +300,22 @@ def test_actual_delete_count_mismatch_rolls_back_preceding_moves_and_audit(data)
         # must already have undone every source move and canonical audit.
         assert snapshot(s)==before
         s.rollback()
+
+
+def test_docx_page_identity_survives_explicit_source_move(data):
+    factory,pid,other,body=data
+    with factory() as s:
+        identities={}
+        for pair in body.pairs:
+            dup=s.get(RebuildDataValue,pair.duplicate_value_id)
+            src=s.scalar(select(RebuildValueSource).where(RebuildValueSource.value_id==dup.id))
+            identity={'page_basis':'derived_pdf','source_sha256':'a'*64,'reading_pdf_sha256':'b'*64}
+            identities[str(src.id)]=identity
+            dup.conflict={**dup.conflict,'source_page_identities':{str(src.id):identity}}
+            src.page_number=1
+            src.source_key=_source_key(serialize_source(src))
+        s.commit()
+        req=request(s,pid,body);apply_dedup(s,pid,req,actor='fixture');s.commit();s.expire_all()
+        for sid,identity in identities.items():
+            src=s.get(RebuildValueSource,UUID(sid))
+            assert all(serialize_source(src)[k]==v for k,v in identity.items())

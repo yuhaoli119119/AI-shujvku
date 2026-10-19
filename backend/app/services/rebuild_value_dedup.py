@@ -136,6 +136,8 @@ def _preview(session, paper_id, payload, state, tables):
         keep, dup = (values.get(i) for i in (pair.keep_value_id, pair.duplicate_value_id))
         if keep is None or dup is None:
             _fail('value_missing_or_cross_paper')
+        if any((v.conflict or {}).get('source_lifecycle') for v in (keep, dup)):
+            _fail('source_lifecycle_requires_explicit_review_before_dedup')
         kr, dr = rows.get(keep.row_id), rows.get(dup.row_id)
         if kr is None or dr is None:
             _fail('owner_inconsistent')
@@ -257,6 +259,9 @@ def apply_dedup(session: Session, paper_id: UUID, payload, *, actor: str):
         for pair in payload.pairs:
             keep = values[pair.keep_value_id]
             conflict = deepcopy(keep.conflict or {})
+            incoming_identities = (values[pair.duplicate_value_id].conflict or {}).get('source_page_identities') or {}
+            if incoming_identities:
+                conflict['source_page_identities'] = {**incoming_identities, **conflict.get('source_page_identities', {})}
             conflict['merge_history'] = [*conflict.get('merge_history', []), deepcopy(event)]
             keep.conflict = conflict
         for image in preview['pairs']:
