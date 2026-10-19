@@ -2,15 +2,9 @@
 """Deploy an exact GitHub commit. Plan first; apply requires its reviewed digest."""
 import argparse,hashlib,json,os,re,subprocess
 from pathlib import Path
-from uuid import uuid4
 
 REMOTE='https://github.com/yuhaoli119119/AI-shujvku.git'
 SERVICES=['backend','worker','worker-pdf','owner-gateway','share-gateway','public-gateway']
-CLEANUP_ARTIFACT_FILES={
-    'cleanup_download_staging.py':'scripts/cleanup_download_staging.py',
-    'litai-download-staging-cleanup.service':'deploy/systemd/litai-download-staging-cleanup.service',
-    'litai-download-staging-cleanup.timer':'deploy/systemd/litai-download-staging-cleanup.timer',
-}
 def run(args,**kwargs):
     return subprocess.check_output(args,text=True,**kwargs).strip()
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -18,53 +12,6 @@ def write_private(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
     fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     with os.fdopen(fd,'w') as f:f.write(data)
-def cleanup_artifact_manifest(app,sha):
-    files={}
-    for name,relative in CLEANUP_ARTIFACT_FILES.items():
-        source=Path(app)/relative
-        if not source.is_file():return None
-        files[name]={'source':relative,'sha256':digest(source),'mode':'0444'}
-    return {'commit':sha,'files':files}
-def ensure_cleanup_artifact(runtime,app,sha,expected):
-    if expected is None:return None
-    parent=runtime/'deploy-state'/'download-staging-cleanup';parent.mkdir(parents=True,exist_ok=True)
-    target=parent/sha
-    expected_raw=json.dumps(expected,sort_keys=True,indent=2)+'\n'
-    if target.exists():
-        if any((target/name).is_symlink() or not (target/name).is_file() or digest(target/name)!=meta['sha256'] for name,meta in expected['files'].items()):
-            raise RuntimeError('Existing download-cleanup artifact does not match reviewed commit')
-        manifest_file=target/'manifest.json'
-        if not manifest_file.is_file() or manifest_file.read_text()!=expected_raw:raise RuntimeError('Download-cleanup artifact manifest changed')
-    else:
-        temporary=parent/f'.{sha}.tmp-{os.getpid()}-{uuid4().hex}'
-        temporary.mkdir(mode=0o700)
-        try:
-            for name,meta in expected['files'].items():
-                data=(Path(app)/meta['source']).read_bytes()
-                if hashlib.sha256(data).hexdigest()!=meta['sha256']:raise RuntimeError('Download-cleanup source changed after planning: '+meta['source'])
-                fd=os.open(temporary/name,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o444)
-                with os.fdopen(fd,'wb') as f:f.write(data)
-                os.chmod(temporary/name,0o444)
-            fd=os.open(temporary/'manifest.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o444)
-            with os.fdopen(fd,'w') as f:f.write(expected_raw)
-            os.chmod(temporary/'manifest.json',0o444)
-            try:temporary.replace(target)
-            except OSError:
-                if not target.exists():raise
-        finally:
-            if temporary.exists():
-                for child in temporary.iterdir():child.unlink()
-                temporary.rmdir()
-    if not target.is_dir() or target.is_symlink():
-        raise RuntimeError('Download-cleanup artifact directory is missing or unsafe')
-    if any((target/name).is_symlink() or not (target/name).is_file() or digest(target/name)!=meta['sha256'] for name,meta in expected['files'].items()):
-        raise RuntimeError('Download-cleanup artifact verification failed')
-    manifest_file=target/'manifest.json'
-    if not manifest_file.is_file() or manifest_file.read_text()!=expected_raw:
-        raise RuntimeError('Download-cleanup artifact manifest changed')
-    current=parent/'current';temporary_link=parent/f'.current-{os.getpid()}-{uuid4().hex}'
-    temporary_link.symlink_to(sha,target_is_directory=True);os.replace(temporary_link,current)
-    return {'release_dir':str(target),'current':str(current),'files':{name:meta['sha256'] for name,meta in expected['files'].items()}}
 def application_root(checkout):
     # Support both the single-directory repository and older frozen commits.
     for app in (checkout,checkout/'literature-ai'):
@@ -124,16 +71,6 @@ def verify(runtime,sha):
                 if not mount['Source'].startswith(expected) or mount['RW']:raise RuntimeError('Uncontrolled source mount: '+name)
     result=json.loads(run(['docker','exec','literature-ai-backend-1','python','-c',"import json,urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').read().decode())"]))
     if result.get('git_commit')!=sha:raise RuntimeError('Backend health revision mismatch')
-    app=application_root(runtime/'releases'/sha)
-    cleanup=cleanup_artifact_manifest(app,sha)
-    if cleanup is not None:
-        parent=runtime/'deploy-state'/'download-staging-cleanup';current=parent/'current';target=parent/sha
-        if not current.is_symlink() or current.resolve()!=target.resolve():raise RuntimeError('Download-cleanup artifact pointer mismatch')
-        expected_raw=json.dumps(cleanup,sort_keys=True,indent=2)+'\n';manifest_file=target/'manifest.json'
-        if not manifest_file.is_file() or manifest_file.read_text()!=expected_raw:raise RuntimeError('Download-cleanup artifact manifest mismatch')
-        for name,meta in cleanup['files'].items():
-            artifact=target/name
-            if artifact.is_symlink() or not artifact.is_file() or digest(artifact)!=meta['sha256']:raise RuntimeError('Download-cleanup artifact hash mismatch: '+name)
     return result
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -151,11 +88,9 @@ def main():
     cfg=configuration(runtime,app,sha)
     raw=json.dumps(cfg,sort_keys=True,indent=2)+'\n'
     config_hash=hashlib.sha256(raw.encode()).hexdigest()
-    cleanup_artifact=cleanup_artifact_manifest(app,sha)
     plan={'commit':sha,'remote':REMOTE,'code_root':str(app),'services_to_recreate':SERVICES,
           'durable_data_root':str(runtime/'data'),'credential_file':str(runtime/'.env'),
           'compose_sha256':config_hash,'database_services_recreated':[],
-          'download_staging_cleanup':cleanup_artifact,
           'code_mounts':{s:[v for v in cfg['services'][s].get('volumes',[]) if v.get('source','').startswith(str(app))] for s in SERVICES}}
     plan_raw=json.dumps(plan,sort_keys=True,indent=2)+'\n';plan_hash=hashlib.sha256(plan_raw.encode()).hexdigest()
     plan_file=state/'plan.json';config_file=state/'compose.private.json'
@@ -169,9 +104,8 @@ def main():
     compose=['docker','compose','-p','literature-ai','--project-directory',str(runtime),'-f',str(config_file)]
     subprocess.run([*compose,'build','backend','worker','worker-pdf'],check=True)
     subprocess.run([*compose,'up','-d','--no-deps','--force-recreate','--wait','--wait-timeout','180',*SERVICES],check=True)
-    cleanup_installed=ensure_cleanup_artifact(runtime,app,sha,cleanup_artifact)
     verified=verify(runtime,sha)
-    receipt={'commit':sha,'remote':REMOTE,'plan_sha256':plan_hash,'verified_health':verified,'download_staging_cleanup':cleanup_installed}
+    receipt={'commit':sha,'remote':REMOTE,'plan_sha256':plan_hash,'verified_health':verified}
     write_private(state/'deployment-receipt.json',json.dumps(receipt,indent=2)+'\n')
     pointer=runtime/'DEPLOYED_GITHUB_COMMIT';temporary=runtime/'DEPLOYED_GITHUB_COMMIT.next'
     write_private(temporary,sha+'\n');temporary.replace(pointer)

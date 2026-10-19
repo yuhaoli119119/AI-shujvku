@@ -1,4 +1,4 @@
-import importlib.util,json,tempfile,unittest
+import importlib.util,json,unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,30 +62,5 @@ class DeploymentBoundaryTests(unittest.TestCase):
         worker={'State':{'Running':True,'Health':{'Status':'unhealthy'}}}
         with patch.object(deploy,'run',side_effect=[json.dumps([backend]),json.dumps([worker])]):
             with self.assertRaisesRegex(RuntimeError,'health check has not passed: worker'):deploy.verify(Path('/opt/literature-ai'),'a'*40)
-
-    def test_download_cleanup_artifact_is_commit_bound_and_atomically_selected(self):
-        temp_root=Path(__file__).parents[2]/'outputs';temp_root.mkdir(parents=True,exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=temp_root) as temporary:
-            root=Path(temporary);runtime=root/'runtime';app=runtime/'releases'/('b'*40)
-            for name,relative in deploy.CLEANUP_ARTIFACT_FILES.items():
-                target=app/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(name)
-            expected=deploy.cleanup_artifact_manifest(app,'b'*40)
-            result=deploy.ensure_cleanup_artifact(runtime,app,'b'*40,expected)
-            current=runtime/'deploy-state/download-staging-cleanup/current'
-            self.assertTrue(current.is_symlink())
-            self.assertEqual(current.resolve(),(runtime/'deploy-state/download-staging-cleanup'/('b'*40)).resolve())
-            self.assertEqual(json.loads((current/'manifest.json').read_text()),expected)
-            self.assertEqual(result['files'],{name:meta['sha256'] for name,meta in expected['files'].items()})
-
-    def test_download_cleanup_source_change_after_plan_is_rejected(self):
-        temp_root=Path(__file__).parents[2]/'outputs';temp_root.mkdir(parents=True,exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=temp_root) as temporary:
-            root=Path(temporary);runtime=root/'runtime';app=runtime/'releases'/('c'*40)
-            for name,relative in deploy.CLEANUP_ARTIFACT_FILES.items():
-                target=app/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(name)
-            expected=deploy.cleanup_artifact_manifest(app,'c'*40)
-            (app/deploy.CLEANUP_ARTIFACT_FILES['cleanup_download_staging.py']).write_text('changed')
-            with self.assertRaisesRegex(RuntimeError,'changed after planning'):
-                deploy.ensure_cleanup_artifact(runtime,app,'c'*40,expected)
 
 if __name__=='__main__':unittest.main()
