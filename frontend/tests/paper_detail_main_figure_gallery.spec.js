@@ -60,6 +60,7 @@ test('sourced whole figures replace undocumented same-source drafts only in defa
 test('real gallery search opens retained panel image, reading and PDF source; clearing restores default', async ({page}) => {
   await page.setContent(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
   const script = html.slice(html.indexOf('    const API_BASE ='), html.lastIndexOf('</script>'));
+  await page.addScriptTag({path:path.join(__dirname,'../shared/editable-data-grid.js')});
   await page.addScriptTag({content:script});
   await page.evaluate(({assets,files})=>{
     Object.assign(state,{paperId:'paper',paper:{id:'paper',source_pdf_sha256:'main-hash',figures:[],tables:[]},rebuildAssets:assets,rebuildFiles:files,rebuildFamilyIds:['paper','si-paper'],rebuildRows:[],rebuildStatus:'ready',deepLink:{},figureSearch:''});

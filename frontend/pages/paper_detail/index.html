@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
-  <script src="../../shared/editable-data-grid.js?v=20261020-bound-pdf-pages-r2"></script>
+  <script src="../../shared/editable-data-grid.js?v=20261021-navigation-compatibility"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -2313,7 +2313,7 @@
             <div style="font-size:11.5px;font-weight:700;color:var(--color-text-secondary);margin-bottom:4px;">原文位置：</div>
             <div class="pd-reading-locators">
               ${pageLocators.map(loc => `
-                ${loc.paper_id && !rebuildOwnerIsKnown(loc.paper_id) ? '<span class="warning">证据论文归属不一致</span>' : loc.file_id ? currentPdfLinks(loc.file_id,[Number(loc.page)],loc.page_identity || loc) : `<button type="button" class="pd-reading-locator-chip clickable" onclick="openPdfAtPage(${Number(loc.page)})" title="${esc(loc.quote || loc.section || (`PDF 第 ${loc.page} 页`))}">
+                ${loc.paper_id && !rebuildOwnerIsKnown(loc.paper_id) ? '<span class="warning">证据论文归属不一致</span>' : loc.file_id ? currentPdfLinks(loc.file_id,[Number(loc.page)],loc) : `<button type="button" class="pd-reading-locator-chip clickable" onclick="openPdfAtPage(${Number(loc.page)})" title="${esc(loc.quote || loc.section || (`PDF 第 ${loc.page} 页`))}">
                   打开 PDF 第 ${esc(loc.page)} 页
                   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-left:3px;vertical-align:-1px;"><path d="M7 17l9.2-9.2M17 17V8H8"/></svg>
                 </button>`}
@@ -2375,7 +2375,7 @@
       const page = figure.page || "";
       const validPage = validPdfPage(figure.page);
       const canOpenPdfPage = hasPaperPdf() && validPage !== null;
-      const pdfPageAction = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, (figure._currentAsset.provenance?.page_identity || figure._currentAsset.provenance)) : canOpenPdfPage
+      const pdfPageAction = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, figure._currentAsset) : canOpenPdfPage
         ? `<button class="btn btn-ghost btn-sm" type="button" onclick="openPdfAtPage(${validPage})">查看原 PDF 第 ${validPage} 页</button>`
         : `<span class="muted">${hasPaperPdf() ? "缺少有效 PDF 页码" : "原 PDF 不可用"}</span>`;
       const readingData = buildFigureReadingData(figure);
@@ -3182,44 +3182,24 @@
       if (!loc || typeof loc !== 'object') return loc;
       const parentFile = reading.file_id || asset?.file_id;
       if (!parentFile || loc.file_id && loc.file_id !== parentFile) return loc;
-      const parent = reading.page_identity || (asset?.file_id === parentFile ? asset.provenance?.page_identity : null);
-      return {...(parent || {}), file_sha256:reading.file_sha256, ...loc,
-        file_id:loc.file_id || parentFile};
+      // A locator inherits only its saved reading identity, never a newer
+      // screenshot's derived-PDF version or a current conversion cache.
+      const parent = Object.fromEntries(['paper_id','file_id','file_sha256','source_sha256','reading_pdf_sha256','page_basis','page_identity'].filter(key => reading[key] != null).map(key => [key,reading[key]]));
+      return {...loc, file_id:loc.file_id || parentFile, reading_identity:parent};
     }
     function currentPdfLinks(fileId, pages, identity = null) {
       const file = currentSourceFile(fileId);
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
       const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
-      // Native PDF source bytes are also its reading bytes. Historical records
-      // may store only their source hash; bind both hashes and let preview verify
-      // the actual format/bytes. Never borrow a DOCX reading-cache identity.
-      const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-      let bindingIdentity = identity;
-      const nativeLegacy = identity?.page_identity_status === 'legacy_unverified' && identity.file_id === file.id &&
-        (!identity.paper_id || identity.paper_id === file.paper_id) && !identity.page_basis && !identity.source_sha256 && !identity.reading_pdf_sha256 &&
-        /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(file.sha256);
-      if (nativeLegacy) bindingIdentity = {...identity, page_basis:'source_pdf', source_sha256:file.sha256, reading_pdf_sha256:file.sha256};
-      const storedHash = identity?.source_sha256 || identity?.file_sha256;
-      if (identity && !identity.reading_pdf_sha256 && /\.pdf$/i.test(file.original_filename || file.storage_path || '') &&
-          (!identity.page_basis || identity.page_basis === 'source_pdf') &&
-          (identity.page_identity_status === undefined || identity.page_identity_status === 'verified') &&
-          hash(storedHash) && storedHash === file.sha256) {
-        bindingIdentity = {...identity, page_basis:'source_pdf', source_sha256:storedHash, reading_pdf_sha256:storedHash};
-      }
-      const verifiedPageIdentity = bindingIdentity && (nativeLegacy || bindingIdentity.page_identity_status === undefined || bindingIdentity.page_identity_status === 'verified') &&
-        (!bindingIdentity.file_id || bindingIdentity.file_id === file.id) &&
-        (!bindingIdentity.paper_id || bindingIdentity.paper_id === file.paper_id) &&
-        (!bindingIdentity.file_sha256 || bindingIdentity.file_sha256 === file.sha256) &&
-        ['source_pdf','derived_pdf'].includes(bindingIdentity.page_basis) && hash(bindingIdentity.source_sha256) && hash(bindingIdentity.reading_pdf_sha256) &&
-        bindingIdentity.source_sha256 === file.sha256 && (bindingIdentity.page_basis !== 'source_pdf' || bindingIdentity.reading_pdf_sha256 === bindingIdentity.source_sha256);
-      if (!verifiedPageIdentity && validPages.length) return '<span class="warning">旧来源页码身份未核实，请核对原件与阅读件</span>' + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
-      const binding = verifiedPageIdentity ? ['page_basis','source_sha256','reading_pdf_sha256'].map(key => '&' + key + '=' + encodeURIComponent(bindingIdentity[key])).join('') : '';
-      const pageLabel = bindingIdentity?.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF';
+      const bindingIdentity = EditableDataGrid.pdfPageBinding(file, identity);
+      if (!bindingIdentity.ok && (validPages.length || bindingIdentity.reason !== 'derived_identity_required')) return '<span class="warning">来源版本或文件绑定不一致，无法定位该 PDF 页</span>' + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
+      const binding = bindingIdentity.ok ? ['page_basis','source_sha256','reading_pdf_sha256'].map(key => '&' + key + '=' + encodeURIComponent(bindingIdentity[key])).join('') : '';
+      const pageLabel = bindingIdentity.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF';
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>
         `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${binding}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} ${pageLabel}${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
       const originalLink = `<a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载${esc(role)}原文件</a>`;
-      return (nativeLegacy ? '<span class="muted">旧页码待核对，按登记原 PDF 打开</span>' : '') + previewLinks + ' ' + originalLink;
+      return previewLinks + ' ' + originalLink;
     }
     function isPlaceholderReading(reading) {
       return (reading?.detailed_explanation_zh || reading?.detailed_explanation || reading?.core_interpretation || '').trim() === '已由 AI 从原 PDF 逐个子图裁切并汇总；可在图表资料页逐个子图核对。';
@@ -3258,7 +3238,7 @@
         ${data.subfigures.length ? `<section class="pd-reading-subfig-list"><h4>逐子图解读</h4>${data.subfigures.map(sub => `<div class="pd-reading-subfig-item"><strong class="pd-reading-subfig-label">${esc(sub.label)}</strong><div class="prewrap">${esc(sub.description)}</div>
           ${sub.methods ? `<div class="prewrap"><strong>方法：</strong>${esc(storedText(sub.methods))}</div>` : ''}
           ${sub.findings ? `<div class="prewrap"><strong>发现：</strong>${esc(storedText(sub.findings))}</div>` : ''}</div>`).join('')}</section>` : ''}
-        <section class="pd-reading-evidence"><h4>原文证据与位置</h4>${data.locators.map(loc => `<div class="pd-current-source">${currentPdfLinks(loc.file_id,[loc.page],loc.page_identity || loc)}
+        <section class="pd-reading-evidence"><h4>原文证据与位置</h4>${data.locators.map(loc => `<div class="pd-current-source">${currentPdfLinks(loc.file_id,[loc.page],loc)}
           <div class="muted">${esc(loc.section || '')}${loc.evidence_type ? ' · ' + esc(loc.evidence_type) : ''}</div>${typeof loc.quote === 'string' && loc.quote.trim() ? `<blockquote class="prewrap">${esc(loc.quote)}</blockquote>` : ''}${loc.evidence_type === 'visual' && loc.visual_observation ? `<div class="prewrap"><strong>图中观察：</strong>${esc(loc.visual_observation)}</div>` : ''}</div>`).join('')}</section>
         <section class="pd-reading-uncertainty"><strong>不确定项 / 缺失证据</strong>${data.uncertainties.length ? `<ul>${data.uncertainties.map(text=>`<li class="prewrap">${esc(text)}</li>`).join('')}</ul>` : '<div>未记录不确定项</div>'}</section></details>` : `<div class="muted pd-reading-incomplete">${esc(data.reason)}，请结合原文图注和 PDF 阅读。</div>`;
       return `<div class="pd-figure-reading-block" data-scientific-reading="${data.type === 'current_scientific' ? 'bound' : 'incomplete'}">
@@ -3642,7 +3622,7 @@
       const parts = records.map(entry => {
         const asset = entry.asset;
         const sourceId = entry.sourceId;
-        const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers, (asset.provenance?.page_identity || asset.provenance)) :
+        const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers, asset) :
           (sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${entry.page ? '#page=' + entry.page : ''}" target="_blank" rel="noopener">查看原 PDF${entry.page ? ' 第 ' + entry.page + ' 页' : ''}</a>` : '');
         const sources = asset?.table_content?.sources || asset?.provenance?.table_sources || [];
         const pointers = sources.map(source => `<li>${esc(source.role || 'body')} · 第 ${esc(source.page_number)} 页 · ${esc(source.locator || '')}${source.quote ? ' · ' + esc(source.quote) : ''}</li>`).join('');
@@ -4138,7 +4118,7 @@
       img.alt = figure.figure_label || ("Figure " + (index + 1));
       labelEl.textContent = (figure.figure_label || ("Figure " + (index + 1))) + ` · ${group.label} (${index - group.start + 1} / ${group.length})`;
       pageEl.textContent = figure._currentAsset ? "已存页码：" + (figure._currentAsset.page_numbers || []).join(", ") : figure.page ? "PDF 页码: Page " + figure.page : "";
-      pdfActionEl.innerHTML = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, (figure._currentAsset.provenance?.page_identity || figure._currentAsset.provenance)) : canOpenPdfPage
+      pdfActionEl.innerHTML = figure._currentAsset ? currentPdfLinks(figure._currentAsset.file_id, figure._currentAsset.page_numbers, figure._currentAsset) : canOpenPdfPage
         ? `<button class="btn btn-ghost btn-sm" type="button" onclick="openPdfAtPage(${validPage})">查看原 PDF 第 ${validPage} 页</button>`
         : `<span class="muted">${hasPaperPdf() ? "缺少有效 PDF 页码" : "原 PDF 不可用"}</span>`;
 

@@ -127,31 +127,62 @@
     const panel = document.createElement('dialog'); panel.className='edg-dialog'; panel.innerHTML=`<header><strong>${esc(title)}</strong><button type="button" data-close>关闭</button></header><div data-body></div>`; document.body.append(panel); panel.querySelector('[data-close]').onclick=() => panel.close(); panel.onclose=() => panel.remove(); panel.showModal(); return panel;
   }
   function displayRole(file,owner,familyId) {return file?.role==='si' || familyId && owner!==familyId ? 'si' : file?.role;}
-  function sourcePreviewUrl(source, file, owner) {
-    if (!file || file.id !== source.file_id || file.paper_id !== owner || source.paper_id && source.paper_id !== owner) return '';
-    if (source.file_sha256 && source.file_sha256 !== file.sha256) return '';
+  function pdfPageBinding(file, identity = null, owner = file?.paper_id) {
+    // Navigation compatibility only. Never write or promote scientific review state.
+    const fail = reason => ({ok:false, reason});
     const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-    // Registered file IDs are immutable per source hash. A legacy native PDF
-    // can open those original bytes without claiming its page was reviewed.
-    const nativeLegacy = source.page_identity_status === 'legacy_unverified' &&
-      !source.page_basis && !source.source_sha256 && !source.reading_pdf_sha256 &&
-      /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(file.sha256);
-    if (source.page_identity_status && source.page_identity_status !== 'verified' && !nativeLegacy) return '';
-    if (nativeLegacy) source = {...source, page_basis:'source_pdf', source_sha256:file.sha256, reading_pdf_sha256:file.sha256};
-    let basis = source.page_basis, sourceHash = source.source_sha256, readingHash = source.reading_pdf_sha256;
-    if ((!basis || basis === 'source_pdf') && !readingHash && /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(sourceHash) && sourceHash === file.sha256) {
-      basis = 'source_pdf'; readingHash = sourceHash;
+    if (!file || file.paper_id !== owner || !hash(file.sha256)) return fail('unregistered_file');
+    const records = [], seen = new Set();
+    function visit(value, kind = 'root') {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || seen.has(value)) return;
+      seen.add(value); records.push({value, kind});
+      for (const key of ['provenance','page_identity','reading_identity']) visit(value[key], key);
     }
-    if (!['source_pdf','derived_pdf'].includes(basis) || !hash(sourceHash) || !hash(readingHash) || sourceHash !== file.sha256 || basis === 'source_pdf' && readingHash !== sourceHash) return '';
+    visit(identity);
+    const bases = new Set(), readings = new Set(); let sourceDeclared = false;
+    for (const {value,kind} of records) {
+      if (value.file_id && value.file_id !== file.id || value.paper_id && value.paper_id !== owner) return fail('owner_mismatch');
+      if (['mismatch','invalid','stale','conflict','source_changed'].includes(value.page_identity_status)) return fail('identity_conflict');
+      for (const key of ['source_sha256','file_sha256']) {
+        if (value[key] == null || value[key] === '') continue;
+        if (!hash(value[key]) || value[key] !== file.sha256) return fail('source_hash_mismatch');
+        sourceDeclared = true;
+      }
+      if (value.reading_pdf_sha256) {
+        if (!hash(value.reading_pdf_sha256)) return fail('reading_hash_invalid');
+        readings.add(value.reading_pdf_sha256);
+      }
+      // Old DOCX provenance describes the original container; an explicit
+      // nested screenshot identity describes its separately registered PDF.
+      const originalDocxContext = kind === 'provenance' && String(value.page_basis || '').startsWith('docx') && value.page_identity?.page_basis;
+      if (value.page_basis && !originalDocxContext) bases.add(value.page_basis);
+    }
+    if (bases.size > 1 || readings.size > 1) return fail('identity_conflict');
+    const basis = [...bases][0], reading = [...readings][0];
+    const native = /\.pdf$/i.test(file.original_filename || file.storage_path || '');
+    if (native && (!basis || basis === 'source_pdf')) {
+      if (reading && reading !== file.sha256) return fail('reading_hash_mismatch');
+      // File registration is immutable per SHA; preview rehashes the bytes and
+      // enforces source_pdf. Missing newer fields never invalidate this link.
+      return {ok:true, page_basis:'source_pdf', source_sha256:file.sha256, reading_pdf_sha256:file.sha256};
+    }
+    if (!native && basis === 'derived_pdf' && sourceDeclared && reading) {
+      return {ok:true, page_basis:'derived_pdf', source_sha256:file.sha256, reading_pdf_sha256:reading};
+    }
+    return fail('derived_identity_required');
+  }
+  function sourcePreviewUrl(source, file, owner) {
+    const binding = pdfPageBinding(file, source, owner);
+    if (!binding.ok) return '';
     const page = Number(source.page_number);
-    return `/api/rebuild/files/${encodeURIComponent(file.id)}/preview?page_basis=${basis}&source_sha256=${sourceHash}&reading_pdf_sha256=${readingHash}${Number.isSafeInteger(page) && page > 0 ? '#page=' + page : ''}`;
+    return `/api/rebuild/files/${encodeURIComponent(file.id)}/preview?page_basis=${binding.page_basis}&source_sha256=${binding.source_sha256}&reading_pdf_sha256=${binding.reading_pdf_sha256}${Number.isSafeInteger(page) && page > 0 ? '#page=' + page : ''}`;
   }
   function sourcePageLabel(source, href) {
     const page = Number(source.page_number);
     if (source.page_basis === 'docx') return 'DOCX 原件定位（非 PDF 物理页）';
     if (!Number.isSafeInteger(page) || page < 1) return '页码未记录';
-    if (href && source.page_identity_status === 'legacy_unverified') return `原 PDF 第 ${page} 页（旧页码待核对）`;
-    return href ? `${source.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `已存页码 ${page}（身份待核对）`;
+    if (href.includes('page_basis=source_pdf') && source.page_identity_status === 'legacy_unverified') return `原 PDF 第 ${page} 页`;
+    return href ? `${source.page_basis === 'derived_pdf' || href.includes('page_basis=derived_pdf') ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `已存页码 ${page}（身份待核对）`;
   }
   function sourceHtml(source, files, owner, familyId) {
     const file = files.find(f => f.id === source.file_id), page = Number(source.page_number);
@@ -225,5 +256,5 @@
     if(row.identity_status==='pending'){status.textContent='身份待定：请通过带来源的数据导入补交缺失身份。';form.querySelector('[type=submit]').disabled=true;return;}
     form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{let intent;const saved=sessionStorage.getItem(key);if(saved)intent=JSON.parse(saved);else{const d=Object.fromEntries(new FormData(form)),condition=JSON.parse(d.condition);if(!condition || typeof condition!=='object' || Array.isArray(condition))throw Error('条件须为 JSON 对象');intent={paper_id:row.paper_id,row_key:row.row_key,expected_revision:row.identity_revision,request_id:crypto.randomUUID(),changes:{material:d.material,support:d.support || null,active_site:d.active_site || null,configuration:d.configuration || null,active_site_type:d.active_site_type,condition},correction_reason:d.correction_reason,evidence:[{file_id:d.file_id,source_kind:'text',page_number:Number(d.page_number),label:d.label || null,quote:d.quote || null}]};sessionStorage.setItem(key,JSON.stringify(intent));}await api(`/api/rebuild/rows/${row.id}/identity`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(intent)});sessionStorage.removeItem(key);await options.reload?.();panel.close();}catch(error){if(error.status && error.status<500)sessionStorage.removeItem(key);status.textContent=error.status===409?'此行已被修改或与已有身份条件冲突，请刷新后核对。':'保存未确认：'+error.message+'。重试将复用原请求。';}finally{button.disabled=false;}};
   }
-  global.EditableDataGrid={mount,groups,fields,readable,metricLabel,displayRole,editValue,sourceHtml,transferHistory};
+  global.EditableDataGrid={pdfPageBinding,mount,groups,fields,readable,metricLabel,displayRole,editValue,sourceHtml,transferHistory};
 })(window);
