@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
-  <script src="../../shared/editable-data-grid.js?v=20261021-navigation-compatibility"></script>
+  <script src="../../shared/editable-data-grid.js?v=20261021-navigation-compatibility-r2"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -3193,7 +3193,7 @@
       const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
       const bindingIdentity = EditableDataGrid.pdfPageBinding(file, identity);
-      if (!bindingIdentity.ok && (validPages.length || bindingIdentity.reason !== 'derived_identity_required')) return '<span class="warning">来源版本或文件绑定不一致，无法定位该 PDF 页</span>' + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
+      if (!bindingIdentity.ok && (validPages.length || bindingIdentity.reason !== 'derived_identity_required')) return `<span class="warning">${bindingIdentity.reason === 'derived_identity_required' ? '旧记录未指定派生阅读版本；保留原件入口' : 'PDF 文件或版本绑定不一致，无法打开此页'}</span>` + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
       const binding = bindingIdentity.ok ? ['page_basis','source_sha256','reading_pdf_sha256'].map(key => '&' + key + '=' + encodeURIComponent(bindingIdentity[key])).join('') : '';
       const pageLabel = bindingIdentity.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF';
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>

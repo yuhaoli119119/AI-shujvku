@@ -140,12 +140,19 @@
     }
     visit(identity);
     const bases = new Set(), readings = new Set(); let sourceDeclared = false;
+    const native = /\.pdf$/i.test(file.original_filename || file.storage_path || '');
     for (const {value,kind} of records) {
       if (value.file_id && value.file_id !== file.id || value.paper_id && value.paper_id !== owner) return fail('owner_mismatch');
       if (['mismatch','invalid','stale','conflict','source_changed'].includes(value.page_identity_status)) return fail('identity_conflict');
       for (const key of ['source_sha256','file_sha256']) {
         if (value[key] == null || value[key] === '') continue;
-        if (!hash(value[key]) || value[key] !== file.sha256) return fail('source_hash_mismatch');
+        // Older Word imports registered the fixed reading PDF as its own file.
+        // Their source_sha256 names the Word original, explicitly repeated in
+        // source_word_sha256; the saved reading hash identifies this PDF exactly.
+        const registeredWordReading = key === 'source_sha256' && native && !value.page_basis &&
+          hash(value.source_word_sha256) && value[key] === value.source_word_sha256 &&
+          value.reading_pdf_sha256 === file.sha256;
+        if (!hash(value[key]) || value[key] !== file.sha256 && !registeredWordReading) return fail('source_hash_mismatch');
         sourceDeclared = true;
       }
       if (value.reading_pdf_sha256) {
@@ -159,7 +166,6 @@
     }
     if (bases.size > 1 || readings.size > 1) return fail('identity_conflict');
     const basis = [...bases][0], reading = [...readings][0];
-    const native = /\.pdf$/i.test(file.original_filename || file.storage_path || '');
     if (native && (!basis || basis === 'source_pdf')) {
       if (reading && reading !== file.sha256) return fail('reading_hash_mismatch');
       // File registration is immutable per SHA; preview rehashes the bytes and
@@ -182,12 +188,13 @@
     if (source.page_basis === 'docx') return 'DOCX 原件定位（非 PDF 物理页）';
     if (!Number.isSafeInteger(page) || page < 1) return '页码未记录';
     if (href.includes('page_basis=source_pdf') && source.page_identity_status === 'legacy_unverified') return `原 PDF 第 ${page} 页`;
-    return href ? `${source.page_basis === 'derived_pdf' || href.includes('page_basis=derived_pdf') ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `已存页码 ${page}（身份待核对）`;
+    return href ? `${source.page_basis === 'derived_pdf' || href.includes('page_basis=derived_pdf') ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `原件定位 ${page}（未绑定 PDF 物理页）`;
   }
   function sourceHtml(source, files, owner, familyId) {
     const file = files.find(f => f.id === source.file_id), page = Number(source.page_number);
     const link = sourcePreviewUrl(source,file,owner);
-    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${esc(sourcePageLabel(source,link))}</div><blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : '<span class="edg-muted">来源页码身份未核实，请核对原件与阅读件</span>'}${file ? ` <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
+    const note = pdfPageBinding(file,source,owner).reason === 'derived_identity_required' ? '原件定位保留，未指定派生 PDF 页版本' : 'PDF 文件或版本绑定不一致，无法打开此页';
+    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${esc(sourcePageLabel(source,link))}</div><blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : `<span class="edg-muted">${note}</span>`}${file ? ` <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
   }
   // Match the backend's raw-number grammar without changing the stored text.
   // Python str.strip()/regex whitespace includes NEL and excludes BOM.
