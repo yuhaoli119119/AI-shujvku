@@ -73,8 +73,8 @@
         const sources=(v.sources || []).map(source=>{
           const file=files.find(f=>f.id===source.file_id), role=displayRole(file,r.paper_id,options.familyId);
           const roleText=role==='si'?'SI':role==='main'?'正文':'来源文件';
-          const page=Number(source.page_number), locator=[roleText,file?.original_filename,Number.isInteger(page)&&page>0?`PDF 第 ${page} 页`:'页码未记录',source.label].filter(Boolean).join(' · ');
-          const href=source.file_id?`/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview${Number.isInteger(page)&&page>0?'#page='+page:''}`:'';
+          const href=sourcePreviewUrl(source,file,r.paper_id);
+          const locator=[roleText,file?.original_filename,sourcePageLabel(source,href),source.label].filter(Boolean).join(' · ');
           return `<div>${href?`<a href="${esc(href)}" target="_blank" rel="noopener">${esc(locator)}</a>`:esc(locator)}</div>`;
         }).join('') || '<span class="edg-muted">未保存来源</span>';
         return `<section class="edg-condition edg-metric-record" data-current-row="${esc(r.id)}"><header><strong>记录 ${i+1} · ${esc(field?.label || metricLabel(name))}</strong>${valueButton(r,v)}</header><div class="edg-condition-meta">${item('吸附物／研究对象',c.adsorbate)}${item('位点',c.site ?? r.active_site)}${item('构型',({edge:'边缘（edge）',basal:'基面（basal）'})[r.configuration ?? c.configuration] || r.configuration || c.configuration)}${c.reaction_cycle?item('记录用途',({adsorption:'吸附能计算',adsorption_geometry:'吸附构型分析'})[c.reaction_cycle] || c.reaction_cycle):''}${c.reaction_step || c.step?item('反应步骤',c.reaction_step ?? c.step):''}${c.solvent?item('溶剂',c.solvent):''}</div><div class="edg-metric-sources"><span>来源：</span>${sources}</div>${v.notes?`<p class="edg-hint">备注：${esc(v.notes)}</p>`:''}<details class="edg-more"><summary>计算／测试条件与材料详情</summary>${conditionContent(r)}${Object.keys(r.properties || {}).some(k=>!k.startsWith('_'))?`<p>${esc(readable(r.properties))}</p>`:''}<button class="edg-identity-button" data-edg-identity="${esc(r.id)}">编辑材料与条件</button></details></section>`;
@@ -127,10 +127,28 @@
     const panel = document.createElement('dialog'); panel.className='edg-dialog'; panel.innerHTML=`<header><strong>${esc(title)}</strong><button type="button" data-close>关闭</button></header><div data-body></div>`; document.body.append(panel); panel.querySelector('[data-close]').onclick=() => panel.close(); panel.onclose=() => panel.remove(); panel.showModal(); return panel;
   }
   function displayRole(file,owner,familyId) {return file?.role==='si' || familyId && owner!==familyId ? 'si' : file?.role;}
+  function sourcePreviewUrl(source, file, owner) {
+    if (!file || file.id !== source.file_id || file.paper_id !== owner || source.paper_id && source.paper_id !== owner) return '';
+    const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+    if (source.page_identity_status && source.page_identity_status !== 'verified') return '';
+    let basis = source.page_basis, sourceHash = source.source_sha256, readingHash = source.reading_pdf_sha256;
+    if ((!basis || basis === 'source_pdf') && !readingHash && /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(sourceHash) && sourceHash === file.sha256) {
+      basis = 'source_pdf'; readingHash = sourceHash;
+    }
+    if (!['source_pdf','derived_pdf'].includes(basis) || !hash(sourceHash) || !hash(readingHash) || sourceHash !== file.sha256 || basis === 'source_pdf' && readingHash !== sourceHash) return '';
+    const page = Number(source.page_number);
+    return `/api/rebuild/files/${encodeURIComponent(file.id)}/preview?page_basis=${basis}&source_sha256=${sourceHash}&reading_pdf_sha256=${readingHash}${Number.isSafeInteger(page) && page > 0 ? '#page=' + page : ''}`;
+  }
+  function sourcePageLabel(source, href) {
+    const page = Number(source.page_number);
+    if (source.page_basis === 'docx') return 'DOCX 原件定位（非 PDF 物理页）';
+    if (!Number.isSafeInteger(page) || page < 1) return '页码未记录';
+    return href ? `${source.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `已存页码 ${page}（身份待核对）`;
+  }
   function sourceHtml(source, files, owner, familyId) {
     const file = files.find(f => f.id === source.file_id), page = Number(source.page_number);
-    const link = source.file_id ? `/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview${Number.isInteger(page) && page > 0 ? '#page=' + page : ''}` : '';
-    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${page > 0 ? 'PDF 第 ' + page + ' 页' : '页码未记录'}</div><blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
+    const link = sourcePreviewUrl(source,file,owner);
+    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${esc(sourcePageLabel(source,link))}</div><blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : '<span class="edg-muted">来源页码身份未核实，请核对原件与阅读件</span>'}${file ? ` <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
   }
   // Match the backend's raw-number grammar without changing the stored text.
   // Python str.strip()/regex whitespace includes NEL and excludes BOM.

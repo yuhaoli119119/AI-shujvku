@@ -53,10 +53,10 @@ test('stored scientific metric and condition keys use readable Chinese with inte
 test('family grouping combines explicit main and SI identities while editors keep original source owner',async({page})=>{
  await page.goto('http://127.0.0.1:4173/pages/data_table/index.html');await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
  const rows=[row('1',{adsorbate:'Li2S'}),{...row('2',{adsorbate:'Li2S6'}),paper_id:'si'}];
- await page.route('**/api/rebuild/papers/si/files',r=>r.fulfill({json:{items:[{id:'si-file',paper_id:'si',role:'main',original_filename:'SI-original.pdf'}]}}));
- await page.evaluate(rows=>{rows[1].values[0].sources=[{file_id:'si-file',source_kind:'figure',page_number:3,quote:'SI evidence'}];EditableDataGrid.mount(document.getElementById('grid'),{rows,familyId:'paper'});},rows);
+ await page.route('**/api/rebuild/papers/si/files',r=>r.fulfill({json:{items:[{id:'si-file',paper_id:'si',role:'main',original_filename:'SI-original.pdf',sha256:'a'.repeat(64)}]}}));
+ await page.evaluate(rows=>{rows[1].values[0].sources=[{file_id:'si-file',source_kind:'figure',page_number:3,quote:'SI evidence',source_sha256:'a'.repeat(64)}];EditableDataGrid.mount(document.getElementById('grid'),{rows,familyId:'paper'});},rows);
  await expect(page.locator('.edg-tools>span')).toHaveText('1 个催化剂 · 2 条独立条件');await page.getByRole('button',{name:'多组（2）'}).click();await page.locator('[data-current-row="2"] [data-edg-value]').click();
- await expect(page.locator('.edg-source')).toContainText('SI · SI-original.pdf');await expect(page.locator('.edg-source a')).toHaveAttribute('href','/api/rebuild/files/si-file/preview#page=3');await expect(page.locator('select[name=file_id]')).toContainText('SI · SI-original.pdf');
+ await expect(page.locator('.edg-source')).toContainText('SI · SI-original.pdf');await expect(page.locator('.edg-source a[href*=preview]')).toHaveAttribute('href',/files\/si-file\/preview\?page_basis=source_pdf.*#page=3/);await expect(page.locator('select[name=file_id]')).toContainText('SI · SI-original.pdf');
 });
 test('editing only raw value updates numeric safely and keeps original precision',async({page})=>{
  await page.goto('http://127.0.0.1:4173/pages/data_table/index.html');await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});let saved;
@@ -88,12 +88,12 @@ test('wide metric tables remain compact and column choices preserve expanded con
 test('metric expansion shows seven adsorption records with sources, switches metrics and retains all 37 conditions',async({page})=>{
  await page.setContent('<div id="grid"></div>');await page.addScriptTag({path:script});
  const rows=Array.from({length:37},(_,i)=>row(String(i),{software:'VASP',adsorbate:i<7?'Li2S'+(i+1):undefined,reaction_cycle:i===0?'adsorption_geometry':'adsorption'},i<7?'adsorption_energy':i<10?'solvation_adsorption_energy_ev':'icohp_fe_s_ev'));
- rows[0].configuration='edge';rows[0].values[0].sources=[{file_id:'si-file',page_number:9,label:'Fig. S7'}];
- await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows,files:[{id:'si-file',role:'si',original_filename:'SI.pdf'}],onValue:(r,v)=>window.selected=[r.id,v.id]}),rows);
+ rows[0].configuration='edge';rows[0].values[0].sources=[{file_id:'si-file',page_number:9,label:'Fig. S7',source_sha256:'a'.repeat(64)}];
+ await page.evaluate(rows=>EditableDataGrid.mount(document.getElementById('grid'),{rows,files:[{id:'si-file',paper_id:'paper',role:'si',original_filename:'SI.pdf',sha256:'a'.repeat(64)}],onValue:(r,v)=>window.selected=[r.id,v.id]}),rows);
  await page.getByRole('button',{name:'多组（7）'}).click();
  const details=page.locator('.edg-conditions:not([hidden])');
  await expect(details.locator('.edg-metric-record')).toHaveCount(7);await expect(details).toContainText('吸附能明细');await expect(details).not.toContainText('icohp_fe_s_ev');await expect(details).not.toContainText('溶剂化');
- await expect(details).toContainText('SI · SI.pdf · PDF 第 9 页 · Fig. S7');await expect(details.locator('a')).toHaveAttribute('href','/api/rebuild/files/si-file/preview#page=9');await expect(details).toContainText('边缘（edge）');await expect(details).toContainText('吸附构型分析');
+ await expect(details).toContainText('SI · SI.pdf · PDF 第 9 页 · Fig. S7');await expect(details.locator('a')).toHaveAttribute('href',/files\/si-file\/preview\?page_basis=source_pdf.*#page=9/);await expect(details).toContainText('边缘（edge）');await expect(details).toContainText('吸附构型分析');
  await details.locator('[data-current-row="0"] [data-edg-value]').click();expect(await page.evaluate(()=>window.selected)).toEqual(['0','v0']);
  await page.getByRole('button',{name:'多组（3）'}).click();await expect(details.locator('.edg-metric-record')).toHaveCount(3);await expect(details).toContainText('溶剂化');await expect(details).toContainText('未保存来源');
  await page.getByRole('button',{name:'查看该材料全部 37 条条件记录'}).click();await expect(details.locator('.edg-condition')).toHaveCount(37);
