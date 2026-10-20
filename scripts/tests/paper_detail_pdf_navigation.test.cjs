@@ -11,3 +11,5 @@ test('complete derived identity retains exact reading version',()=>{assert.match
 test('reading hash inheritance is same-file only and explicit mismatch survives',()=>{const reading={file_id:'f',file_sha256:sha};assert.match(links(ctx.readingLocatorIdentity({file_id:'f'},reading)),/#page=13/);assert.equal(ctx.readingLocatorIdentity({file_id:'g'},reading).file_sha256,undefined);assert.doesNotMatch(links(ctx.readingLocatorIdentity({file_id:'f',file_sha256:other},reading)),/#page=/);});
 
 test('DOCX cannot infer reading identity from its source hash',()=>{file.original_filename='source.docx';assert.doesNotMatch(links({file_sha256:sha}),/#page=/);file.original_filename='source.pdf';});
+
+test('legacy native source ID binds immutable registered bytes but retains an unverified warning',()=>{const s={file_id:'f',paper_id:'p',page_identity_status:'legacy_unverified'};assert.match(links(s),/#page=13/);assert.match(links(s),/旧页码待核对/);assert.equal(s.source_sha256,undefined);file.original_filename='source.docx';assert.doesNotMatch(links(s),/#page=/);file.original_filename='source.pdf';});

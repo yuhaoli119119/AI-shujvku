@@ -129,8 +129,15 @@
   function displayRole(file,owner,familyId) {return file?.role==='si' || familyId && owner!==familyId ? 'si' : file?.role;}
   function sourcePreviewUrl(source, file, owner) {
     if (!file || file.id !== source.file_id || file.paper_id !== owner || source.paper_id && source.paper_id !== owner) return '';
+    if (source.file_sha256 && source.file_sha256 !== file.sha256) return '';
     const hash = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
-    if (source.page_identity_status && source.page_identity_status !== 'verified') return '';
+    // Registered file IDs are immutable per source hash. A legacy native PDF
+    // can open those original bytes without claiming its page was reviewed.
+    const nativeLegacy = source.page_identity_status === 'legacy_unverified' &&
+      !source.page_basis && !source.source_sha256 && !source.reading_pdf_sha256 &&
+      /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(file.sha256);
+    if (source.page_identity_status && source.page_identity_status !== 'verified' && !nativeLegacy) return '';
+    if (nativeLegacy) source = {...source, page_basis:'source_pdf', source_sha256:file.sha256, reading_pdf_sha256:file.sha256};
     let basis = source.page_basis, sourceHash = source.source_sha256, readingHash = source.reading_pdf_sha256;
     if ((!basis || basis === 'source_pdf') && !readingHash && /\.pdf$/i.test(file.original_filename || file.storage_path || '') && hash(sourceHash) && sourceHash === file.sha256) {
       basis = 'source_pdf'; readingHash = sourceHash;
@@ -143,6 +150,7 @@
     const page = Number(source.page_number);
     if (source.page_basis === 'docx') return 'DOCX 原件定位（非 PDF 物理页）';
     if (!Number.isSafeInteger(page) || page < 1) return '页码未记录';
+    if (href && source.page_identity_status === 'legacy_unverified') return `原 PDF 第 ${page} 页（旧页码待核对）`;
     return href ? `${source.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF'} 第 ${page} 页` : `已存页码 ${page}（身份待核对）`;
   }
   function sourceHtml(source, files, owner, familyId) {
