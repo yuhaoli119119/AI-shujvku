@@ -103,6 +103,7 @@ def test_import_preflight_correct_serialize_link_crop_and_replay(env):
     crop=dict(file_id=ids.file,asset_key='synthetic-crop',asset_type='figure',request_id=str(uuid4()),regions=[dict(page_number=2,bbox=[0,0,1,0.2])])
     result=client.post('/api/rebuild/papers/'+ids.paper+'/assets/crop',json=crop);assert result.status_code==200,result.text
     asset=result.json()['asset'];assert asset['provenance']['page_identity']==ids.identity;assert asset['page_numbers']==[2]
+    assert asset['bbox']==dict(units='normalized_page_fraction',regions=crop['regions'])
     png=client.get(asset['image_url']);assert png.status_code==200 and png.content.startswith(b'\x89PNG')
     assert client.post('/api/rebuild/papers/'+ids.paper+'/assets/crop',json=crop).json()['asset']['id']==asset['id']
     with factory() as s:

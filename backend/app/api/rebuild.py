@@ -1189,6 +1189,10 @@ def _crop_asset(session, paper_id, payload, settings):
         if "reading_explanation" not in payload.model_fields_set:
             base_payload.pop("reading_explanation", None)
         base_payload["page_numbers"] = sorted({region.page_number for region in payload.regions})
+        # Persist the exact ordered render regions, rather than a caller-supplied
+        # optional bbox that can disagree with the pixels (or be absent).
+        base_payload["bbox"] = {"units": "normalized_page_fraction",
+                               "regions": [region.model_dump() for region in payload.regions]}
         supplied_identity = (payload.provenance or {}).get("page_identity")
         if supplied_identity is not None and supplied_identity != page_identity:
             raise RebuildWorkflowError("source_page_identity_mismatch")

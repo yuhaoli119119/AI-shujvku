@@ -5,13 +5,13 @@ const vm = require('vm');
 const html = fs.readFileSync(path.join(__dirname, '../pages/paper_detail/index.html'), 'utf8');
 const helpers = html.slice(html.indexOf('    function isDefaultMainFigure('), html.indexOf('    function renderCurrentFigures('));
 const files = [
-  {id:'main', paper_id:'paper', role:'main'},
+  {id:'main', paper_id:'paper', role:'main', original_filename:'source.pdf', sha256:'a'.repeat(64)},
   {id:'si', paper_id:'paper', role:'si'},
   {id:'related', paper_id:'si-paper', role:'main'},
 ];
 const assets = [
   {id:'whole', paper_id:'paper', file_id:'main', asset_type:'figure', figure_label:'Figure 1', page_numbers:[2], image_path:'whole.png', reading_explanation:{detailed_explanation_zh:'有来源的正文整图解读'}},
-  {id:'panel', paper_id:'paper', file_id:'main', asset_type:'subfigure', figure_label:'Figure 1', subfigure_label:'a', page_numbers:[2], image_path:'panel.png', reading_explanation:{summary_zh:'轨道杂化关键词', detailed_explanation_zh:'保留的子图中文解读'}},
+  {id:'panel', paper_id:'paper', file_id:'main', asset_type:'subfigure', figure_label:'Figure 1', subfigure_label:'a', page_numbers:[2], image_path:'panel.png', provenance:{page_basis:'source_pdf',source_sha256:'a'.repeat(64)}, reading_explanation:{summary_zh:'轨道杂化关键词', detailed_explanation_zh:'保留的子图中文解读'}},
   {id:'panel-no-label', paper_id:'paper', file_id:'main', asset_type:'subfigure', figure_label:'Figure 2', page_numbers:[3]},
   {id:'panel-old-type', paper_id:'paper', file_id:'main', asset_type:'figure', figure_label:'Figure 3', subfigure_label:'b', page_numbers:[3]},
   {id:'si-whole', paper_id:'paper', file_id:'si', asset_type:'figure', figure_label:'Figure S1', page_numbers:[1]},
