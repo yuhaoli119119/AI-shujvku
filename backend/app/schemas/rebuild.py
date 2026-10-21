@@ -526,3 +526,42 @@ class RebuildDedupApplyRequest(RebuildDedupPreviewRequest):
     expected_move_source_ids: list[UUID]
     request_id: UUID
     reason: str = Field(min_length=1, max_length=4000)
+
+
+class RebuildAssetMetadataChanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_numbers: list[Annotated[int, Field(strict=True, ge=1)]] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def valid_pages(self):
+        if any(type(p) is not int or p < 1 for p in self.page_numbers) or len(set(self.page_numbers)) != len(self.page_numbers):
+            raise ValueError("positive_unique_physical_pages_required")
+        return self
+
+
+class RebuildSectionMetadataChanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    section_title: str | None = Field(default=None, min_length=1, max_length=4000)
+    section_type: str | None = Field(default=None, max_length=64)
+    text: str | None = Field(default=None, min_length=1, max_length=2000000)
+
+    @model_validator(mode="after")
+    def valid_changes(self):
+        if not self.model_fields_set:
+            raise ValueError("metadata_changes_required")
+        for field in self.model_fields_set & {"section_title", "text"}:
+            if not (getattr(self, field) or "").strip():
+                raise ValueError("nonblank_section_content_required")
+        return self
+
+
+class RebuildAssetMetadataCorrection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=4000, pattern=r"\S")
+    changes: RebuildAssetMetadataChanges
+
+
+class RebuildSectionMetadataCorrection(RebuildAssetMetadataCorrection):
+    changes: RebuildSectionMetadataChanges

@@ -108,7 +108,7 @@ def audit_ids(request, payload):
     return request_id, task_id
 
 
-def run_audited(session, *, paper_id, operation, payload, actor, request_id, task_id, mutate):
+def run_audited(session, *, paper_id, operation, payload, actor, request_id, task_id, mutate, receipt_serializer=safe_json):
     if not actor or not actor.strip():
         raise RebuildWorkflowError("mutation_actor_required")
     if session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update()) is None:
@@ -143,6 +143,6 @@ def run_audited(session, *, paper_id, operation, payload, actor, request_id, tas
                         payload={"actor": actor, "task_id": task_id, "request_id": request_id,
                                  "request_sha256": fingerprint,
                                  "outcome": "partial" if errors and events else "rejected" if errors else "succeeded",
-                                 "result": safe_json(result)}))
+                                 "result": receipt_serializer(result)}))
     session.flush()
     return result

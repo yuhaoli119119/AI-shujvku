@@ -25,6 +25,7 @@ from app.schemas.rebuild import (
     ProcessingStatusReport,
     ProcessingStatusReportEnvelope,
     RebuildAssetsImportRequest,
+    RebuildAssetMetadataCorrection, RebuildSectionMetadataCorrection,
     RebuildAnalysisRequest,
     RebuildRowsImportRequest,
     RebuildDataRowInput,
@@ -37,6 +38,7 @@ from app.schemas.rebuild import (
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
+from app.services.rebuild_metadata_cas import metadata_state, correct_metadata
 from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
 from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source
 from app.services.artifact_store import ArtifactStore
@@ -1087,12 +1089,13 @@ async def rebuild_assets(paper_id: UUID, session: Session = Depends(get_db_sessi
         raise _http_error(exc) from exc
 
 
-def _audited_response(session, request, payload, paper_id, operation, actor, mutate):
+def _audited_response(session, request, payload, paper_id, operation, actor, mutate, *, receipt_serializer=None):
     from app.services.rebuild_mutation_audit import audit_ids, run_audited
     try:
         request_id, task_id = audit_ids(request, payload)
         result = run_audited(session, paper_id=paper_id, operation=operation, payload=payload,
-                             actor=actor, request_id=request_id, task_id=task_id, mutate=mutate)
+                             actor=actor, request_id=request_id, task_id=task_id, mutate=mutate,
+                             **({"receipt_serializer": receipt_serializer} if receipt_serializer else {}))
         session.commit()
         return result
     except RebuildWorkflowError as exc:
@@ -1629,3 +1632,42 @@ async def apply_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupApplyRe
     except Exception:
         session.rollback()
         raise
+
+
+# Deliberately separate from broad imports: each request changes one target.
+
+
+@router.get("/papers/{paper_id}/assets/{target_id}/metadata")
+async def asset_metadata_state(paper_id: UUID, target_id: UUID,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_work_package_session)):
+    return metadata_state(session, paper_id, "assets", target_id)[1]
+
+
+@router.get("/papers/{paper_id}/sections/{target_id}/metadata")
+async def section_metadata_state(paper_id: UUID, target_id: UUID,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_work_package_session)):
+    return metadata_state(session, paper_id, "sections", target_id)[1]
+
+
+@router.put("/papers/{paper_id}/assets/{target_id}/metadata")
+async def correct_asset_metadata(paper_id: UUID, target_id: UUID,
+    payload: RebuildAssetMetadataCorrection, request: Request,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)):
+    return _audited_response(session, request, payload, paper_id,
+        f"assets.metadata.{target_id}", auth.username,
+        lambda: correct_metadata(session, paper_id, "assets", target_id, payload),
+        receipt_serializer=lambda value: value)
+
+
+@router.put("/papers/{paper_id}/sections/{target_id}/metadata")
+async def correct_section_metadata(paper_id: UUID, target_id: UUID,
+    payload: RebuildSectionMetadataCorrection, request: Request,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)):
+    return _audited_response(session, request, payload, paper_id,
+        f"sections.metadata.{target_id}", auth.username,
+        lambda: correct_metadata(session, paper_id, "sections", target_id, payload),
+        receipt_serializer=lambda value: value)

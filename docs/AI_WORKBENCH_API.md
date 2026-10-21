@@ -282,3 +282,30 @@ PUT仅追加history_reconciliation_recorded专用AuditLog，保留原WorkflowJob
 无法证明的旧数据按页与内容稳定显示并标记 `page_then_content_order_unverified`，不依赖 UUID、
 不臆测罗马/字母/无编号科学章序。它们可通过原文证据声明显式顺序。展示不再附加列表索引章号。
 科学独立验收、正式 accepted/gates/freeze/coverage-plan 合同不在本候选修改范围内。
+
+### 精确资产页码与 legacy 章节元数据纠正
+
+认证工作台会话读取 `GET /api/rebuild/papers/{paper_id}/assets/{target_id}/metadata`
+或 `.../sections/{target_id}/metadata`。返回 `snapshot`（目标的全部持久字段）及
+`expected_revision`；该令牌绑定完整目标状态及其正式写入事件，不可从旧的 version 数字推测。
+章节仅支持没有 `section_imported` 来源事件的 legacy 目标；已有来源绑定的章节返回 422，
+不能借此改写原始导入证明。资产已有 file_id 必须属于同篇，不能跨篇修正。
+
+`PUT` 同一路径，要求同源、工作台会话和 `X-CSRF-Token`，请求例：
+
+```json
+{"request_id":"<UUID>","expected_revision":"<fresh 64 hex>","reason":"核对原文后修正定位","changes":{"page_numbers":[6]}}
+```
+
+资产只接受 `page_numbers`（非空、不重复、正整数物理页列表）；不会更新图片、来源指针、
+解读、provenance 或科学关联。该入口不重新裁图，也不替代原件科学核验或来源页码单独纠正。
+章节 changes 仅接受 `section_title`、`section_type`、`text`，至少一项；标题/正文必须非空，
+section_type 可显式置 null。省略字段不写，额外字段或非法类型 422；目标不属于该篇返回 404。
+每请求一个目标，整项与审计在同一事务提交；不提供跨目标部分成功批量写入。
+
+令牌过期 409、无业务写入；调用方必须重新读取并重新核对，不能盲重试覆盖。
+相同 actor、同目标、同 request_id 和同原始请求重放原回执，`audit.replayed=true`；
+同一作用域 ID 更换原体或 actor 返回 409。重放只是历史回执，不代表当前状态。
+共享正式 mutation 审计追加不可变完整 before/after、原因、原 CAS 令牌、actor 和 request_id，
+返回 `audit.event_ids`；目标与回执原子提交，审计失败全部回滚。不授予科学 accepted 或解除占用。
+已有宽范围导入协议保持兼容，精确修正必须调用此独立入口。
