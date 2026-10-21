@@ -1631,12 +1631,22 @@ async def read_rebuild_value(value_id: UUID, session: Session = Depends(get_db_s
     return serialize_value(value, sources)
 
 
+async def _require_value_write_session(request: Request) -> SessionState:
+    try:
+        return await _require_section_write_session(request)
+    except HTTPException as exc:
+        # Keep the value endpoint's existing finite-JSON error contract.
+        if exc.status_code == 422 and exc.detail == "section_body_must_be_finite_json":
+            raise HTTPException(status_code=422, detail="identity_body_must_be_finite_json") from exc
+        raise
+
+
 @router.put("/values/{value_id}")
 async def correct_rebuild_value(
     value_id: UUID,
     payload: RebuildValueCorrectionRequest,
     session: Session = Depends(get_db_session),
-    auth: SessionState = Depends(_require_identity_correction_session),
+    auth: SessionState = Depends(_require_value_write_session),
 ) -> dict[str, Any]:
     try:
         value = update_data_value(session, value_id=value_id, payload=payload, actor=auth.username)

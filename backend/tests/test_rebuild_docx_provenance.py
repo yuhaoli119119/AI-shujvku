@@ -47,6 +47,7 @@ def env(setup_test_db, tmp_path, monkeypatch):
     app.dependency_overrides[get_db_session]=db;app.dependency_overrides[get_settings]=lambda:settings
     app.dependency_overrides[rebuild._require_section_write_session]=lambda:SimpleNamespace(username='fixture-actor',csrf='fixture-csrf')
     app.dependency_overrides[rebuild._require_identity_correction_session]=lambda:SimpleNamespace(username='fixture-actor',csrf='fixture-csrf')
+    app.dependency_overrides[rebuild._require_value_write_session]=lambda:SimpleNamespace(username='fixture-actor',csrf='fixture-csrf')
     app.dependency_overrides[rebuild._require_work_package_session]=lambda:SimpleNamespace(username='fixture-actor',csrf='fixture-csrf')
     with TestClient(app) as client:
         yield client,factory,settings,ids,tmp_path

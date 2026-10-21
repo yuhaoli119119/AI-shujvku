@@ -20,7 +20,7 @@ def test_value_cas_replay_and_precision(setup_test_db):
                          sources=[dict(source_kind='table',page_number=2,label='Table 1',quote='120.00 mV')])]))
         session.commit()
         cell = list_rows(session, paper_id=paper.id)['items'][0]['values'][0]
-        source = {k:v for k,v in cell['sources'][0].items() if k not in {'id','source_key'}}
+        source = {k:v for k,v in cell['sources'][0].items() if k not in {'id','source_key','page_identity_status'}}
         payload = RebuildValueCorrectionRequest(raw_value='120.00', numeric_value=120, unit='mV',
             precision_digits=2, source=source, correction_reason='UI acceptance with unchanged scientific value',
             expected_revision=cell['value_revision'], request_id=uuid4(), notes='verified')
@@ -49,7 +49,7 @@ def test_value_cas_replay_and_precision(setup_test_db):
 def test_value_readback_and_edit_http_contract(setup_test_db):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    from app.api.rebuild import router, _require_identity_correction_session
+    from app.api.rebuild import router, _require_value_write_session
     from app.db.session import get_db_session
     from types import SimpleNamespace
     factory=sessionmaker(bind=setup_test_db,expire_on_commit=False)
@@ -65,12 +65,12 @@ def test_value_readback_and_edit_http_contract(setup_test_db):
     def db():
         with factory() as session:yield session
     app.dependency_overrides[get_db_session]=db
-    app.dependency_overrides[_require_identity_correction_session]=lambda:SimpleNamespace(username='tester')
+    app.dependency_overrides[_require_value_write_session]=lambda:SimpleNamespace(username='tester')
     with TestClient(app) as client:
         path='/api/rebuild/values/'+cell['id']
         read=client.get(path);assert read.status_code==200
         assert read.json()['value_revision']==cell['value_revision']
-        source={k:v for k,v in cell['sources'][0].items() if k!='id'}
+        source={k:v for k,v in cell['sources'][0].items() if k not in {'id','page_identity_status'}}
         body=dict(expected_revision=cell['value_revision'],request_id=str(uuid4()),correction_reason='API acceptance',
             raw_value='-1.230',numeric_value=-1.23,unit='eV',precision_digits=3,source=source)
         response=client.put(path,json=body);assert response.status_code==200,response.text

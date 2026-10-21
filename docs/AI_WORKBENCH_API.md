@@ -27,7 +27,7 @@
 3. `POST /api/rebuild/rows/import`  
    幂等批量填表；同一 `row_key` 仅在身份一致时合并，来源追加。来源化写入接口语义见第 5 节。
 4. `PUT /api/rebuild/values/{value_id}`  
-   单元格人工/AI修正；旧值保留在冲突历史中，不静默覆盖。
+   单元格人工/AI修正；要求工作台登录会话、允许的 Origin 和与会话绑定的双提交 `X-CSRF-Token`。缺失/无效会话 401，Origin/CSRF 拒绝 403；原有字段校验 422、版本/请求冲突 409、同体同 ID 重放与响应合同保持不变。旧值保留在冲突历史中，不静默覆盖。
 5. `POST /api/rebuild/papers/{paper_id}/ai-extract/jobs`  
    一键派发 Codex-web 目标模式线程自动提取；任务完成后自动写回 `paper_figures`，旧详情页可见图与解读。
 6. `GET /api/rebuild/papers/{paper_id}/ai-extract/jobs/latest`  
