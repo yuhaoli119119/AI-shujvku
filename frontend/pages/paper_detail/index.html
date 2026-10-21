@@ -3502,7 +3502,7 @@
       return `<section class="section-item pd-paper-table" data-table-id="${esc(table.id)}">
         <div class="section-title">${esc(title)}${page ? `<span class="pd-figure-page-badge">Page ${page}</span>` : ''}</div>
         <div class="muted prewrap">${esc(table.caption || '未保存表题')}</div>
-        ${sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${page ? '#page=' + page : ''}" target="_blank" rel="noopener">查看${supplementary ? ' SI' : '正文'}原 PDF${page ? ' 第 ' + page + ' 页' : ''}</a>` : ''}
+        ${sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf?legacy_original=true${page ? '#page=' + page : ''}" target="_blank" rel="noopener">查看${supplementary ? ' SI' : '正文'}原 PDF${page ? ' 第 ' + page + ' 页' : ''}</a>` : ''}
         ${renderPipeTable(table.markdown_content || '')}</section>`;
     }
     /* 把一个逻辑表跨页拆成的多段 markdown 合并为单一表格：
@@ -3639,7 +3639,7 @@
         const asset = entry.asset;
         const sourceId = entry.sourceId;
         const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers, asset) :
-          (sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf${entry.page ? '#page=' + entry.page : ''}" target="_blank" rel="noopener">查看原 PDF${entry.page ? ' 第 ' + entry.page + ' 页' : ''}</a>` : '');
+          (sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf?legacy_original=true${entry.page ? '#page=' + entry.page : ''}" target="_blank" rel="noopener">查看原 PDF${entry.page ? ' 第 ' + entry.page + ' 页' : ''}</a>` : '');
         const sources = asset?.table_content?.sources || asset?.provenance?.table_sources || [];
         const pointers = sources.map(source => `<li>${esc(source.role || 'body')} · 第 ${esc(source.page_number)} 页 · ${esc(source.locator || '')}${source.quote ? ' · ' + esc(source.quote) : ''}</li>`).join('');
         return `<section class="section-item pd-paper-table" ${asset ? `data-current-asset="${esc(asset.id)}"` : `data-table-id="${esc(entry.rec?.id)}"`}>
@@ -4025,7 +4025,7 @@
       const validPage = validPdfPage(page);
       const paperId = state.paper && (state.paper.id || state.paper.paper_id);
       if (!paperId || !hasPaperPdf() || validPage === null) return;
-      window.open(`${API_BASE}/${encodeURIComponent(paperId)}/pdf#page=${validPage}&toolbar=1`, "_blank", "noopener");
+      window.open(`${API_BASE}/${encodeURIComponent(paperId)}/pdf?legacy_original=true#page=${validPage}&toolbar=1`, "_blank", "noopener");
     }
 
     async function toggleCitationPreview(event) {

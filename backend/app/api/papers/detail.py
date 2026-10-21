@@ -1531,20 +1531,21 @@ def get_paper_evidence_locators(
     return EvidenceLocatorService(session).list_locators_for_paper(paper_id, limit=limit)
 
 
-def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:
+def _resolve_paper_pdf_path(paper_id: UUID, session: Session, *, legacy_original: bool = False) -> Path:
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
-    from app.services.rebuild_file_lifecycle import file_set
-    from app.services.rebuild_workflow_service import get_file
-    from app.services.rebuild_file_preview import resolve_reading_pdf
-    state = file_set(session, paper_id)
-    if state['ambiguous_main']:
-        raise HTTPException(409, 'preferred_main_source_ambiguous')
-    if state['preferred_main_id']:
-        return resolve_reading_pdf(get_file(session, UUID(state['preferred_main_id'])), get_settings())
-    if any(f['role'] == 'main' for f in state['items']):
-        raise HTTPException(409, 'preferred_main_source_unavailable')
+    if not legacy_original:
+        from app.services.rebuild_file_lifecycle import file_set
+        from app.services.rebuild_workflow_service import get_file
+        from app.services.rebuild_file_preview import resolve_reading_pdf
+        state = file_set(session, paper_id)
+        if state['ambiguous_main']:
+            raise HTTPException(409, 'preferred_main_source_ambiguous')
+        if state['preferred_main_id']:
+            return resolve_reading_pdf(get_file(session, UUID(state['preferred_main_id'])), get_settings())
+        if any(f['role'] == 'main' for f in state['items']):
+            raise HTTPException(409, 'preferred_main_source_unavailable')
     if not paper.pdf_path:
         raise HTTPException(status_code=404, detail="PDF not uploaded or unavailable")
     settings = get_settings()
@@ -1562,10 +1563,11 @@ def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:
 @router.head("/{paper_id}/pdf")
 async def head_paper_pdf(
     paper_id: UUID,
+    legacy_original: bool = False,
     session: Session = Depends(get_db_session),
 ):
     """Probe PDF availability without downloading it."""
-    file_path = _resolve_paper_pdf_path(paper_id, session)
+    file_path = _resolve_paper_pdf_path(paper_id, session, legacy_original=legacy_original)
     return Response(
         status_code=200,
         media_type="application/pdf",
@@ -1580,10 +1582,11 @@ async def head_paper_pdf(
 async def get_paper_pdf(
     paper_id: UUID,
     download: bool = False,
+    legacy_original: bool = False,
     session: Session = Depends(get_db_session),
 ):
     """Serve the PDF file for a paper, for in-browser preview."""
-    file_path = _resolve_paper_pdf_path(paper_id, session)
+    file_path = _resolve_paper_pdf_path(paper_id, session, legacy_original=legacy_original)
     return FileResponse(str(file_path), media_type="application/pdf",
                         filename=file_path.name if download else None,
                         content_disposition_type="attachment" if download else "inline")

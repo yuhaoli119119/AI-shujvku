@@ -134,6 +134,11 @@ def test_replace_keeps_old_identity_bytes_and_science_and_does_not_parse(audit_e
     assert preferred.status_code == 200 and preferred.content == new_raw
     generic = env['client'].get(f'/api/papers/{env["paper"]}/pdf')
     assert generic.status_code == 200 and generic.content == new_raw
+    legacy = env['client'].get(f'/api/papers/{env["paper"]}/pdf?legacy_original=true')
+    # The original Paper.pdf_path was fixture.pdf, retained without rebinding.
+    assert legacy.status_code == 200
+    assert legacy.content == (env['settings'].storage_root / 'fixture.pdf').read_bytes()
+
     with env['factory']() as session:
         from app.services.rebuild_workflow_service import resolve_paper_source_pdf
         paper = session.get(Paper, env['paper'])

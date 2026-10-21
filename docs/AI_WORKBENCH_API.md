@@ -353,3 +353,8 @@ UUID `request_id`、新鲜 `expected_revision`、`action: add|supersede`、非�
 替代列表原字符串、原文件名与字节 SHA，拒绝未知/重复 multipart 字段。
 数据库/审计失败不建立文件关联或解析任务；已落盘的不可变候选字节可以保留供同体重试，
 不自动删除任何候选或历史文件。
+
+旧 `GET/HEAD /api/papers/{paper_id}/pdf` 默认也选择当前首选。
+只有明确的 `?legacy_original=true` 返回原 `Paper.pdf_path`，供未绑定文件 UUID 的
+历史表格/历史定位使用；这条链接明确保留原记录，不随文件替换改到新正文。
+已绑定文件 UUID 的证据继续使用 `/api/rebuild/files/{file_id}/preview`。
