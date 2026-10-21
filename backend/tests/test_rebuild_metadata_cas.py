@@ -34,7 +34,7 @@ def metadata_env(audit_env):
                             paper_code='T998', pdf_path='foreign.pdf')
         asset = RebuildVisualAsset(paper_id=env['paper'], file_id=env['file'],
             asset_key='metadata-target', asset_type='figure', page_numbers=[5],
-            image_path='immutable.png', caption='Original caption', explanation='Original explanation',
+            y_axis_unit='Original unit', image_path='immutable.png', caption='Original caption', explanation='Original explanation',
             context_text='original context', bbox={'page': 5},
             provenance={'reading_explanation': {'text': 'preserve reading'}, 'identity': 'preserve'},
             unreadable_fields=['label'], material_mapping={'a': 'fixture'})
@@ -83,7 +83,7 @@ def snapshots(env):
                               RebuildValueSource, RebuildPaperFile)}
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'page_numbers': [6]}),
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}),
                                           ('sections', {'section_title': 'Corrected heading'})])
 def test_exact_target_omission_preservation_and_immutable_audit(metadata_env, kind, changes):
     env = metadata_env
@@ -119,7 +119,7 @@ def test_exact_target_omission_preservation_and_immutable_audit(metadata_env, ki
         assert len(list(s.scalars(select(AuditLog).where(AuditLog.action.in_([EVENT, RECEIPT]))))) == 2
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'page_numbers': [6]}), ('sections', {'text': 'Corrected text'})])
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}), ('sections', {'text': 'Corrected text'})])
 def test_stale_reuse_actor_and_aba(metadata_env, kind, changes):
     env = metadata_env
     original = read(env, kind)
@@ -145,6 +145,10 @@ def test_stale_reuse_actor_and_aba(metadata_env, kind, changes):
 
 
 @pytest.mark.parametrize('kind,changes', [
+    *[('assets', {'y_axis_unit': v}) for v in (1, True, 1.5, [], {}, 'x' * 65)],
+    ('assets', {}), ('assets', {'page_numbers': None}),
+    ('assets', {'y_axis_unit': 'unit', 'page_numbers': [6]}),
+    ('assets', {'y_axis_unit': 'unit', 'caption': None}),
     ('assets', {'page_numbers': [0]}), ('assets', {'page_numbers': [True]}),
     ('assets', {'page_numbers': [1.5]}), ('assets', {'page_numbers': [6, 6]}),
     ('assets', {'page_numbers': []}), ('assets', {'image_path': 'overwrite.png'}),
@@ -170,7 +174,7 @@ def test_cross_paper_ownership_and_missing_target(metadata_env, kind):
     assert snapshots(env) == before
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'page_numbers': [6]}),
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}),
                                           ('sections', {'section_title': 'new', 'text': 'new text'})])
 def test_audit_failure_rolls_back_entire_target(metadata_env, kind, changes):
     env = metadata_env; before = snapshots(env); body = request(env, kind, changes)
@@ -219,14 +223,18 @@ def test_source_bound_import_section_rejected(metadata_env):
     assert snapshots(env) == before
 
 
-@pytest.mark.parametrize('kind', ['assets', 'sections'])
-def test_concurrent_same_revision_only_one_winner(metadata_env, kind):
+@pytest.mark.parametrize('kind,field', [('assets', 'page_numbers'), ('assets', 'y_axis_unit'), ('sections', 'text')])
+def test_concurrent_same_revision_only_one_winner(metadata_env, kind, field):
     from concurrent.futures import ThreadPoolExecutor
     env = metadata_env
     changes = {'page_numbers': [6]} if kind == 'assets' else {'text': 'first correction'}
+    if field == 'y_axis_unit':
+        changes = {'y_axis_unit': 'first unit'}
     first = request(env, kind, changes)
     second = copy.deepcopy(first); second['request_id'] = str(uuid4())
     second['changes'] = {'page_numbers': [4]} if kind == 'assets' else {'text': 'second correction'}
+    if field == 'y_axis_unit':
+        second['changes'] = {'y_axis_unit': 'second unit'}
     def send(body):
         client = env['client_for']('writer')
         try:

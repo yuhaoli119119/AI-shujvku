@@ -15,6 +15,8 @@ from sqlalchemy import inspect, select
 from app.db.models import AuditLog, PaperSection, RebuildVisualAsset, RebuildPaperFile
 from app.services.rebuild_mutation_audit import VERSION, EVENT, safe_json
 
+ASSET_METADATA_FIELDS = frozenset({"page_numbers", "y_axis_unit"})
+
 MODELS = {"assets": RebuildVisualAsset, "sections": PaperSection}
 
 
@@ -54,6 +56,8 @@ def correct_metadata(session, paper_id, kind, target_id, payload):
     if before["expected_revision"] != payload.expected_revision:
         raise HTTPException(409, "metadata_revision_conflict")
     changes = payload.changes.model_dump(exclude_unset=True)
+    if kind == "assets" and (len(changes) != 1 or not changes.keys() <= ASSET_METADATA_FIELDS):
+        raise HTTPException(422, "exactly_one_allowed_asset_metadata_field_required")
     for field, value in changes.items():
         setattr(row, field, value)
     session.flush()

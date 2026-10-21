@@ -283,7 +283,7 @@ PUT仅追加history_reconciliation_recorded专用AuditLog，保留原WorkflowJob
 不臆测罗马/字母/无编号科学章序。它们可通过原文证据声明显式顺序。展示不再附加列表索引章号。
 科学独立验收、正式 accepted/gates/freeze/coverage-plan 合同不在本候选修改范围内。
 
-### 精确资产页码与 legacy 章节元数据纠正
+### 精确资产页码、纵轴单位与 legacy 章节元数据纠正
 
 认证工作台会话读取 `GET /api/rebuild/papers/{paper_id}/assets/{target_id}/metadata`
 或 `.../sections/{target_id}/metadata`。返回 `snapshot`（目标的全部持久字段）及
@@ -297,7 +297,9 @@ PUT仅追加history_reconciliation_recorded专用AuditLog，保留原WorkflowJob
 {"request_id":"<UUID>","expected_revision":"<fresh 64 hex>","reason":"核对原文后修正定位","changes":{"page_numbers":[6]}}
 ```
 
-资产只接受 `page_numbers`（非空、不重复、正整数物理页列表）；不会更新图片、来源指针、
+资产每次仅接受一个字段：`page_numbers`（非空、不重复、正整数物理页列表），或
+`y_axis_unit`（严格字符串，最多 64 字符，允许显式 null）；二者同时提交返回 422。
+例如 `"changes":{"y_axis_unit":"<经原件核对的标签>"}`。不会更新图片、来源指针、
 解读、provenance 或科学关联。该入口不重新裁图，也不替代原件科学核验或来源页码单独纠正。
 章节 changes 仅接受 `section_title`、`section_type`、`text`，至少一项；标题/正文必须非空，
 section_type 可显式置 null。省略字段不写，额外字段或非法类型 422；目标不属于该篇返回 404。

@@ -530,12 +530,16 @@ class RebuildDedupApplyRequest(RebuildDedupPreviewRequest):
 
 class RebuildAssetMetadataChanges(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    page_numbers: list[Annotated[int, Field(strict=True, ge=1)]] = Field(min_length=1, max_length=1000)
+    page_numbers: list[Annotated[int, Field(strict=True, ge=1)]] | None = Field(default=None, min_length=1, max_length=1000)
+    y_axis_unit: Annotated[str, Field(strict=True, max_length=64)] | None = None
 
     @model_validator(mode="after")
-    def valid_pages(self):
-        if any(type(p) is not int or p < 1 for p in self.page_numbers) or len(set(self.page_numbers)) != len(self.page_numbers):
-            raise ValueError("positive_unique_physical_pages_required")
+    def valid_changes(self):
+        if len(self.model_fields_set) != 1:
+            raise ValueError("exactly_one_asset_metadata_field_required")
+        if "page_numbers" in self.model_fields_set:
+            if self.page_numbers is None or len(set(self.page_numbers)) != len(self.page_numbers):
+                raise ValueError("positive_unique_physical_pages_required")
         return self
 
 
