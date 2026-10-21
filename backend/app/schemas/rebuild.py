@@ -154,7 +154,8 @@ class RebuildValueSourceInput(BaseModel):
     source_key: str | None = Field(default=None, max_length=255)
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
     page_number: int | None = Field(default=None, ge=1, strict=True)
-    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    page_basis: Literal["source_pdf", "derived_pdf", "ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(default=None, max_length=128)
@@ -308,6 +309,9 @@ class RebuildVisualAssetRequest(BaseModel):
     subfigure_label: str | None = Field(default=None, max_length=64)
     caption: str | None = None
     page_numbers: list[int] = Field(default_factory=list)
+    page_basis: Literal["ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     bbox: dict[str, Any] | None = None
     image_path: str | None = None
     x_axis_unit: str | None = Field(default=None, max_length=64)
@@ -475,7 +479,8 @@ class RebuildSourceIdentity(BaseModel):
     asset_id: UUID | None
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
     page_number: int | None = Field(ge=1, le=2147483647, strict=True)
-    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    page_basis: Literal["source_pdf", "derived_pdf", "ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(max_length=128)
@@ -531,6 +536,7 @@ class RebuildDedupApplyRequest(RebuildDedupPreviewRequest):
 class RebuildAssetMetadataChanges(BaseModel):
     model_config = ConfigDict(extra="forbid")
     page_numbers: list[Annotated[int, Field(strict=True, ge=1)]] | None = Field(default=None, min_length=1, max_length=1000)
+    material_mapping: dict[str, Any] | None = None
     y_axis_unit: Annotated[str, Field(strict=True, max_length=64)] | None = None
 
     @model_validator(mode="after")

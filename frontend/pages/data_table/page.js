@@ -194,6 +194,9 @@ function sourcePdfLink(row, source) {
   if (hasFileId && !(typeof source.file_id === "string" && uuid.test(source.file_id))) {
     return '<span class="rebuild-error">来源文件不可用：文件标注无效</span>';
   }
+  if (source.page_basis === "ooxml" && source.ooxml_locator && hasFileId) {
+    return `<span>OOXML 定位（DOCX 原件，无物理页）：<code>${escapeHtml(source.ooxml_locator)}</code></span> <a href="/api/rebuild/files/${encodeURIComponent(source.file_id)}/download" download>下载 DOCX 原件</a>`;
+  }
   const page = validSourcePage(source.page_number);
   const path = hasFileId ? `/api/rebuild/files/${source.file_id}/preview` :
     `/api/rebuild/papers/${encodeURIComponent(row.paper_id)}/source-pdf/preview`;
@@ -214,7 +217,7 @@ function showSource(rowId, fieldName) {
     <div class="rebuild-panel" style="box-shadow:none">
       ${value.preferred_source_id && source.id === value.preferred_source_id ? '<span class="rebuild-tag">当前首选来源</span>' : ""}
       <div>来源 ID：${escapeHtml(source.id)}</div>
-      <div><strong>${escapeHtml(source.label || source.source_kind)}</strong> · ${validSourcePage(source.page_number) === null ? "页码未标注" : `第 ${validSourcePage(source.page_number)} 页`}</div>
+      <div><strong>${escapeHtml(source.label || source.source_kind)}</strong> · ${source.page_basis === "ooxml" ? "OOXML 定位（DOCX 原件，无物理页）" : validSourcePage(source.page_number) === null ? "页码未标注" : `第 ${validSourcePage(source.page_number)} 页`}</div>
       ${source.quote ? `<p>${escapeHtml(source.quote)}</p>` : ""}
       ${source.estimate_basis ? `<p><strong>估读依据：</strong>${escapeHtml(source.estimate_basis)}</p>` : ""}
       ${source.asset_id ? `
@@ -285,6 +288,7 @@ async function submitCorrection(event) {
   const sourceKind = $("correctionSourceKind").value.trim() || "text";
   const pageNumber = $("correctionPageNumber").value;
   const quote = $("correctionQuote").value.trim() || null;
+  const originalSource = value.sources?.find(item => item.id === value.preferred_source_id) || value.sources?.[0];
   const payload = {
     raw_value: valueType === "missing" ? null : ($("correctionRawValue").value.trim() || null),
     numeric_value: $("correctionNumericValue").value === "" ? null : Number($("correctionNumericValue").value),
@@ -294,6 +298,7 @@ async function submitCorrection(event) {
     missing_reason: valueType === "missing" ? ($("correctionMissingReason").value.trim() || "missing") : null,
     correction_reason: $("correctionReason").value.trim() || null,
     source: {
+      ...(originalSource?.page_basis === "ooxml" ? Object.fromEntries(["page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator"].map(key => [key, originalSource[key]])) : {}),
       file_id: $("correctionSourceFile").value || null,
       source_kind: sourceKind,
       page_number: pageNumber ? Number(pageNumber) : null,

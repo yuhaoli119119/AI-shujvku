@@ -132,7 +132,7 @@ def test_key_collision_paper_mismatch_missing_and_rollback(fixture,monkeypatch):
         req=body(s,ids)
         original=s.get(RebuildValueSource,ids.source)
         data=RebuildSourceCorrectionRequest(**req).source.model_dump()
-        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**{k:v for k,v in data.items() if k not in {"page_basis","source_sha256","reading_pdf_sha256"}})
+        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**{k:v for k,v in data.items() if k not in {"page_basis","source_sha256","reading_pdf_sha256","ooxml_locator"}})
         s.add(other);s.commit();stored=snapshot(s)
         for source_id,changes,error in [(ids.source,{},'source_key_conflict'),(ids.source,{'paper_id':ids.other},'source_paper_mismatch'),(uuid4(),{},'source_not_found'),(ids.source,{'correction_reason':'  '},'correction_reason_required')]:
             with pytest.raises(RebuildWorkflowError,match=error):

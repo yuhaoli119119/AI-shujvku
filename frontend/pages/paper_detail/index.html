@@ -3191,6 +3191,8 @@
       const file = currentSourceFile(fileId);
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
       const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
+      const xml = EditableDataGrid.ooxmlBinding(file, identity);
+      if (xml && !(pages || []).length) return `<span class="muted">OOXML 定位（DOCX 原件，无物理页）：<code>${esc(xml.ooxml_locator)}</code></span> <a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载 DOCX 原件</a>`;
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
       const bindingIdentity = EditableDataGrid.pdfPageBinding(file, identity);
       if (!bindingIdentity.ok && (validPages.length || bindingIdentity.reason !== 'derived_identity_required')) return `<span class="warning">${bindingIdentity.reason === 'derived_identity_required' ? '旧记录未指定派生阅读版本；保留原件入口' : 'PDF 文件或版本绑定不一致，无法打开此页'}</span>` + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;

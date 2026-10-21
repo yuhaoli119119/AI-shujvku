@@ -83,7 +83,7 @@ def snapshots(env):
                               RebuildValueSource, RebuildPaperFile)}
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}),
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}), ('assets', {'material_mapping': {'panels': [{'label': '(a)', 'role': 'solvent configuration'}], 'conflict': 'Preserve unresolved caption/legend conflict'}}),
                                           ('sections', {'section_title': 'Corrected heading'})])
 def test_exact_target_omission_preservation_and_immutable_audit(metadata_env, kind, changes):
     env = metadata_env
@@ -111,6 +111,7 @@ def test_exact_target_omission_preservation_and_immutable_audit(metadata_env, ki
         payload = copy.deepcopy(events[0].payload)
         assert payload['before'] == original and payload['after'] == updated
         assert payload['actor'] == 'writer' and payload['request_id'] == body['request_id']
+        assert set(payload['changed_fields']) == {key for key in changes if original[key] != updated[key]}
     replay = env['client'].put(url(env, kind), json=body)
     assert replay.status_code == 200 and replay.json()['audit']['replayed'] is True
     assert snapshots(env) == after
@@ -119,7 +120,7 @@ def test_exact_target_omission_preservation_and_immutable_audit(metadata_env, ki
         assert len(list(s.scalars(select(AuditLog).where(AuditLog.action.in_([EVENT, RECEIPT]))))) == 2
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}), ('sections', {'text': 'Corrected text'})])
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}), ('assets', {'material_mapping': {'a': 'new fixture role'}}), ('sections', {'text': 'Corrected text'})])
 def test_stale_reuse_actor_and_aba(metadata_env, kind, changes):
     env = metadata_env
     original = read(env, kind)
@@ -153,6 +154,8 @@ def test_stale_reuse_actor_and_aba(metadata_env, kind, changes):
     ('assets', {'page_numbers': [1.5]}), ('assets', {'page_numbers': [6, 6]}),
     ('assets', {'page_numbers': []}), ('assets', {'image_path': 'overwrite.png'}),
     ('assets', {'file_id': str(uuid4())}), ('assets', {'provenance': {}}),
+    *[('assets', {'material_mapping': value}) for value in (None, {}, [], 'role', 1, {'': 'role'}, {'panel': 'bad\x00role'})],
+    ('assets', {'material_mapping': {'a': 'role'}, 'y_axis_unit': 'eV'}),
     ('sections', {'text': ' '}), ('sections', {'section_title': ''}),
     ('sections', {'section_type': 'x' * 65}), ('sections', {'page_start': 7}),
     ('sections', {'heading_path': ['overwrite']}), ('sections', {}),
@@ -174,7 +177,7 @@ def test_cross_paper_ownership_and_missing_target(metadata_env, kind):
     assert snapshots(env) == before
 
 
-@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}),
+@pytest.mark.parametrize('kind,changes', [('assets', {'y_axis_unit': 'Synthetic / a.u.'}), ('assets', {'y_axis_unit': None}), ('assets', {'page_numbers': [6]}), ('assets', {'material_mapping': {'panels': [{'label': '(a)', 'role': 'solvent configuration'}], 'conflict': 'Preserve unresolved caption/legend conflict'}}),
                                           ('sections', {'section_title': 'new', 'text': 'new text'})])
 def test_audit_failure_rolls_back_entire_target(metadata_env, kind, changes):
     env = metadata_env; before = snapshots(env); body = request(env, kind, changes)
@@ -223,18 +226,22 @@ def test_source_bound_import_section_rejected(metadata_env):
     assert snapshots(env) == before
 
 
-@pytest.mark.parametrize('kind,field', [('assets', 'page_numbers'), ('assets', 'y_axis_unit'), ('sections', 'text')])
+@pytest.mark.parametrize('kind,field', [('assets', 'page_numbers'), ('assets', 'y_axis_unit'), ('assets', 'material_mapping'), ('sections', 'text')])
 def test_concurrent_same_revision_only_one_winner(metadata_env, kind, field):
     from concurrent.futures import ThreadPoolExecutor
     env = metadata_env
     changes = {'page_numbers': [6]} if kind == 'assets' else {'text': 'first correction'}
     if field == 'y_axis_unit':
         changes = {'y_axis_unit': 'first unit'}
+    if field == 'material_mapping':
+        changes = {'material_mapping': {'a': 'first role'}}
     first = request(env, kind, changes)
     second = copy.deepcopy(first); second['request_id'] = str(uuid4())
     second['changes'] = {'page_numbers': [4]} if kind == 'assets' else {'text': 'second correction'}
     if field == 'y_axis_unit':
         second['changes'] = {'y_axis_unit': 'second unit'}
+    if field == 'material_mapping':
+        second['changes'] = {'material_mapping': {'a': 'second role'}}
     def send(body):
         client = env['client_for']('writer')
         try:
@@ -249,9 +256,10 @@ def test_concurrent_same_revision_only_one_winner(metadata_env, kind, field):
         assert len(list(s.scalars(select(AuditLog).where(AuditLog.action == RECEIPT)))) == 1
 
 
-def test_asset_existing_foreign_file_pointer_rejected(metadata_env):
+@pytest.mark.parametrize('changes', [{'page_numbers': [6]}, {'material_mapping': {'a': 'role'}}])
+def test_asset_existing_foreign_file_pointer_rejected(metadata_env, changes):
     env = metadata_env
-    body = request(env, 'assets', {'page_numbers': [6]})
+    body = request(env, 'assets', changes)
     with env['factory']() as s:
         foreign_file = RebuildPaperFile(paper_id=env['foreign'], role='main',
             storage_path='foreign.pdf', original_filename='foreign.pdf', sha256='f' * 64, file_size=1)
@@ -341,3 +349,53 @@ def test_section_all_allowed_fields_then_explicit_null_type(metadata_env):
         assert len(events) == 2
         assert events[0].payload['after'] == events[1].payload['before'] == updated
         assert events[1].payload['after'] == final
+
+
+@pytest.mark.parametrize('failure', ['depth', 'size', 'foreign_paper'])
+def test_material_mapping_boundaries_preserve_all_records(metadata_env, failure):
+    env = metadata_env
+    mapping = {'panels': [{'label': '(a)', 'role': 'configuration'}]}
+    if failure == 'depth':
+        for _ in range(18):
+            mapping = {'nested': mapping}
+    elif failure == 'size':
+        mapping = {'panel': 'x' * 1_000_001}
+    body = request(env, 'assets', {'material_mapping': mapping})
+    before = snapshots(env)
+    path = url(env, 'assets', paper=env['foreign']) if failure == 'foreign_paper' else url(env, 'assets')
+    response = env['client'].put(path, json=body)
+    assert response.status_code == (404 if failure == 'foreign_paper' else 422), response.text
+    assert snapshots(env) == before
+    with env['factory']() as s:
+        assert not list(s.scalars(select(AuditLog).where(AuditLog.action.in_([EVENT, RECEIPT]))))
+
+
+@pytest.mark.parametrize('changes', [{'page_numbers': [6]}, {'material_mapping': {'a': 'corrected role'}}])
+def test_asset_audit_changed_fields_excludes_automatic_maintenance_columns(metadata_env, changes):
+    from datetime import datetime
+    env = metadata_env
+    with env['factory']() as s:
+        # Force a distinct old time so this checks the real PostgreSQL/ORM
+        # on-update behavior without sleeps or timing-dependent assertions.
+        s.get(RebuildVisualAsset, env['asset']).updated_at = datetime(2000, 1, 1)
+        s.commit()
+    body = request(env, 'assets', changes)
+    response = env['client'].put(url(env, 'assets'), json=body)
+    assert response.status_code == 200, response.text
+    with env['factory']() as s:
+        audit = s.scalar(select(AuditLog).where(AuditLog.action == EVENT))
+        assert audit.payload['before']['updated_at'] != audit.payload['after']['updated_at']
+        assert audit.payload['changed_fields'] == list(changes)
+        assert audit.payload['before'] == response.json()['before']
+        assert audit.payload['after'] == response.json()['snapshot']
+
+
+@pytest.mark.parametrize('value', [float('nan'), float('inf'), float('-inf'), '\ud800'])
+def test_mapping_nonfinite_or_unencodable_json_rejected_before_audit(metadata_env,value):
+    import json
+    env=metadata_env
+    body=request(env,'assets',{'material_mapping':{'panel':value}})
+    before=snapshots(env)
+    response=env['client'].put(url(env,'assets'),content=json.dumps(body),headers={'Content-Type':'application/json'})
+    assert response.status_code==422,response.text
+    assert snapshots(env)==before

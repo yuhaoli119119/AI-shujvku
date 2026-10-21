@@ -177,6 +177,16 @@
     }
     return fail('derived_identity_required');
   }
+  function ooxmlBinding(file, identity, owner = file?.paper_id) {
+    if (!file || !/\.docx$/i.test(file.original_filename || file.storage_path || '') || file.paper_id !== owner) return null;
+    const candidates = [identity, identity?.page_identity, identity?.provenance?.page_identity, identity?.reading_identity];
+    const binding = candidates.find(value => value?.page_basis === 'ooxml');
+    if (!binding || !/^word\/document\.xml#body-child\[[1-9][0-9]*\](?:\/w:[A-Za-z][A-Za-z0-9]*\[[1-9][0-9]*\])+$/.test(binding.ooxml_locator || '') || (binding.ooxml_locator || '').length > 4000 || !/^[0-9a-f]{64}$/.test(binding.source_sha256 || '') ||
+        binding.source_sha256 !== file.sha256 || binding.reading_pdf_sha256 ||
+        candidates.some(value => value && (value.file_id && value.file_id !== file.id || value.paper_id && value.paper_id !== owner || value.source_sha256 && value.source_sha256 !== file.sha256 || value.page_basis && value.page_basis !== 'ooxml' || value.reading_pdf_sha256 || value.ooxml_locator && value.ooxml_locator !== binding.ooxml_locator)) ||
+        identity?.page_number != null || identity?.page_numbers?.length) return null;
+    return binding;
+  }
   function sourcePreviewUrl(source, file, owner) {
     const binding = pdfPageBinding(file, source, owner);
     if (!binding.ok) return '';
@@ -185,6 +195,7 @@
   }
   function sourcePageLabel(source, href) {
     const page = Number(source.page_number);
+    if (source.page_basis === 'ooxml') return 'OOXML 定位（DOCX 原件，无物理页）';
     if (source.page_basis === 'docx') return 'DOCX 原件定位（非 PDF 物理页）';
     if (!Number.isSafeInteger(page) || page < 1) return '页码未记录';
     if (href.includes('page_basis=source_pdf') && source.page_identity_status === 'legacy_unverified') return `原 PDF 第 ${page} 页`;
@@ -192,9 +203,10 @@
   }
   function sourceHtml(source, files, owner, familyId) {
     const file = files.find(f => f.id === source.file_id), page = Number(source.page_number);
-    const link = sourcePreviewUrl(source,file,owner);
+    const xml = ooxmlBinding(file,source,owner);
+    const link = xml ? '' : sourcePreviewUrl(source,file,owner);
     const note = pdfPageBinding(file,source,owner).reason === 'derived_identity_required' ? '原件定位保留，未指定派生 PDF 页版本' : 'PDF 文件或版本绑定不一致，无法打开此页';
-    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${esc(sourcePageLabel(source,link))}</div>${file?.lifecycle_status === "superseded" ? '<p class="edg-hint">历史文件已被替代；原科学关联保留，需独立科学复核。</p>' : ""}<blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : `<span class="edg-muted">${note}</span>`}${file ? ` <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
+    return `<article class="edg-source"><strong>${esc(displayRole(file,owner,familyId) === 'si' ? 'SI' : file?.role === 'main' ? '正文' : '来源未登记')} · ${esc(file?.original_filename || '')}</strong><div>${esc(source.label || source.source_kind)} · ${esc(sourcePageLabel(source,link))}</div>${file?.lifecycle_status === "superseded" ? '<p class="edg-hint">历史文件已被替代；原科学关联保留，需独立科学复核。</p>' : ""}<blockquote>${esc(source.quote || source.estimate_basis || '未保存引文')}</blockquote>${xml ? `<p><code>${esc(xml.ooxml_locator)}</code></p>` : ''}${xml ? '' : link ? `<a href="${esc(link)}" target="_blank" rel="noopener">打开证据 PDF</a>` : `<span class="edg-muted">${note}</span>`}${file ? ` <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>` : ''}${source.asset_id ? ` <a href="/api/rebuild/assets/${encodeURIComponent(source.asset_id)}" target="_blank" rel="noopener">打开证据图表</a>` : ''}</article>`;
   }
   // Match the backend's raw-number grammar without changing the stored text.
   // Python str.strip()/regex whitespace includes NEL and excludes BOM.
@@ -237,7 +249,7 @@
       let payload;
       try {
         if (sessionStorage.getItem(key)) payload=JSON.parse(sessionStorage.getItem(key));
-        else {const data=Object.fromEntries(new FormData(form)); if(!data.correction_reason.trim())throw Error('请填写修改理由'); payload={expected_revision:value.value_revision,request_id:crypto.randomUUID(),raw_value:data.value_type==='missing'?null:data.raw_value || null,numeric_value:data.value_type==='missing'||data.numeric_value===''?null:Number(data.numeric_value),unit:data.unit || null,value_type:data.value_type,precision_digits:value.precision_digits,missing_reason:data.value_type==='missing'?data.missing_reason || '未报告':null,notes:data.notes || null,correction_reason:data.correction_reason,source:{...Object.fromEntries(['file_id','asset_id','source_key','source_kind','page_number','label','table_row','table_column','quote','estimate_basis'].filter(k=>source[k]!==undefined).map(k=>[k,source[k]])),file_id:data.file_id || null,source_kind:source.source_kind || 'text',page_number:data.page_number?Number(data.page_number):null,label:data.label || null,quote:data.quote || null}}; if(!payload.expected_revision)throw Error('数据版本缺失，请刷新后重试'); sessionStorage.setItem(key,JSON.stringify(payload));}
+        else {const data=Object.fromEntries(new FormData(form)); if(!data.correction_reason.trim())throw Error('请填写修改理由'); payload={expected_revision:value.value_revision,request_id:crypto.randomUUID(),raw_value:data.value_type==='missing'?null:data.raw_value || null,numeric_value:data.value_type==='missing'||data.numeric_value===''?null:Number(data.numeric_value),unit:data.unit || null,value_type:data.value_type,precision_digits:value.precision_digits,missing_reason:data.value_type==='missing'?data.missing_reason || '未报告':null,notes:data.notes || null,correction_reason:data.correction_reason,source:{...Object.fromEntries(['file_id','asset_id','source_key','source_kind','page_number','label','table_row','table_column','quote','estimate_basis',...(source.page_basis === 'ooxml' ? ['page_basis','source_sha256','reading_pdf_sha256','ooxml_locator'] : [])].filter(k=>source[k]!==undefined).map(k=>[k,source[k]])),file_id:data.file_id || null,source_kind:source.source_kind || 'text',page_number:data.page_number?Number(data.page_number):null,label:data.label || null,quote:data.quote || null}}; if(!payload.expected_revision)throw Error('数据版本缺失，请刷新后重试'); sessionStorage.setItem(key,JSON.stringify(payload));}
         status.textContent='正在核实并保存…';
         const current=await api(`/api/rebuild/values/${value.id}`);
         const audits=current.conflict?.correction_requests || [];
@@ -263,5 +275,5 @@
     if(row.identity_status==='pending'){status.textContent='身份待定：请通过带来源的数据导入补交缺失身份。';form.querySelector('[type=submit]').disabled=true;return;}
     form.onsubmit=async event=>{event.preventDefault();const button=form.querySelector('[type=submit]');button.disabled=true;try{let intent;const saved=sessionStorage.getItem(key);if(saved)intent=JSON.parse(saved);else{const d=Object.fromEntries(new FormData(form)),condition=JSON.parse(d.condition);if(!condition || typeof condition!=='object' || Array.isArray(condition))throw Error('条件须为 JSON 对象');intent={paper_id:row.paper_id,row_key:row.row_key,expected_revision:row.identity_revision,request_id:crypto.randomUUID(),changes:{material:d.material,support:d.support || null,active_site:d.active_site || null,configuration:d.configuration || null,active_site_type:d.active_site_type,condition},correction_reason:d.correction_reason,evidence:[{file_id:d.file_id,source_kind:'text',page_number:Number(d.page_number),label:d.label || null,quote:d.quote || null}]};sessionStorage.setItem(key,JSON.stringify(intent));}await api(`/api/rebuild/rows/${row.id}/identity`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(intent)});sessionStorage.removeItem(key);await options.reload?.();panel.close();}catch(error){if(error.status && error.status<500)sessionStorage.removeItem(key);status.textContent=error.status===409?'此行已被修改或与已有身份条件冲突，请刷新后核对。':'保存未确认：'+error.message+'。重试将复用原请求。';}finally{button.disabled=false;}};
   }
-  global.EditableDataGrid={pdfPageBinding,mount,groups,fields,readable,metricLabel,displayRole,editValue,sourceHtml,transferHistory};
+  global.EditableDataGrid={pdfPageBinding,ooxmlBinding,mount,groups,fields,readable,metricLabel,displayRole,editValue,sourceHtml,transferHistory};
 })(window);

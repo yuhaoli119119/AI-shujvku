@@ -38,7 +38,7 @@ from app.schemas.rebuild import (
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
-from app.services.rebuild_metadata_cas import metadata_state, correct_metadata
+from app.services.rebuild_metadata_cas import metadata_state, correct_metadata, validate_material_mapping
 from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
 from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source
 from app.services.artifact_store import ArtifactStore
@@ -1762,6 +1762,10 @@ async def correct_asset_metadata(paper_id: UUID, target_id: UUID,
     payload: RebuildAssetMetadataCorrection, request: Request,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)):
+    # Reject invalid JSON values before audit fingerprint serialization; otherwise
+    # NaN/unencodable strings could fail outside the metadata validation gate.
+    if "material_mapping" in payload.changes.model_fields_set:
+        validate_material_mapping(payload.changes.material_mapping)
     return _audited_response(session, request, payload, paper_id,
         f"assets.metadata.{target_id}", auth.username,
         lambda: correct_metadata(session, paper_id, "assets", target_id, payload),

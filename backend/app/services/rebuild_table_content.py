@@ -11,7 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class TableSource(BaseModel):
     model_config = ConfigDict(extra="forbid")
     file_id: UUID
-    page_number: int = Field(ge=1, strict=True)
+    page_number: int | None = Field(ge=1, strict=True)
+    page_basis: Literal["ooxml"] | None = None
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
     role: Literal["caption", "body", "footnote"] = "body"
     locator: str = Field(min_length=1, max_length=4000)
     quote: str | None = None
@@ -38,17 +41,17 @@ def table_write_contract() -> dict:
         "storage": "rebuild_visual_assets.provenance; no paper_tables dual write",
         "fields": {"table_data": "columns: string[], rows: (string|null)[][], footnotes: string[]",
                    "table_markdown": "original markdown string",
-                   "table_sources": "file_id, physical page_number, role caption/body/footnote, locator, optional quote/table_row/table_column"},
+                   "table_sources": "file_id, physical page_number or null with page_basis=ooxml/source_sha256/ooxml_locator, role caption/body/footnote, locator (equal to ooxml_locator for OOXML), optional quote/table_row/table_column"},
         "priority": ["table_data", "table_markdown", "legacy markdown_content", "context_text"],
         "completion": "Plain text remains readable/copyable but is pending_structure, not complete. A formal representation still requires independent scientific review. Legacy bodies must be source-bound and frozen.",
         "rules": ["Keep original precision, non-numeric markers and missing cells; never infer rows or columns.",
                   "context_text is an exact plain-text fallback, not parsed as a table.",
-                  "For new structured/markdown bodies provide same-file sources for caption and body on their actual physical pages; include all source pages in page_numbers.",
+                  "For new structured/markdown bodies provide same-file sources for caption and body on their actual physical pages; include all source pages in page_numbers. Registered hash-checked DOCX with page_basis=ooxml uses page_numbers=[] and null source pages plus exact verified OOXML locators; PDF table pages remain mandatory.",
                   "Missing content remains empty/pending; extracted does not mean accepted."],
     }
 
 
-def validate_table_provenance(provenance: dict, *, file_id, page_numbers: list, caption=None) -> None:
+def validate_table_provenance(provenance: dict, *, file_id, page_numbers: list, caption=None, ooxml=False) -> None:
     """Validate only explicitly submitted body fields; legacy reads stay permissive."""
     if "table_markdown" in provenance and not isinstance(provenance["table_markdown"], str):
         raise ValueError("table_markdown_must_be_text")
@@ -60,7 +63,11 @@ def validate_table_provenance(provenance: dict, *, file_id, page_numbers: list, 
         source = TableSource.model_validate(raw)
         if not file_id or source.file_id != UUID(str(file_id)):
             raise ValueError("table_source_wrong_file")
-        if source.page_number not in page_numbers:
+        if ooxml:
+            if (source.page_number is not None or page_numbers or source.page_basis != "ooxml"
+                    or not source.source_sha256 or source.ooxml_locator != source.locator):
+                raise ValueError("table_ooxml_identity_required")
+        elif source.page_number is None or source.page_number not in page_numbers or source.page_basis is not None or source.ooxml_locator is not None:
             raise ValueError("table_source_page_not_in_asset")
         if not source.locator.strip():
             raise ValueError("table_source_locator_required")
@@ -79,8 +86,12 @@ def table_content(asset) -> dict | None:
     if asset.asset_type != "table":
         return None
     provenance = asset.provenance if isinstance(asset.provenance, dict) else {}
+    identity = provenance.get("page_identity")
+    identity = identity if isinstance(identity, dict) else {}
     common = {"version": "table_content_v1", "file_id": str(asset.file_id) if asset.file_id else None,
-              "page_numbers": asset.page_numbers or [], "sources": provenance.get("table_sources", [])}
+              "page_numbers": asset.page_numbers or [], "sources": provenance.get("table_sources", []),
+              **({**identity, "page_number": None, "location_label": "OOXML 定位"}
+                 if identity.get("page_basis") == "ooxml" else {})}
     if isinstance(provenance.get("table_data"), dict):
         try:
             data = TableData.model_validate(provenance["table_data"]).model_dump()

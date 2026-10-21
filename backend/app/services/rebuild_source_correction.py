@@ -54,8 +54,8 @@ def source_correction_contract():
             'semantics': 'Append-only inactive declaration; preserve original source identity and quote, associations and scientific values. Current sources excludes inactive; historical_sources and source GET preserve it. Retiring preferred clears pointer; no automatic alternative selection. Last evidence becomes no_current_sources, not a missing scientific value. No restore operation. Same actor/body replay is read-only; stale revision or request reuse is 409. Inactive identity cannot be corrected or reimported; dedup requires separate explicit review.'},
         'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision from GET',
                  'request_id': 'new UUID; persist exact body for retries', 'correction_reason': 'mandatory nonblank reason',
-                 'source': 'complete replacement: file_id, asset_id, source_kind, page_number, page_basis, source_sha256, reading_pdf_sha256, label, table_row, table_column, quote, estimate_basis (legacy identity keys required; nullable except file_id and source_kind; page_basis/source_sha256/reading_pdf_sha256 optional for native PDF or null-page XML, required for a DOCX page)'},
-        'rules': ['page_number is 1-based in page_basis: source_pdf for original PDF, derived_pdf for registered DOCX reading PDF; derived writes require source_sha256 and reading_pdf_sha256; null page keeps XML locators',
+                 'source': 'complete replacement: file_id, asset_id, source_kind, page_number, page_basis, source_sha256, reading_pdf_sha256, label, table_row, table_column, quote, estimate_basis, optional ooxml_locator (legacy identity keys required; nullable except file_id and source_kind; page_basis/source_sha256/reading_pdf_sha256 optional for native PDF or null-page XML, required for a DOCX page)'},
+        'rules': ['page_number is 1-based in page_basis: source_pdf for original PDF, derived_pdf for registered DOCX reading PDF; derived writes require source_sha256 and reading_pdf_sha256; page_basis=ooxml requires null page_number, exact ooxml_locator and matching source_sha256 on a registered DOCX; original file download exposes the XML source, never a fabricated physical PDF page',
                   'table coordinates are zero-based nonnegative integers, both required for table kind; other kinds must use null',
                   'file and asset must belong to paper; asset.file_id must equal file_id',
                   'source_key is recomputed from all identity fields; collision is 409 without merge or deletion',
@@ -91,6 +91,8 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     if all(request_body['source'].get(k) is None for k in ('page_basis', 'source_sha256', 'reading_pdf_sha256')):
         for k in ('page_basis', 'source_sha256', 'reading_pdf_sha256'):
             request_body['source'].pop(k, None)
+    if request_body["source"].get("ooxml_locator") is None:
+        request_body["source"].pop("ooxml_locator", None)
     fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     state = source_state(session, source_id)
     for entry in [*((value.conflict or {}).get('source_corrections') or []),

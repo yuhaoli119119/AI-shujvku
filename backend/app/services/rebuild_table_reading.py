@@ -131,6 +131,27 @@ def table_representations(session, paper_id, settings, *, force_physical=False):
             result["binding"] = {"file_id": str(file.id), "source_sha256": file.sha256,
                                  "physical_pages": pages, "scientific_review_required": True}
             continue
+        identity = (asset.provenance or {}).get("page_identity")
+        if isinstance(identity, dict) and identity.get("page_basis") == "ooxml":
+            from app.services.rebuild_file_preview import validate_page_identity
+            from app.services.rebuild_table_content import validate_table_provenance
+            result["binding"] = {"file_id": str(file.id), **identity, "physical_pages": [],
+                                 "location_label": "OOXML 定位"}
+            try:
+                if pages:
+                    raise ValueError("ooxml_has_no_physical_page")
+                validate_page_identity(file, settings, {**identity, "page_number": None})
+                validate_table_provenance(asset.provenance, file_id=file.id, page_numbers=[],
+                                          caption=asset.caption, ooxml=True)
+                for source in asset.provenance.get("table_sources", []):
+                    validate_page_identity(file, settings, source)
+                if not formal:
+                    result.update(complete=False, reason="pending_structure")
+                elif complete:
+                    result["reason"] = "formal_ooxml_representation"
+            except (RebuildWorkflowError, OSError, ValueError):
+                result.update(complete=False, reason="table_ooxml_source_unverified")
+            continue  # XML evidence never borrows physical PDF/legacy table rows.
         binding, rows = scope(file)
         result["binding"] = {**binding, "physical_pages": pages}
         count = binding["physical_total_pages"]

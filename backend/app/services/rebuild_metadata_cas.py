@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -15,9 +16,53 @@ from sqlalchemy import inspect, select
 from app.db.models import AuditLog, PaperSection, RebuildVisualAsset, RebuildPaperFile
 from app.services.rebuild_mutation_audit import VERSION, EVENT, safe_json
 
-ASSET_METADATA_FIELDS = frozenset({"page_numbers", "y_axis_unit"})
+ASSET_METADATA_FIELDS = frozenset({"page_numbers", "y_axis_unit", "material_mapping"})
 
 MODELS = {"assets": RebuildVisualAsset, "sections": PaperSection}
+
+
+def validate_material_mapping(value):
+    """Accept bounded, lossless JSON metadata, never a coerced mapping or scalar.
+
+    Panel roles have no universal vocabulary: publication labels, conflicts and
+    media identifiers must survive a correction without schema-driven loss.
+    Scientific verification of those roles remains the caller's responsibility.
+    """
+    def reject():
+        raise HTTPException(422, "material_mapping_nonempty_bounded_json_object_required")
+
+    if not isinstance(value, dict) or not value:
+        reject()
+
+    def check(item, depth=0):
+        if depth > 16:
+            reject()
+        if isinstance(item, dict):
+            for key, nested in item.items():
+                if not isinstance(key, str) or not key.strip() or "\x00" in key:
+                    reject()
+                check(nested, depth + 1)
+        elif isinstance(item, list):
+            for nested in item:
+                check(nested, depth + 1)
+        elif isinstance(item, str):
+            if "\x00" in item:
+                reject()
+        elif item is None or isinstance(item, (bool, int)):
+            pass
+        elif isinstance(item, float):
+            if not math.isfinite(item):
+                reject()
+        else:
+            reject()
+
+    check(value)
+    try:
+        if len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode("utf-8")) > 1_000_000:
+            reject()
+    except (TypeError, ValueError, UnicodeError):
+        reject()
+    return value
 
 
 def metadata_state(session, paper_id, kind, target_id, *, lock=False):
@@ -58,6 +103,11 @@ def correct_metadata(session, paper_id, kind, target_id, payload):
     changes = payload.changes.model_dump(exclude_unset=True)
     if kind == "assets" and (len(changes) != 1 or not changes.keys() <= ASSET_METADATA_FIELDS):
         raise HTTPException(422, "exactly_one_allowed_asset_metadata_field_required")
+    if kind == "assets" and "material_mapping" in changes:
+        validate_material_mapping(changes["material_mapping"])
+    identity = (row.provenance or {}).get("page_identity") if kind == "assets" else None
+    if kind == "assets" and "page_numbers" in changes and isinstance(identity, dict) and identity.get("page_basis") == "ooxml":
+        raise HTTPException(422, "ooxml_has_no_physical_page")
     for field, value in changes.items():
         setattr(row, field, value)
     session.flush()
@@ -74,7 +124,9 @@ def correct_metadata(session, paper_id, kind, target_id, payload):
                 "actor": context["actor"], "operation": context["operation"],
                 "reason": payload.reason, "expected_revision": payload.expected_revision,
                 "before": before["snapshot"], "after": after["snapshot"],
-                "changed_fields": [f for f in before["snapshot"] if before["snapshot"][f] != after["snapshot"][f]]}))
+                # Maintenance timestamps/version columns remain in the full
+                # snapshots, but are not caller-requested metadata changes.
+                "changed_fields": [f for f in changes if before["snapshot"][f] != after["snapshot"][f]]}))
         context["item_events"].append(str(event_id))
     session.flush()
     _, after = metadata_state(session, paper_id, kind, target_id)

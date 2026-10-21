@@ -478,19 +478,57 @@ def prepare_visual_asset(
     old_provenance = existing.provenance if existing is not None and isinstance(existing.provenance, dict) else {}
     supplied = data.get("provenance") if isinstance(data.get("provenance"), dict) else {}
     provenance = {**old_provenance, **supplied} if data.get("provenance") is not None else dict(old_provenance)
+    # Persist optional DOCX identity in the existing audited provenance JSON.
+    binding_fields = ("page_basis", "ooxml_locator", "source_sha256")
+    binding = {key: data.pop(key) for key in binding_fields if key in data}
+    binding = {key: value for key, value in binding.items() if value is not None}
+    if "page_identity" in supplied and not isinstance(supplied["page_identity"], dict):
+        raise RebuildWorkflowError("source_page_identity_invalid")
+    if binding:
+        if "page_identity" in supplied and any(supplied["page_identity"].get(k) != v for k, v in binding.items()):
+            raise RebuildWorkflowError("source_page_identity_mismatch")
+        provenance["page_identity"] = {**(provenance["page_identity"] if isinstance(provenance.get("page_identity"), dict) else {}), **binding}
+        supplied = {**supplied, "page_identity": provenance["page_identity"]}
+        data["provenance"] = provenance
+    identity = provenance.get("page_identity") or {}
+    if not isinstance(identity, dict):
+        identity = {}
+    if binding and identity.get("page_basis") != "ooxml":
+        raise RebuildWorkflowError("ooxml_page_basis_required")
+    if identity.get("page_basis") == "ooxml" or identity.get("ooxml_locator") is not None:
+        from app.services.rebuild_file_preview import validate_page_identity
+        effective_file = data.get("file_id", getattr(existing, "file_id", None))
+        if effective_file is None:
+            raise RebuildWorkflowError("ooxml_requires_registered_docx")
+        record = get_file(session, effective_file)
+        if record.paper_id != paper_id:
+            raise RebuildWorkflowError("file_belongs_to_other_paper")
+        pages = data.get("page_numbers", getattr(existing, "page_numbers", []))
+        if pages:
+            raise RebuildWorkflowError("ooxml_has_no_physical_page")
+        identity = validate_page_identity(record, settings, {**identity, "page_number": None})
+        provenance["page_identity"] = identity
+        data["provenance"] = provenance
     table_fields = ("table_data", "table_markdown", "table_sources")
     changed_table_source = existing is not None and any(
         key in data and data[key] != getattr(existing, key) for key in ("file_id", "page_numbers", "caption"))
     if data.get("asset_type", getattr(existing, "asset_type", None)) == "table" and (
         any(key in supplied for key in table_fields) or
+        identity.get("page_basis") == "ooxml" or
         changed_table_source and any(key in provenance for key in table_fields)
     ):
         try:
             validate_table_provenance(provenance,
                 file_id=data.get("file_id", getattr(existing, "file_id", None)),
                 page_numbers=data.get("page_numbers", getattr(existing, "page_numbers", [])),
-                caption=data.get("caption", getattr(existing, "caption", None)))
-            if provenance.get("table_sources"):
+                caption=data.get("caption", getattr(existing, "caption", None)),
+                ooxml=identity.get("page_basis") == "ooxml")
+            if provenance.get("table_sources") and identity.get("page_basis") == "ooxml":
+                from app.services.rebuild_file_preview import validate_page_identity
+                source_file = get_file(session, data.get("file_id", getattr(existing, "file_id", None)))
+                for source in provenance["table_sources"]:
+                    validate_page_identity(source_file, settings, source)
+            elif provenance.get("table_sources"):
                 from app.services.rebuild_file_preview import resolve_reading_pdf
                 import fitz
                 source_file = get_file(session, data.get("file_id", getattr(existing, "file_id", None)))
@@ -545,6 +583,8 @@ def upsert_visual_asset(session: Session, *, paper_id: UUID, payload: RebuildVis
 
 
 def serialize_asset(asset: RebuildVisualAsset) -> dict[str, Any]:
+    identity = (asset.provenance or {}).get("page_identity")
+    identity = identity if isinstance(identity, dict) else {}
     return {
         "id": str(asset.id),
         "paper_id": str(asset.paper_id),
@@ -555,6 +595,8 @@ def serialize_asset(asset: RebuildVisualAsset) -> dict[str, Any]:
         "figure_label": asset.figure_label,
         "subfigure_label": asset.subfigure_label,
         "caption": asset.caption,
+        **({**identity, "page_number": None, "location_label": "OOXML 定位"}
+           if identity.get("page_basis") == "ooxml" else {}),
         "page_numbers": asset.page_numbers or [],
         "bbox": asset.bbox,
         "image_path": asset.image_path,
@@ -613,15 +655,17 @@ def _source_key(data: dict[str, Any]) -> str:
         "estimate_basis": data.get("estimate_basis"),
     }
     # Keep historical PDF/XML keys stable; derived page identities include both hashes.
-    if data.get("page_basis") == "derived_pdf":
+    if data.get("page_basis") in {"derived_pdf", "ooxml"}:
         identity.update({key: data.get(key) for key in ("page_basis", "source_sha256", "reading_pdf_sha256")})
+    if data.get("page_basis") == "ooxml":
+        identity["ooxml_locator"] = data.get("ooxml_locator")
     return _stable_hash("source", identity)
 
 
 def _source_is_sufficient(data: dict[str, Any]) -> bool:
     # Empty strings and an isolated table coordinate do not locate evidence.
     located = bool(data.get("page_number") or data.get("asset_id") or
-                   str(data.get("label") or "").strip() or str(data.get("quote") or "").strip())
+                   str(data.get("label") or "").strip() or str(data.get("quote") or "").strip() or data.get("ooxml_locator"))
     return located
 
 
@@ -740,7 +784,7 @@ def _validate_source_for_paper(session, paper_id, source):
             raise RebuildWorkflowError("source_file_belongs_to_other_paper")
         source.update(validate_page_identity(record, get_settings(), source))
         source["file_id"] = file_id
-    elif any(source.get(k) is not None for k in ("page_basis", "source_sha256", "reading_pdf_sha256")):
+    elif any(source.get(k) is not None for k in ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator")):
         raise RebuildWorkflowError("source_page_identity_requires_file")
 
 
@@ -795,7 +839,7 @@ def _upsert_source(
         row_id=row.id,
         paper_id=row.paper_id,
         source_key=source_key,
-        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256"}},
+        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator"}},
     )
     session.add(source)
     session.flush()
@@ -1339,9 +1383,11 @@ def update_data_value(
 
     request_body = payload.model_dump(mode="json")
     source_body = request_body.get("source")
-    if source_body and all(source_body.get(k) is None for k in ("page_basis", "source_sha256", "reading_pdf_sha256")):
-        for k in ("page_basis", "source_sha256", "reading_pdf_sha256"):
+    if source_body and all(source_body.get(k) is None for k in ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator")):
+        for k in ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator"):
             source_body.pop(k, None)
+    if source_body and source_body.get("ooxml_locator") is None:
+        source_body.pop("ooxml_locator", None)
     fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     correction_requests = list((value.conflict or {}).get("correction_requests") or [])
     for entry in correction_requests:
@@ -1435,6 +1481,7 @@ def serialize_source(source: RebuildValueSource) -> dict[str, Any]:
     from app.services.rebuild_file_preview import stored_source_identity
     identity = stored_source_identity(source)
     return {
+        **({"ooxml_locator": identity["ooxml_locator"], "location_label": "OOXML 定位"} if identity.get("ooxml_locator") else {}),
         "page_basis": identity.get("page_basis"),
         "source_sha256": identity.get("source_sha256"),
         "reading_pdf_sha256": identity.get("reading_pdf_sha256"),

@@ -86,7 +86,8 @@ function renderFiles() {
   $("fileList").innerHTML = state.files.map(file => {
     const full=file.original_filename || '未保存文件名';
     const display=full.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i,'');
-    return `<article class="figure-source-file"><header><strong>${file.role==='main'?'正文':'补充资料 SI'} · ${file.lifecycle_status === 'superseded' ? '已被替代（历史）' : file.preferred ? '当前首选' : file.role === 'main' ? '正文首选待指定' : '当前文件'}</strong><a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">打开 PDF ↗</a></header><div title="${assetText(full)}">${assetText(display)}</div>${file.scientific_review_required ? '<p class="rebuild-error">原有关联仍指向此文件，需独立科学复核。</p>' : ""}</article>`;
+    const docx = /\.docx$/i.test(full);
+    return `<article class="figure-source-file"><header><strong>${file.role==='main'?'正文':'补充资料 SI'} · ${file.lifecycle_status === 'superseded' ? '已被替代（历史）' : file.preferred ? '当前首选' : file.role === 'main' ? '正文首选待指定' : '当前文件'}</strong><a href="/api/rebuild/files/${encodeURIComponent(file.id)}/${docx ? "download" : "preview"}" target="_blank" rel="noopener">${docx ? "下载 DOCX 原件" : "打开 PDF ↗"}</a>${docx ? `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">打开派生阅读 PDF（如已生成）↗</a>` : ""}</header><div title="${assetText(full)}">${assetText(display)}</div>${file.scientific_review_required ? '<p class="rebuild-error">原有关联仍指向此文件，需独立科学复核。</p>' : ""}</article>`;
   }).join('');
   $("cropFile").innerHTML=state.files.filter(file=>file.lifecycle_status!=="superseded" && (file.role!=="main" || file.preferred!==false)).map(file=>`<option value="${assetText(file.id)}">${file.role==='main'?'正文':'SI'} · ${assetText(file.original_filename)}</option>`).join('');
 
@@ -217,6 +218,11 @@ async function openContextViewer(assetId) {
   }
 }
 
+function assetLocationHtml(asset) {
+  if (asset.page_basis === 'ooxml' && asset.ooxml_locator) return `<span class="rebuild-tag">OOXML 定位（DOCX 原件，无物理页）</span><p><code>${assetText(asset.ooxml_locator)}</code></p>${asset.file_id ? `<a href="/api/rebuild/files/${encodeURIComponent(asset.file_id)}/download" download>下载 DOCX 原件</a>` : ''}`;
+  return `<span class="rebuild-tag">PDF 物理页 ${(asset.page_numbers || []).join(", ") || "—"}</span>`;
+}
+
 function renderAssets() {
   const superseded = state.assets.filter(asset => supersedingAsset(asset, state.assets));
   const current = $("showSuperseded").checked ? state.assets : state.assets.filter(asset => !supersedingAsset(asset, state.assets));
@@ -238,7 +244,7 @@ function renderAssets() {
 
 
           ${(asset.unreadable_fields || []).length ? `<span class="rebuild-tag warn">局部不可读</span>` : ""}
-          <span class="rebuild-tag">页 ${(asset.page_numbers || []).join(", ") || "—"}</span>
+          ${assetLocationHtml(asset)}
         </div>
         <h3>${assetText(asset.figure_label || asset.asset_key)}${asset.subfigure_label ? ` · ${assetText(asset.subfigure_label)}` : ''}</h3>
         <p class="figure-caption-preview">${assetText(asset.caption || "未填写图注")}</p>
