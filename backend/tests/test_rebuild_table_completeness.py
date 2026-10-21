@@ -100,14 +100,18 @@ def test_legacy_matching_never_borrows_wrong_identity(audit_env, mismatch):
         session.commit()
     add_asset(env, file_id=file_id)
     if mismatch == "other_file":
-        # Freeze must honestly cover all registered files, including this edition.
-        body = freeze_body(env)
-        with env["factory"]() as session: file = session.get(RebuildPaperFile, file_id)
-        body["coverage"].append({"file_id": str(file_id), "source_sha256": file.sha256,
-            "reading_pdf_sha256": file.sha256, "covered_pages": [1]})
-        response = env["client"].post(base(env) + "/freeze", json=body)
-        assert response.status_code == 200, response.text
-        frozen = response.json()
+        # Two legacy mains have no declared preferred source. Neither UUID nor
+        # insertion order can authorize borrowing one edition's legacy tables.
+        state = env["client"].get(f'/api/rebuild/papers/{env["paper"]}/files').json()
+        assert state["ambiguous_main"] and state["preferred_main_id"] is None
+        assert state["active_file_ids"] == []
+        response = env["client"].post(base(env) + "/freeze", json=freeze_body(env))
+        assert response.status_code == 400, response.text
+        with env["factory"]() as session:
+            from app.services.rebuild_table_reading import table_representations
+            readings = table_representations(session, env["paper"], env["settings"])
+            assert readings["tables"] and not any(table["complete"] for table in readings["tables"])
+        return
     else: frozen = freeze_result(env)
     assert frozen["status"] == "partial"
     assert any(issue["code"] == "table_representation_incomplete" for issue in frozen["progress"]["rules"]["issues"])

@@ -37,7 +37,7 @@ async function loadPapers() {
 
 function syncWriteControls() {
   const loaded = !!state.paperId && loadedPaperGeneration === paperLoadGeneration;
-  const source = state.files.some(file => file.id === $("cropFile").value && file.paper_id === state.paperId);
+  const source = state.files.some(file => file.id === $("cropFile").value && file.paper_id === state.paperId && file.lifecycle_status !== "superseded" && (file.role !== "main" || file.preferred !== false));
   const selected = state.selected && state.selected.paper_id === state.paperId && state.assets.some(asset => asset.id === state.selected.id && asset.paper_id === state.paperId);
   $("cropBtn").disabled = !loaded || cropSubmitting || !source;
   $("editBtn").disabled = !loaded || editSubmitting || !selected;
@@ -86,9 +86,9 @@ function renderFiles() {
   $("fileList").innerHTML = state.files.map(file => {
     const full=file.original_filename || '未保存文件名';
     const display=full.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i,'');
-    return `<article class="figure-source-file"><header><strong>${file.role==='main'?'正文':'补充资料 SI'}</strong><a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">打开 PDF ↗</a></header><div title="${assetText(full)}">${assetText(display)}</div></article>`;
+    return `<article class="figure-source-file"><header><strong>${file.role==='main'?'正文':'补充资料 SI'} · ${file.lifecycle_status === 'superseded' ? '已被替代（历史）' : file.preferred ? '当前首选' : file.role === 'main' ? '正文首选待指定' : '当前文件'}</strong><a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">打开 PDF ↗</a></header><div title="${assetText(full)}">${assetText(display)}</div>${file.scientific_review_required ? '<p class="rebuild-error">原有关联仍指向此文件，需独立科学复核。</p>' : ""}</article>`;
   }).join('');
-  $("cropFile").innerHTML=state.files.map(file=>`<option value="${assetText(file.id)}">${file.role==='main'?'正文':'SI'} · ${assetText(file.original_filename)}</option>`).join('');
+  $("cropFile").innerHTML=state.files.filter(file=>file.lifecycle_status!=="superseded" && (file.role!=="main" || file.preferred!==false)).map(file=>`<option value="${assetText(file.id)}">${file.role==='main'?'正文':'SI'} · ${assetText(file.original_filename)}</option>`).join('');
 
 }
 
@@ -273,7 +273,7 @@ function selectAsset(id) {
 async function submitCrop(event) {
   event.preventDefault();
   if (cropSubmitting || $("cropBtn").disabled || !state.paperId || loadedPaperGeneration !== paperLoadGeneration) return;
-  const sourceFile = state.files.find(file => file.id === $("cropFile").value && file.paper_id === state.paperId);
+  const sourceFile = state.files.find(file => file.id === $("cropFile").value && file.paper_id === state.paperId && file.lifecycle_status !== "superseded" && (file.role !== "main" || file.preferred !== false));
   if (!sourceFile) { status("请选择本篇文献已关联的来源文件。", "error"); return; }
   const paperId = state.paperId, generation = paperLoadGeneration;
   const current = () => state.paperId === paperId && paperLoadGeneration === generation;

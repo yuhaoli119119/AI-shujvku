@@ -259,7 +259,17 @@ def resolve_file_path(file_record: RebuildPaperFile, settings: Settings) -> Path
 
 def resolve_paper_source_pdf(paper: Paper, settings: Settings) -> Path:
     from app.utils.artifact_paths import resolve_paper_pdf_path
-
+    from sqlalchemy.orm import object_session
+    from app.services.rebuild_file_lifecycle import file_set
+    session = object_session(paper)
+    if session is not None:
+        state = file_set(session, paper.id)
+        if state['ambiguous_main']:
+            raise RebuildWorkflowError('preferred_main_source_ambiguous')
+        if state['preferred_main_id']:
+            return resolve_file_path(get_file(session, UUID(state['preferred_main_id'])), settings)
+        if any(f['role'] == 'main' for f in state['items']):
+            raise RebuildWorkflowError('preferred_main_source_unavailable')
     path = resolve_paper_pdf_path(paper.pdf_path, settings.storage_root)
     if path is None:
         raise RebuildWorkflowError("paper_pdf_not_found")
@@ -337,11 +347,9 @@ def serialize_file(record: RebuildPaperFile) -> dict[str, Any]:
 
 
 def list_files(session: Session, paper_id: UUID) -> list[dict[str, Any]]:
-    _required_paper(session, paper_id)
-    records = session.scalars(
-        select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id).order_by(RebuildPaperFile.created_at)
-    ).all()
-    return [serialize_file(record) for record in records]
+    from app.services.rebuild_file_lifecycle import file_set
+    state = file_set(session, paper_id)
+    return [f for f in state['items'] if f['id'] in state['active_file_ids']]
 
 
 def get_file(session: Session, file_id: UUID) -> RebuildPaperFile:

@@ -1535,6 +1535,16 @@ def _resolve_paper_pdf_path(paper_id: UUID, session: Session) -> Path:
     paper = session.get(Paper, paper_id)
     if not paper:
         raise HTTPException(status_code=404, detail="Paper not found")
+    from app.services.rebuild_file_lifecycle import file_set
+    from app.services.rebuild_workflow_service import get_file
+    from app.services.rebuild_file_preview import resolve_reading_pdf
+    state = file_set(session, paper_id)
+    if state['ambiguous_main']:
+        raise HTTPException(409, 'preferred_main_source_ambiguous')
+    if state['preferred_main_id']:
+        return resolve_reading_pdf(get_file(session, UUID(state['preferred_main_id'])), get_settings())
+    if any(f['role'] == 'main' for f in state['items']):
+        raise HTTPException(409, 'preferred_main_source_unavailable')
     if not paper.pdf_path:
         raise HTTPException(status_code=404, detail="PDF not uploaded or unavailable")
     settings = get_settings()

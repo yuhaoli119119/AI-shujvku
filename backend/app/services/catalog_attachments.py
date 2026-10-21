@@ -53,17 +53,29 @@ def supplementary_attachments(session, paper_ids):
     records_by_owner = {}
     for record in registrations:
         records_by_owner.setdefault(record.paper_id, []).append(record)
+    from app.services.rebuild_file_lifecycle import file_set
     for pid in ids:
+        lifecycle = file_set(session, pid)
+        active_ids = set(lifecycle["active_file_ids"])
+        historical = [record for record in records_by_owner.get(pid, []) if str(record.id) not in active_ids]
+        historical_identities = [_identity(record.storage_path, settings) for record in historical]
         candidates = []
         owned_children = sorted((children[r.target_paper_id] for r in links if r.source_paper_id == pid and r.target_paper_id in children),
                                 key=lambda p: (p.created_at, str(p.id)))
         for child in owned_children:
             path, digest, exists = _identity(child.pdf_path, settings)
+            if any((path and path == old_path) or (exists and old_exists and digest and digest == old_digest)
+                   for old_path, old_digest, old_exists in historical_identities):
+                # The linked child is the retained superseded registration, not
+                # an unregistered new SI. History remains in file_lifecycle.
+                continue
             candidates.append({"id": str(child.id), "file_id": None, "paper_id": str(child.id),
                 "attachment_code": child.paper_code, "original_filename": Path(child.pdf_path or "supplementary.pdf").name,
                 "sha256": digest, "pdf_exists": exists, "preview_url": f"/api/papers/{child.id}/pdf",
                 "download_url": f"/api/papers/{child.id}/pdf?download=true", "_path": path})
         for record in records_by_owner.get(pid, []):
+            if str(record.id) not in active_ids:
+                continue
             path, digest, exists = _identity(record.storage_path, settings)
             candidates.append({"id": str(record.id), "file_id": str(record.id), "paper_id": None,
                 "attachment_code": None, "original_filename": record.original_filename,

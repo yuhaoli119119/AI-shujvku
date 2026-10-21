@@ -311,3 +311,45 @@ section_type 可显式置 null。省略字段不写，额外字段或非法类�
 共享正式 mutation 审计追加不可变完整 before/after、原因、原 CAS 令牌、actor 和 request_id，
 返回 `audit.event_ids`；目标与回执原子提交，审计失败全部回滚。不授予科学 accepted 或解除占用。
 已有宽范围导入协议保持兼容，精确修正必须调用此独立入口。
+
+### 文件来源生命周期（main / si）
+
+认证会话 `GET /api/rebuild/papers/{paper_id}/files` 返回完整 `items` 历史、
+`file_set_revision`、`preferred_main_id`、`active_file_ids`、`ambiguous_main`。
+每项含 `lifecycle_status: active|superseded`、`preferred`、`scientific_review_required`。
+旧单正文无需迁移，沿用为当前首选；旧多个正文不按时间/UUID猜选，明确报告歧义，
+通用正文预览返回 409。SI 可同时有多个当前文件，各自保留独立身份。
+
+`POST .../files` 为 multipart：`file`（PDF，最多30 MiB）、`role: main|si`、
+UUID `request_id`、新鲜 `expected_revision`、`action: add|supersede`、非空 `reason`、
+`supersede_file_ids`（JSON UUID 数组，默认 `[]`）。`add` 不允许替代目标；
+`supersede` 必须明确列出本篇同角色的当前旧文件。正文最终只能有一个当前文件，
+已有正文时不能用 add 隐式覆盖。UI 只提供安全新增；替换由明确指定目标的正式调用完成。
+
+已存在候选可用 `POST .../files/lifecycle`，JSON 含相同字段与 `file_id`（不含上传）。
+目标必须属于本篇同角色；禁止把同一文件替代自身或静默复活历史文件。
+同篇同角色相同 SHA 复用原文件 UUID；同一请求原 actor/body/文件名/字节重放原回执，
+`audit.replayed=true`，不会再次保存文件或审计。新请求仍须新鲜 CAS。
+不同 actor/请求体复用 ID 为409 `file_request_id_reused`，过期版本409
+`file_set_revision_conflict`，已有正文未明确替代409
+`main_source_requires_explicit_supersede`；跨篇/角色目标422，未找到文件404。
+读取文件集后须保存原请求再发送，遇409重新读取核对，不自动换 ID/版本覆盖。
+两种写入口均要求会话、Origin 和 `X-CSRF-Token`。旧无 CAS 上传合同不再接受。
+
+状态和回执仅追加专用 `file_lifecycle_recorded` AuditLog，原文件记录和物理文件不删除、
+不覆盖；审计保存 actor、请求指纹、理由、原版本、完整文件身份前后快照和回执。
+不新增表/列、不批量回填旧记录。Paper 行锁保护 CAS 与幂等；文件集版本包含完整文件元数据及事件，
+重复已有 SHA 的新请求只追加审计，不增加文件；回执自身是历史事实，不代表当前版本。
+
+工作包、质量、覆盖、解析状态和默认预览使用首选当前文件；`file_history` /
+`file_lifecycle` 保留全部历史。按精确旧 UUID 的预览/下载继续可用。
+旧 source/row/value/asset/章节仍保留原 UUID、页码、引文和科学值，文件替换不重新归属；
+相关读取标注需独立科学复核，质量门禁拒绝把旧文件覆盖当作新文件完成。
+不自动启动解析/提取，不授予 accepted，不修改既有冻结/验收回执。
+回滚代码不删除生命周期审计或新文件，但旧版本不理解新选择状态：实际开始替换后，
+须使用能读取该生命周期合同的修订继续提供服务，不能把旧版本读取等价于安全业务回滚。
+
+请求指纹保留 JSON 原提供字段（显式默认值也构成改体）；上传还绑定原提供字段集、
+替代列表原字符串、原文件名与字节 SHA，拒绝未知/重复 multipart 字段。
+数据库/审计失败不建立文件关联或解析任务；已落盘的不可变候选字节可以保留供同体重试，
+不自动删除任何候选或历史文件。

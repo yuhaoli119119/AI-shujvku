@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator, field_validator
 
 
 class RebuildSectionSourceInput(BaseModel):
@@ -569,3 +569,22 @@ class RebuildAssetMetadataCorrection(BaseModel):
 
 class RebuildSectionMetadataCorrection(RebuildAssetMetadataCorrection):
     changes: RebuildSectionMetadataChanges
+
+
+class RebuildFileLifecycleRequest(BaseModel):
+    """Select an existing source while preserving every previous file binding."""
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    expected_revision: str = Field(pattern=r'^[0-9a-f]{64}$')
+    role: Literal['main', 'si']
+    action: Literal['add', 'supersede']
+    reason: str = Field(min_length=1, max_length=2000)
+    supersede_file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    file_id: UUID
+
+    @field_validator('reason')
+    @classmethod
+    def reason_not_blank(cls, value):
+        if not value.strip():
+            raise ValueError('reason_required')
+        return value

@@ -10,6 +10,43 @@ from app.db.models import Paper, PaperSection, PaperTable, RebuildVisualAsset, A
 from app.services.rebuild_workflow_service import list_rows, serialize_asset
 
 
+def _inactive_binding_ids(value, inactive_file_ids):
+    if isinstance(value, list):
+        return set().union(*(_inactive_binding_ids(child, inactive_file_ids) for child in value))
+    if not isinstance(value, dict):
+        return set()
+    affected = {str(value["file_id"])} if value.get("file_id") is not None and str(value["file_id"]) in inactive_file_ids else set()
+    for child in value.values():
+        if isinstance(child, (dict, list)):
+            affected.update(_inactive_binding_ids(child, inactive_file_ids))
+    return affected
+
+
+def mark_scientific_file_bindings(value, inactive_file_ids):
+    """Annotate retained file UUIDs without rebinding or changing science."""
+    if isinstance(value, list):
+        affected = set()
+        for child in value:
+            affected.update(mark_scientific_file_bindings(child, inactive_file_ids))
+        return affected
+    if not isinstance(value, dict):
+        return set()
+    affected = {str(value["file_id"])} if value.get("file_id") is not None and str(value["file_id"]) in inactive_file_ids else set()
+    for key, child in list(value.items()):
+        if isinstance(child, (dict, list)):
+            if key in {"source_import_event", "provenance", "conflict", "before", "after"}:
+                # Original immutable events and raw provenance remain byte-for-byte
+                # JSON-equivalent. Mark only their public parent projection.
+                affected.update(_inactive_binding_ids(child, inactive_file_ids))
+            else:
+                affected.update(mark_scientific_file_bindings(child, inactive_file_ids))
+    if affected:
+        value["scientific_review_required"] = True
+        value["unresolved_file_ids"] = sorted(affected)
+        value["scientific_file_status"] = "original_binding_requires_independent_review"
+    return affected
+
+
 def endpoint(paper_id, **params):
     return f"/api/rebuild/papers/{paper_id}/ai-work-package?" + urlencode({key: value for key, value in params.items() if value is not None})
 
@@ -17,10 +54,14 @@ def endpoint(paper_id, **params):
 def bounded_view(session, paper_id, *, view, snapshot, limit, offset):
     revision = snapshot["revision"]
     paper = session.get(Paper, paper_id)
+    from app.services.rebuild_file_lifecycle import file_set
+    lifecycle = file_set(session, paper_id)
+    inactive_ids = {item["id"] for item in lifecycle["items"]} - set(lifecycle["active_file_ids"])
     result = {"view": view, "paper": {"id": str(paper_id), "paper_code": paper.paper_code, "title": paper.title},
               "output_revision": revision, "scientific_acceptance": "not_implied"}
     if view == "rows":
         page = list_rows(session, paper_id=paper_id, limit=limit, offset=offset)
+        mark_scientific_file_bindings(page.get("items", []), inactive_ids)
         page["next_page"] = endpoint(paper_id, view="rows", rows_limit=limit, rows_offset=page["next_offset"], expected_revision=revision) if page["has_more"] else None
         return {**result, "rows": page}
     model = RebuildVisualAsset if view == "assets" else PaperTable if view == "legacy_tables" else PaperSection
@@ -72,6 +113,7 @@ def bounded_view(session, paper_id, *, view, snapshot, limit, offset):
                 item["source_import_event"] = event.payload if event else None
             item["coverage_status"] = "stored_event_not_independent_acceptance" if event else "legacy_file_coverage_unknown"
             item["correction_rule"] = "Use provenance_endpoint for existing boundary corrections before any chapter write; pagination is original text plus its import event, not a replacement for correction history."
+    mark_scientific_file_bindings(items, inactive_ids)
     next_offset = offset + len(items) if offset + len(items) < total else None
     return {**result, "items": items, "total": total, "limit": limit, "offset": offset,
             "has_more": next_offset is not None, "next_offset": next_offset,
@@ -79,8 +121,7 @@ def bounded_view(session, paper_id, *, view, snapshot, limit, offset):
 
 
 def compact_package(session, paper_id, snapshot):
-    from app.services.rebuild_workflow_service import serialize_file
-    from app.db.models import RebuildPaperFile, RebuildDataRow
+    from app.db.models import RebuildDataRow
     from app.services.rebuild_quality import producer_contract
     from app.services.rebuild_table_content import table_write_contract
     from app.services.rebuild_sections import section_write_contract
@@ -89,9 +130,14 @@ def compact_package(session, paper_id, snapshot):
     totals = {name: session.scalar(select(func.count()).select_from(model).where(model.paper_id == paper_id)) or 0
               for name, model in [("rows", RebuildDataRow), ("assets", RebuildVisualAsset), ("sections", PaperSection)]}
     totals["legacy_tables"] = sum(item["kind"] == "paper_tables" for item in snapshot["output_manifest"])
-    files = list(session.scalars(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id).order_by(RebuildPaperFile.id)))
+    from app.services.rebuild_file_lifecycle import file_set
+    lifecycle = file_set(session, paper_id)
+    active_ids = set(lifecycle["active_file_ids"])
     return {"view": "compact", "paper": {"id": str(paper_id), "paper_code": paper.paper_code, "title": paper.title},
-            "output_revision": revision, "totals": totals, "files": [serialize_file(file) for file in files],
+            "output_revision": revision, "totals": totals,
+            "files": [item for item in lifecycle["items"] if item["id"] in active_ids],
+            "file_history": [item for item in lifecycle["items"] if item["id"] not in active_ids],
+            "file_lifecycle": lifecycle,
             "pages": {name: endpoint(paper_id, view=name, rows_limit=50, rows_offset=0, expected_revision=revision) for name in totals},
             "quality_endpoint": f"/api/rebuild/papers/{paper_id}/quality?expected_revision={revision}",
             "staged_package_endpoint": f"/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25",

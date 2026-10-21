@@ -64,16 +64,29 @@ def processing_statuses(session, paper_ids, include_attachments=True):
             for pid,count,stamp in session.execute(select(model.paper_id,func.count(model.id),func.max(date)).where(model.paper_id.in_(paper_ids)).group_by(model.paper_id)):
                 counts[pid][key] = int(count)
                 if stamp and (latest[pid] is None or stamp > latest[pid]):latest[pid]=stamp
-        files = dict(session.execute(select(models.RebuildPaperFile.paper_id,func.max(models.RebuildPaperFile.created_at)).where(models.RebuildPaperFile.paper_id.in_(paper_ids)).group_by(models.RebuildPaperFile.paper_id)).all())
+        from app.services.rebuild_file_lifecycle import file_set
+        lifecycles = {pid: file_set(session, pid) for pid in paper_ids}
+        active_ids = {fid for lifecycle in lifecycles.values() for fid in lifecycle['active_file_ids']}
+        file_rows = [file for file in session.scalars(select(models.RebuildPaperFile).where(
+            models.RebuildPaperFile.paper_id.in_(paper_ids))) if str(file.id) in active_ids]
+        files = {}
+        for file in file_rows:
+            if file.created_at and (file.paper_id not in files or file.created_at > files[file.paper_id]):
+                files[file.paper_id] = file.created_at
         jobs = list(session.scalars(select(models.WorkflowJob).where(models.WorkflowJob.type.in_(JOB_TYPES),models.WorkflowJob.payload.op('->>')('paper_id').in_([str(pid) for pid in paper_ids])).order_by(models.WorkflowJob.created_at.desc(),models.WorkflowJob.job_id.desc())))
         newest={}
         for job in jobs:newest.setdefault((job.payload or {})['paper_id'],job)
         statuses = {pid:resolve_status(counts[pid],latest[pid],newest.get(str(pid)),files.get(pid)) for pid in paper_ids}
-        file_rows = list(session.scalars(select(models.RebuildPaperFile).where(models.RebuildPaperFile.paper_id.in_(paper_ids))))
         file_work = {}
         for model, key in ((models.RebuildVisualAsset,'assets'),(models.RebuildValueSource,'sources')):
             for file_id,count in session.execute(select(model.file_id,func.count(model.id)).where(model.paper_id.in_(paper_ids),model.file_id.is_not(None)).group_by(model.file_id)):
                 file_work.setdefault(str(file_id),{})[key]=int(count)
+        from app.services.rebuild_sections import EVENT as SECTION_EVENT, VERSION as SECTION_VERSION
+        for event in session.scalars(select(models.AuditLog).where(models.AuditLog.paper_id.in_(paper_ids),
+                models.AuditLog.action == SECTION_EVENT, models.AuditLog.source == SECTION_VERSION)):
+            file_id = (event.payload or {}).get('section', {}).get('file_id')
+            if file_id:
+                file_work.setdefault(file_id, {})['sections'] = file_work.get(file_id, {}).get('sections', 0) + 1
         completed_files = set()
         for job in jobs:
             if job.status=='completed' and (job.progress or {}).get('content_status')!='partial':
@@ -88,6 +101,12 @@ def processing_statuses(session, paper_ids, include_attachments=True):
                 from uuid import UUID
                 child_statuses = {str(pid): value for pid,value in processing_statuses(session,[UUID(pid) for pid in child_ids],include_attachments=False).items()}
         for pid,status in statuses.items():
+            lifecycle = lifecycles[pid]
+            status['file_lifecycle'] = lifecycle
+            status['file_history'] = [item for item in lifecycle['items'] if item['id'] not in active_ids]
+            review_ids = [fid for fid in lifecycle['scientific_review_required_file_ids'] if file_work.get(fid)]
+            status['scientific_review_required'] = bool(review_ids)
+            status['scientific_review_required_file_ids'] = review_ids
             status['files'] = []
             for file in file_rows:
                 if file.paper_id != pid:continue
@@ -109,6 +128,9 @@ def processing_statuses(session, paper_ids, include_attachments=True):
                     if file['file_id'] in active_scope:
                         file.update(status=status['status'], label=LABELS[status['status']])
             apply_file_status(status)
+            if lifecycle['ambiguous_main']:
+                status.update(status='needs_check', label=LABELS['needs_check'],
+                    message='存在多个当前正文且未明确首选来源；请经文件生命周期接口确认，保留历史文件和科学来源。')
         return statuses
 
 
@@ -165,7 +187,8 @@ def report_processing(session, paper, report):
         by_id={file['file_id']:file for file in status['files']}
         if report.status=='parsed' and not report.no_extractable_content_reason and any(not (by_id.get(str(fid),{}).get('counts',{}).get('assets') or by_id.get(str(fid),{}).get('counts',{}).get('sources')) for fid in selected_files):
             raise ValueError('file_completion_requires_file_results_or_reason')
-        owned = {str(file.id) for file in session.scalars(select(models.RebuildPaperFile).where(models.RebuildPaperFile.paper_id==paper.id))}
+        from app.services.rebuild_file_lifecycle import file_set
+        owned = set(file_set(session, paper.id)['active_file_ids'])
         if any(str(file_id) not in owned for file_id in selected_files): raise ValueError('file_belongs_to_other_paper')
     job.result={'counts':status['counts'],'file_ids':[str(file_id) for file_id in selected_files], 'scientific_acceptance':'not_implied'} if terminal else None
     job.error=report.message if report.status=='failed' else None

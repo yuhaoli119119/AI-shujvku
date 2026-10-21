@@ -262,7 +262,7 @@ function fillCorrectionForm(row, value) {
   fileSelect.value = source?.file_id || "";
   api(`/api/rebuild/papers/${encodeURIComponent(row.paper_id)}/files`).then(result => {
     if (form.dataset.rowId !== row.id || form.dataset.fieldName !== value.field_name) return;
-    fileSelect.innerHTML = `<option value="">来源文件未标注</option>` + result.items.map(file => `<option value="${escapeHtml(file.id)}">${file.role === "si" ? "SI" : "正文"} · ${escapeHtml(file.original_filename)}</option>`).join("");
+    fileSelect.innerHTML = `<option value="">来源文件未标注</option>` + result.items.map(file => `<option value="${escapeHtml(file.id)}">${file.role === "si" ? "SI" : "正文"}${file.lifecycle_status === "superseded" ? "（历史；需独立复核）" : file.preferred ? "（当前首选）" : ""} · ${escapeHtml(file.original_filename)}</option>`).join("");
     fileSelect.value = source?.file_id || "";
   }).catch(() => { $("correctionStatus").textContent = "来源文件列表读取失败，请刷新后重试。"; });
   $("correctionSourceKind").value = source?.source_kind || "";
@@ -497,7 +497,7 @@ async function openIdentityEditor(rowId) {
   try {
     const files = await api(`/api/rebuild/papers/${row.paper_id}/files`);
     if (identityRow?.id !== row.id) return;
-    $("identityFile").innerHTML += files.items.map(file => `<option value="${escapeHtml(file.id)}">${escapeHtml(file.role === "si" ? "SI" : "正文")} · ${escapeHtml(file.original_filename)}</option>`).join("");
+    $("identityFile").innerHTML += files.items.map(file => `<option value="${escapeHtml(file.id)}">${escapeHtml(file.role === "si" ? "SI" : "正文")}${file.lifecycle_status === "superseded" ? "（历史；需独立复核）" : file.preferred ? "（当前首选）" : ""} · ${escapeHtml(file.original_filename)}</option>`).join("");
     const saved = sessionStorage.getItem(identityIntentKey(row));
     if (saved) {
       const intent = JSON.parse(saved);

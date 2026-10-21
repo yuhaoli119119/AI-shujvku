@@ -579,9 +579,17 @@ async def rebuild_ai_work_package(
             return compact_package(session, paper_id, snapshot)
         if view in {"rows", "assets", "sections", "legacy_tables"}:
             return bounded_view(session, paper_id, view=view, snapshot=snapshot, limit=rows_limit, offset=rows_offset)
-        files = list_files(session, paper_id)
+        from app.services.rebuild_file_lifecycle import file_set
+        from app.services.rebuild_work_package import mark_scientific_file_bindings
+        lifecycle = file_set(session, paper_id)
+        files = [f for f in lifecycle['items'] if f['id'] in lifecycle['active_file_ids']]
+        inactive = {f['id'] for f in lifecycle['items']} - set(lifecycle['active_file_ids'])
         sections = list_sections(session, paper_id)
+        mark_scientific_file_bindings(sections, inactive)
         rows = list_rows(session, paper_id=paper_id, limit=rows_limit, offset=rows_offset)
+        mark_scientific_file_bindings(rows, inactive)
+        assets = list_assets(session, paper_id)
+        mark_scientific_file_bindings(assets, inactive)
         rows["next_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?rows_limit={rows_limit}&rows_offset={rows['next_offset']}&expected_revision={snapshot['revision']}"
                              if rows["has_more"] else None)
         rows["continuation_page"] = (f"/api/rebuild/papers/{paper_id}/ai-work-package?view=rows&rows_limit={rows_limit}&rows_offset={rows['next_offset']}&expected_revision={snapshot['revision']}" if rows["has_more"] else None)
@@ -598,7 +606,9 @@ async def rebuild_ai_work_package(
             "section_write_contract": section_write_contract(paper_id),
             "templates": reaction_templates(),
             "files": files,
-            "assets": list_assets(session, paper_id),
+            "file_history": lifecycle['items'],
+            "file_lifecycle": lifecycle,
+            "assets": assets,
             "rows": rows,
             "coordinator_tools": {"python_module": "app.services.literature_tools", "read_only_cli": "scripts/literature_tools.py",
                                   "pdf_chunk_rules": "/api/rebuild/files/{file_id}/text-pages", "automatic_scientific_decisions": False},
@@ -914,51 +924,128 @@ async def save_history_registration(paper_id: UUID, payload: HistoryRegistration
         raise
 
 
+async def _require_file_write_session(request: Request) -> SessionState:
+    auth = await _require_work_package_session(request)
+    if not origin_allowed(request, get_settings()):
+        raise HTTPException(403, "cross_origin_request_blocked")
+    if not csrf_token_valid(request, auth):
+        raise HTTPException(403, "csrf_token_invalid")
+    return auth
+
+
+from app.schemas.rebuild import RebuildFileLifecycleRequest
+
+
+@router.post("/papers/{paper_id}/files/lifecycle")
+async def select_rebuild_file(paper_id: UUID, payload: RebuildFileLifecycleRequest,
+    session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.rebuild_file_lifecycle import _hash, locked_replay, validate_change, apply_change
+    body = payload.model_dump(mode='json')
+    try:
+        fingerprint = _hash({'body': payload.model_dump(mode='json', exclude_unset=True), 'operation': 'select_existing'})
+        replay = locked_replay(session, paper_id, body['request_id'], fingerprint, auth.username)
+        if replay is not None:
+            return replay
+        before = validate_change(session, paper_id, body)
+        record = get_file(session, payload.file_id)
+        if record.paper_id != paper_id or record.role != payload.role:
+            raise HTTPException(422, 'selected_file_not_in_paper_role')
+        result = apply_change(session, paper_id, body, auth.username, fingerprint, record, before, created=False)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.post("/papers/{paper_id}/files")
 async def associate_rebuild_pdf(
-    paper_id: UUID,
-    role: str = Form(pattern="^(main|si)$"),
-    file: UploadFile = File(...),
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
+    paper_id: UUID, request: Request, role: Literal['main', 'si'] = Form(...), file: UploadFile = File(...),
+    request_id: UUID = Form(...), expected_revision: str = Form(..., pattern=r'^[0-9a-f]{64}$'),
+    action: Literal['add', 'supersede'] = Form(...), reason: str = Form(..., min_length=1, max_length=2000),
+    supersede_file_ids: str = Form(default='[]'),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+    auth: SessionState = Depends(_require_file_write_session),
 ) -> dict[str, Any]:
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="only_pdf_uploads_are_supported")
-    digest = hashlib.sha256()
-    size = 0
-    while True:
-        chunk = await file.read(1024 * 1024)
-        if not chunk:
-            break
-        digest.update(chunk)
-        size += len(chunk)
+    from app.services.rebuild_file_lifecycle import _hash, locked_replay, validate_change, apply_change
+    form = await request.form()
+    allowed = {'role', 'file', 'request_id', 'expected_revision', 'action', 'reason', 'supersede_file_ids'}
+    if set(form.keys()) - allowed or any(len(form.getlist(key)) != 1 for key in form.keys()):
+        raise HTTPException(422, 'unexpected_or_duplicate_file_fields')
+    if not file.filename or not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(400, 'only_pdf_uploads_are_supported')
+    try:
+        targets = json.loads(supersede_file_ids)
+        if not isinstance(targets, list) or len(targets) > 100:
+            raise ValueError()
+        targets = [str(UUID(item)) for item in targets]
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(422, 'invalid_supersede_file_ids')
+    if not reason.strip():
+        raise HTTPException(422, 'reason_required')
+    digest = hashlib.sha256(); size = 0
+    while chunk := await file.read(1024 * 1024):
+        digest.update(chunk); size += len(chunk)
         if size > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail="file_too_large")
+            raise HTTPException(413, 'file_too_large')
     await file.seek(0)
     safe_name = Path(file.filename).name
-    store = ArtifactStore(settings)
-    saved_path = await store.save_upload(file, f"rebuild_{uuid4()}_{role}_{safe_name}")
+    body = {'request_id': str(request_id), 'expected_revision': expected_revision, 'role': role,
+            'action': action, 'reason': reason, 'supersede_file_ids': targets,
+            'original_filename': safe_name, 'sha256': digest.hexdigest(), 'file_size': size}
+    fingerprint = _hash({'body': body, 'provided_fields': sorted(form.keys()),
+                         'supersede_file_ids_raw': supersede_file_ids, 'operation': 'upload'})
     try:
-        record, created = associate_pdf_file(
-            session,
-            paper_id=paper_id,
-            role=role,
-            saved_path=saved_path,
-            original_filename=safe_name,
-            sha256=digest.hexdigest(),
-            file_size=size,
-            settings=settings,
-        )
-    except RebuildWorkflowError as exc:
-        raise _http_error(exc) from exc
-    session.commit()
-    return {"file": serialize_file(record), "created": created, "automatic_parsing_started": False}
+        replay = locked_replay(session, paper_id, str(request_id), fingerprint, auth.username)
+        if replay is not None:
+            return replay
+        before = validate_change(session, paper_id, body)
+        # Validate CAS/ownership and duplicates before persisting any upload.
+        from app.db.models import RebuildPaperFile
+        record = session.scalar(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id,
+            RebuildPaperFile.role == role, RebuildPaperFile.sha256 == digest.hexdigest()))
+        created = record is None
+        if record is not None:
+            if str(record.id) in targets:
+                raise HTTPException(409, 'file_cannot_supersede_itself')
+            if any(f['id'] == str(record.id) and f['lifecycle_status'] == 'superseded' for f in before['items']):
+                raise HTTPException(409, 'superseded_file_cannot_be_reactivated')
+        if role == 'main' and any(f['role'] == 'main' and f['lifecycle_status'] == 'active'
+            and f['id'] not in targets and (record is None or f['id'] != str(record.id)) for f in before['items']):
+            raise HTTPException(409, 'main_source_requires_explicit_supersede')
+        if created:
+            # A content-addressed immutable destination avoids orphan duplicates on retry.
+            relative = f'rebuild_sources/{paper_id}/{role}/{digest.hexdigest()}.pdf'
+            path = settings.storage_root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                if hashlib.sha256(path.read_bytes()).hexdigest() != digest.hexdigest():
+                    raise HTTPException(409, 'immutable_upload_content_mismatch')
+            else:
+                with path.open('xb') as handle:
+                    while chunk := await file.read(1024 * 1024):
+                        handle.write(chunk)
+            record = RebuildPaperFile(paper_id=paper_id, role=role, storage_path=relative,
+                original_filename=safe_name, sha256=digest.hexdigest(), file_size=size)
+            session.add(record); session.flush()
+        result = apply_change(session, paper_id, body, auth.username, fingerprint, record, before, created=created)
+        session.commit()
+        return result
+    except Exception:
+        session.rollback()
+        raise
 
 
 @router.get("/papers/{paper_id}/files")
-async def rebuild_files(paper_id: UUID, session: Session = Depends(get_db_session)) -> dict[str, Any]:
+async def rebuild_files(paper_id: UUID, session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_work_package_session)) -> dict[str, Any]:
+    from app.services.rebuild_file_lifecycle import file_set
     try:
-        return {"items": list_files(session, paper_id)}
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        return file_set(session, paper_id)
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
 
@@ -1069,7 +1156,16 @@ async def rebuild_paper_source_pdf(
 ) -> FileResponse:
     try:
         paper = _required_paper(session, paper_id)
-        path = resolve_paper_source_pdf(paper, settings)
+        from app.services.rebuild_file_lifecycle import file_set
+        state = file_set(session, paper_id)
+        if state['ambiguous_main']:
+            raise HTTPException(409, 'preferred_main_source_ambiguous')
+        if state['preferred_main_id']:
+            path = resolve_reading_pdf(get_file(session, UUID(state['preferred_main_id'])), settings)
+        elif any(f['role'] == 'main' for f in state['items']):
+            raise HTTPException(409, 'preferred_main_source_unavailable')
+        else:
+            path = resolve_paper_source_pdf(paper, settings)
     except RebuildWorkflowError as exc:
         raise _http_error(exc) from exc
     filename = f"{paper.paper_code or paper.id}.pdf"

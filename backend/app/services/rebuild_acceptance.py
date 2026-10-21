@@ -61,8 +61,8 @@ def _scope(session, paper_id):
     # An unregistered linked SI remains explicit and prevents a full acceptance.
     missing = [{"paper_id": item["paper_id"], "reason": "linked_si_registration_required"}
                for item in attachments if not item["file_id"]]
-    files = list(session.scalars(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id)
-                                .order_by(RebuildPaperFile.id)))
+    from app.services.rebuild_file_lifecycle import active_files
+    files = sorted(active_files(session, paper_id), key=lambda file: str(file.id))
     return files, missing
 
 
@@ -118,6 +118,12 @@ def current_snapshot(session, paper_id, *, force_physical=False):
     manifest = output_manifest(session, paper_id, force_physical=force_physical, table_readings=readings)
     # Title/number may change; stable paper_id is the scientific identity.
     frozen = {"paper_id": str(paper_id), "files": file_manifest, "unregistered_files": missing, "output_manifest": manifest}
+    from app.services.rebuild_file_lifecycle import file_set
+    lifecycle = file_set(session, paper_id)
+    if (lifecycle["scientific_review_required_file_ids"] or
+            lifecycle["preferred_main_id"] is None and any(item["role"] == "main" for item in lifecycle["items"])):
+        frozen["file_lifecycle"] = {key: lifecycle[key] for key in (
+            "file_set_revision", "preferred_main_id", "scientific_review_required_file_ids")}
     if files:
         frozen["file_reading_identity"] = {str(key): value for key, value in file_inventory(files, get_settings(), force=force_physical).items()}
     if readings["tables"]:

@@ -8,6 +8,8 @@ const state = {
   pollTimer: null,
   selectedId: "",
   selectionSeq: 0,
+  files: null,
+  uploadIntent: null,
 };
 
 const initialPaperId = new URLSearchParams(location.search).get("paper_id");
@@ -102,6 +104,7 @@ async function selectPaper(id) {
   if (!id) return;
   const seq = ++state.selectionSeq;
   state.selectedId = id;
+  state.files = null;
   stopPolling();
   state.job = null;
   renderJobStatus();
@@ -110,9 +113,10 @@ async function selectPaper(id) {
   renderSteps();
   markActiveResult();
   try {
-    const detail = await api(`/api/rebuild/papers/${id}`);
+    const [detail, files] = await Promise.all([api(`/api/rebuild/papers/${id}`), api(`/api/rebuild/papers/${id}/files`)]);
     if (seq !== state.selectionSeq) return;
     state.selected = detail;
+    state.files = files;
     const index = state.papers.findIndex((paper) => paper.id === id);
     if (index >= 0) state.papers[index] = detail; else state.papers.unshift(detail);
     renderResults();
@@ -154,8 +158,15 @@ function renderSelection() {
       <span class="rebuild-count"><strong>${count(paper, "assets")}</strong> 图表对象</span>
       <span class="rebuild-count"><strong>${count(paper, "rows")}</strong> 数据行</span>
     </div>
+    ${fileHistoryMarkup()}
     ${paper.has_pdf ? `<div class="rebuild-step-actions"><a class="rebuild-btn ghost" href="/api/rebuild/papers/${esc(paper.id)}/source-pdf/preview" target="_blank" rel="noopener">预览源 PDF</a></div>` : ""}
   `;
+}
+
+function fileHistoryMarkup() {
+  if (!state.files) return '';
+  const items = state.files.items || [];
+  return `<details class="rebuild-file-history"><summary>正文与 SI 文件历史 · ${items.length} 个文件</summary>${items.map(file => `<p><strong>${file.role === 'main' ? '正文' : 'SI'} · ${file.lifecycle_status === 'superseded' ? '已被替代（历史）' : file.preferred ? '当前首选' : file.role === 'main' ? '正文首选待指定' : '当前文件'}</strong> · ${esc(file.original_filename)} <a href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview" target="_blank" rel="noopener">查看原文件</a>${file.scientific_review_required ? '<br>原科学关联保留，需独立科学复核。' : ''}</p>`).join('') || '尚未关联文件'}</details>`;
 }
 
 function setStepStatus(id, text, ok) {
@@ -229,8 +240,22 @@ async function uploadFile(event) {
   if (!state.selected) { renderStatus("请先选择论文", "error"); return; }
   const file = $("uploadFile").files[0];
   if (!file) { renderStatus("请选择 PDF 文件", "error"); return; }
+  const paperId = state.selected.id, role = $("uploadRole").value;
+  const snapshot = state.files;
+  if (!snapshot?.file_set_revision) { renderStatus("请刷新读取文件版本后再上传。", "error"); return; }
+  if (role === "main" && snapshot.items?.some(item => item.role === "main" && item.lifecycle_status !== "superseded")) {
+    renderStatus("已有正文。替换须明确指定旧文件并通过版本校验，请使用文件生命周期接口；不会自动替换。", "error"); return;
+  }
+  const oldIntent = state.uploadIntent;
+  const intent = oldIntent?.file === file && oldIntent.paperId === paperId && oldIntent.role === role ? oldIntent :
+    { file, paperId, role, requestId: crypto.randomUUID(), revision: snapshot.file_set_revision };
+  state.uploadIntent = intent;
   const formData = new FormData();
-  formData.append("role", $("uploadRole").value);
+  formData.append("role", role);
+  formData.append("action", "add");
+  formData.append("request_id", intent.requestId);
+  formData.append("expected_revision", intent.revision);
+  formData.append("reason", "用户新增来源文件");
   formData.append("file", file);
   const button = $("uploadBtn");
   button.disabled = true;
@@ -238,10 +263,11 @@ async function uploadFile(event) {
   try {
     const result = await api(`/api/rebuild/papers/${state.selected.id}/files`, { method: "POST", body: formData });
     renderStatus(result.created ? "文件关联已保存，未启动自动解析。" : "相同文件已存在，关联保持幂等。");
+    state.uploadIntent = null;
     $("uploadFile").value = "";
     await selectPaper(state.selected.id);
   } catch (error) {
-    renderStatus(`保存失败：${error.message}`, "error");
+    renderStatus(`保存未确认：${error.message}。重新提交同一文件将复用原请求；版本冲突请刷新核对。`, "error");
   } finally {
     button.disabled = false;
   }

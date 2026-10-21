@@ -40,6 +40,10 @@ def table_label(value):
 def table_representations(session, paper_id, settings, *, force_physical=False):
     """Return source-bound representation checks/dependencies without writes."""
     checks, scopes, dependencies = [], [], {}
+    from app.services.rebuild_file_lifecycle import active_files, file_set
+    lifecycle = file_set(session, paper_id)
+    current_files = sorted(active_files(session, paper_id), key=lambda file: str(file.id))
+    active_ids = {file.id for file in current_files}
     legal_links = list(session.scalars(select(PaperRelationship).where(
         PaperRelationship.source_paper_id == paper_id,
         PaperRelationship.relationship_type.in_(SI_RELATIONSHIPS))))
@@ -120,6 +124,13 @@ def table_representations(session, paper_id, settings, *, force_physical=False):
             result["binding"] = {"file_id": str(asset.file_id) if asset.file_id else None,
                                  "file_owner_id": str(file.paper_id) if file else None}
             continue
+        if file.id not in active_ids:
+            reason = ("source_file_superseded_requires_scientific_review" if str(file.id) in lifecycle["scientific_review_required_file_ids"]
+                      else "source_file_preference_unresolved_requires_scientific_review")
+            result.update(complete=False, reason=reason)
+            result["binding"] = {"file_id": str(file.id), "source_sha256": file.sha256,
+                                 "physical_pages": pages, "scientific_review_required": True}
+            continue
         binding, rows = scope(file)
         result["binding"] = {**binding, "physical_pages": pages}
         count = binding["physical_total_pages"]
@@ -151,7 +162,7 @@ def table_representations(session, paper_id, settings, *, force_physical=False):
             result.update(format="legacy_markdown", complete=True, reason="source_bound_legacy")
     # The detail page also consumes remaining legacy tables directly. Freeze
     # their full records and legal PDF/SI scope, including relation changes.
-    for file in session.scalars(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id).order_by(RebuildPaperFile.id)):
+    for file in current_files:
         binding, rows = scope(file)
         for row in rows:
             dependency(row)

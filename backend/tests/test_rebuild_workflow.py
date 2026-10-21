@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -60,10 +61,17 @@ def _row(material: str, values: list[dict], condition: dict | None = None):
     )
 
 
+def _file_upload_data(client, paper_id, role):
+    response = client.get(f"/api/rebuild/papers/{paper_id}/files")
+    assert response.status_code == 200, response.text
+    return {"role": role, "request_id": str(uuid4()),
+            "expected_revision": response.json()["file_set_revision"],
+            "action": "add", "reason": "Synthetic workflow upload"}
+
+
 def test_rebuild_pdf_association_is_idempotent_and_does_not_queue_parsing(
-    setup_test_db, monkeypatch, tmp_path
+    setup_test_db, monkeypatch, tmp_path, audit_env
 ):
-    monkeypatch.setenv("LITAI_AUTH_ENABLED", "false")
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -74,10 +82,10 @@ def test_rebuild_pdf_association_is_idempotent_and_does_not_queue_parsing(
 
     pdf_path = tmp_path / "main.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n% test document\n")
-    with TestClient(app) as client:
+    with audit_env["client"] as client:
         response = client.post(
             f"/api/rebuild/papers/{paper_id}/files",
-            data={"role": "main"},
+            data=_file_upload_data(client, paper_id, "main"),
             files={"file": ("main.pdf", pdf_path.read_bytes(), "application/pdf")},
         )
         assert response.status_code == 200, response.text
@@ -85,7 +93,7 @@ def test_rebuild_pdf_association_is_idempotent_and_does_not_queue_parsing(
         assert response.json()["created"] is True
         response = client.post(
             f"/api/rebuild/papers/{paper_id}/files",
-            data={"role": "main"},
+            data=_file_upload_data(client, paper_id, "main"),
             files={"file": ("main-copy.pdf", pdf_path.read_bytes(), "application/pdf")},
         )
         assert response.status_code == 200, response.text
@@ -265,11 +273,10 @@ def test_rebuild_crop_merges_cross_page_regions_and_csv_export(
     document.save(pdf_path)
     document.close()
 
-    client = audit_env["client"]
-    if True:
+    with audit_env["client"] as client:
         upload = client.post(
             f"/api/rebuild/papers/{paper_id}/files",
-            data={"role": "si"},
+            data=_file_upload_data(client, paper_id, "si"),
             files={"file": ("si.pdf", pdf_path.read_bytes(), "application/pdf")},
         )
         assert upload.status_code == 200, upload.text

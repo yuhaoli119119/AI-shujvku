@@ -229,7 +229,12 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
     files = list(session.scalars(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id).order_by(RebuildPaperFile.id)))
     row_map, value_map, asset_map = ({row.id: row for row in rows}, {value.id: value for value in values}, {asset.id: asset for asset in assets})
     file_map = {file.id: file for file in files}
-    physical = file_inventory(files, settings) if file_states is None else {file.id: file_states[str(file.id)] for file in files}
+    from app.services.rebuild_file_lifecycle import file_set, active_files
+    lifecycle = file_set(session, paper_id)
+    current_files = sorted(active_files(session, paper_id), key=lambda file: str(file.id))
+    active_ids = {file.id for file in current_files}
+    physical = file_inventory(current_files, settings) if file_states is None else {
+        file.id: file_states[str(file.id)] for file in current_files}
     parent_labels, parent_groups = defaultdict(list), defaultdict(list)
     for parent in assets:
         if parent.asset_type == "figure":
@@ -238,17 +243,31 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
     issues = []
     def issue(severity, code, kind, record_id, action, **extra):
         issues.append({"severity": severity, "code": code, "kind": kind, "id": str(record_id), "action": action, **extra})
+    if lifecycle['ambiguous_main']:
+        issue('error', 'preferred_main_source_ambiguous', 'paper', paper_id,
+              'Explicitly select one current main using the file lifecycle contract; retain every original file and scientific binding.')
+    def binding_check(file_id, kind, record_id):
+        if file_id in file_map and file_id not in active_ids:
+            code = ("source_file_superseded_requires_scientific_review" if str(file_id) in lifecycle["scientific_review_required_file_ids"]
+                    else "source_file_preference_unresolved_requires_scientific_review")
+            issue("error", code, kind, record_id,
+                  "Retain the original file UUID, position and scientific values. Independently review the evidence before an explicit scientific correction; replacement never remaps existing objects.",
+                  file_id=str(file_id), scientific_review_required=True)
     def page_check(file_id, page, kind, record_id):
         if type(page) is not int or page < 1:
             issue("error", "physical_page_invalid", kind, record_id, "Read the source PDF and supply its actual positive physical page.", file_id=str(file_id) if file_id else None)
         elif file_id in physical and physical[file_id]["physical_pages"] is not None and page > physical[file_id]["physical_pages"]:
             issue("error", "physical_page_out_of_range", kind, record_id, "Correct the source file/page from the actual PDF.", file_id=str(file_id), page=page)
-    for file in files:
+    if any(file.role == "main" for file in files) and lifecycle["preferred_main_id"] is None:
+        issue("unknown", "preferred_main_source_ambiguous", "paper", paper_id,
+              "Select the preferred active main through the authenticated CAS file lifecycle endpoint; do not infer the preferred source from insertion order.")
+    for file in current_files:
         item = physical[file.id]
         if item["status"] != "verified":
             issue("error" if item.get("reason") in {"source_sha256_mismatch", "source_file_size_mismatch"} else "unknown", item.get("reason", "physical_source_unknown"),
                   "file", file.id, "Verify the registered original bytes and existing reading PDF; do not reparse or replace evidence automatically.")
     for asset in assets:
+        binding_check(asset.file_id, "asset", asset.id)
         if asset.file_id not in file_map:
             issue("error" if asset.file_id else "unknown", "asset_file_identity_unverified", "asset", asset.id,
                   "Bind the asset to this paper's actual registered file with evidence.", file_id=str(asset.file_id) if asset.file_id else None)
@@ -279,6 +298,7 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
         if asset and source.file_id and asset.file_id != source.file_id:
             issue("error", "source_asset_file_mismatch", "source", source.id, "Verify which PDF owns the asset; source and asset must agree.")
         file_id = source.file_id or (asset.file_id if asset else None)
+        binding_check(file_id, "source", source.id)
         if source.page_number is not None:
             page_check(file_id, source.page_number, "source", source.id)
             if asset and isinstance(asset.page_numbers, list) and asset.page_numbers and source.page_number not in asset.page_numbers:
@@ -339,8 +359,9 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             file_id = UUID(snapshot["file_id"])
             if file_id not in file_map or snapshot.get("source_sha256") != file_map[file_id].sha256:
                 raise RebuildWorkflowError("section_file_hash_mismatch")
-            actual = physical[file_id]
-            if actual["status"] == "verified":
+            binding_check(file_id, "section", section.id)
+            actual = physical.get(file_id, {})
+            if actual.get("status") == "verified":
                 expected_basis = "source_pdf" if actual["page_basis"] == "original_pdf" else "derived_pdf"
                 if (declared.page_basis != expected_basis or
                         event.payload.get("reading_pdf_sha256") != actual["reading_pdf_sha256"] or
@@ -354,7 +375,8 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
                 page = source.get("page_number")
                 page_check(file_id, page, "section", section.id)
                 if type(page) is int and section.page_start <= page <= section.page_end:
-                    section_pages[file_id].add(page)
+                    if file_id in active_ids:
+                        section_pages[file_id].add(page)
         except (RebuildWorkflowError, KeyError, ValueError, TypeError, ValidationError):
             issue("error", "section_source_or_record_changed", "section", section.id,
                   "Compare the existing imported original chapter and its immutable source event; report conflicts without overwriting mature text.")
@@ -363,7 +385,9 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             "counts": counts, "issues_total": len(issues), "issues": issues if limit is None else issues[offset:offset + limit], "offset": offset, "limit": limit,
             "has_more": limit is not None and offset + limit < len(issues), "next_offset": offset + limit if limit is not None and offset + limit < len(issues) else None,
             "stored_counts": {"rows": len(rows), "values": len(values), "sources": len(sources), "assets": len(assets)},
-            "files": list(physical.values()), "asset_mechanics": _asset_mechanics(assets, settings,
+            "files": list(physical.values()), "file_lifecycle": lifecycle,
+            "file_history": [item for item in lifecycle["items"] if item["id"] not in {str(fid) for fid in active_ids}],
+            "asset_mechanics": _asset_mechanics(assets, settings,
                 requested=include_asset_mechanics, offset=asset_offset, limit=asset_limit),
             "full_pdf_completeness": "unknown_until_explicit_physical_page_coverage_and_independent_review",
             "section_scope": {"stored_sections": len(sections), "legacy_without_file_provenance": len(legacy_sections),
