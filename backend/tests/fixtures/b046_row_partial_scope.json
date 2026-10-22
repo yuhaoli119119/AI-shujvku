@@ -1,0 +1,269 @@
+{
+  "paper_id": "88a1d9ea-8465-46be-b75f-3114192bfd9a",
+  "value_ids": [
+    "e5d2920f-f070-437d-9964-9abf7a6ad213",
+    "b90552ad-20d0-421b-adc5-4f7453c7d29e",
+    "885875a7-1527-4f16-934a-a1171dc8f35c",
+    "137d3dce-8af6-464c-9bfc-7da600e0fe69",
+    "ac94bd58-ba22-4090-9b17-d515d13a7f67",
+    "13dea31c-ca0d-4760-867e-ff4dec240c12",
+    "36bc8737-9823-4c15-8381-d2b34ce21fe7",
+    "f67a6d39-d408-4c8c-bbb1-f512914ee18f",
+    "327f1185-aedd-4841-9206-9ce0cf8d4423",
+    "339aef82-7e62-42be-b1f4-4025021fc53b",
+    "f2150b37-f515-4756-911e-1f8822111777",
+    "adfc92a2-13dd-4f8c-9ff8-b5178baf9d4c",
+    "982df940-3246-4858-ad69-a7f1fcb76a26",
+    "e99e6332-c140-4441-bf5e-ef3948df878f",
+    "c23dd5a5-dea2-4df1-bd61-cd5ebdb9e503",
+    "ed7402d9-b2b3-4852-acf9-9522e8bd4760",
+    "99d536e5-2cd2-4772-87a8-2946edb1cc38",
+    "60798e49-dc15-438b-9065-6bfa0afd02dc",
+    "c515ad43-9112-4e08-bb40-d21148775a33",
+    "6562f057-61f4-4b40-8ec6-1e08893c7942",
+    "e783a991-6b94-42cb-a9a4-114d88a8cbd5",
+    "86a95c37-e186-443c-b059-1fb5a65e7eb2",
+    "8d436b0a-1f9b-47de-ae36-5bfd3fc52903",
+    "af4d616b-3f8f-4936-9aa1-b104a7ffa387",
+    "b00c8311-8b0f-4318-883d-af6edc1f781c",
+    "57d82a91-a229-4912-9a77-c1e76b8052e3",
+    "1e4acc2b-025d-4646-bba6-d3decd90e8e4",
+    "128a3f36-623c-47c5-90a1-2ece97fcfce8",
+    "b45bbf2d-ddf8-49ad-a4c6-a1d921fbba5c",
+    "7b585e2d-2377-462f-933b-9ee44d80e07f",
+    "de294d88-92cc-46cf-8c23-f7ac8d3e6b72"
+  ],
+  "row_ids": [
+    "13390a5e-c939-4448-b78f-6527f44a7f37",
+    "243317d2-ef8e-49a1-9e8f-34049fc9b008",
+    "3e05730f-8a1f-4db9-b175-e2c363f32705",
+    "4a3b11d4-8a09-4ace-a567-6807e2b1ae09",
+    "4b80ff4a-ad32-4cd8-847b-cec66ef7f3b9",
+    "5b9a4a47-37b9-49fe-989e-87694c3b2ae8",
+    "5d8173dc-5e74-4ab1-8c07-3194e7cd80fc",
+    "84496bb9-d412-41cc-888f-54361d63d8ba",
+    "b4aeaf46-1388-4172-bef4-4435a54c81f5",
+    "caf800fa-5d7c-4ad4-b131-96cebf645c4a",
+    "d1c89ce9-4d50-47d6-8991-bb57c0d83801"
+  ],
+  "provenance": "Frozen packet UUIDs and matrix row/field/unit shapes only; raw values and sources are synthetic, not scientific authorization",
+  "cells": [
+    {
+      "value_id": "e5d2920f-f070-437d-9964-9abf7a6ad213",
+      "row_id": "4b80ff4a-ad32-4cd8-847b-cec66ef7f3b9",
+      "field_name": "fe_content_wt_percent",
+      "unit": "wt %",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "b90552ad-20d0-421b-adc5-4f7453c7d29e",
+      "row_id": "3e05730f-8a1f-4db9-b175-e2c363f32705",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "885875a7-1527-4f16-934a-a1171dc8f35c",
+      "row_id": "3e05730f-8a1f-4db9-b175-e2c363f32705",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "137d3dce-8af6-464c-9bfc-7da600e0fe69",
+      "row_id": "3e05730f-8a1f-4db9-b175-e2c363f32705",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "ac94bd58-ba22-4090-9b17-d515d13a7f67",
+      "row_id": "d1c89ce9-4d50-47d6-8991-bb57c0d83801",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "13dea31c-ca0d-4760-867e-ff4dec240c12",
+      "row_id": "d1c89ce9-4d50-47d6-8991-bb57c0d83801",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "36bc8737-9823-4c15-8381-d2b34ce21fe7",
+      "row_id": "d1c89ce9-4d50-47d6-8991-bb57c0d83801",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "f67a6d39-d408-4c8c-bbb1-f512914ee18f",
+      "row_id": "5b9a4a47-37b9-49fe-989e-87694c3b2ae8",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "327f1185-aedd-4841-9206-9ce0cf8d4423",
+      "row_id": "5b9a4a47-37b9-49fe-989e-87694c3b2ae8",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "339aef82-7e62-42be-b1f4-4025021fc53b",
+      "row_id": "5b9a4a47-37b9-49fe-989e-87694c3b2ae8",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "f2150b37-f515-4756-911e-1f8822111777",
+      "row_id": "13390a5e-c939-4448-b78f-6527f44a7f37",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "adfc92a2-13dd-4f8c-9ff8-b5178baf9d4c",
+      "row_id": "13390a5e-c939-4448-b78f-6527f44a7f37",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "982df940-3246-4858-ad69-a7f1fcb76a26",
+      "row_id": "13390a5e-c939-4448-b78f-6527f44a7f37",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "e99e6332-c140-4441-bf5e-ef3948df878f",
+      "row_id": "4a3b11d4-8a09-4ace-a567-6807e2b1ae09",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "c23dd5a5-dea2-4df1-bd61-cd5ebdb9e503",
+      "row_id": "4a3b11d4-8a09-4ace-a567-6807e2b1ae09",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "ed7402d9-b2b3-4852-acf9-9522e8bd4760",
+      "row_id": "4a3b11d4-8a09-4ace-a567-6807e2b1ae09",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "99d536e5-2cd2-4772-87a8-2946edb1cc38",
+      "row_id": "84496bb9-d412-41cc-888f-54361d63d8ba",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "60798e49-dc15-438b-9065-6bfa0afd02dc",
+      "row_id": "84496bb9-d412-41cc-888f-54361d63d8ba",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "c515ad43-9112-4e08-bb40-d21148775a33",
+      "row_id": "84496bb9-d412-41cc-888f-54361d63d8ba",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "6562f057-61f4-4b40-8ec6-1e08893c7942",
+      "row_id": "caf800fa-5d7c-4ad4-b131-96cebf645c4a",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "e783a991-6b94-42cb-a9a4-114d88a8cbd5",
+      "row_id": "caf800fa-5d7c-4ad4-b131-96cebf645c4a",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "86a95c37-e186-443c-b059-1fb5a65e7eb2",
+      "row_id": "caf800fa-5d7c-4ad4-b131-96cebf645c4a",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "8d436b0a-1f9b-47de-ae36-5bfd3fc52903",
+      "row_id": "243317d2-ef8e-49a1-9e8f-34049fc9b008",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "af4d616b-3f8f-4936-9aa1-b104a7ffa387",
+      "row_id": "243317d2-ef8e-49a1-9e8f-34049fc9b008",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "b00c8311-8b0f-4318-883d-af6edc1f781c",
+      "row_id": "243317d2-ef8e-49a1-9e8f-34049fc9b008",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "57d82a91-a229-4912-9a77-c1e76b8052e3",
+      "row_id": "5d8173dc-5e74-4ab1-8c07-3194e7cd80fc",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "1e4acc2b-025d-4646-bba6-d3decd90e8e4",
+      "row_id": "5d8173dc-5e74-4ab1-8c07-3194e7cd80fc",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "128a3f36-623c-47c5-90a1-2ece97fcfce8",
+      "row_id": "5d8173dc-5e74-4ab1-8c07-3194e7cd80fc",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "b45bbf2d-ddf8-49ad-a4c6-a1d921fbba5c",
+      "row_id": "b4aeaf46-1388-4172-bef4-4435a54c81f5",
+      "field_name": "bond_distance_angstrom",
+      "unit": "A",
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "7b585e2d-2377-462f-933b-9ee44d80e07f",
+      "row_id": "b4aeaf46-1388-4172-bef4-4435a54c81f5",
+      "field_name": "coordination_number",
+      "unit": null,
+      "data_type": "experimental"
+    },
+    {
+      "value_id": "de294d88-92cc-46cf-8c23-f7ac8d3e6b72",
+      "row_id": "b4aeaf46-1388-4172-bef4-4435a54c81f5",
+      "field_name": "sigma2_angstrom2",
+      "unit": "A^2",
+      "data_type": "experimental"
+    }
+  ]
+}

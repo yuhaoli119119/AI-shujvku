@@ -24,6 +24,8 @@ from app.services.rebuild_workflow_service import _validate_value
 
 VERSION = 'rebuild_ml_v1'
 ACCEPTANCE_VERSION = 'rebuild_ml_acceptance_v1'
+PARTIAL_ACCEPTANCE_VERSION = 'rebuild_ml_acceptance_v2'
+PARTIAL_DATASET_VERSION = 'rebuild_ml_v2'
 MODELS = {'papers': Paper, 'files': RebuildPaperFile, 'assets': RebuildVisualAsset,
           'rows': RebuildDataRow, 'values': RebuildDataValue, 'sources': RebuildValueSource}
 STATUSES = {'eligible', 'partial', 'rejected', 'unresolved', 'missing', 'conflict', 'leakage'}
@@ -109,7 +111,8 @@ def paper_revision(snapshot, paper_id):
 
 
 def validate_manifest(manifest, snapshot):
-    if manifest.get('schema_version') != ACCEPTANCE_VERSION:
+    v2 = manifest.get('schema_version') == PARTIAL_ACCEPTANCE_VERSION
+    if manifest.get('schema_version') not in {ACCEPTANCE_VERSION, PARTIAL_ACCEPTANCE_VERSION}:
         raise ValueError('unsupported acceptance schema')
     if manifest.get('scope_paper_ids') != snapshot['scope_paper_ids']:
         raise ValueError('acceptance scope must exactly match sorted snapshot scope')
@@ -134,21 +137,68 @@ def validate_manifest(manifest, snapshot):
         if set(manifest.get(kind, {})) - known:
             raise ValueError('disposition references unknown ' + kind + ' UUID')
         for key, decision in manifest.get(kind, {}).items():
-            if str(UUID(key)) != key or decision.get('status') not in STATUSES:
+            statuses = STATUSES | ({'row_partial'} if v2 and kind == 'rows' else set())
+            if str(UUID(key)) != key or decision.get('status') not in statuses:
                 raise ValueError('invalid UUID disposition')
+            if not v2 and any(k in decision for k in
+                        ('eligible_value_mask', 'missing_cells', 'reviewer_authorization', 'unit_overlay')):
+                raise ValueError('v2 acceptance fields require explicit v2 schema')
             if not SHA.fullmatch(decision.get('sha256', '')):
                 raise ValueError('dispositions require content sha256')
+            if v2 and 'unit_overlay' in decision:
+                overlay = decision['unit_overlay']
+                if (kind != 'values' or not isinstance(overlay, dict) or
+                        set(overlay) != {'stored_unit', 'analysis_unit', 'reason'} or
+                        overlay['stored_unit'] is not None or overlay['analysis_unit'] != '1' or
+                        not isinstance(overlay['reason'], str) or not overlay['reason'].strip()):
+                    raise ValueError('only explicit null-to-dimensionless value unit overlay supported')
     for pid, decision in manifest.get('papers', {}).items():
         if not decision.get('review_receipt') or not SHA.fullmatch(decision.get('review_evidence_sha256', '')):
             raise ValueError('independent paper review receipt and evidence hash required')
         if not SHA.fullmatch(decision.get('graph_revision', '')):
             raise ValueError('paper review must bind graph revision')
+    if v2:
+        for rid, decision in manifest.get('rows', {}).items():
+            if decision['status'] not in {'eligible', 'row_partial'}:
+                continue
+            values = [v for v in snapshot['graph']['values'] if v['row_id'] == rid]
+            mask = decision.get('eligible_value_mask')
+            if (not isinstance(mask, dict) or set(mask) != {v['id'] for v in values}
+                    or any(type(v) is not bool for v in mask.values())):
+                raise ValueError('v2 row requires exact boolean value UUID mask')
+            missing = decision.get('missing_cells')
+            if (not isinstance(missing, dict) or any(k not in policy['fields'] or
+                    not isinstance(v, str) or not v.strip() for k, v in missing.items())):
+                raise ValueError('v2 row requires field-scoped missing cell reasons')
+            absent = {field for field, spec in policy['fields'].items() if not any(
+                v['field_name'] == field and v['value_type'] != 'missing' and
+                v['raw_value'] is not None and (spec['kind'] != 'numeric' or
+                v['numeric_value'] is not None) for v in values)}
+            absent.update(v['field_name'] for v in values if v['field_name'] in policy['fields']
+                and (v['value_type'] == 'missing' or v['raw_value'] is None or
+                     (policy['fields'][v['field_name']]['kind'] == 'numeric' and v['numeric_value'] is None)))
+            if not absent <= set(missing):
+                raise ValueError('v2 missing cell reason required for absent/null fields')
+            if decision['status'] == 'eligible' and (missing or not all(mask.values())):
+                raise ValueError('incomplete v2 row must explicitly use row_partial')
     return policy
+
+
+def _authorized(manifest, entry):
+    if manifest['schema_version'] == ACCEPTANCE_VERSION:
+        return True  # v1 explicit UUID dispositions retain their original contract.
+    auth = entry.get('reviewer_authorization')
+    return (isinstance(auth, dict) and auth.get('authorized') is True
+            and isinstance(auth.get('reviewer'), str) and bool(auth['reviewer'].strip())
+            and isinstance(auth.get('receipt'), str) and bool(auth['receipt'].strip())
+            and isinstance(auth.get('evidence_sha256'), str)
+            and bool(SHA.fullmatch(auth['evidence_sha256'])))
 
 
 def _eligible(manifest, kind, obj):
     entry = manifest.get(kind, {}).get(obj['id'], {})
-    return entry.get('status') == 'eligible' and entry.get('sha256') == digest(obj)
+    return (entry.get('status') == 'eligible' and entry.get('sha256') == digest(obj)
+            and _authorized(manifest, entry))
 
 
 def _path(obj, path):
@@ -257,6 +307,7 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
             sorted(x['id'] for x in snapshot['graph']['papers']) != scope):
         raise ValueError('snapshot graph papers must exactly match explicit scope')
     policy = validate_manifest(manifest, snapshot)
+    v2 = manifest['schema_version'] == PARTIAL_ACCEPTANCE_VERSION
     graph = snapshot['graph']
     indexes = {kind: {x['id']: x for x in graph[kind]} for kind in MODELS}
     superseded = {fid for event in graph['file_lifecycle'] for fid in event['payload'].get('superseded_file_ids', [])}
@@ -274,13 +325,20 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
         # Partial paper reviews can authorize explicitly eligible local objects;
         # they never promote the whole paper or a final train/val/test split.
         if (review.get('status') not in {'eligible', 'partial'} or review.get('sha256') != digest(paper)
-                or review.get('graph_revision') != revisions.get(pid)):
+                or review.get('graph_revision') != revisions.get(pid) or not _authorized(manifest, review)):
             exclude('paper_acceptance_missing_or_stale')
         if row is None or row['paper_id'] != pid:
             exclude('row_paper_mismatch')
         row = row or {}
-        for kind, obj in [('rows', row), ('values', value)]:
-            if not obj or not _eligible(manifest, kind, obj): exclude(kind + '_not_eligible_or_stale')
+        row_review = manifest.get('rows', {}).get(value['row_id'], {})
+        row_eligible = bool(row) and _eligible(manifest, 'rows', row)
+        if v2:
+            row_eligible = bool(row) and (row_review.get('status') in {'eligible', 'row_partial'}
+                and row_review.get('sha256') == digest(row) and _authorized(manifest, row_review))
+            if row_review.get('eligible_value_mask', {}).get(value['id']) is not True:
+                exclude('value_not_in_row_eligible_mask')
+        if not row_eligible: exclude('rows_not_eligible_or_stale')
+        if not _eligible(manifest, 'values', value): exclude('values_not_eligible_or_stale')
         identity = {key: row.get(key) for key in IDENTITY}
         missing_identity = [key for key in policy['required_identity'] if _path(row, key) in (None, '', {}, [])]
         if missing_identity: exclude('identity_missing')
@@ -290,6 +348,13 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
         if re.search(r'predict|similarity|fingerprint|^ml_|预测|相似|指纹', value['field_name'], re.I):
             exclude('leakage_field_blocked')
         decision = manifest.get('values', {}).get(value['id'], {})
+        analysis_unit = value['unit']
+        if v2 and 'unit_overlay' in decision:
+            if (value['unit'] is not None or not spec or spec['kind'] != 'numeric' or
+                    '1' not in spec['allowed_units'] or not _authorized(manifest, decision)):
+                exclude('unit_overlay_not_authorized_or_inapplicable')
+            else:
+                analysis_unit = decision['unit_overlay']['analysis_unit']
         if decision.get('leakage') != 'clear': exclude('leakage_not_cleared')
         conflict = value['conflict'] or {}
         conflict_status = conflict.get('status')
@@ -347,7 +412,7 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
             # and task-specific formula semantics have an independently reviewed contract.
             exclude('derived_input_closure_not_supported_v1')
         if spec:
-            if value['unit'] not in spec['allowed_units']: exclude('unit_not_allowed')
+            if analysis_unit not in spec['allowed_units']: exclude('unit_not_allowed')
             if spec['kind'] == 'numeric':
                 if value['numeric_value'] is None: exclude('numeric_missing')
                 if type(value['precision_digits']) is not int or value['precision_digits'] < 0:
@@ -362,6 +427,12 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
                              'numeric_missing': value['numeric_value'] is None},
             'exclusion_reasons': sorted(set(reasons)), 'formal_eligible': not reasons,
             'conflict_status': conflict_status, 'leakage_status': decision.get('leakage', 'unresolved')})
+        if v2:
+            observations[-1].update(row_acceptance=row_review,
+                row_partial=row_review.get('status') == 'row_partial',
+                missing_cells=row_review.get('missing_cells', {}),
+                analysis_unit=analysis_unit,
+                value_eligible_mask=row_review.get('eligible_value_mask', {}).get(value['id']) is True)
     _groups(observations)
     for x in observations:
         bucket = int(digest([seed, x['leakage_group']]), 16) % 100
@@ -388,13 +459,24 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
         'formal_eligible': 'Every acceptance and machine provenance check passes',
         'raw_value': 'Unmodified original text, never reconstructed from binary64 numeric_value',
         'exclusion_reasons': 'All failed checks; exploratory values never enter formal artifacts'}
-    payload['schema.json'] = encoded({'schema_version': VERSION, 'dictionary': dictionary, 'policy': policy})
+    if v2:
+        dictionary['export'].update(row_partial='Explicit partial row review; never whole-row acceptance',
+            analysis_unit='Stored unit unless explicit authorized null-to-1 value overlay; stored unit unchanged',
+            value_eligible_mask='Explicit reviewer row mask; all independent cell and source gates also apply',
+            missing_cells='Field to reviewer reason; absent cells are not synthesized or filled',
+            row_acceptance='Content-bound row disposition with explicit reviewer authorization')
+    export_version = PARTIAL_DATASET_VERSION if v2 else VERSION
+    payload['schema.json'] = encoded({'schema_version': export_version, 'dictionary': dictionary, 'policy': policy})
     stats = {'observations': len(observations), 'formal_values': len(formal),
              'exploratory_values': len(observations) - len(formal),
              'formal_rows': len({x['row_id'] for x in formal}),
              'exclusions': dict(sorted(Counter(r for x in observations for r in x['exclusion_reasons']).items())),
              'papers_without_disposition': sorted(set(snapshot['scope_paper_ids']) - set(manifest.get('papers', {})))}
-    payload['build_manifest.json'] = encoded({'schema_version': VERSION, 'code_revision': code_revision,
+    if v2:
+        stats['formal_rows_with_eligible_values'] = stats.pop('formal_rows')
+        stats['formal_partial_rows'] = len({x['row_id'] for x in formal if x['row_partial']})
+        stats['reviewed_eligible_rows_with_formal_values'] = len({x['row_id'] for x in formal if not x['row_partial']})
+    payload['build_manifest.json'] = encoded({'schema_version': export_version, 'code_revision': code_revision,
         'builder_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         'snapshot_sha256': snapshot['snapshot_sha256'], 'query_bundle_sha256': snapshot['query_bundle_sha256'],
         'acceptance_sha256': digest(manifest),
