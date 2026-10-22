@@ -226,3 +226,42 @@ def saved_file_plan(session, paper_id):
                     if part['status'] == 'completed':
                         merged[fid]['stages'][stage] = copy.deepcopy(part)
     return merged
+
+
+def recover_auto_started_turn(payload, progress, status, settings):
+    """Adopt only the first turn already journaled after our exact fresh goal ACK.
+
+    Does not send a native request or infer identity from a file checkpoint.
+    """
+    if (payload.get('parse_contract') != VERSION or payload.get('chosen_mode') != 'codex_web_target'
+            or progress.get('turn_id') or status is None or status.thread_id != progress.get('thread_id')
+            or status.cwd != settings.codex_web_cwd or status.model_provider != 'workbuddy'):
+        return None
+    tid = progress['thread_id']
+    events = progress.get('events', [])
+    if any(e.get('method') == 'turn/start' and e.get('phase') == 'request_prepared' for e in events):
+        return None
+    fresh = False; goal_sent = False; acked = False; checked = False
+    for event in events:
+        result = (event.get('response') or {}).get('result') or {}
+        method, phase = event.get('method'), event.get('phase')
+        if method == 'thread/start' and phase == 'response_received':
+            thread = result.get('thread') or {}
+            fresh = thread.get('id') == tid and thread.get('turns') == [] and result.get('modelProvider') == 'workbuddy'
+        if method == 'thread/goal/set' and phase == 'request_prepared':
+            params = event.get('params') or {}
+            goal_sent = fresh and params.get('threadId') == tid and params.get('objective') == payload.get('dispatch_prompt') and bool(payload.get('attempt_token')) and payload['attempt_token'] in params.get('objective', '')
+        if method in ('thread/goal/set', 'thread/goal/get') and phase == 'response_received':
+            goal = result.get('goal') or {}
+            good = goal.get('threadId') == tid and goal.get('objective') == payload.get('dispatch_prompt') and goal.get('status') == 'active'
+            if method == 'thread/goal/set': acked = goal_sent and good
+            else: checked = acked and good
+        if method == 'thread/read' and phase == 'response_received' and checked:
+            thread = result.get('thread') or {}
+            turns = thread.get('turns') or []
+            if thread.get('id') == tid and thread.get('modelProvider') == 'workbuddy' and turns:
+                first = turns[0].get('id')
+                if first and first in (status.turn_ids or ()):
+                    return {'turn_id': first, 'reason': 'fresh_owned_goal_auto_start_journal_and_live_readback',
+                            'thread_id': tid, 'checked_at': datetime.utcnow().isoformat()}
+    return None

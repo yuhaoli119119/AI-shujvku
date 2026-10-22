@@ -424,7 +424,8 @@ async def sync_job_status(
     progress = dict(job.progress or {})
     observed = {"thread_id": getattr(status, "thread_id", None), "turn_id": getattr(status, "turn_id", None),
                 "turn_status": getattr(status, "turn_status", None), "goal_status": getattr(status, "goal_status", None),
-                "item_count": getattr(status, "item_count", None), "read_at": _utcnow().isoformat()}
+                "item_count": getattr(status, "item_count", None), "thread_status": getattr(status, "thread_status", None),
+                "goal_observed": getattr(status, "goal_observed", False), "read_at": _utcnow().isoformat()}
     progress["readback"] = observed
     progress["status_checked_at"] = _utcnow().isoformat()
     from app.services.rebuild_progress_guard import observe, evidence_signature
@@ -447,13 +448,25 @@ async def sync_job_status(
         job.progress = {**progress, "phase": "needs_check", "needs_check": True, "automatic_retry": False}
         session.flush()
         return job
+    if ordinary and not progress.get("turn_id"):
+        from app.services.ordinary_parsing import recover_auto_started_turn
+        recovered = recover_auto_started_turn(job.payload or {}, progress, status, settings)
+        if recovered:
+            progress.update(turn_id=recovered["turn_id"], identity_recovery=recovered)
+            job.error = None
+            job.status = "running"
+    plan = progress.get("file_plan", {})
+    stages_processed = bool(plan) and all(part.get("status") in {"completed", "partial", "failed"}
+        for file in plan.values() for part in file.get("stages", {}).values())
+    confirmed_absent_idle = (ordinary and stages_processed and getattr(status, "goal_observed", False)
+                            and status.goal_status is None and getattr(status, "thread_status", None) == "idle")
     if not mode or not matches_owned_attempt(status, thread_id, progress.get("turn_id"),
                                              allow_goal_continuations=mode == "codex_web_target"):
         job.progress = {**progress,"phase":"needs_check","needs_check":True,"automatic_retry":False}
         session.flush()
         return job  # Unknown turn reply stays unknown; no turn mutation/replay.
     turn_status = (status.turn_status or "").lower()
-    if turn_status == "completed" and (mode == "codex_web_ordinary" or status.goal_status in {"complete","completed"}):
+    if turn_status == "completed" and (mode == "codex_web_ordinary" or status.goal_status in {"complete","completed"} or confirmed_absent_idle):
         if not ordinary and not (progress.get("evidence_guard") or {}).get("business_advanced"):
             job.progress = {**progress, "phase": "awaiting_evidence", "needs_check": True,
                             "automatic_retry": False, "completion_blocked": "no_new_business_evidence"}
@@ -467,7 +480,8 @@ async def sync_job_status(
             from app.services.ordinary_parsing import progress_summary
             ordinary_summary = progress_summary(progress.get("file_plan", {}))
             progress.update(native_terminal_verified=True, native_terminal=observed,
-                            content_status=ordinary_summary["content_status"])
+                            content_status=ordinary_summary["content_status"],
+                            goal_terminal_evidence="confirmed_absent_idle_after_processed_stages" if confirmed_absent_idle else status.goal_status)
             summary["file_progress"] = ordinary_summary
         job.status = "completed"
         observed_files = set(session.scalars(select(RebuildVisualAsset.file_id).where(RebuildVisualAsset.paper_id==UUID(paper_id_str),RebuildVisualAsset.file_id.is_not(None)))) | set(session.scalars(select(RebuildValueSource.file_id).where(RebuildValueSource.paper_id==UUID(paper_id_str),RebuildValueSource.file_id.is_not(None)))) if paper_id_str else set()
