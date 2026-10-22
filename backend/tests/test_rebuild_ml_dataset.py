@@ -423,3 +423,60 @@ def test_applicable_source_kinds_keep_legal_semantics(frozen, kind):
     else:
         assert len(lines(payload, 'formal_numeric.jsonl')) == 2
         assert not lines(payload, 'exploratory.jsonl')
+
+
+@pytest.mark.parametrize('kind', ['figure', 'estimated', 'table', 'unsupported-kind'])
+@pytest.mark.parametrize('asset_type', ['figure', 'subfigure', 'table'])
+def test_persisted_source_asset_compatibility_matrix(frozen, kind, asset_type):
+    """Fresh PG graph and eligible receipts isolate source/asset compatibility."""
+    db, _, _ = frozen
+    with db.session_factory() as s:
+        source = s.get(RebuildValueSource, uid(6))
+        asset = s.get(RebuildVisualAsset, uid(3))
+        source.source_kind = kind
+        asset.asset_type = asset_type
+        if kind != 'table':
+            source.table_row = source.table_column = None
+        if asset_type != 'table':
+            asset.asset_key = 'Fig1a' if asset_type == 'subfigure' else 'Fig1'
+            asset.figure_label = 'Fig. 1'
+            asset.subfigure_label = 'a' if asset_type == 'subfigure' else None
+            asset.provenance = None
+            source.label = 'Fig. 1(a)' if asset_type == 'subfigure' else 'Fig. 1'
+        if kind == 'estimated':
+            source.estimate_basis = 'Fig. 1(a) axis, independently reviewed estimate'
+            value = s.get(RebuildDataValue, uid(5))
+            value.value_type = 'estimated'
+            value.is_estimated = True
+        s.commit()
+    snap, manifest = refresh(db)
+    source = next(x for x in snap['graph']['sources'] if x['id'] == str(uid(6)))
+    asset = next(x for x in snap['graph']['assets'] if x['id'] == str(uid(3)))
+    assert source['source_kind'] == kind and asset['asset_type'] == asset_type
+    if kind != 'unsupported-kind':
+        from app.schemas.rebuild import RebuildValueSourceInput, RebuildVisualAssetRequest
+        RebuildValueSourceInput.model_validate({k: v for k, v in source.items()
+                                               if k in RebuildValueSourceInput.model_fields})
+        RebuildVisualAssetRequest.model_validate({k: asset[k] for k in
+            ('asset_key', 'asset_type', 'file_id', 'page_numbers', 'figure_label', 'subfigure_label')})
+    payload = build(snap, manifest)
+    formal = {x['id']: x for x in lines(payload, 'formal_numeric.jsonl')}
+    exploratory = lines(payload, 'exploratory.jsonl')
+    allowed = (kind == 'table' and asset_type == 'table') or (
+        kind in {'figure', 'estimated'} and asset_type in {'figure', 'subfigure'})
+    assert str(uid(105)) in formal  # Unchanged control stays eligible.
+    if allowed:
+        assert set(formal) == {str(uid(5)), str(uid(105))}
+        assert not exploratory
+        assert not formal[str(uid(5))]['exclusion_reasons']
+        if kind == 'table':
+            assert source['table_row'] == source['table_column'] == 0
+            assert asset['provenance']['table_data'] == {'columns': ['energy'], 'rows': [['−2.40']]}
+    else:
+        assert set(formal) == {str(uid(105))}
+        excluded, = exploratory
+        reason = ('source_kind_not_supported' if kind == 'unsupported-kind' else
+                  'table_asset_type_mismatch' if kind == 'table' else 'figure_asset_type_mismatch')
+        assert reason in excluded['exclusion_reasons']
+        assert excluded['id'] == str(uid(5)) and not excluded['formal_eligible']
+        assert not any('stale' in x for x in excluded['exclusion_reasons'])

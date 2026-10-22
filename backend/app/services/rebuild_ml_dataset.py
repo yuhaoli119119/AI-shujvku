@@ -209,7 +209,9 @@ def _source_locator_errors(src, asset):
         if kind in {'figure', 'estimated'}:
             if not asset:
                 errors.append('figure_asset_missing')
-            elif asset.get('asset_type') != 'figure':
+            # A source describes how a value was read; subfigure is an asset
+            # granularity, not a separate source kind (schemas/rebuild.py).
+            elif asset.get('asset_type') not in {'figure', 'subfigure'}:
                 errors.append('figure_asset_type_mismatch')
         elif kind in {'explicit', 'text', 'derived'} and not (src.get('quote') or '').strip():
             errors.append('text_quote_missing')
