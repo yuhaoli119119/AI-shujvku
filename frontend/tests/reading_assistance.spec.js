@@ -19,7 +19,7 @@ async function boot(page,{saved=guide,job={status:'not_started'},english='Origin
 }
 
 test('saved Chinese defaults, English toggle, progressive guide and scoped evidence links',async({page})=>{
- await boot(page);await expect(page.locator('#paperAbstract')).toHaveText('忠实中文摘要');
+ await boot(page);await expect(page.locator('#pdRefreshReadingState')).toBeHidden();await expect(page.locator('#paperAbstract')).toHaveText('忠实中文摘要');
  await page.getByRole('button',{name:'查看英文原摘要'}).click();await expect(page.locator('#paperAbstract')).toHaveText('Original English abstract');
  await page.getByRole('button',{name:'查看中文摘要'}).click();await expect(page.locator('#paperAbstract')).toHaveText('忠实中文摘要');
  await expect(page.locator('#pdQuickReading')).toContainText('一句话研究结论');await expect(page.locator('#pdReadingScope')).toContainText('正文文字');
@@ -77,6 +77,7 @@ test('one generation progresses through saved-running to terminal without reload
  await expect(page.locator('#pdBeginnerGuide details').filter({hasText:'确定反应目标'})).toHaveAttribute('open','');
  await expect(page.locator('#pdReadingJob')).toHaveText('中文导读已保存。');
  await expect(page.locator('#pdGenerateReading')).toBeEnabled();
+ await expect(page.locator('#pdRefreshReadingState')).toBeHidden();
  expect(await page.evaluate(()=>posts.length)).toBe(1);
  const reads=await page.evaluate(()=>readIndex);await page.clock.runFor(120000);
  expect(await page.evaluate(()=>readIndex)).toBe(reads);
@@ -100,6 +101,7 @@ test('transient polling failure recovers saved content and terminal state with n
  await page.clock.runFor(10000);
  await expect(page.locator('#pdReadingJob')).toHaveText('中文导读已保存。');
  await expect(page.locator('#pdGenerateReading')).toBeEnabled();
+ await expect(page.locator('#pdRefreshReadingState')).toBeHidden();
  expect(await page.evaluate(()=>posts.length)).toBe(1);
 });
 

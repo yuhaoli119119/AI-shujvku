@@ -16,3 +16,6 @@
 .reading-section dt{font-weight:600;margin:12px 0 5px}.reading-section dd{margin:0;line-height:1.8;font-size:14px}.reading-section ul{font-size:13px;line-height:1.8;padding-left:20px}
 #pdBeginnerGuide{min-width:0}#pdBeginnerGuide a{overflow-wrap:anywhere}.pd-reading-aux{margin-top:8px}#pdQuickReading[hidden]{display:none}
 @media(max-width:600px){.shell{padding:12px!important}.pd-header{padding:16px!important}.pd-actions{gap:7px}.pd-actions .btn{white-space:normal}.reading-takeaway{font-size:18px!important}.pd-reading-head button{width:100%}.pd-metrics{gap:8px 16px!important}.tabs{overflow-x:auto}.pd-parsing-details{padding:0 12px}.pd-parsing-tools .btn{white-space:normal}#pdQuickReading p,#pdBeginnerGuide p{font-size:14px}}
+
+/* The shared .btn display rule overrides the browser's hidden attribute default. */
+#pdRefreshReadingState[hidden] { display: none !important; }
