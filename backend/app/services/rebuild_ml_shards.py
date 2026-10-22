@@ -5,11 +5,15 @@ scientific eligibility. All shards use the same immutable snapshot. Overlap is
 retained in shard artifacts and deduplicated only in the aggregate UUID index.
 """
 from collections import defaultdict
+from contextlib import contextmanager
+import ctypes
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
-from uuid import UUID
+import stat
+from uuid import UUID, uuid4
 
 from app.services.rebuild_ml_dataset import (
     MODELS, SHA, _authorized, build_dataset, digest, encoded, paper_revision,
@@ -103,8 +107,8 @@ def _union(shards, entries, overlap_policy):
             'deduplicated_memberships': sum(len(ids) - 1 for ids in owners.values())}
 
 
-def build_sharded_dataset(snapshot, plan, *, seed=0, code_revision):
-    """Return a flat relative-path/bytes map; never reads DB or writes artifacts."""
+def validate_frozen_plan(snapshot, plan):
+    """Shared fail-closed input contract for building and accepting readback."""
     if plan.get('schema_version') != PLAN_VERSION:
         raise ValueError('unsupported shard plan schema')
     if (plan.get('snapshot_sha256') != snapshot.get('snapshot_sha256') or
@@ -127,7 +131,6 @@ def build_sharded_dataset(snapshot, plan, *, seed=0, code_revision):
                 approved.get('policy_sha256') != digest(policy) or
                 not _authorized({'schema_version': PARTIAL_ACCEPTANCE_VERSION}, approved)):
             raise ValueError('unapproved data_type/policy: ' + pid)
-    outputs = {}; entries = {}; payload = {'shard_plan.json': encoded(plan)}
     for sid, shard in sorted(shards.items()):
         if not SAFE_ID.fullmatch(sid):
             raise ValueError('invalid shard_id')
@@ -154,6 +157,17 @@ def build_sharded_dataset(snapshot, plan, *, seed=0, code_revision):
         for pid, decision in manifest.get('papers', {}).items():
             if decision.get('graph_revision') != paper_revision(snapshot, pid):
                 raise ValueError('stale paper graph revision')
+    return shards
+
+
+def build_sharded_dataset(snapshot, plan, *, seed=0, code_revision):
+    """Return a flat relative-path/bytes map; never reads DB or writes artifacts."""
+    shards = validate_frozen_plan(snapshot, plan)
+    outputs = {}; entries = {}; payload = {'shard_plan.json': encoded(plan)}
+    for sid, shard in sorted(shards.items()):
+        manifest = shard['manifest']
+        approved = plan['approved_policies'][shard['policy_id']]
+        members = shard['eligible_value_ids']
         out = build_dataset(snapshot, manifest, seed=seed, code_revision=code_revision)
         _verify_shard(out)
         formal = _formal(out)
@@ -203,6 +217,12 @@ def verify_sharded_dataset(payload):
     outputs = {}
     expected_paths = {'shard_plan.json', 'shard_index.json', 'aggregate_index.json', 'SHA256SUMS'}
     plan = json.loads(payload['shard_plan.json'])
+    # Validate every embedded snapshot against the exact same frozen contract.
+    # Outer checksums are integrity checks, never authorization.
+    for sid in entries:
+        validate_frozen_plan(json.loads(payload[f'shards/{sid}/snapshot.json']), plan)
+    if not entries:
+        raise ValueError('explicit shards required')
     if (set(entries) != set(plan['shards']) or aggregate['plan_sha256'] != digest(plan) or
             aggregate['overlap_policy'] != plan['overlap_policy']):
         raise ValueError('shard index/plan mismatch')
@@ -249,13 +269,142 @@ def verify_sharded_dataset(payload):
     return aggregate
 
 
+_DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+@contextmanager
+def _directory_at(parent_fd, name):
+    """Open one component only; never resolve symlinks."""
+    fd = os.open(name, _DIR_FLAGS, dir_fd=parent_fd)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def _output_parent(output):
+    # Walk even pre-existing ancestors without following links. Do not resolve()
+    # first: that would silently accept a caller's symlink destination.
+    parts = Path(os.path.abspath(output)).parts
+    fd = os.open(parts[0], _DIR_FLAGS)
+    try:
+        for part in parts[1:-1]:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(part, _DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        yield fd, parts[-1]
+    finally:
+        os.close(fd)
+
+
+def _publish_no_clobber(source_fd, staging, parent_fd, destination):
+    """Linux renameat2(RENAME_NOREPLACE): atomic even against an empty dir."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    rename = libc.renameat2  # Fail closed on unsupported platforms; no rename fallback.
+    rename.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+    rename.restype = ctypes.c_int
+    if rename(source_fd, os.fsencode(staging), parent_fd, os.fsencode(destination), 1):
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), destination)
+
+
+def _write_staged_file(fd, name, data):
+    leaf = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC,
+                   0o600, dir_fd=fd)
+    with os.fdopen(leaf, 'wb') as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _identity(fd):
+    info = os.fstat(fd)
+    return info.st_dev, info.st_ino
+
+
 def write_sharded_dataset(payload, output):
-    """Validate everything before creating a new build root; never overwrite."""
+    """Verify private staging before atomic publication; retain failed evidence.
+
+    Directory descriptors and O_NOFOLLOW protect every component. Staging is
+    private (0700); this is not a security boundary against root or a hostile
+    process with the same credentials able to mutate already-open files.
+    """
     verify_sharded_dataset(payload)
-    output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
-    for name, data in sorted(payload.items()):
-        path = output / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open('xb') as handle:
-            handle.write(data)
+    with _output_parent(output) as (parent_fd, destination):
+        # lexists via lstat rejects even a dangling destination symlink.
+        try:
+            os.stat(destination, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(destination)
+        staging = '.' + destination + '.staging-' + uuid4().hex
+        os.mkdir(staging, mode=0o700, dir_fd=parent_fd)
+        # Keep the rename source inside a private wrapper, not in the shared
+        # destination parent. Publication uses its open descriptor even if the
+        # wrapper's external name is moved or replaced concurrently.
+        with _directory_at(parent_fd, staging) as workspace_fd:
+            workspace = os.fstat(workspace_fd)
+            if workspace.st_uid != os.geteuid() or stat.S_IMODE(workspace.st_mode) != 0o700:
+                raise ValueError('unsafe staging permissions/owner')
+            os.mkdir('payload', mode=0o700, dir_fd=workspace_fd)
+            with _directory_at(workspace_fd, 'payload') as root_fd:
+                identities = {'': _identity(root_fd)}
+
+                @contextmanager
+                def directory(parts, create=False):
+                    fd = os.dup(root_fd)
+                    try:
+                        for i, part in enumerate(parts):
+                            key = '/'.join(parts[:i + 1])
+                            if create and key not in identities:
+                                # No exist_ok: inserted directories or links fail closed.
+                                os.mkdir(part, mode=0o700, dir_fd=fd)
+                            child = os.open(part, _DIR_FLAGS, dir_fd=fd)
+                            os.close(fd)
+                            fd = child
+                            if key in identities and identities[key] != _identity(fd):
+                                raise ValueError('staging directory replaced')
+                            identities[key] = _identity(fd)
+                        yield fd
+                    finally:
+                        os.close(fd)
+
+                for name, data in sorted(payload.items()):
+                    parts = name.split('/')
+                    with directory(parts[:-1], create=True) as fd:
+                        _write_staged_file(fd, parts[-1], data)
+                        os.fsync(fd)
+                readback = {}
+                for name in sorted(payload):
+                    parts = name.split('/')
+                    with directory(parts[:-1]) as fd:
+                        leaf = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                                       dir_fd=fd)
+                        with os.fdopen(leaf, 'rb') as handle:
+                            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                                raise ValueError('non-regular staging file')
+                            readback[name] = handle.read()
+                # Check complete directory contents as well as the expected bytes.
+                for key in identities:
+                    parts = key.split('/') if key else []
+                    with directory(parts) as fd:
+                        expected = {n[len(key) + 1:].split('/')[0] if key else n.split('/')[0]
+                                    for n in payload if not key or n.startswith(key + '/')}
+                        if set(os.listdir(fd)) != expected:
+                            raise ValueError('unexpected staging entries')
+                if readback != payload:
+                    raise ValueError('staging readback bytes mismatch')
+                verify_sharded_dataset(readback)
+                with _directory_at(workspace_fd, 'payload') as current_fd:
+                    if _identity(current_fd) != identities['']:
+                        raise ValueError('staging root replaced')
+                os.fsync(root_fd)
+                _publish_no_clobber(workspace_fd, 'payload', parent_fd, destination)
+            os.fsync(workspace_fd)
+        os.fsync(parent_fd)
