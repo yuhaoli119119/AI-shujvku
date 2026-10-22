@@ -82,7 +82,7 @@ def test_reconcile_existing_autostart_job_only_when_terminal_is_proven(env,monke
     from dataclasses import replace
     from app.services.ai_extract_service import sync_job_status
     jid=start(env).json()['job_id']
-    payload,progress,status,_=identity();status=replace(status,cwd=env['settings'].codex_web_cwd,goal_observed=goal_observed)
+    payload,progress,status,_=identity();status=replace(status,cwd=env['settings'].codex_web_cwd,goal_observed=goal_observed,thread_status='notLoaded')
     async def read(*a,**kw):return status
     monkeypatch.setattr('app.services.codex_web_dispatch.read_thread_status',read)
     with env['factory']() as session:
@@ -98,3 +98,12 @@ def test_reconcile_existing_autostart_job_only_when_terminal_is_proven(env,monke
         assert job.status==expected and job.progress['turn_id']=='first'
         assert job.progress['identity_recovery']['thread_id']=='owned'
         if expected=='completed':assert job.progress['native_terminal_verified'] and job.result['file_ids']==[str(env['file'])]
+
+
+@pytest.mark.no_test_database
+def test_verified_project_alias_and_unloaded_terminal_thread_are_supported():
+    from dataclasses import replace
+    payload,progress,status,settings=identity()
+    settings.codex_web_cwd='/opt/literature-ai'
+    status=replace(status,cwd='/opt/AI-shujvku/literature-ai',thread_status='notLoaded')
+    assert recover_auto_started_turn(payload,progress,status,settings)['turn_id']=='first'

@@ -459,7 +459,7 @@ async def sync_job_status(
     stages_processed = bool(plan) and all(part.get("status") in {"completed", "partial", "failed"}
         for file in plan.values() for part in file.get("stages", {}).values())
     confirmed_absent_idle = (ordinary and stages_processed and getattr(status, "goal_observed", False)
-                            and status.goal_status is None and getattr(status, "thread_status", None) == "idle")
+                            and status.goal_status is None and getattr(status, "thread_status", None) in {"idle", "notLoaded"})
     if not mode or not matches_owned_attempt(status, thread_id, progress.get("turn_id"),
                                              allow_goal_continuations=mode == "codex_web_target"):
         job.progress = {**progress,"phase":"needs_check","needs_check":True,"automatic_retry":False}
