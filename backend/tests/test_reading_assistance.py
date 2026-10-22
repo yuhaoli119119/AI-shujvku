@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, func
-from app.db.models import Paper, WorkflowJob, RebuildDataValue, RebuildVisualAsset
+from app.db.models import Paper, WorkflowJob, RebuildDataValue, RebuildVisualAsset, AuditLog
 from app.schemas.reading_assistance import ReadingAssistanceSave
 from app.services import reading_assistance as service
 from app.services.codex_web_dispatch import ThreadStatus
@@ -121,3 +121,34 @@ def test_legacy_guide_update_preserves_new_saved_namespace(reading_env):
         result=FigureReadingService(s).save_paper_reading_guide(e['paper'],{'research_background':'legacy edit'})
         assert result['guide']['beginner_zh']['one_sentence']==p['one_sentence']
         assert result['guide']['research_background']=='legacy edit'
+
+
+@pytest.mark.parametrize('length',[64,65,128])
+def test_full_request_identity_saves_and_replays_with_legacy_audit_limit(reading_env,length):
+    e=reading_env;j=create(e);p=body(e,j['job_id']);p['request_id']='r'*length
+    result=e['client'].post(base(e),json=p);assert result.status_code==200,result.text
+    # A lost ACK can be replayed even after native finalization, without a new audit/write.
+    with e['factory']() as s:
+        job=s.get(WorkflowJob,j['job_id']);job.status='completed';s.commit()
+    result=e['client'].post(base(e),json=p);assert result.status_code==200,result.text
+    assert result.json()['replayed']
+    changed=copy.deepcopy(p);changed['one_sentence']='不同正文'
+    assert e['client'].post(base(e),json=changed).status_code==409
+    with e['factory']() as s:
+        audits=list(s.scalars(select(AuditLog).where(AuditLog.action==service.VERSION)))
+        assert len(audits)==1 and len(audits[0].target_id)<=64
+        assert s.get(Paper,e['paper']).abstract.startswith('A catalyst')
+        assert s.get(Paper,e['paper']).reading_guide['research_background']=='old content'
+
+
+def test_long_request_ids_with_same_prefix_are_distinct_not_truncated(reading_env):
+    e=reading_env;j=create(e);p=body(e,j['job_id']);p['request_id']='x'*64+'first'
+    assert e['client'].post(base(e),json=p).status_code==200
+    next_body=body(e,j['job_id']);next_body['request_id']='x'*64+'second'
+    # Simulate the same ordinary task's next valid source revision, without creating a second task.
+    with e['factory']() as s:
+        job=s.get(WorkflowJob,j['job_id']);job.payload={**job.payload,'reading_revision':service.reading_revision(s.get(Paper,e['paper']))};s.commit()
+    result=e['client'].post(base(e),json=next_body);assert result.status_code==200,result.text
+    with e['factory']() as s:
+        audits=list(s.scalars(select(AuditLog).where(AuditLog.action==service.VERSION)))
+        assert len(audits)==2 and len({a.target_id for a in audits})==2
