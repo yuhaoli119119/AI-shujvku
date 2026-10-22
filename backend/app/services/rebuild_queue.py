@@ -87,7 +87,7 @@ def paper_busy(session, paper_id, *, excluding=None):
     # Include legacy one-click and external writers; neither a second writer nor
     # a reviewer may overlap an unresolved native writer for the same paper.
     jobs = session.scalars(select(WorkflowJob).where(
-        WorkflowJob.type.in_([TYPE, "ai_extract_rebuild", "rebuild_external_extract"]),
+        WorkflowJob.type.in_([TYPE, "ai_extract_rebuild", "rebuild_external_extract", "paper_reading_assistance"]),
         WorkflowJob.payload.op("->>")("paper_id") == str(paper_id)))
     for job in jobs:
         if job.job_id == excluding:

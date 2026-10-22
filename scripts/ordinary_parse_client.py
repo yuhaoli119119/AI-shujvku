@@ -123,17 +123,18 @@ def main():
     base = credentials.get('base_url') or credentials.get('url') or credentials.get('origin') or 'https://47.94.252.147:49004'
     client = WorkbenchClient(base)
     client.login(credentials.get('username') or credentials.get('account'), credentials['password'])
-    directory = OUTPUT / args.job
+    directory = (ROOT / 'outputs/stable-parsing-command-20261023/detail-reading/jobs' if args.job.startswith('aiext-guide-') else OUTPUT) / args.job
     if args.command == 'get':
         result = client.request(args.path)
     elif args.command == 'write':
         payload = json.loads(args.json_file.read_text())
         seed = json.dumps(payload, sort_keys=True, ensure_ascii=False, allow_nan=False)
         payload.setdefault('request_id', hashlib.sha256((args.job + args.path + seed).encode()).hexdigest())
-        payload.setdefault('task_id', args.job)
+        if not args.path.endswith('/reading-assistance'):
+            payload.setdefault('task_id', args.job)
         if args.path == '/api/rebuild/rows/import':
             payload.setdefault('paper_id', args.paper)
-        allowed = {f'/api/rebuild/papers/{args.paper}/assets/import', '/api/rebuild/rows/import'}
+        allowed = {f'/api/rebuild/papers/{args.paper}/assets/import', '/api/rebuild/rows/import', f'/api/rebuild/papers/{args.paper}/reading-assistance'}
         if args.path not in allowed or ('paper_id' in payload and payload['paper_id'] != args.paper):
             parser.error('write outside selected paper or supported idempotent imports')
         result = durable_write(client, directory, args.path, payload)

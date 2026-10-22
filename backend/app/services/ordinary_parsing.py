@@ -125,6 +125,7 @@ def build_prompt(paper_id, plan, job_id, origin):
 GET {origin}/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25；按分页读取所需合同，勿将首包当全量。先读已存图表/行，保留成果，跳过已完成阶段；不用每篇另写导入脚本。若请求结果未知，重放同一文件/请求ID，禁止改ID重复写。
 按每个文件 read→assets→rows 执行；各阶段开始/结束用checkpoint持久回报 running/completed/partial/failed（partial/failed须原因）。PDF用文件 text-pages/render-page 读原文，DOCX用 GET /api/rebuild/papers/{paper_id}/files/FILE_ID/reading-text 取得OOXML段落/表格定位，page=null、page_basis=ooxml，不能伪造物理页。图表可保存有来源的文字与表格；不能裁图时保留文字结果并注明局限。章节完整解读不是本次正常解析门槛。
 写入口 assets/import、rows/import/preflight→rows/import，均读取工作包当前合同；表格按table_write_contract保留原文结构和精度；不同条件分行，DFT/实验分开。每值须自身 file_id 与原句/图表定位。明确未报告留空，有根据估读标 estimated；局部字段不满足合同则保留失败回执并继续其他字段/文件，禁止编造填满。
+普通解析最后以一次轻量中文阅读辅助收尾（不是完成门槛）：get /api/rebuild/papers/{paper_id}/reading-assistance/context，复用已读全文/图表，遵循其字段合同生成并write同路径（job_id={job_id}），中文摘要忠实翻译原摘要，导读包括问题/目标/关键对照/创新/结论条件/局限/论证脉络及少量真实图表证据；不猜首创或心理。失败保存原因即可结束普通解析，不新建任务或反复精修。
 单个文件或阶段失败不能阻塞其他文件；先保留可用成果，再标注具体原因。不做多轮全篇科学精修，不反复重读已成功范围。结束报告各文件可用结果/未完成原因。GET本job核对断点；所有阶段均已处理（含失败/partial）即可结束普通解析目标，明确partial不是科学accepted。'''
 
 
@@ -207,6 +208,8 @@ async def monitor(settings):
         await asyncio.sleep(30)
         try:
             await reconcile_once(settings)
+            from app.services.reading_assistance import monitor_once
+            await monitor_once(settings)
         except Exception:
             logging.getLogger(__name__).exception('Ordinary parsing readback will retry on next bounded observation')
 

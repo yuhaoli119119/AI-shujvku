@@ -707,6 +707,7 @@ class FigureReadingService:
             version = int(existing["version"]) + 1
 
         clean_guide = {
+            **(existing if isinstance(existing, dict) else {}),
             "version": version,
             "research_background": guide_payload.get("research_background", ""),
             "research_motivation": guide_payload.get("research_motivation", ""),
@@ -805,6 +806,21 @@ class FigureReadingService:
                   {blocks_rendered}
                 </section>
                 """
+
+        beginner = sg.get("beginner_zh") if isinstance(sg, dict) else None
+        if isinstance(beginner, dict):
+            labels = {"background_gap":"研究背景与空白", "research_objective":"研究目标", "study_design":"研究方案与对照",
+                      "innovation":"创新点与比较依据", "conclusions":"结论与适用条件", "limitations":"局限与待核实"}
+            parts = ["<h2>中文论文导读</h2>", "<p>阅读辅助，依据范围：" + html.escape(str(beginner.get("content_scope", "待核实"))) + "；不代表科学验收。</p>",
+                     "<p>" + html.escape(str(beginner.get("one_sentence", ""))) + "</p>"]
+            for key, label in labels.items():
+                text = (beginner.get("guide") or {}).get(key)
+                if isinstance(text, str) and text.strip(): parts.append("<h3>" + label + "</h3><p>" + html.escape(text) + "</p>")
+            for value in beginner.get("argument_flow") or []:
+                parts.append("<p>" + html.escape(str(value)) + "</p>")
+            for value in beginner.get("missing") or []:
+                parts.append("<p>待补充：" + html.escape(str(value)) + "</p>")
+            guide_overview_html += '<section class="card">' + ''.join(parts) + '</section>'
 
         sections_html = []
         for section in data.get("sections", []):
