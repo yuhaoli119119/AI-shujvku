@@ -47,6 +47,7 @@ def source_state(session: Session, source_id: UUID):
 
 def source_correction_contract():
     return {
+        'merged_cell': 'Optional merged_cell_v1: coordinate_basis=zero_based_data_rows; merged_group_id, role anchor/continuation, anchor_row/column, row_span/column_span, cell_content printed/blank; optional cell_bbox with bbox_basis=source_page_normalized. Requires structured table asset bounds. Blank continuation cannot supply raw/numeric values. Existing metadata must be explicitly replaced (null explicitly clears); omission is rejected. Stored in value.conflict.source_merged_cells, source-key/revision/history bound; no migration or legacy inference.',
         'read': 'GET /api/rebuild/sources/{source_id}',
         'write': 'PUT /api/rebuild/sources/{source_id}',
         'authentication': 'workbench session; writes also require same-origin and X-CSRF-Token',
@@ -130,6 +131,11 @@ def bind_source_asset(session: Session, source_id: UUID, payload: RebuildSourceA
                                                                   RebuildValueSource.id != source.id)):
         if other.source_key == key or _source_key(serialize_source(other)) == key:
             raise RebuildWorkflowError('source_key_conflict')
+    from app.services.rebuild_merged_cell import validate_source_cell
+    try:
+        validate_source_cell({**serialize_source(source), 'asset_id': str(asset.id)}, asset)
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
     before = _snapshot(source)
     # No identity normalization or physical-page revalidation: this operation
     # preserves every stored locator, including legacy null coordinates.
@@ -161,6 +167,8 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
             request_body['source'].pop(k, None)
     if request_body["source"].get("ooxml_locator") is None:
         request_body["source"].pop("ooxml_locator", None)
+    if "merged_cell" not in payload.source.model_fields_set:
+        request_body["source"].pop("merged_cell", None)
     fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     state = source_state(session, source_id)
     for entry in [*((value.conflict or {}).get('source_corrections') or []),
@@ -189,6 +197,14 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
             raise RebuildWorkflowError('source_asset_belongs_to_other_paper')
         if asset.file_id != file.id:
             raise RebuildWorkflowError('source_asset_file_mismatch')
+    from app.services.rebuild_merged_cell import validate_source_cell, validate_merged_value, store_merged_cell
+    if state.get('merged_cell') is not None and 'merged_cell' not in payload.source.model_fields_set:
+        raise RebuildWorkflowError('merged_cell_replacement_required')
+    try:
+        validate_source_cell(data, get_asset(session, data['asset_id']) if data['asset_id'] else None)
+        validate_merged_value({'sources': [data], 'raw_value': value.raw_value, 'numeric_value': value.numeric_value})
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
     coords = (data['table_row'], data['table_column'])
     if data['source_kind'] == 'table':
         if any(c is None for c in coords):
@@ -213,10 +229,11 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     before = _snapshot(source)
     # No mutation before all preflight checks. Endpoint owns commit/rollback.
     for field, val in data.items():
-        if field not in PAGE_IDENTITY_FIELDS:
+        if field not in (*PAGE_IDENTITY_FIELDS, "merged_cell"):
             setattr(source, field, val)
     source.source_key = key
     store_source_identity(value, source, data)
+    store_merged_cell(value, source, data)
     conflict = dict(value.conflict or {})
     conflict['source_corrections'] = [*(conflict.get('source_corrections') or []), {
         'source_id': str(source.id), 'value_id': str(value.id), 'paper_id': str(paper_id),

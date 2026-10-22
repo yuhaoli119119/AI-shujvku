@@ -659,6 +659,8 @@ def _source_key(data: dict[str, Any]) -> str:
         identity.update({key: data.get(key) for key in ("page_basis", "source_sha256", "reading_pdf_sha256")})
     if data.get("page_basis") == "ooxml":
         identity["ooxml_locator"] = data.get("ooxml_locator")
+    if data.get("merged_cell") is not None:
+        identity["merged_cell"] = data["merged_cell"]
     return _stable_hash("source", identity)
 
 
@@ -716,6 +718,11 @@ def _raw_numeric_decimal(raw: str | None) -> Decimal | None:
 
 
 def _validate_value(payload: dict[str, Any]) -> None:
+    from app.services.rebuild_merged_cell import validate_merged_value
+    try:
+        validate_merged_value(payload)
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
     kind = payload.get("value_type", "explicit")
     raw, number = payload.get("raw_value"), payload.get("numeric_value")
     if kind == "missing":
@@ -780,6 +787,11 @@ def _validate_source_for_paper(session, paper_id, source):
     asset = get_asset(session, source["asset_id"]) if source.get("asset_id") is not None else None
     if asset is not None and asset.paper_id != paper_id:
         raise RebuildWorkflowError("source_asset_belongs_to_other_paper")
+    from app.services.rebuild_merged_cell import validate_source_cell
+    try:
+        validate_source_cell(source, asset)
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
     file_id = source.get("file_id") or (asset.file_id if asset is not None else None)
     if asset is not None and source.get("file_id") and asset.file_id and str(asset.file_id) != str(source["file_id"]):
         raise RebuildWorkflowError("source_asset_file_mismatch")
@@ -845,12 +857,14 @@ def _upsert_source(
         row_id=row.id,
         paper_id=row.paper_id,
         source_key=source_key,
-        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator"}},
+        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator", "merged_cell"}},
     )
     session.add(source)
     session.flush()
     from app.services.rebuild_file_preview import store_source_identity
     store_source_identity(value, source, data)
+    from app.services.rebuild_merged_cell import store_merged_cell
+    store_merged_cell(value, source, data)
     return source, True
 
 
@@ -923,7 +937,7 @@ def _import_value(
     if existing is not None and not candidates:
         # Old conflict records mixed all sources together. Preserve that uncertainty.
         legacy_ids = [str(source.id) for source in current_sources(value, old_sources)]
-        legacy_conflict = {k: v for k, v in conflict.items() if k != "source_page_identities"}
+        legacy_conflict = {k: v for k, v in conflict.items() if k not in {"source_page_identities", "source_merged_cells"}}
         if legacy_conflict:
             conflict["unattributed_legacy_source_ids"] = legacy_ids
         _retain_candidate(candidates, _candidate(
@@ -954,7 +968,7 @@ def _import_value(
         source, created = _upsert_source(session, value=value, row=row, data=source_data)
         incoming_ids.append(str(source.id))
         created_sources += int(created)
-    conflict.update({k: v for k, v in (value.conflict or {}).items() if k == "source_page_identities"})
+    conflict.update({k: v for k, v in (value.conflict or {}).items() if k in {"source_page_identities", "source_merged_cells"}})
     before = _canonical_json(candidates)
     _retain_candidate(candidates, _candidate(payload, incoming_ids))
     candidate_changed = before != _canonical_json(candidates)
@@ -1394,6 +1408,8 @@ def update_data_value(
             source_body.pop(k, None)
     if source_body and source_body.get("ooxml_locator") is None:
         source_body.pop("ooxml_locator", None)
+    if source_body and "merged_cell" not in payload.source.model_fields_set:
+        source_body.pop("merged_cell", None)
     fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     correction_requests = list((value.conflict or {}).get("correction_requests") or [])
     for entry in correction_requests:
@@ -1433,7 +1449,7 @@ def update_data_value(
     if not candidates:
         old_sources = session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id)).all()
         legacy_ids = [str(source.id) for source in current_sources(value, old_sources)]
-        legacy_conflict = {k: v for k, v in previous_conflict.items() if k != "source_page_identities"}
+        legacy_conflict = {k: v for k, v in previous_conflict.items() if k not in {"source_page_identities", "source_merged_cells"}}
         if legacy_conflict:
             previous_conflict["unattributed_legacy_source_ids"] = legacy_ids
         _retain_candidate(candidates, _candidate(previous, [] if legacy_conflict else legacy_ids))
@@ -1464,7 +1480,7 @@ def update_data_value(
     value.preferred_source_id = preferred_source_id
     value.conflict = {
         **previous_conflict,
-        **{k: v for k, v in (value.conflict or {}).items() if k == "source_page_identities"},
+        **{k: v for k, v in (value.conflict or {}).items() if k in {"source_page_identities", "source_merged_cells"}},
         "candidates": candidates,
         "status": "corrected_previous_retained",
         "previous": previous,
@@ -1486,7 +1502,10 @@ def update_data_value(
 def serialize_source(source: RebuildValueSource) -> dict[str, Any]:
     from app.services.rebuild_file_preview import stored_source_identity
     identity = stored_source_identity(source)
+    from app.services.rebuild_merged_cell import stored_merged_cell
+    merged = stored_merged_cell(source)
     return {
+        **({"merged_cell": merged} if merged is not None else {}),
         **({"ooxml_locator": identity["ooxml_locator"], "location_label": "OOXML 定位"} if identity.get("ooxml_locator") else {}),
         "page_basis": identity.get("page_basis"),
         "source_sha256": identity.get("source_sha256"),

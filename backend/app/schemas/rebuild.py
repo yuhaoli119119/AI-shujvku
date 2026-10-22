@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator, field_validator
 
+from app.schemas.merged_cell import MergedCellSource
+
 
 class RebuildSectionSourceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -146,7 +148,7 @@ AnalysisComparisonField = Literal[
 ]
 
 
-class RebuildValueSourceInput(BaseModel):
+class RebuildValueSourceInput(MergedCellSource):
     model_config = ConfigDict(extra="forbid")
 
     file_id: UUID | None = None
@@ -159,8 +161,8 @@ class RebuildValueSourceInput(BaseModel):
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(default=None, max_length=128)
-    table_row: int | None = Field(default=None, ge=0)
-    table_column: int | None = Field(default=None, ge=0)
+    table_row: int | None = Field(default=None, ge=0, strict=True)
+    table_column: int | None = Field(default=None, ge=0, strict=True)
     quote: str | None = None
     estimate_basis: str | None = None
 
@@ -471,7 +473,7 @@ class RebuildQueueAttemptRequest(BaseModel):
     manual_recheck: bool = False
 
 
-class RebuildSourceIdentity(BaseModel):
+class RebuildSourceIdentity(MergedCellSource):
     """Complete replacement; omitted fields cannot silently clear provenance."""
     model_config = ConfigDict(extra="forbid")
 

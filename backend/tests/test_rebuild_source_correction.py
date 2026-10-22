@@ -132,7 +132,7 @@ def test_key_collision_paper_mismatch_missing_and_rollback(fixture,monkeypatch):
         req=body(s,ids)
         original=s.get(RebuildValueSource,ids.source)
         data=RebuildSourceCorrectionRequest(**req).source.model_dump()
-        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**{k:v for k,v in data.items() if k not in {"page_basis","source_sha256","reading_pdf_sha256","ooxml_locator"}})
+        other=RebuildValueSource(value_id=ids.value,row_id=original.row_id,paper_id=ids.paper,source_key=_source_key(data),**{k:v for k,v in data.items() if k not in {"page_basis","source_sha256","reading_pdf_sha256","ooxml_locator","merged_cell"}})
         s.add(other);s.commit();stored=snapshot(s)
         for source_id,changes,error in [(ids.source,{},'source_key_conflict'),(ids.source,{'paper_id':ids.other},'source_paper_mismatch'),(uuid4(),{},'source_not_found'),(ids.source,{'correction_reason':'  '},'correction_reason_required')]:
             with pytest.raises(RebuildWorkflowError,match=error):
@@ -254,3 +254,143 @@ def test_legacy_native_pdf_request_fingerprint_is_stable(fixture):
         result=correct_source(s,ids.source,RebuildSourceCorrectionRequest(**req),settings,actor='trusted-login');s.commit()
         assert result['source_corrections'][-1]['request_fingerprint']==expected
         assert correct_source(s,ids.source,RebuildSourceCorrectionRequest(**req),settings,actor='trusted-login')==result
+
+
+def test_merged_cell_correction_persistence_cas_replay_and_null_science(fixture):
+    """Synthetic blank cell; metadata survives session reload and is audit bound."""
+    from app.schemas.rebuild import RebuildValueCorrectionRequest
+    from app.services.rebuild_workflow_service import update_data_value, value_revision
+    factory, settings, ids = fixture
+    merged = dict(coordinate_basis='zero_based_data_rows', merged_group_id='synthetic-group',
+                  role='continuation', anchor_row=0, anchor_column=1, row_span=2,
+                  column_span=1, cell_content='blank')
+    with factory() as s:
+        value = s.get(RebuildDataValue, ids.value)
+        value.raw_value = None; value.numeric_value = None
+        value.value_type = 'missing'; value.missing_reason = 'Printed continuation blank'
+        table = s.get(RebuildVisualAsset, ids.assets[0])
+        table.provenance = {'table_data':{'columns':['shell','delta'], 'rows':[['A','4.774'],['B',None]]}}
+        s.commit()
+        before = source_state(s,ids.source)
+        science = {k:getattr(value,k) for k in ('raw_value','numeric_value','unit','value_type','missing_reason','preferred_source_id')}
+        req = RebuildSourceCorrectionRequest(**body(s,ids,table_row=1,merged_cell=merged))
+        result = correct_source(s,ids.source,req,settings,actor='synthetic-reviewer')
+        assert result['merged_cell']['role'] == 'continuation'
+        assert result['source_revision'] != before['source_revision']
+        assert {k:getattr(value,k) for k in science} == science
+        assert result['source_corrections'][-1]['after']['merged_cell'] == result['merged_cell']
+        s.commit()
+    with factory() as s:
+        result=source_state(s,ids.source)
+        assert result['merged_cell']['row_span'] == 2
+        frozen=snapshot(s)
+        assert correct_source(s,ids.source,req,settings,actor='synthetic-reviewer') == result
+        assert snapshot(s) == frozen
+        omitted=RebuildSourceCorrectionRequest(**body(s,ids,table_row=1))
+        with pytest.raises(RebuildWorkflowError,match='merged_cell_replacement_required'):
+            correct_source(s,ids.source,omitted,settings,actor='synthetic-reviewer')
+        assert snapshot(s) == frozen
+        value=s.get(RebuildDataValue,ids.value)
+        # Existing blank evidence must also reject numeric promotion through the value API.
+        numeric=RebuildValueCorrectionRequest(expected_revision=value_revision(value),request_id=uuid4(),
+            correction_reason='Forbidden inheritance',raw_value='4.774',numeric_value=4.774,
+            value_type='explicit',source={**body(s,ids,table_row=1)['source'],'merged_cell':merged})
+        with pytest.raises(RebuildWorkflowError,match='merged_blank_cell_cannot_supply_value'):
+            update_data_value(s,value_id=value.id,payload=numeric)
+        assert snapshot(s) == frozen
+        replacement=RebuildSourceCorrectionRequest(**body(s,ids,table_row=1,merged_cell=merged))
+        corrected=correct_source(s,ids.source,replacement,settings,actor='synthetic-reviewer')
+        assert corrected['merged_cell'] == result['merged_cell']
+        assert s.get(RebuildDataValue,ids.value).raw_value is None
+
+
+@pytest.mark.parametrize('changes,error', [
+    ({'row_span':3},'row_out_of_range'),
+    ({'anchor_column':1,'column_span':2},'column_out_of_range'),
+])
+def test_merged_source_correction_invalid_bounds_no_mutation(fixture, changes, error):
+    factory,settings,ids=fixture
+    with factory() as s:
+        value=s.get(RebuildDataValue,ids.value)
+        value.raw_value=None; value.numeric_value=None
+        value.value_type='missing'; value.missing_reason='Blank'
+        s.get(RebuildVisualAsset,ids.assets[0]).provenance={
+            'table_data':{'columns':['shell','delta'],'rows':[['A','4.774'],['B',None]]}}
+        s.commit(); frozen=snapshot(s)
+        merged=dict(coordinate_basis='zero_based_data_rows',merged_group_id='invalid-test',
+                    role='continuation',anchor_row=0,anchor_column=1,row_span=2,column_span=1,cell_content='blank')
+        request=RebuildSourceCorrectionRequest(**body(s,ids,table_row=1,merged_cell=merged | changes))
+        with pytest.raises(RebuildWorkflowError,match=error):
+            correct_source(s,ids.source,request,settings,actor='test')
+        assert snapshot(s)==frozen
+
+
+def test_merged_cell_import_and_value_update_keep_json_extension(fixture):
+    from app.schemas.rebuild import RebuildValueCorrectionRequest
+    from app.services.rebuild_workflow_service import update_data_value, value_revision
+    factory,settings,ids=fixture
+    merged=dict(coordinate_basis='zero_based_data_rows',merged_group_id='synthetic-import',
+                role='anchor',anchor_row=0,anchor_column=1,row_span=2,column_span=1,cell_content='printed')
+    with factory() as s:
+        s.get(RebuildVisualAsset,ids.assets[0]).provenance={
+            'table_data':{'columns':['shell','delta'],'rows':[['A','-1.230'],['B',None]]}}
+        src={**body(s,ids)['source'],'merged_cell':merged}
+        data=RebuildDataRowInput(material='synthetic-merged',reaction='HER',data_type='dft',
+            active_site_type='single_atom',values=[dict(field_name='energy',raw_value='-1.230',
+            numeric_value=-1.23,unit='eV',sources=[src])])
+        result=import_data_row(s,ids.paper,data)
+        value=s.scalar(select(RebuildDataValue).where(RebuildDataValue.field_name=='energy'))
+        source=s.scalar(select(RebuildValueSource).where(RebuildValueSource.value_id==value.id))
+        assert serialize_source(source)['merged_cell']['role']=='anchor'
+        request=RebuildValueCorrectionRequest(expected_revision=value_revision(value),request_id=uuid4(),
+            correction_reason='Explicit synthetic value update',raw_value='-1.230',numeric_value=-1.23,
+            unit='eV',value_type='explicit',source=src)
+        update_data_value(s,value_id=value.id,payload=request)
+        assert serialize_source(source)['merged_cell']['merged_group_id']=='synthetic-import'
+        s.commit()
+        assert serialize_source(source)['merged_cell']['row_span']==2
+
+
+def test_exact_six_b046_synthetic_targets_persist_without_inheritance(setup_test_db, tmp_path):
+    from pathlib import Path
+    from app.db.models import RebuildDataRow
+    shape=json.loads((Path(__file__).parent/'fixtures/b046_merged_cells.json').read_text())
+    pdf=fitz.open()
+    for _ in range(26): pdf.new_page()
+    pdf.save(tmp_path/'six-synthetic.pdf'); pdf.close()
+    content=(tmp_path/'six-synthetic.pdf').read_bytes()
+    settings=Settings(storage_root=tmp_path)
+    factory=sessionmaker(bind=setup_test_db,expire_on_commit=False)
+    pid,fid,aid=[UUID(shape[k]) for k in ('paper_id','file_id','asset_id')]
+    with factory() as s:
+        s.add(Paper(id=pid,title='Synthetic six-target merged cells',pdf_path=''));s.flush()
+        s.add(RebuildPaperFile(id=fid,paper_id=pid,role='si',storage_path='six-synthetic.pdf',
+            original_filename='six-synthetic.pdf',sha256=hashlib.sha256(content).hexdigest(),file_size=len(content)));s.flush()
+        s.add(RebuildVisualAsset(id=aid,paper_id=pid,file_id=fid,asset_type='table',
+            asset_key='synthetic-six',page_numbers=[26],provenance={'table_data':shape['table_data']}));s.flush()
+        for target in shape['targets']:
+            row=RebuildDataRow(paper_id=pid,row_key=target['value_id'],reaction='SRR',material='synthetic',data_type='dft',active_site_type='single_atom')
+            s.add(row);s.flush()
+            value=RebuildDataValue(id=UUID(target['value_id']),paper_id=pid,row_id=row.id,
+                field_name='delta_e0_ev',raw_value=None,numeric_value=None,value_type='missing',
+                missing_reason='Synthetic printed continuation blank')
+            s.add(value);s.flush()
+            src=RebuildValueSource(id=UUID(target['source_id']),paper_id=pid,row_id=row.id,value_id=value.id,
+                file_id=fid,asset_id=aid,source_key='legacy-'+target['source_id'],source_kind='table',
+                page_number=26,label='Synthetic S2',table_row=target['table_row'],table_column=target['table_column'])
+            s.add(src);s.flush()
+            state=source_state(s,src.id)
+            fields={k:state[k] for k in ('file_id','asset_id','source_kind','page_number','label','table_row','table_column','quote','estimate_basis')}
+            req=RebuildSourceCorrectionRequest(paper_id=pid,expected_revision=state['source_revision'],
+                request_id=uuid4(),correction_reason='Synthetic-only span test',source=fields | {'merged_cell':target['merged_cell']})
+            result=correct_source(s,src.id,req,settings,actor='synthetic-test')
+            assert result['merged_cell']==target['merged_cell']
+            assert value.raw_value is None and value.numeric_value is None
+        s.commit()
+    with factory() as s:
+        assert len(list(s.scalars(select(RebuildValueSource))))==6
+        assert len(list(s.scalars(select(RebuildDataValue))))==6
+        for target in shape['targets']:
+            state=source_state(s,UUID(target['source_id']))
+            assert state['merged_cell']==target['merged_cell']
+            assert s.get(RebuildDataValue,UUID(target['value_id'])).raw_value is None

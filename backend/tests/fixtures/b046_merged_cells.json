@@ -1,0 +1,300 @@
+{
+  "synthetic": true,
+  "paper_id": "88a1d9ea-8465-46be-b75f-3114192bfd9a",
+  "file_id": "d9e6a90b-32f4-494b-8cb3-1171756c00c8",
+  "asset_id": "730cc645-bfd0-414a-afc7-d430ea895cca",
+  "table_data": {
+    "columns": [
+      "Sample",
+      "Shell",
+      "CN",
+      "R(\u00c5)",
+      "\u03c3\u00b2(\u00c5\u00b2)",
+      "\u0394E\u2080(eV)",
+      "R factor"
+    ],
+    "rows": [
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "5.05",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "-3.553",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "-4.347",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "4.774",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "8.967",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        "-3.608",
+        null
+      ],
+      [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    ]
+  },
+  "targets": [
+    {
+      "source_id": "3871222a-9cfe-45df-a7e8-4eabaf399015",
+      "value_id": "29896608-1c14-4867-83b0-975f94f588cf",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 10,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-V-foil",
+        "role": "continuation",
+        "anchor_row": 9,
+        "anchor_column": 5,
+        "row_span": 2,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    },
+    {
+      "source_id": "39c3f690-5d75-469a-8303-228977785572",
+      "value_id": "26d9dfad-3d29-4ca8-a0bd-dd513ccb1261",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 14,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-V2O5",
+        "role": "continuation",
+        "anchor_row": 11,
+        "anchor_column": 5,
+        "row_span": 4,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    },
+    {
+      "source_id": "3e0f40cc-2446-431b-830b-277e94127f32",
+      "value_id": "915f4b32-ecd1-4e9d-a691-1ccb8b983e72",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 5,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-Fe2O3",
+        "role": "continuation",
+        "anchor_row": 2,
+        "anchor_column": 5,
+        "row_span": 4,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    },
+    {
+      "source_id": "7b5db281-de8d-4e14-b086-3c6b1e14b993",
+      "value_id": "0e67f5cc-6f91-4d2b-9b34-bda84c355b8b",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 8,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-DAC-Fe",
+        "role": "continuation",
+        "anchor_row": 7,
+        "anchor_column": 5,
+        "row_span": 2,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    },
+    {
+      "source_id": "b366d1e6-9dbd-4279-a67d-cd708b5cf61c",
+      "value_id": "1fd1b46e-1ca1-480f-aacf-4a38d107d8c0",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 1,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-Fe-foil",
+        "role": "continuation",
+        "anchor_row": 0,
+        "anchor_column": 5,
+        "row_span": 2,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    },
+    {
+      "source_id": "fcfb9855-c347-4b6c-83eb-a7a9291fb26f",
+      "value_id": "48475827-a400-4c79-8f4a-0c0bdcfd8b7a",
+      "raw_value": null,
+      "numeric_value": null,
+      "table_row": 16,
+      "table_column": 5,
+      "merged_cell": {
+        "version": "merged_cell_v1",
+        "coordinate_basis": "zero_based_data_rows",
+        "merged_group_id": "synthetic-DAC-V",
+        "role": "continuation",
+        "anchor_row": 15,
+        "anchor_column": 5,
+        "row_span": 2,
+        "column_span": 1,
+        "cell_content": "blank",
+        "cell_bbox": null,
+        "bbox_basis": null
+      }
+    }
+  ]
+}

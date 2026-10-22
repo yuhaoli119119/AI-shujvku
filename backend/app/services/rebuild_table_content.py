@@ -8,7 +8,10 @@ import re
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
-class TableSource(BaseModel):
+from app.schemas.merged_cell import MergedCellSource, validate_cell_location
+
+
+class TableSource(MergedCellSource):
     model_config = ConfigDict(extra="forbid")
     file_id: UUID
     page_number: int | None = Field(ge=1, strict=True)
@@ -38,6 +41,7 @@ class TableData(BaseModel):
 def table_write_contract() -> dict:
     return {
         "version": "table_content_v1",
+        "merged_cell": "Optional merged_cell_v1 on each source: zero_based_data_rows, merged_group_id, role anchor/continuation, anchor_row/column, row_span/column_span, cell_content printed/blank, optional source_page_normalized cell_bbox. Blank continuation never inherits a value; structured bounds required.",
         "storage": "rebuild_visual_assets.provenance; no paper_tables dual write",
         "fields": {"table_data": "columns: string[], rows: (string|null)[][], footnotes: string[]",
                    "table_markdown": "original markdown string",
@@ -59,6 +63,7 @@ def validate_table_provenance(provenance: dict, *, file_id, page_numbers: list, 
     has_body = data is not None or bool(provenance.get("table_markdown", "").strip())
     if has_body and not provenance.get("table_sources"):
         raise ValueError("table_body_sources_required")
+    groups = {}
     for raw in provenance.get("table_sources", []):
         source = TableSource.model_validate(raw)
         if not file_id or source.file_id != UUID(str(file_id)):
@@ -71,6 +76,21 @@ def validate_table_provenance(provenance: dict, *, file_id, page_numbers: list, 
             raise ValueError("table_source_page_not_in_asset")
         if not source.locator.strip():
             raise ValueError("table_source_locator_required")
+        if source.merged_cell is not None:
+            if data is None:
+                raise ValueError("merged_cell_requires_structured_table_bounds")
+            cell = validate_cell_location(source.merged_cell, source.table_row, source.table_column,
+                                          rows=len(data.rows), columns=len(data.columns))
+            signature = (source.file_id, source.page_number, cell.anchor_row, cell.anchor_column,
+                         cell.row_span, cell.column_span, cell.cell_bbox, cell.bbox_basis)
+            previous = groups.setdefault(cell.merged_group_id, signature)
+            if previous != signature:
+                raise ValueError("merged_group_geometry_mismatch")
+            content = data.rows[source.table_row][source.table_column]
+            if cell.cell_content == "blank" and content not in (None, ""):
+                raise ValueError("merged_blank_cell_contains_value")
+            if cell.cell_content == "printed" and content in (None, ""):
+                raise ValueError("merged_printed_cell_is_blank")
         if data is not None:
             if source.table_row is not None and source.table_row >= len(data.rows):
                 raise ValueError("table_source_row_out_of_range")

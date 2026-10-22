@@ -480,3 +480,34 @@ def test_persisted_source_asset_compatibility_matrix(frozen, kind, asset_type):
         assert reason in excluded['exclusion_reasons']
         assert excluded['id'] == str(uid(5)) and not excluded['formal_eligible']
         assert not any('stale' in x for x in excluded['exclusion_reasons'])
+
+
+def test_merged_cell_reviewer_evidence_and_export_preserve_blank(frozen):
+    db, _, _ = frozen
+    merged=dict(version='merged_cell_v1',coordinate_basis='zero_based_data_rows',
+                merged_group_id='synthetic-export',role='continuation',anchor_row=0,
+                anchor_column=0,row_span=2,column_span=1,cell_content='blank',
+                cell_bbox=None,bbox_basis=None)
+    with db.session_factory() as session:
+        value=session.get(RebuildDataValue,uid(5))
+        value.raw_value=None; value.numeric_value=None; value.value_type='missing'
+        value.missing_reason='Blank continuation'
+        value.conflict={**value.conflict,'source_merged_cells':{str(uid(6)):merged}}
+        session.get(RebuildValueSource,uid(6)).table_row=1
+        session.get(RebuildVisualAsset,uid(3)).provenance={
+            'table_data':{'columns':['energy'],'rows':[['−2.40'],[None]]}}
+        session.commit()
+    snap,manifest=refresh(db)
+    result=next(x for x in lines(build(snap,manifest)) if x['value_id']==str(uid(5)))
+    assert result['sources'][0]['merged_cell']==merged
+    assert result['raw_value'] is None and result['numeric_value'] is None
+    assert 'missing' in result['exclusion_reasons']
+    assert not any(x['value_id']==str(uid(5)) for x in lines(build(snap,manifest),'formal_numeric.jsonl'))
+    # Even independently marked eligible, a numeric inherited continuation is rejected.
+    with db.session_factory() as session:
+        value=session.get(RebuildDataValue,uid(5))
+        value.raw_value='−2.40'; value.numeric_value=-2.4; value.value_type='explicit'
+        session.commit()
+    snap,manifest=refresh(db)
+    result=next(x for x in lines(build(snap,manifest)) if x['value_id']==str(uid(5)))
+    assert 'invalid_value:merged_blank_cell_cannot_supply_value' in result['exclusion_reasons']

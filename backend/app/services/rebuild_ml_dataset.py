@@ -370,7 +370,19 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
             class StoredValue: pass
             stored = StoredValue(); stored.conflict = conflict
             if not source_is_current(stored, src['id']):
+                merged = conflict.get('source_merged_cells', {}).get(src['id'])
+                if merged is not None:
+                    source['merged_cell'] = merged
                 historical.append(source); continue
+            merged = conflict.get('source_merged_cells', {}).get(src['id'])
+            if merged is not None:
+                source['merged_cell'] = merged
+                from app.services.rebuild_merged_cell import validate_source_cell
+                from types import SimpleNamespace
+                try:
+                    validate_source_cell(source, SimpleNamespace(**asset) if asset else None)
+                except ValueError as exc:
+                    exclude('invalid_merged_cell:' + str(exc))
             current.append(source)
             if src['paper_id'] != pid or src['row_id'] != value['row_id']:
                 exclude('source_identity_mismatch')
