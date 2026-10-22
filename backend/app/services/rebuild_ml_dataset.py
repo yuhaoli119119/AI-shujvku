@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (AuditLog, Paper, RebuildPaperFile, RebuildVisualAsset,
                            RebuildDataRow, RebuildDataValue, RebuildValueSource)
+from app.services.rebuild_table_content import TableData
 from app.services.rebuild_source_lifecycle import source_is_current
 from app.services.rebuild_workflow_service import _validate_value
 
@@ -26,6 +27,7 @@ ACCEPTANCE_VERSION = 'rebuild_ml_acceptance_v1'
 MODELS = {'papers': Paper, 'files': RebuildPaperFile, 'assets': RebuildVisualAsset,
           'rows': RebuildDataRow, 'values': RebuildDataValue, 'sources': RebuildValueSource}
 STATUSES = {'eligible', 'partial', 'rejected', 'unresolved', 'missing', 'conflict', 'leakage'}
+SOURCE_KINDS = frozenset({'explicit', 'estimated', 'derived', 'table', 'text', 'figure'})
 SHA = re.compile(r'^[0-9a-f]{64}$')
 IDENTITY = ('reaction', 'material', 'support', 'active_site_type', 'active_site',
             'configuration', 'material_family', 'data_type', 'condition', 'properties')
@@ -187,6 +189,61 @@ def _groups(observations):
     for x in observations: x['leakage_group'] = group_ids[x['paper_id']]
 
 
+def _source_locator_errors(src, asset):
+    """Fail closed on source type and table locators, independent of dispositions.
+
+    Formal table coordinates must be strict nonnegative integers under this export
+    contract. Stored locators are preserved verbatim, never rebased or inferred.
+    Any coordinates require table kind, so relabeling cannot bypass this gate.
+    Paper/file identity, physical page identity and dispositions are checked by
+    the caller for every current source, including each table source.
+    """
+    errors = []
+    kind = src.get('source_kind')
+    if kind not in SOURCE_KINDS:
+        errors.append('source_kind_not_supported')
+    coords = (src.get('table_row'), src.get('table_column'))
+    if kind != 'table':
+        if any(c is not None for c in coords):
+            errors.append('table_coordinates_require_table_kind')
+        if kind in {'figure', 'estimated'}:
+            if not asset:
+                errors.append('figure_asset_missing')
+            elif asset.get('asset_type') != 'figure':
+                errors.append('figure_asset_type_mismatch')
+        elif kind in {'explicit', 'text', 'derived'} and not (src.get('quote') or '').strip():
+            errors.append('text_quote_missing')
+        return errors
+    if any(c is None for c in coords):
+        errors.append('table_coordinates_missing')
+    elif not all(type(c) is int and c >= 0 for c in coords):
+        errors.append('table_coordinates_invalid')
+    if not src.get('asset_id') or not asset:
+        errors.append('table_asset_missing')
+    else:
+        if asset.get('asset_type') != 'table':
+            errors.append('table_asset_type_mismatch')
+        pages = asset.get('page_numbers')
+        if (not isinstance(pages, list) or not pages or
+                not all(type(p) is int and p > 0 for p in pages)):
+            errors.append('table_asset_pages_missing_or_invalid')
+        elif src.get('page_number') not in pages:
+            errors.append('page_outside_asset')
+        provenance = asset.get('provenance')
+        data = provenance.get('table_data') if isinstance(provenance, dict) else None
+        try:
+            table = TableData.model_validate(data)
+        except ValueError:
+            errors.append('table_data_missing_or_invalid')
+        else:
+            if all(type(c) is int and c >= 0 for c in coords) and (
+                    coords[0] >= len(table.rows) or coords[1] >= len(table.columns)):
+                errors.append('table_coordinates_out_of_range')
+    if not (src.get('quote') or '').strip():
+        errors.append('table_quote_missing')
+    return errors
+
+
 def build_dataset(snapshot, manifest, *, seed=0, code_revision):
     """Return deterministic artifact bytes. No DB access and no filesystem writes."""
     if snapshot.get('schema_version') != VERSION or snapshot['snapshot_sha256'] != digest(snapshot['graph']):
@@ -268,14 +325,9 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
             if (file and page_identity.get('page_basis') == 'source_pdf' and
                     page_identity.get('reading_pdf_sha256') != file['sha256']):
                 exclude('source_pdf_hash_mismatch')
-            if asset and page not in (asset['page_numbers'] or []): exclude('page_outside_asset')
-            kind = src['source_kind']
-            if kind == 'table':
-                if not all(type(src[k]) is int and src[k] >= 0 for k in ('table_row', 'table_column')):
-                    exclude('table_coordinates_missing')
-            elif kind in {'figure', 'subfigure', 'estimated'}:
-                if not asset: exclude('figure_asset_missing')
-            elif not (src['quote'] or '').strip(): exclude('text_quote_missing')
+            if asset and (not isinstance(asset.get('page_numbers'), list) or
+                    page not in asset['page_numbers']): exclude('page_outside_asset')
+            reasons.extend(_source_locator_errors(src, asset))
         if not current: exclude('current_sources_missing')
         if value['preferred_source_id'] and value['preferred_source_id'] not in {s['id'] for s in current}:
             exclude('preferred_source_not_current')
@@ -322,6 +374,10 @@ def build_dataset(snapshot, manifest, *, seed=0, code_revision):
                         for c in model.__table__.columns} for kind, model in MODELS.items()}
     dictionary['export'] = {'value_id': 'Stable rebuild_data_values UUID; one observation per stored cell',
         'identity': list(IDENTITY), 'missing_mask': 'Null is never zero; reason and stored value_type retained',
+        'source_kinds': sorted(SOURCE_KINDS),
+        'formal_table_locator': 'table asset in same paper/file, physical page in positive asset pages, '
+            'strict nonnegative integer row/column pair within structured table_data, nonempty quote; '
+            'stored coordinates never rebased',
         'sources': 'All current sources with complete file/asset records and page identity',
         'historical_sources': 'Inactive evidence retained, never used for eligibility',
         'duplicate_group': 'Within-paper exact scientific identity and field; no scientific merge',

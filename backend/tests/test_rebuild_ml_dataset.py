@@ -29,7 +29,8 @@ def frozen(default_test_database_mode):
                 original_filename='fixture.pdf', sha256=('a' if offset == 0 else 'b') * 64, file_size=12))
             session.flush()
             session.add(RebuildVisualAsset(id=a, paper_id=p, file_id=f, asset_type='table',
-                asset_key='Table1', page_numbers=[1]))
+                asset_key='Table1', page_numbers=[1],
+                provenance={'table_data': {'columns': ['energy'], 'rows': [['−2.40']]}}))
             session.add(RebuildDataRow(id=r, paper_id=p, row_key='row', reaction='SRR', material='FeN4',
                 active_site_type='single_atom', active_site='Fe', configuration='planar', support='C',
                 data_type='dft', condition={'functional': 'PBE', 'sample': 'same'}, properties={'adsorbate': 'S'}))
@@ -89,7 +90,10 @@ def test_bytes_semantics_checksums_and_read_only(frozen, tmp_path):
     assert value['sources'][0]['id'] == str(uid(6))
     assert value['sources'][0]['file_id'] == str(uid(2))
     assert value['sources'][0]['asset_id'] == str(uid(3))
+    assert value['sources'][0]['table_row'] == 0
     assert value['sources'][0]['table_column'] == 0
+    assert value['sources'][0]['asset']['provenance']['table_data'] == {
+        'columns': ['energy'], 'rows': [['−2.40']]}
     assert value['identity']['condition'] == {'functional': 'PBE', 'sample': 'same'}
     # Scientific identity creates a conservative cross-paper group, not a merge.
     assert records[0]['leakage_group'] == records[1]['leakage_group']
@@ -298,3 +302,124 @@ def test_leakage_groups_by_doi_or_file_without_identity_match(frozen, link):
     snap, manifest = refresh(db)
     a, b = lines(build(snap, manifest), 'formal_numeric.jsonl')
     assert (a['leakage_group'] == b['leakage_group']) == (link != 'none')
+
+
+@pytest.mark.parametrize('case,reason', [
+    ('no_locator', 'table_asset_missing'),
+    ('no_asset', 'table_asset_missing'),
+    ('no_quote', 'table_quote_missing'), ('blank_quote', 'table_quote_missing'),
+    ('figure_asset', 'table_asset_type_mismatch'),
+    ('unknown_kind', 'source_kind_not_supported'),
+    ('subfigure_kind', 'source_kind_not_supported'),
+    ('text_with_coords', 'table_coordinates_require_table_kind'),
+    ('explicit_with_coords', 'table_coordinates_require_table_kind'),
+    ('figure_with_coords', 'table_coordinates_require_table_kind'),
+    ('negative_row', 'table_coordinates_invalid'), ('negative_column', 'table_coordinates_invalid'),
+    ('null_row', 'table_coordinates_missing'), ('null_column', 'table_coordinates_missing'),
+    ('null_pair', 'table_coordinates_missing'),
+    ('row_out_of_range', 'table_coordinates_out_of_range'),
+    ('column_out_of_range', 'table_coordinates_out_of_range'),
+    ('no_provenance', 'table_data_missing_or_invalid'),
+    ('no_table_data', 'table_data_missing_or_invalid'),
+    ('ragged_table', 'table_data_missing_or_invalid'),
+    ('empty_table', 'table_coordinates_out_of_range'),
+    ('no_pages', 'table_asset_pages_missing_or_invalid'),
+    ('null_pages', 'table_asset_pages_missing_or_invalid'),
+    ('bad_pages', 'table_asset_pages_missing_or_invalid'),
+    ('page_outside', 'page_outside_asset'),
+    ('no_page', 'page_identity_missing_or_mismatched'),
+    ('wrong_paper', 'source_asset_file_mismatch'),
+    ('wrong_file', 'source_asset_file_mismatch'),
+])
+def test_table_locator_admission_with_fresh_eligible_db_graph(frozen, case, reason):
+    """Persist malformed sources, re-read PG, refresh ALL review hashes, then build.
+
+    The same value first passes formal. Failure after mutation must come from
+    machine checks, never stale dispositions or an already ineligible value.
+    """
+    db, snap, manifest = frozen
+    assert {x['id'] for x in lines(build(snap, manifest), 'formal_numeric.jsonl')} == {str(uid(5)), str(uid(105))}
+    with db.session_factory() as s:
+        source = s.get(RebuildValueSource, uid(6))
+        asset = s.get(RebuildVisualAsset, uid(3))
+        if case in {'no_locator', 'no_asset'}: source.asset_id = None
+        if case == 'no_locator': source.quote = source.label = None
+        if case == 'no_quote': source.quote = None
+        if case == 'blank_quote': source.quote = '  '
+        if case == 'figure_asset': asset.asset_type = 'figure'
+        if case == 'unknown_kind': source.source_kind = 'unsupported-kind'
+        if case == 'subfigure_kind': source.source_kind = 'subfigure'
+        if case == 'text_with_coords': source.source_kind = 'text'
+        if case == 'explicit_with_coords': source.source_kind = 'explicit'
+        if case == 'figure_with_coords': source.source_kind = 'figure'; asset.asset_type = 'figure'
+        if case == 'negative_row': source.table_row = -1
+        if case == 'negative_column': source.table_column = -1
+        if case in {'null_row', 'null_pair'}: source.table_row = None
+        if case in {'null_column', 'null_pair'}: source.table_column = None
+        if case == 'row_out_of_range': source.table_row = 1
+        if case == 'column_out_of_range': source.table_column = 1
+        if case == 'no_provenance': asset.provenance = None
+        if case == 'no_table_data': asset.provenance = {'table_markdown': '|energy|'}
+        if case == 'ragged_table': asset.provenance = {'table_data': {'columns': ['energy'], 'rows': [['a', 'b']]}}
+        if case == 'empty_table': asset.provenance = {'table_data': {'columns': ['energy'], 'rows': []}}
+        if case == 'no_pages': asset.page_numbers = []
+        if case == 'null_pages': asset.page_numbers = None
+        if case == 'bad_pages': asset.page_numbers = [True, '1']
+        if case == 'page_outside': asset.page_numbers = [2]
+        if case == 'no_page': source.page_number = None
+        if case == 'wrong_paper':
+            asset.paper_id = uid(101); asset.asset_key = 'other-paper-table'
+        if case == 'wrong_file': asset.file_id = uid(102)
+        s.commit()
+    snap, manifest = refresh(db)
+    payload = build(snap, manifest)
+    formal = lines(payload, 'formal_numeric.jsonl')
+    excluded, = lines(payload, 'exploratory.jsonl')
+    assert [x['id'] for x in formal] == [str(uid(105))]
+    assert not lines(payload, 'formal_text.jsonl')
+    assert excluded['id'] == str(uid(5)) and not excluded['formal_eligible']
+    assert reason in excluded['exclusion_reasons']
+    assert not any('stale' in x for x in excluded['exclusion_reasons'])
+    assert excluded['raw_value'] == '−2.40' and excluded['numeric_value'] == -2.4
+    assert excluded['sources'][0]['table_row'] == snap['graph']['sources'][0]['table_row']
+    assert excluded['sources'][0]['asset_id'] == snap['graph']['sources'][0]['asset_id']
+
+
+@pytest.mark.parametrize('field', ['table_row', 'table_column'])
+@pytest.mark.parametrize('bad', [True, False, 0.0, '0'])
+def test_offline_table_coordinate_types_cannot_bypass_admission(frozen, field, bad):
+    # PostgreSQL INTEGER normalizes/rejects these types; exercise the offline
+    # snapshot path after a real PG read, with fresh eligible review hashes.
+    _, snap, manifest = frozen
+    assert len(lines(build(snap, manifest), 'formal_numeric.jsonl')) == 2
+    snap['graph']['sources'][0][field] = bad
+    snap['snapshot_sha256'] = digest(snap['graph'])
+    payload = build(snap, acceptance(snap))
+    assert [x['id'] for x in lines(payload, 'formal_numeric.jsonl')] == [str(uid(105))]
+    excluded, = lines(payload, 'exploratory.jsonl')
+    assert 'table_coordinates_invalid' in excluded['exclusion_reasons']
+
+
+@pytest.mark.parametrize('kind', ['text', 'explicit', 'figure', 'estimated', 'derived'])
+def test_applicable_source_kinds_keep_legal_semantics(frozen, kind):
+    db, _, _ = frozen
+    with db.session_factory() as s:
+        source = s.get(RebuildValueSource, uid(6))
+        source.source_kind = kind
+        source.table_row = source.table_column = None
+        if kind in {'figure', 'estimated'}:
+            s.get(RebuildVisualAsset, uid(3)).asset_type = 'figure'
+        if kind in {'text', 'explicit', 'derived'}: source.asset_id = None
+        if kind in {'estimated', 'derived'}:
+            source.estimate_basis = 'reviewed evidence basis'
+            value = s.get(RebuildDataValue, uid(5)); value.value_type = kind
+            value.is_estimated = kind == 'estimated'
+        s.commit()
+    snap, manifest = refresh(db)
+    payload = build(snap, manifest)
+    if kind == 'derived':
+        excluded, = lines(payload, 'exploratory.jsonl')
+        assert 'derived_input_closure_not_supported_v1' in excluded['exclusion_reasons']
+    else:
+        assert len(lines(payload, 'formal_numeric.jsonl')) == 2
+        assert not lines(payload, 'exploratory.jsonl')
