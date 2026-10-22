@@ -15,6 +15,9 @@ from app.db.models import (
     AuditLog,
     Base,
     CatalystSample,
+    ContentWebReviewBundleV2,
+    ContentWebReviewLocalVerificationResult,
+    EvidenceLocator,
     DFTAuditIssue,
     DFTResult,
     EvidenceSpan,
@@ -638,3 +641,158 @@ def test_apply_never_nulls_foreign_keys_in_other_papers(recovery_databases, refe
             assert session.get(DFTResult, referenced_id).support_writeback_dft_result_id == result_id
         else:
             assert session.get(DFTAuditIssue, referenced_id).result_id == result_id
+
+
+def _add_verification_reference(pair, reference_field, scope):
+    with Session(pair.live_engine) as session:
+        result = session.get(DFTResult, pair.bad_result_ids[0])
+        if reference_field == "review_id":
+            reference_id = session.scalar(sa.select(ExtractionFieldReview.id).where(
+                ExtractionFieldReview.target_id == str(result.id)).order_by(ExtractionFieldReview.id))
+        else:
+            reference_id = uuid4()
+            session.add(EvidenceLocator(
+                id=reference_id, paper_id=result.paper_id, target_type="dft_results",
+                target_id=str(result.id), evidence_text="batch evidence",
+            ))
+            session.flush()
+        paper_id = result.paper_id if scope == "same_paper" else session.get(
+            DFTResult, pair.other_paper_result_id).paper_id
+        bundle_id = uuid4()
+        session.add(ContentWebReviewBundleV2(
+            id=bundle_id, paper_id=paper_id, policy_version="reference-test",
+            snapshot_fingerprint="f" * 64, manifest={},
+        ))
+        session.flush()
+        verification = ContentWebReviewLocalVerificationResult(
+            id=uuid4(), bundle_id=bundle_id, plan_item_id=uuid4(), payload_hash="a" * 64,
+            target_type="dft_results", target_id=str(pair.other_paper_result_id),
+            field_name="value", object_snapshot_hash="b" * 64, outcome="accepted",
+            verification_note="preserve full verification provenance", verified_value=1.23,
+            status="applied", applied_by="reviewer", **{reference_field: reference_id},
+        )
+        session.add(verification)
+        session.commit()
+        return verification.id, reference_id
+
+
+def _full_database_rows(engine):
+    # All tables, including unrelated-paper rows and compensation audits. This
+    # catches partial restoration/deletion as well as silent FK nulling.
+    with engine.connect() as connection:
+        return {
+            table.name: sorted(
+                [recovery_module._jsonable(dict(row)) for row in connection.execute(sa.select(table)).mappings()],
+                key=lambda row: str(row.get("id")),
+            ) for table in Base.metadata.sorted_tables
+        }
+
+
+@pytest.mark.parametrize("reference_field", ["review_id", "locator_id"])
+@pytest.mark.parametrize("scope", ["same_paper", "other_paper"])
+@pytest.mark.parametrize("phase", ["dry_run", "apply", "locked_guard"])
+def test_local_verification_references_refuse_recovery_without_any_mutation(
+    recovery_databases, monkeypatch, reference_field, scope, phase,
+):
+    pair = recovery_databases
+    service = pair.service()
+    # A locator is added before the clean plan so subsequent apply probes
+    # isolate verification drift, rather than dependency drift.
+    verification_id, reference_id = _add_verification_reference(pair, reference_field, scope)
+    with Session(pair.live_engine) as session:
+        verification_row = _model_row(session.get(ContentWebReviewLocalVerificationResult, verification_id))
+    if phase != "dry_run":
+        # Temporarily detach only the synthetic FK to build a valid plan, then
+        # restore it before apply. All writes are confined to the test schema.
+        with Session(pair.live_engine) as session:
+            setattr(session.get(ContentWebReviewLocalVerificationResult, verification_id), reference_field, None)
+            session.commit()
+        manifest = service.build_dry_run_manifest()
+        with Session(pair.live_engine) as session:
+            row = session.get(ContentWebReviewLocalVerificationResult, verification_id)
+            recovery_module._restore_model_from_row(row, verification_row, preserve=("id",))
+            session.commit()
+    before = _full_database_rows(pair.live_engine)
+    with Session(pair.live_engine) as session:
+        snapshot = recovery_module._snapshot(session, "B0102")
+        assert snapshot.fingerprint == recovery_module._snapshot(session, "B0102").fingerprint
+        refs = snapshot.tables[ContentWebReviewLocalVerificationResult.__tablename__]
+        assert refs == [verification_row]
+    if phase == "dry_run":
+        for _ in range(2):
+            with pytest.raises(RecoveryRefused, match=f"local_verification_reference:{reference_field}"):
+                service.build_dry_run_manifest()
+    else:
+        assert snapshot.fingerprint != manifest["live"]["fingerprint"]
+        if phase == "locked_guard":
+            # Even a stale snapshot must not bypass the independent global
+            # query. Observe actual PostgreSQL locks when that query runs.
+            original = recovery_module._verification_references
+            def assert_locked(session, review_ids, locator_ids):
+                if session.bind.engine is pair.backup_engine:
+                    return original(session, review_ids, locator_ids)
+                locks = session.execute(sa.text(
+                    "SELECT relation::regclass::text FROM pg_locks "
+                    "WHERE pid=pg_backend_pid() AND mode='RowShareLock'"
+                )).scalars().all()
+                assert any("extraction_field_reviews" in name for name in locks)
+                assert any("evidence_locators" in name for name in locks)
+                assert session.scalar(sa.text("SHOW transaction_isolation")) == "serializable"
+                return original(session, review_ids, locator_ids)
+            snapshot_fn = recovery_module._snapshot
+            def stale_live_snapshot(session, code):
+                if session.bind.engine is pair.backup_engine:
+                    return snapshot_fn(session, code)
+                pytest.fail("locked guard did not reject before live snapshot")
+            monkeypatch.setattr(recovery_module, "_snapshot", stale_live_snapshot)
+            monkeypatch.setattr(recovery_module, "_verification_references", assert_locked)
+        with pytest.raises(RecoveryRefused, match=f"local_verification_reference:{reference_field}"):
+            service.apply_manifest(
+                manifest, confirm_paper_code="B0102", expected_backup_sha256=BACKUP_SHA256,
+                expected_live_fingerprint=manifest["live"]["fingerprint"],
+            )
+    assert _full_database_rows(pair.live_engine) == before
+    with Session(pair.live_engine) as session:
+        actual = session.get(ContentWebReviewLocalVerificationResult, verification_id)
+        assert _model_row(actual) == verification_row
+        assert getattr(actual, reference_field) == reference_id
+        assert getattr(actual, reference_field) is not None
+
+
+@pytest.mark.parametrize("reference_field", ["review_id", "locator_id"])
+@pytest.mark.parametrize("force_rollback", [False, True])
+def test_unselected_verification_dependencies_are_preserved_on_success_and_rollback(
+    recovery_databases, monkeypatch, reference_field, force_rollback,
+):
+    pair = recovery_databases
+    verification_id, dependency_id = _add_verification_reference(pair, reference_field, "other_paper")
+    model = ExtractionFieldReview if reference_field == "review_id" else EvidenceLocator
+    with Session(pair.live_engine) as session:
+        # This dependency belongs to a retained DFT result, so its verification
+        # must not block the narrow recovery or lose either provenance FK.
+        session.get(model, dependency_id).target_id = str(stable_uuid("baseline-result-0"))
+        session.commit()
+        verification_before = _model_row(session.get(ContentWebReviewLocalVerificationResult, verification_id))
+    service = pair.service()
+    manifest = service.build_dry_run_manifest()
+    before = _full_database_rows(pair.live_engine)
+    if force_rollback:
+        def fail_after_all_mutations(*args):
+            raise RuntimeError("forced failure after deletions and compensation audit")
+        monkeypatch.setattr(recovery_module, "_counts", fail_after_all_mutations)
+        with pytest.raises(RuntimeError, match="forced failure after deletions"):
+            service.apply_manifest(
+                manifest, confirm_paper_code="B0102", expected_backup_sha256=BACKUP_SHA256,
+                expected_live_fingerprint=manifest["live"]["fingerprint"],
+            )
+        assert _full_database_rows(pair.live_engine) == before
+    else:
+        result = service.apply_manifest(
+            manifest, confirm_paper_code="B0102", expected_backup_sha256=BACKUP_SHA256,
+            expected_live_fingerprint=manifest["live"]["fingerprint"],
+        )
+        assert result["status"] == "recovered"
+    with Session(pair.live_engine) as session:
+        assert _model_row(session.get(ContentWebReviewLocalVerificationResult, verification_id)) == verification_before
+        assert getattr(session.get(ContentWebReviewLocalVerificationResult, verification_id), reference_field) == dependency_id
+        assert session.get(model, dependency_id) is not None

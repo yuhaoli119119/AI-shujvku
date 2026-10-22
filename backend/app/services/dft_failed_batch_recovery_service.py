@@ -18,6 +18,7 @@ from app.db.models import (
     AuditLog,
     CatalystSample,
     ContentEvidenceItem,
+    ContentWebReviewLocalVerificationResult,
     DFTAuditIssue,
     DFTResult,
     ElectrochemicalPerformance,
@@ -220,6 +221,18 @@ class DFTFailedBatchRecoveryService:
             ).all()
             if len(locked_issues) != 25 or len(locked_results) != 25:
                 raise RecoveryRefused("locked_row_count_mismatch")
+
+            # Lock referenced parent rows before checking global verification
+            # FKs. PostgreSQL FK writers need KEY SHARE on these rows, so a
+            # concurrent reference cannot slip between this guard and deletion.
+            review_ids = _dependency_ids(manifest, "extraction_field_reviews")
+            locator_ids = _dependency_ids(manifest, "evidence_locators")
+            for model, ids in ((ExtractionFieldReview, review_ids), (EvidenceLocator, locator_ids)):
+                session.scalars(sa.select(model).where(model.id.in_(ids)).order_by(model.id).with_for_update()).all()
+            references = _verification_references(session, review_ids, locator_ids)
+            for column, ids in (("review_id", review_ids), ("locator_id", locator_ids)):
+                if any(row[column] in {str(value) for value in ids} for row in references):
+                    raise RecoveryRefused(f"local_verification_reference:{column}")
 
             current = _snapshot(session, RECOVERY_PAPER_CODE)
             if current.fingerprint != expected_live_fingerprint:
@@ -496,7 +509,24 @@ def _snapshot(session: Session, paper_code: str) -> DatabaseSnapshot:
             sa.select(model).where(model.paper_id == paper.id).order_by(model.id)
         ).all()
         tables[model.__tablename__] = [_model_row(row) for row in rows]
+    # Bundles may belong to another paper. Scope by the referenced dependency
+    # IDs, never by bundle/paper identity, and bind full rows to the fingerprint.
+    tables[ContentWebReviewLocalVerificationResult.__tablename__] = _verification_references(
+        session,
+        [UUID(row["id"]) for row in tables["extraction_field_reviews"]],
+        [UUID(row["id"]) for row in tables["evidence_locators"]],
+    )
     return DatabaseSnapshot(paper=_model_row(paper), tables=tables)
+
+
+def _verification_references(
+    session: Session, review_ids: list[UUID], locator_ids: list[UUID],
+) -> list[dict[str, Any]]:
+    model = ContentWebReviewLocalVerificationResult
+    rows = session.scalars(sa.select(model).where(sa.or_(
+        model.review_id.in_(review_ids), model.locator_id.in_(locator_ids),
+    )).order_by(model.id)).all()
+    return [_model_row(row) for row in rows]
 
 
 def _model_row(row: Any) -> dict[str, Any]:
@@ -578,6 +608,12 @@ def _item_safety(
         if historical_rows:
             blocking.append(f"historical_dependency_present:{table}")
         dependencies[table] = {"delete_rows": delete_rows, "preserve_rows": historical_rows}
+
+    verification_rows = live.tables[ContentWebReviewLocalVerificationResult.__tablename__]
+    for column, table in (("review_id", "extraction_field_reviews"), ("locator_id", "evidence_locators")):
+        deleting_ids = {str(row["id"]) for row in dependencies[table]["delete_rows"]}
+        if any(row.get(column) in deleting_ids for row in verification_rows):
+            blocking.append(f"local_verification_reference:{column}")
 
     reviews = dependencies["extraction_field_reviews"]["delete_rows"]
     if any(
