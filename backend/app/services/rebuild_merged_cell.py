@@ -30,6 +30,18 @@ def validate_source_cell(data, asset):
     raw = (asset.provenance or {}).get("table_data")
     if raw is None:
         raise ValueError("merged_cell_requires_structured_table_bounds")
+    pages = asset.page_numbers or []
+    asset_basis = ((asset.provenance or {}).get("page_identity") or {}).get("page_basis")
+    source_basis = data.get("page_basis", (data.get("page_identity") or {}).get("page_basis"))
+    if pages:
+        if data.get("page_number") not in pages:
+            raise ValueError("merged_source_page_outside_asset")
+        if source_basis == "ooxml" or asset_basis == "ooxml":
+            raise ValueError("ooxml_has_no_physical_page")
+    # Pageless evidence is explicit OOXML identity, never a missing PDF page.
+    # Callers still verify the registered file/hash/XML locator before writing.
+    elif (data.get("page_number") is not None or source_basis != "ooxml" or asset_basis != "ooxml"):
+        raise ValueError("merged_source_requires_asset_page_or_ooxml_identity")
     table = TableData.model_validate(raw)
     cell = validate_cell_location(data["merged_cell"], data.get("table_row"), data.get("table_column"),
                                  rows=len(table.rows), columns=len(table.columns))
