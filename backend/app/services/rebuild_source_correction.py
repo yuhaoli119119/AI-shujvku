@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import Paper, RebuildDataRow, RebuildDataValue, RebuildValueSource
-from app.schemas.rebuild import RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest
+from app.schemas.rebuild import (
+    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSourceAssetBindingRequest,
+)
 from app.services.rebuild_source_lifecycle import source_is_current
 from app.services.rebuild_workflow_service import (
     RebuildWorkflowError, _canonical_json, _source_key, _source_is_sufficient,
@@ -48,6 +50,12 @@ def source_correction_contract():
         'read': 'GET /api/rebuild/sources/{source_id}',
         'write': 'PUT /api/rebuild/sources/{source_id}',
         'authentication': 'workbench session; writes also require same-origin and X-CSRF-Token',
+        'asset_binding': {
+            'write': 'POST /api/rebuild/sources/{source_id}/asset-binding',
+            'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision',
+                     'request_id': 'stable UUID', 'target_asset_id': 'same-paper same-file table asset UUID',
+                     'reason': 'mandatory nonblank reason'},
+            'semantics': 'Current table source only. Change asset_id and derived source_key only; preserve all coordinates exactly, including legacy nulls. Uses correction CAS, replay and append-only history; no scientific acceptance implied.'},
         'lifecycle': {'write': 'POST /api/rebuild/sources/{source_id}/lifecycle',
             'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision',
                      'request_id': 'stable UUID', 'action': 'deactivate', 'reason': 'mandatory reason'},
@@ -66,13 +74,12 @@ def source_correction_contract():
     }
 
 
-def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorrectionRequest,
-                   settings: Settings, *, actor: str):
+def _lock_source(session: Session, source_id: UUID, paper_id: UUID):
     # Same lock order as imports/value/row edits. Refresh ORM objects after waiting.
-    paper_id = session.scalar(select(RebuildValueSource.paper_id).where(RebuildValueSource.id == source_id))
-    if paper_id is None:
+    owner_id = session.scalar(select(RebuildValueSource.paper_id).where(RebuildValueSource.id == source_id))
+    if owner_id is None:
         raise RebuildWorkflowError('source_not_found')
-    if paper_id != payload.paper_id:
+    if owner_id != paper_id:
         raise RebuildWorkflowError('source_paper_mismatch')
     session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update())
     value_id = session.scalar(select(RebuildValueSource.value_id).where(RebuildValueSource.id == source_id))
@@ -83,6 +90,67 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     row = session.get(RebuildDataRow, source.row_id)
     if value is None or row is None or (value.paper_id, value.row_id, row.paper_id) != (paper_id, source.row_id, paper_id):
         raise RebuildWorkflowError('source_owner_inconsistent')
+    return source, value
+
+
+def bind_source_asset(session: Session, source_id: UUID, payload: RebuildSourceAssetBindingRequest,
+                      *, actor: str):
+    source, value = _lock_source(session, source_id, payload.paper_id)
+    if not actor or not actor.strip():
+        raise RebuildWorkflowError('source_actor_required')
+    fingerprint = hashlib.sha256(_canonical_json(payload.model_dump(mode='json')).encode()).hexdigest()
+    state = source_state(session, source_id)
+    conflict = dict(value.conflict or {})
+    for entry in [*conflict.get('source_corrections', []), *conflict.get('source_lifecycle', [])]:
+        if entry.get('request_id') == str(payload.request_id):
+            if (entry.get('request_fingerprint'), entry.get('actor'), entry.get('source_id')) != (fingerprint, actor, str(source_id)):
+                raise RebuildWorkflowError('source_request_id_reused')
+            return state
+    if state['source_revision'] != payload.expected_revision:
+        raise RebuildWorkflowError('source_revision_conflict')
+    if not source_is_current(value, source.id):
+        raise RebuildWorkflowError('source_inactive')
+    if not payload.reason.strip() or '\x00' in payload.reason:
+        raise RebuildWorkflowError('source_asset_binding_reason_required')
+    if source.source_kind != 'table':
+        raise RebuildWorkflowError('source_asset_binding_requires_table_source')
+    file = get_file(session, source.file_id)
+    if file.paper_id != payload.paper_id:
+        raise RebuildWorkflowError('source_file_belongs_to_other_paper')
+    asset = get_asset(session, payload.target_asset_id)
+    if asset.paper_id != payload.paper_id:
+        raise RebuildWorkflowError('source_asset_belongs_to_other_paper')
+    if asset.file_id != file.id:
+        raise RebuildWorkflowError('source_asset_file_mismatch')
+    if asset.asset_type != 'table':
+        raise RebuildWorkflowError('source_asset_binding_requires_table_asset')
+    data = {**serialize_source(source), 'asset_id': str(asset.id)}
+    key = _source_key(data)
+    for other in session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id,
+                                                                  RebuildValueSource.id != source.id)):
+        if other.source_key == key or _source_key(serialize_source(other)) == key:
+            raise RebuildWorkflowError('source_key_conflict')
+    before = _snapshot(source)
+    # No identity normalization or physical-page revalidation: this operation
+    # preserves every stored locator, including legacy null coordinates.
+    source.asset_id = asset.id
+    source.source_key = key
+    conflict['source_corrections'] = [*conflict.get('source_corrections', []), {
+        'source_id': str(source.id), 'value_id': str(value.id), 'paper_id': str(payload.paper_id),
+        'request_id': str(payload.request_id), 'request_fingerprint': fingerprint,
+        'expected_revision': payload.expected_revision, 'before': before, 'after': _snapshot(source),
+        'actor': actor, 'reason': payload.reason, 'action': 'asset_binding',
+        'recorded_at': datetime.now(timezone.utc).isoformat(),
+    }]
+    value.conflict = conflict
+    session.flush()
+    return source_state(session, source_id)
+
+
+def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorrectionRequest,
+                   settings: Settings, *, actor: str):
+    source, value = _lock_source(session, source_id, payload.paper_id)
+    paper_id = payload.paper_id
     if not actor or not actor.strip():
         raise RebuildWorkflowError('source_actor_required')
     request_body = payload.model_dump(mode='json')

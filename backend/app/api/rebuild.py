@@ -32,7 +32,7 @@ from app.schemas.rebuild import (
     RebuildVisualAssetCropRequest,
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
-    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSectionOrderRequest,
+    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSourceAssetBindingRequest, RebuildSectionOrderRequest,
     RebuildDedupPreviewRequest, RebuildDedupApplyRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
@@ -40,7 +40,7 @@ from app.schemas.rebuild import (
 )
 from app.services.rebuild_metadata_cas import metadata_state, correct_metadata, validate_material_mapping
 from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
-from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source
+from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source, bind_source_asset
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
 from app.services.legacy_data_transfer import LegacyTransferRequest
@@ -623,6 +623,7 @@ async def rebuild_ai_work_package(
                 "coverage_plan": f"/api/rebuild/papers/{paper_id}/coverage-plan",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
+                "source_asset_binding": "/api/rebuild/sources/{source_id}/asset-binding",
                 "source_lifecycle": "/api/rebuild/sources/{source_id}/lifecycle",
                 "section_order": f"/api/rebuild/papers/{paper_id}/sections/order",
                 "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
@@ -1590,6 +1591,25 @@ async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrecti
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
         result = correct_source(session, source_id, payload, settings, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except (IntegrityError, DataError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="source_database_constraint_conflict") from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
+@router.post("/sources/{source_id}/asset-binding")
+async def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAssetBindingRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        result = bind_source_asset(session, source_id, payload, actor=auth.username)
         session.commit()
         return result
     except RebuildWorkflowError as exc:

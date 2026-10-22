@@ -500,6 +500,16 @@ class RebuildSourceCorrectionRequest(BaseModel):
     source: RebuildSourceIdentity
 
 
+class RebuildSourceAssetBindingRequest(BaseModel):
+    """Asset-only repair: callers cannot replace legacy source coordinates."""
+    model_config = ConfigDict(extra="forbid")
+    paper_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_id: UUID
+    target_asset_id: UUID
+    reason: str = Field(min_length=1, max_length=4000)
+
+
 class RebuildSourceLifecycleRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     paper_id: UUID
