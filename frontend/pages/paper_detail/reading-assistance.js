@@ -3,6 +3,19 @@ window.PaperReading = (() => {
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const scopes = {abstract:'仅依据摘要',main_text:'依据正文文字与已有图表资料',main_and_si:'依据正文与 SI 文字、已有图表资料',partial_text:'依据部分文字资料'};
   let timer = null, paperId = null, currentJob = null, options = null;
+  let epoch = 0, polls = 0, failures = 0, stopped = false, checking = false, readNote = '';
+  const MAX_POLLS = 40, MAX_FAILURES = 4;
+  const isRunning = job => job && ['dispatching','running','queued'].includes(job.status);
+  function stopTimer() { if(timer !== null) clearTimeout(timer); timer = null; }
+  function schedule(delay) {
+    stopTimer();
+    if(polls >= MAX_POLLS || failures >= MAX_FAILURES) {
+      stopped = true;
+      readNote = '自动核对已暂停，点击“重新核对状态”继续；不会重新生成。';
+      return;
+    }
+    timer = setTimeout(() => { timer = null; polls += 1; read(); }, delay);
+  }
   const list = values => (Array.isArray(values) ? values : []).filter(v => typeof v === 'string' && v.trim());
   function section(title, value) {
     return typeof value === 'string' && value.trim() ? `<details class="reading-section"><summary>${title}</summary><p>${escape(value)}</p></details>` : '';
@@ -38,21 +51,48 @@ window.PaperReading = (() => {
   function renderJob() {
     const btn=document.getElementById('pdGenerateReading'); const status=document.getElementById('pdReadingJob');
     if(!btn) return;
-    const running=currentJob && ['dispatching','running','queued'].includes(currentJob.status);
-    btn.disabled=Boolean(running);
-    btn.textContent=running?'正在补充中文导读…':currentJob?.can_retry?'重试中文导读':'补充中文导读';
-    status.textContent=currentJob?.status==='failed' ? (currentJob.error || '本次未生成，可重试，已有资料已保留。') : running ? '生成中，离开或刷新页面不会重复启动；已有结果不受影响。' : '';
+    const running=isRunning(currentJob);
+    // Unknown readback is not proof that a generation task has finished.
+    btn.disabled=Boolean(running || checking || readNote);
+    btn.textContent=running?(currentJob.saved?'导读已保存，正在收尾…':'正在补充中文导读…'):currentJob?.can_retry?'重试中文导读':'补充中文导读';
+    const message=currentJob?.status==='failed' ? (currentJob.error || '本次未生成，可重试，已有资料已保留。') : running ?
+      (currentJob.saved ? '中文导读已保存，可以阅读；任务正在收尾，正在核对完成状态。' : '生成中，离开或刷新页面不会重复启动；已有结果不受影响。') : currentJob?.saved ? '中文导读已保存。' : '';
+    status.textContent=[message,readNote].filter(Boolean).join(' ');
+    const resume=document.getElementById('pdRefreshReadingState');
+    if(resume){resume.hidden=!stopped;resume.disabled=checking;}
   }
   async function read() {
-    const id=paperId;
-    const data=await options.fetch(`/api/rebuild/papers/${id}/reading-assistance`);
-    if(id!==paperId)return;
-    currentJob=data.job;
-    if(data.guide){ options.paper.reading_guide={...(options.paper.reading_guide || {}),beginner_zh:data.guide};options.paper.abstract_zh=data.abstract_zh;render(options.paper);options.abstract(); }
-    renderJob();
-    if(timer)clearTimeout(timer);
-    if(['dispatching','running','queued'].includes(data.job?.status) && !data.job?.saved) timer=setTimeout(()=>read().catch(()=>{}),6000);
-    else sessionStorage.removeItem('reading-help:'+id);
+    stopTimer();
+    const id=paperId, generation=epoch;
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),20000);
+    checking=true;renderJob();
+    try {
+      const data=await options.fetch(`/api/rebuild/papers/${id}/reading-assistance`,{signal:controller.signal});
+      if(id!==paperId || generation!==epoch)return;
+      currentJob=data.job;failures=0;readNote='';
+      if(data.guide){
+        if(JSON.stringify(options.paper.reading_guide?.beginner_zh)!==JSON.stringify(data.guide)) {
+          options.paper.reading_guide={...(options.paper.reading_guide || {}),beginner_zh:data.guide};render(options.paper);
+        }
+        if(options.paper.abstract_zh!==data.abstract_zh){options.paper.abstract_zh=data.abstract_zh;options.abstract();}
+      }
+      // Saving the content precedes the native terminal state: keep reading both stages.
+      if(isRunning(currentJob)) schedule(Math.min(6000 + polls * 2000,15000));
+      else { stopped=false;sessionStorage.removeItem('reading-help:'+id); }
+    } catch(error) {
+      if(id!==paperId || generation!==epoch)return;
+      failures+=1;
+      readNote='暂时无法读取状态，正在稍后重试；已有内容保留。';
+      schedule(Math.min(6000 * 2 ** (failures-1),30000));
+    } finally {
+      clearTimeout(timeout);
+      if(id===paperId && generation===epoch){checking=false;renderJob();}
+    }
+  }
+  function resumeRead() {
+    polls=0;failures=0;stopped=false;readNote='';
+    return read();
   }
   async function generate() {
     const key='reading-help:'+paperId;
@@ -64,15 +104,17 @@ window.PaperReading = (() => {
       currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry)})});
       renderJob();await read();
     } catch(error) {
-      document.getElementById('pdReadingJob').textContent='本次未确认：'+error.message+'。已有内容保留，点击重试会复用本次请求。';btn.disabled=false;
+      readNote='本次生成请求尚未确认，正在核对原任务状态；已有内容保留。';
+      schedule(6000);renderJob();
     }
   }
   function mount(config) {
+    stopTimer();epoch+=1;polls=0;failures=0;stopped=false;checking=false;readNote='';currentJob=null;
     options=config;paperId=String(config.paper.id || config.paper.paper_id);
-    if(timer)clearTimeout(timer);
     render(config.paper);
     document.getElementById('pdGenerateReading').onclick=generate;
-    read().catch(()=>{document.getElementById('pdReadingJob').textContent='暂时无法读取生成状态，可稍后刷新。';});
+    document.getElementById('pdRefreshReadingState').onclick=resumeRead;
+    read();
   }
   return {mount,render};
 })();
