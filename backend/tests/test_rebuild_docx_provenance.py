@@ -269,7 +269,9 @@ def test_value_correction_reuses_page_contract_and_legacy_fingerprint(env):
     native=source(ids,file_id=ids.pdf,page_basis=None,source_sha256=None,reading_pdf_sha256=None)
     legacy={**req,'request_id':str(uuid4()),'expected_revision':revision,'source':native}
     wire=RebuildValueCorrectionRequest(**legacy).model_dump(mode='json')
-    for k in ('page_basis','source_sha256','reading_pdf_sha256','ooxml_locator'):wire['source'].pop(k)
+    # Freeze the pre-provenance wire shape: merged_cell was also absent.
+    # 67097679 deliberately omits its new default for callers that omit it.
+    for k in ('page_basis','source_sha256','reading_pdf_sha256','ooxml_locator','merged_cell'):wire['source'].pop(k)
     expected=hashlib.sha256(_canonical_json(wire).encode()).hexdigest()
     r=client.put('/api/rebuild/values/'+vid,json=legacy);assert r.status_code==200,r.text
     assert r.json()['conflict']['correction_requests'][-1]['request_fingerprint']==expected
@@ -437,3 +439,101 @@ def test_source_dialog_contract_retains_uuid_coordinates_and_pageless_locator(en
         for key in ('file_id', 'page_number', 'page_basis', 'source_sha256',
                     'reading_pdf_sha256', 'table_row', 'table_column', 'ooxml_locator'):
             assert response[key] == src[key], key
+
+
+@pytest.mark.parametrize('form', ['legacy', 'derived_pdf', 'ooxml', 'explicit_merged_null', 'merged_cell'])
+def test_value_correction_frozen_wire_replay_and_changed_body(env, form):
+    """Hash an explicit wire contract independent of future Pydantic defaults."""
+    from uuid import UUID
+    from app.services.rebuild_workflow_service import value_revision
+
+    client, factory, settings, ids, root = env
+    imported = client.post('/api/rebuild/rows/import', json=row_request(ids, source(ids)))
+    assert imported.status_code == 200 and not imported.json()['errors'], imported.text
+    with factory() as session:
+        value = session.scalar(select(RebuildDataValue))
+        vid, revision = str(value.id), value_revision(value)
+
+    # These are the full historical source defaults, not a current model dump.
+    src = dict(file_id=ids.pdf, asset_id=None, source_key=None, source_kind='text',
+               page_number=1, label='Frozen source', table_row=None, table_column=None,
+               quote='fixture quote', estimate_basis=None)
+    if form in ('derived_pdf', 'ooxml'):
+        src.update(file_id=ids.file, **ids.identity)
+        if form == 'ooxml':
+            src.update(page_number=None, page_basis='ooxml', reading_pdf_sha256=None,
+                       ooxml_locator='word/document.xml#body-child[2]/w:tbl[1]')
+    if form == 'explicit_merged_null':
+        src['merged_cell'] = None
+    if form == 'merged_cell':
+        with factory() as session:
+            asset = RebuildVisualAsset(paper_id=UUID(ids.paper), file_id=UUID(ids.pdf),
+                asset_key='frozen-table', asset_type='table', page_numbers=[1],
+                provenance={'table_data': {'columns': ['energy'], 'rows': [['-1.230'], ['']]}})
+            session.add(asset)
+            session.flush()
+            src.update(asset_id=str(asset.id), source_kind='table', table_row=0, table_column=0,
+                merged_cell=dict(version='merged_cell_v1', coordinate_basis='zero_based_data_rows',
+                    merged_group_id='frozen-group', role='anchor', anchor_row=0, anchor_column=0,
+                    row_span=2, column_span=1, cell_content='printed', cell_bbox=None, bbox_basis=None))
+            session.commit()
+    wire = dict(raw_value='-1.230', numeric_value=-1.23, unit='eV', value_type='explicit',
+                precision_digits=3, missing_reason=None, correction_reason='Frozen wire contract',
+                expected_revision=revision, request_id=str(uuid4()), notes=None, source=src)
+    # Canonical serialization is pinned independently of the service helper.
+    expected = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False,
+                                        separators=(',', ':')).encode()).hexdigest()
+    path = '/api/rebuild/values/' + vid
+    if form == 'legacy':
+        # Simulate an already persisted pre-provenance decision. Replaying must
+        # find it before stale-CAS checking and must not append history/sources.
+        historical_wire = deepcopy(wire)
+        historical_wire['expected_revision'] = '0' * 64
+        historical_hash = hashlib.sha256(json.dumps(historical_wire, sort_keys=True,
+            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        with factory() as session:
+            value = session.get(RebuildDataValue, UUID(vid))
+            value.conflict = {**(value.conflict or {}), 'correction_requests': [dict(
+                request_id=wire['request_id'], request_fingerprint=historical_hash,
+                actor='fixture-actor', expected_revision='0' * 64)]}
+            session.commit()
+        before = client.get(path).json()
+        baseline = counts(factory)
+        replay = client.put(path, json=historical_wire)
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == before and counts(factory) == baseline
+        assert client.put(path, json={**historical_wire, 'notes': 'changed'}).status_code == 409
+        assert client.get(path).json() == before and counts(factory) == baseline
+        # A fresh ID/CAS still creates a correction with the exact old wire hash.
+        wire['request_id'] = str(uuid4())
+        wire['expected_revision'] = before['value_revision']
+        expected = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False,
+                                            separators=(',', ':')).encode()).hexdigest()
+
+    result = client.put(path, json=wire)
+    assert result.status_code == 200, result.text
+    accepted = result.json()
+    entries = accepted['conflict']['correction_requests']
+    assert entries[-1]['request_fingerprint'] == expected
+    baseline = counts(factory)
+    assert client.put(path, json=wire).json() == accepted
+    assert counts(factory) == baseline
+    changes = [dict(notes='changed'), dict(raw_value='-1.240', numeric_value=-1.24),
+               dict(correction_reason='changed'), dict(expected_revision='f' * 64),
+               dict(source={**src, 'quote': 'different source'})]
+    if form == 'legacy':
+        changes.append(dict(source={**src, 'merged_cell': None}))
+    if form == 'explicit_merged_null':
+        changes.append(dict(source={k: v for k, v in src.items() if k != 'merged_cell'}))
+    if form in ('derived_pdf', 'ooxml'):
+        changes.extend(dict(source={**src, key: replacement}) for key, replacement in [
+            ('source_sha256', '0' * 64), ('reading_pdf_sha256', '0' * 64),
+            ('page_basis', 'source_pdf'), ('ooxml_locator', 'changed-locator')])
+    if form == 'merged_cell':
+        changes.append(dict(source={**src, 'merged_cell': {**src['merged_cell'],
+                                                          'merged_group_id': 'changed-group'}}))
+    for change in changes:
+        rejected = client.put(path, json={**wire, **change})
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json()['detail'] == 'value_request_id_reused'
+        assert client.get(path).json() == accepted and counts(factory) == baseline
