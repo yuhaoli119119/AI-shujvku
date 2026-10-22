@@ -682,6 +682,11 @@ _POWER_NOTATION = re.compile(
     rf"(?:(?P<mantissa>{_NUMERIC_MANTISSA})\s*[×·]\s*)?"
     rf"10(?:\s*\^\s*(?P<exponent>{_NUMERIC_EXPONENT})|(?P<superscript>{_SUPERSCRIPT_EXPONENT}))"
 )
+# Flattened print requires a coefficient, explicit multiplication, and a
+# contiguous signed exponent. Bare 10-5 and unsigned 2×103 remain ambiguous.
+_FLAT_POWER_NOTATION = re.compile(
+    rf"(?P<mantissa>{_NUMERIC_MANTISSA})\s*[×·]\s*10(?P<exponent>[+\-−][0-9]{{1,6}})"
+)
 
 
 def _raw_numeric_decimal(raw: str | None) -> Decimal | None:
@@ -693,7 +698,8 @@ def _raw_numeric_decimal(raw: str | None) -> Decimal | None:
     if raw is None:
         return None
     text = str(raw).strip()
-    match = _DECIMAL_NOTATION.fullmatch(text) or _POWER_NOTATION.fullmatch(text)
+    match = (_DECIMAL_NOTATION.fullmatch(text) or _POWER_NOTATION.fullmatch(text)
+             or _FLAT_POWER_NOTATION.fullmatch(text))
     if match is None:
         return None
     coefficient = (match.group("mantissa") or "1").replace("−", "-")

@@ -1,5 +1,6 @@
 """Exact raw notation contract; synthetic fixtures never use the production DB."""
 from decimal import Decimal, localcontext
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -35,7 +36,7 @@ def test_supported_projection_preserves_input(raw, number):
 @pytest.mark.no_test_database
 @pytest.mark.parametrize('raw', [
     '10−5', '10-5', '1–2', '1-2', '1~2', '≤1', '>1', '≈1', '1 ± 0.1',
-    '1.00s', '1 eV', '7.2 x 10^7', '7.2*10**7', '7.2 × 10-5',
+    '1.00s', '1 eV', '7.2 x 10^7', '7.2*10**7',
     '10⁻5', '10^⁻⁵', '10^2+3', '(2)', '2/3', '1_000', 'NaN', 'Infinity',
     '１.２', '1\x00', '1e1000000', '__import__("os")',
 ])
@@ -61,6 +62,7 @@ def test_inconsistent_or_nonfinite_projection_rejected(raw, number, error):
 @pytest.mark.parametrize('raw,number,precision,error', [
     ('−2.40', -2.4, 2, None), ('1.20 × 10^2', 120, 2, None),
     ('1.20 × 10^−1', .12, 2, 'precision_exceeds'),
+    ('1.20×10-1', .12, 2, 'precision_exceeds'), ('1.20×10+2', 120, 2, None),
     ('1.230', 1.23, 2, 'precision_exceeds'), ('1.230', None, 2, 'precision_exceeds'), ('1.2', 1.2, 3, 'precision_exceeds'),
     ('10−5', None, 2, 'must_be_numeric'), ('1_000', None, 2, 'must_be_numeric'),
     ('9007199254740993', float(9007199254740993), 0, None),
@@ -150,7 +152,8 @@ def test_http_cells_raw_sources_and_equivalent_candidates(audit_env):
     current = env['client'].get(path)
     assert current.status_code == 200, current.text
     state = current.json()
-    source = {k: v for k, v in state['sources'][0].items() if k not in {'id', 'source_key'}}
+    source = {k: v for k, v in state['sources'][0].items()
+              if k not in {'id', 'source_key', 'page_identity_status', 'location_label'}}
     correction = dict(raw_value='−2.400 × 10^0', numeric_value=-2.4, unit='eV', precision_digits=3,
                       source=source, expected_revision=state['value_revision'], request_id='00000000-0000-4000-8000-000000000001',
                       correction_reason='synthetic notation correction')
@@ -185,3 +188,88 @@ def test_old_partial_receipt_replays_then_new_request_fills_same_row(audit_env, 
         values = session.scalars(select(RebuildDataValue)).all()
         assert [(v.raw_value, v.numeric_value) for v in values] == [('−2.40', -2.4)]
     assert env['client'].post('/api/rebuild/rows/import', json=body).json()['audit']['replayed']
+
+
+FLAT_POWERS = [
+    ('5.97×10-10', '5.97e-10'), ('8.45×10-10', '8.45e-10'),
+    ('1.11×10-8', '1.11e-8'), ('1.45×10-8', '1.45e-8'),
+    ('7.28×10-10', '7.28e-10'), ('1.33×10-9', '1.33e-9'),
+    ('7.2 × 10-5', '7.2e-5'), ('−2.400·10+0', '-2.400'),
+    ('  +2.40 × 10−2\n', '.0240'), ('0.00×10-999999', '0e-1000001'),
+]
+
+
+@pytest.mark.no_test_database
+@pytest.mark.parametrize('raw,exact', FLAT_POWERS)
+def test_flat_power_exact_projection(raw, exact):
+    with localcontext() as context:
+        context.prec = 2
+        parsed = workflow._raw_numeric_decimal(raw)
+        assert parsed == Decimal(exact)
+        assert parsed.as_tuple().exponent == Decimal(exact).as_tuple().exponent
+        payload = cell(raw, float(Decimal(exact)), precision_digits=2)
+        before = repr(payload)
+        workflow._validate_value(payload)
+        assert repr(payload) == before
+
+
+@pytest.mark.no_test_database
+@pytest.mark.parametrize('raw', [
+    '10-10', '10+0', '5.97×1010', '5.97×10  -10', '5.97×10- 10',
+    '5.97×10--10', '5.97×10+-10', '5.97×10-1.0', '5.97×10-1000000',
+    '5.97×10-¹⁰', '5.97×10-10 eV', '<5.97×10-10', '≈5.97×10-10',
+    '5.97×10-10–8.45×10-10', '5.97×10-10+1', '5.97×10-10×2',
+    '(5.97×10-10)', '5.97e0×10-10', '5.97x10-10', '5.97*10-10',
+])
+def test_ambiguous_flat_power_fails_closed(raw):
+    assert workflow._raw_numeric_decimal(raw) is None
+    with pytest.raises(workflow.RebuildWorkflowError, match='requires_plain_numeric_raw'):
+        workflow._validate_value(cell(raw, 5.97e-10))
+    workflow._validate_value(cell(raw, None))
+
+
+@pytest.mark.parametrize('raw,exact', FLAT_POWERS[:6])
+def test_flat_power_put_preserves_science_and_cas(audit_env, raw, exact):
+    env = audit_env
+    body = row_body(env)
+    body['rows'][0]['values'][0].update(raw_value=exact, numeric_value=float(exact), unit='cm2 s-1')
+    imported = env['client'].post('/api/rebuild/rows/import', json=body)
+    assert imported.status_code == 200 and imported.json()['complete'], imported.text
+    with env['factory']() as session:
+        value = session.scalar(select(RebuildDataValue))
+        value_id = value.id
+    path = f'/api/rebuild/values/{value_id}'
+    before = env['client'].get(path).json()
+    source = {k: v for k, v in before['sources'][0].items()
+              if k not in {'id', 'source_key', 'page_identity_status', 'location_label'}}
+    request = dict(raw_value=raw, numeric_value=before['numeric_value'], precision_digits=2,
+                   unit=before['unit'], value_type=before['value_type'], missing_reason=None,
+                   source=source, expected_revision=before['value_revision'], request_id=str(uuid4()),
+                   correction_reason='Synthetic original printed representation correction')
+    # Invalid projections and text must leave the entire value/history unchanged.
+    for bad_raw, bad_number, error in [
+        (raw, float(exact) * 10, 'numeric_value_disagrees_with_raw'),
+        (raw + ' cm2 s-1', float(exact), 'numeric_value_requires_plain_numeric_raw'),
+        ('5.97×10--10', float(exact), 'numeric_value_requires_plain_numeric_raw'),
+        ('1×10-999', 0, 'numeric_value_disagrees_with_raw'),
+    ]:
+        rejected = env['client'].put(path, json={**request, 'raw_value': bad_raw, 'numeric_value': bad_number})
+        assert rejected.status_code == 400, rejected.text
+        assert error in rejected.json()['detail']
+        assert env['client'].get(path).json() == before
+    response = env['client'].put(path, json=request)
+    assert response.status_code == 200, response.text
+    after = env['client'].get(path).json()
+    assert after == response.json()
+    assert after['raw_value'] == raw and after['precision_digits'] == 2
+    for key in ('id', 'numeric_value', 'unit', 'value_type', 'missing_reason', 'is_estimated',
+                'preferred_source_id', 'sources', 'historical_sources', 'evidence_status'):
+        assert after[key] == before[key], key
+    assert after['conflict']['status'] == 'corrected_previous_retained'
+    assert after['conflict']['previous']['raw_value'] == exact
+    assert {c['raw_value'] for c in after['conflict']['candidates']} == {exact, raw}
+    assert after['value_revision'] != before['value_revision']
+    assert env['client'].put(path, json=request).json() == after
+    stale = env['client'].put(path, json={**request, 'request_id': str(uuid4())})
+    assert stale.status_code == 409 and stale.json()['detail'] == 'value_revision_conflict'
+    assert env['client'].get(path).json() == after
