@@ -151,7 +151,10 @@ def save(session, paper_id, body, settings, actor):
     if not job or job.type not in (TYPE,'ai_extract_rebuild') or job.payload.get('paper_id')!=str(paper_id):
         raise ValueError('reading_job_not_owned')
     data=body.model_dump(mode='json');fingerprint=digest(data)
-    previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==body.request_id))
+    # Request IDs may be 128 characters; legacy audit target_id is only 64.
+    # Keep existing short identities and use the complete long identity's digest.
+    audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
+    previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
     if previous:
         if previous.payload['fingerprint']!=fingerprint or previous.payload['actor']!=actor: raise ValueError('reading_request_id_reused')
         return {**previous.payload['receipt'],'replayed':True}
@@ -186,7 +189,7 @@ def save(session, paper_id, body, settings, actor):
     if body.abstract_zh:paper.comprehensive_analysis={**(paper.comprehensive_analysis or {}),'abstract_zh':body.abstract_zh}
     receipt={'paper_id':str(paper_id),'job_id':job.job_id,'saved':True,'content_scope':body.content_scope,
              'replayed':False,'reading_revision':reading_revision(paper)}
-    session.add(AuditLog(action=VERSION,source=VERSION,paper_id=paper_id,target_type='paper_reading',target_id=body.request_id,
+    session.add(AuditLog(action=VERSION,source=VERSION,paper_id=paper_id,target_type='paper_reading',target_id=audit_id,
         payload={'actor':actor,'fingerprint':fingerprint,'before':old,'after':{'reading_guide':paper.reading_guide,'abstract_zh':body.abstract_zh},'receipt':receipt}))
     job.progress={**(job.progress or {}),'reading_saved':True,'saved_receipt':receipt}
     session.flush();return receipt
