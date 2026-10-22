@@ -36,7 +36,7 @@ from app.db.models import (
 )
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.services.reading_guide_projection import (
-    ReadingGuideProjectionError, guide_image_path, stored_guide_projection,
+    ReadingGuideProjectionError, guide_image_path, stored_guide_projection, validate_guide_image_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -842,6 +842,11 @@ class FigureReadingService:
                         digest = media.get("sha256") if isinstance(media, dict) else None
                         if digest and hashlib.sha256(raw).hexdigest() != digest:
                             raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": "media_sha256_mismatch"}])
+                        if fig.get("record_type") == "rebuild_visual_asset":
+                            try:
+                                validate_guide_image_bytes(raw)
+                            except ValueError as exc:
+                                raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": str(exc)}]) from exc
                         mime = mimetypes.guess_type(resolved.name)[0] or "image/png"
                         img_b64 = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
                     except ReadingGuideProjectionError:

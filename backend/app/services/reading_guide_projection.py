@@ -7,9 +7,11 @@ API and prevent a misleadingly complete offline artifact from being published.
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 from pathlib import Path
 
+from PIL import Image
 from sqlalchemy import select
 
 from app.db.models import RebuildPaperFile, RebuildVisualAsset
@@ -43,8 +45,22 @@ def guide_image_path(item, settings):
     return path
 
 
+def validate_guide_image_bytes(raw):
+    # A filename or matching digest cannot establish decodability.
+    # Verify structure, then force pixel decoding (including all frames).
+    try:
+        with Image.open(io.BytesIO(raw)) as image:
+            image.verify()
+        with Image.open(io.BytesIO(raw)) as image:
+            for frame in range(getattr(image, "n_frames", 1)):
+                image.seek(frame)
+                image.load()
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+        raise ValueError("image_undecodable") from None
+
+
 def stored_guide_projection(session, paper_id, settings):
-    sections = list_sections(session, paper_id)
+    sections = list_sections(session, paper_id, preserve_missing_file=True)
     # The reader's source-bound ordering contract is shared, including history
     # and explicit unverified-order labels. No new scientific order is inferred.
     sections = [{**s, "order": index} for index, s in enumerate(sections)]
@@ -57,6 +73,13 @@ def stored_guide_projection(session, paper_id, settings):
             RebuildVisualAsset.subfigure_label.asc().nulls_first(),
             RebuildVisualAsset.asset_key, RebuildVisualAsset.id)).all()
     items, issues = [], []
+    file_ids = {str(file_id) for file_id in files}
+    for section in sections:
+        reference = (section.get("provenance") or {}).get("file_id")
+        if reference and reference not in file_ids:
+            code = "source_file_not_found_or_wrong_paper"
+            section["projection_errors"] = [code]
+            issues.append({"section_id": section["id"], "code": code})
     for asset in assets:
         provenance = asset.provenance if isinstance(asset.provenance, dict) else {}
         identity = provenance.get("page_identity")
@@ -124,8 +147,10 @@ def stored_guide_projection(session, paper_id, settings):
         try:
             path = guide_image_path(item, settings)
             digest = media.get("sha256") if isinstance(media, dict) else None
-            if digest and hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raw = path.read_bytes()
+            if digest and hashlib.sha256(raw).hexdigest() != digest:
                 errors.append("media_sha256_mismatch")
+            validate_guide_image_bytes(raw)
             item["image_status"] = "available"
         except (ValueError, OSError, TypeError) as exc:
             errors.append(str(exc) if isinstance(exc, ValueError) else "image_unreadable")

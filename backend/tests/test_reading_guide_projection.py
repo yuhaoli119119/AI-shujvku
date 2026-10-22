@@ -1,10 +1,13 @@
 """Guide API/export against synthetic isolated PostgreSQL and file fixtures."""
 import base64
 import hashlib
+import io
 from copy import deepcopy
+from pathlib import Path
 from uuid import UUID
 
 import pytest
+from PIL import Image
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
@@ -16,11 +19,11 @@ from app.db.models import (AuditLog, Paper, PaperFigure, PaperSection,
                            RebuildPaperFile, RebuildVisualAsset)
 from app.db.session import get_db_session
 from app.services.figure_reading_service import FigureReadingService
-from app.services.reading_guide_projection import ReadingGuideProjectionError
+from app.services.reading_guide_projection import ReadingGuideProjectionError, validate_guide_image_bytes
 from app.services.rebuild_sections import EVENT, VERSION, _digest, list_sections
 
 
-PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=')
+PNG = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC')
 
 
 @pytest.fixture
@@ -254,3 +257,92 @@ def test_source_bound_section_metadata_not_lost(guide_env):
         assert s['reading_order']['basis'] == 'original_heading_number'
         html = FigureReadingService(session, settings).render_offline_html(ids['paper'])
         assert 'si:results' in html and 'original_heading_number' in html
+
+
+@pytest.mark.parametrize('binding', ['missing', 'foreign'])
+def test_section_invalid_file_binding_retained_and_blocks_publication(guide_env, binding):
+    factory, settings, ids, client = guide_env
+    reference = str(UUID(int=999))
+    with factory() as session:
+        if binding == 'foreign':
+            alien = session.get(RebuildVisualAsset, ids['alien'])
+            file = RebuildPaperFile(paper_id=alien.paper_id, role='si', storage_path='alien.docx',
+                original_filename='alien.docx', sha256='a' * 64, file_size=1)
+            session.add(file); session.flush(); reference = str(file.id)
+        row = session.get(PaperSection, UUID(int=1))
+        fields = ('section_title', 'section_type', 'text', 'page_start', 'page_end',
+                  'section_level', 'section_number', 'parent_heading', 'heading_path')
+        source = {k: getattr(row, k) for k in fields}
+        source.update(file_id=reference, section_key='si:results', source_sha256='a' * 64,
+                      page_basis='ooxml', sources=[{'ooxml_locator': 'word/document.xml#body-child[1]/w:p[1]'}])
+        session.add(AuditLog(paper_id=ids['paper'], action=EVENT, source=VERSION,
+            target_type='paper_section', target_id=str(row.id),
+            payload={'section': source, 'content_sha256': _digest(source)}))
+        session.commit(); before = snapshot(session)
+        data = FigureReadingService(session, settings).get_paper_reading_guide_data(ids['paper'])
+        section = next(s for s in data['sections'] if s['id'] == str(row.id))
+        assert section['provenance']['file_id'] == reference
+        assert section['provenance']['sources'] == source['sources']
+        assert section['provenance']['download_url'] is None
+        assert next(s for s in data['sections'] if s['id'] == str(UUID(int=2)))['provenance'] is None
+        assert not data['projection_complete']
+        assert snapshot(session) == before
+    issue = {'section_id': str(UUID(int=1)), 'code': 'source_file_not_found_or_wrong_paper'}
+    assert issue in client.get(f'/api/papers/{ids["paper"]}/reading-guide').json()['projection_errors']
+    response = client.post(f'/api/papers/{ids["paper"]}/reading-guide/export-html')
+    assert response.status_code == 409 and issue in response.json()['detail']['issues']
+    assert not (settings.storage_root / 'exports').exists()
+
+
+@pytest.mark.parametrize('declared_hash', [False, True])
+@pytest.mark.parametrize('raw', [b'not an image', PNG[:50]], ids=['not-image', 'truncated-png'])
+def test_undecodable_curated_image_blocks_api_export_and_preserves_last_export(guide_env, declared_hash, raw):
+    factory, settings, ids, client = guide_env
+    with factory() as session:
+        service = FigureReadingService(session, settings)
+        export = service.export_offline_html(ids['paper'])
+        path = Path(export['runtime_path'])
+        saved = path.read_bytes()
+        (settings.storage_root / 'figures' / 'invalid.png').write_bytes(raw)
+        asset = session.get(RebuildVisualAsset, ids['asset'])
+        asset.image_path = 'figures/invalid.png'
+        asset.provenance = {'media': {'sha256': hashlib.sha256(raw).hexdigest(),
+            'zip_member': 'word/media/image1.png'}} if declared_hash else {}
+        session.commit(); before = snapshot(session)
+        data = service.get_paper_reading_guide_data(ids['paper'])
+        assert not data['projection_complete']
+        assert next(a for a in data['figures'] if a.get('asset_id') == str(asset.id))['image_status'] == 'unavailable'
+        with pytest.raises(ReadingGuideProjectionError):
+            service.render_offline_html(ids['paper'])
+        assert snapshot(session) == before
+    issue = {'asset_id': str(ids['asset']), 'code': 'image_undecodable'}
+    assert issue in client.get(f'/api/papers/{ids["paper"]}/reading-guide').json()['projection_errors']
+    response = client.post(f'/api/papers/{ids["paper"]}/reading-guide/export-html')
+    assert response.status_code == 409 and issue in response.json()['detail']['issues']
+    assert path.read_bytes() == saved
+
+
+def test_image_rechecked_at_embedding_when_bytes_change_after_projection(guide_env, monkeypatch):
+    factory, settings, ids, _ = guide_env
+    with factory() as session:
+        service = FigureReadingService(session, settings)
+        original = service.get_paper_reading_guide_data
+        def change_after_projection(paper_id):
+            data = original(paper_id)
+            assert data['projection_complete']
+            (settings.storage_root / 'figures' / 'stored.png').write_bytes(b'not an image')
+            return data
+        monkeypatch.setattr(service, 'get_paper_reading_guide_data', change_after_projection)
+        with pytest.raises(ReadingGuideProjectionError) as caught:
+            service.export_offline_html(ids['paper'])
+        assert {'asset_id': str(ids['asset']), 'code': 'image_undecodable'} in caught.value.issues
+        assert not (settings.storage_root / 'exports').exists()
+
+
+@pytest.mark.no_test_database
+@pytest.mark.parametrize('format', ['PNG', 'JPEG', 'GIF'])
+def test_image_decoder_accepts_valid_curated_formats(format):
+    raw = io.BytesIO()
+    with Image.open(io.BytesIO(PNG)) as image:
+        image.convert('RGB').save(raw, format=format)
+    validate_guide_image_bytes(raw.getvalue())
