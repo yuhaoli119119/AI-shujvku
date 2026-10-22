@@ -119,10 +119,14 @@ def _valid_corrections(session, paper_id, rows, imports, files):
     return valid
 
 
-def list_sections(session: Session, paper_id: UUID) -> list[dict]:
-    """Batched reads; only explicit, source-bound declarations mark history."""
+def list_sections(session: Session, paper_id: UUID, *, preserve_missing_file: bool = False) -> list[dict]:
+    """Batched reads; only explicit, source-bound declarations mark history.
+
+    Guide projections retain unresolved audit file references to report errors;
+    other readers keep their existing legacy/coverage behavior by default.
+    """
     rows = list(session.scalars(select(PaperSection).where(
-        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.section_title, PaperSection.text)))
+        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.section_title, PaperSection.text, PaperSection.id)))
     events = {event.target_id: event for event in _events(session, paper_id)}
     files = {str(file.id): file for file in session.scalars(select(RebuildPaperFile).where(
         RebuildPaperFile.paper_id == paper_id))}
@@ -139,14 +143,14 @@ def list_sections(session: Session, paper_id: UUID) -> list[dict]:
             data = event.payload
             snapshot = data.get("section", {})
             file = files.get(snapshot.get("file_id"))
-            if file:
+            if file or (preserve_missing_file and snapshot.get("file_id")):
                 item.update(section_key=snapshot.get("section_key"),
                             explanation_zh=snapshot.get("explanation_zh"),
                             conflicts_with_section_ids=snapshot.get("conflicts_with_section_ids", []),
                             provenance={
                                 "version": VERSION, "audit_id": str(event.id),
-                                "section_id": str(row.id), "file_id": str(file.id),
-                                "role": file.role, "original_filename": file.original_filename,
+                                "section_id": str(row.id), "file_id": snapshot.get("file_id"),
+                                "role": file.role if file else None, "original_filename": file.original_filename if file else None,
                                 "source_sha256": snapshot.get("source_sha256"),
                                 "page_basis": snapshot.get("page_basis"),
                                 "reading_pdf_sha256": data.get("reading_pdf_sha256"),
@@ -154,8 +158,8 @@ def list_sections(session: Session, paper_id: UUID) -> list[dict]:
                                 "request_id": data.get("request_id"), "actor": data.get("actor"),
                                 "content_sha256": data.get("content_sha256"),
                                 "created_at": event.created_at.isoformat(),
-                                "preview_url": f"/api/rebuild/files/{file.id}/preview",
-                                "download_url": f"/api/rebuild/files/{file.id}/download",
+                                "preview_url": f"/api/rebuild/files/{file.id}/preview" if file else None,
+                                "download_url": f"/api/rebuild/files/{file.id}/download" if file else None,
                             })
         items.append(item)
     by_id = {item["id"]: item for item in items}

@@ -80,7 +80,16 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     # Old workflow_jobs cleanup removed
     async with AsyncExitStack() as stack:
-        yield
+        import asyncio
+        from app.services.ordinary_parsing import monitor
+        recovery_task = asyncio.create_task(monitor(settings))
+        try:
+            yield
+        finally:
+            recovery_task.cancel()
+            from contextlib import suppress
+            with suppress(asyncio.CancelledError):
+                await recovery_task
 
 app = FastAPI(
     title="Literature AI Backend",

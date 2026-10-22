@@ -30,7 +30,7 @@ def env(setup_test_db, tmp_path, monkeypatch):
     factory=sessionmaker(bind=setup_test_db,expire_on_commit=False)
     with zipfile.ZipFile(tmp_path/'source.docx','w') as z:
         z.writestr('[Content_Types].xml','<Types/>')
-        z.writestr('word/document.xml','<document><p>Synthetic fixture only</p></document>')
+        z.writestr('word/document.xml','<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:drawing/></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>fixture</w:t></w:r></w:p></w:tc></w:tr></w:tbl></w:body></w:document>')
     pdf=fitz.open();pdf.new_page().insert_text((70,70),'Synthetic derived reading page one');pdf.new_page().insert_text((70,70),'Synthetic reading page two');pdf.save(tmp_path/'reading.pdf');pdf.close()
     with factory() as s:
         papers=[Paper(title='DOCX fixture',pdf_path=''),Paper(title='Other fixture',pdf_path='')];s.add_all(papers);s.flush()
@@ -269,8 +269,271 @@ def test_value_correction_reuses_page_contract_and_legacy_fingerprint(env):
     native=source(ids,file_id=ids.pdf,page_basis=None,source_sha256=None,reading_pdf_sha256=None)
     legacy={**req,'request_id':str(uuid4()),'expected_revision':revision,'source':native}
     wire=RebuildValueCorrectionRequest(**legacy).model_dump(mode='json')
-    for k in ('page_basis','source_sha256','reading_pdf_sha256'):wire['source'].pop(k)
+    # Freeze the pre-provenance wire shape: merged_cell was also absent.
+    # 67097679 deliberately omits its new default for callers that omit it.
+    for k in ('page_basis','source_sha256','reading_pdf_sha256','ooxml_locator','merged_cell'):wire['source'].pop(k)
     expected=hashlib.sha256(_canonical_json(wire).encode()).hexdigest()
     r=client.put('/api/rebuild/values/'+vid,json=legacy);assert r.status_code==200,r.text
     assert r.json()['conflict']['correction_requests'][-1]['request_fingerprint']==expected
     assert client.put('/api/rebuild/values/'+vid,json=legacy).status_code==200
+
+
+def xml_source(ids, **changes):
+    return source(ids, page_number=None, page_basis='ooxml', reading_pdf_sha256=None,
+                  ooxml_locator='word/document.xml#body-child[2]/w:tbl[1]', **changes)
+
+
+def test_pageless_docx_source_asset_table_and_replay(env):
+    client,factory,settings,ids,root=env
+    # Explicitly unavailable reading PDF must not block same-file XML evidence.
+    ids.cache.rename(root/'held-reading.pdf')
+    src=xml_source(ids)
+    req=row_request(ids,src)
+    pre=client.post('/api/rebuild/rows/import/preflight',json=req)
+    assert pre.status_code==200 and not pre.json()['errors'],pre.text
+    result=client.post('/api/rebuild/rows/import',json=req)
+    assert result.status_code==200 and not result.json()['errors'],result.text
+    baseline=counts(factory)
+    assert client.post('/api/rebuild/rows/import',json=req).status_code==200
+    assert counts(factory)==baseline
+    sid,state=read_source(client,factory)
+    assert state['page_number'] is None and state['page_basis']=='ooxml'
+    assert state['ooxml_locator']==src['ooxml_locator'] and state['location_label']=='OOXML 定位'
+    assert state['reading_pdf_sha256'] is None and state['page_identity_status']=='verified'
+    corrected=correction(ids,state,src | {'ooxml_locator':'word/document.xml#body-child[1]/w:drawing[1]'})
+    response=client.put('/api/rebuild/sources/'+sid,json=corrected)
+    assert response.status_code==200,response.text
+    assert response.json()['source_key']!=state['source_key']
+    assert client.put('/api/rebuild/sources/'+sid,json=corrected).json()==response.json()
+    asset=dict(asset_key='xml-table',asset_type='table',file_id=ids.file,page_numbers=[],
+               page_basis='ooxml',source_sha256=ids.identity['source_sha256'],ooxml_locator=src['ooxml_locator'],
+               caption='Fixture table',provenance={'table_data':{'columns':['A'],'rows':[['1']]},
+                   'table_sources':[dict(file_id=ids.file,page_number=None,page_basis='ooxml',
+                       source_sha256=ids.identity['source_sha256'],ooxml_locator=src['ooxml_locator'],
+                       locator=src['ooxml_locator'],role=role) for role in ('caption','body')]})
+    body=dict(request_id=str(uuid4()),assets=[asset])
+    url='/api/rebuild/papers/'+ids.paper+'/assets/import'
+    imported=client.post(url,json=body);assert imported.status_code==200 and not imported.json()['errors'],imported.text
+    baseline=counts(factory);assert client.post(url,json=body).json()['audit']['replayed']
+    assert counts(factory)==baseline
+    stored=client.get('/api/rebuild/papers/'+ids.paper+'/assets').json()['items'][0]
+    assert stored['page_numbers']==[] and stored['page_number'] is None
+    assert stored['ooxml_locator']==src['ooxml_locator']
+    assert stored['table_content']['location_label']=='OOXML 定位'
+    assert stored['table_content']['sources'][0]['page_number'] is None
+    from app.services.rebuild_quality import integrity_report
+    from app.services.rebuild_table_reading import table_representations
+    with factory() as s:
+        quality=integrity_report(s,__import__('uuid').UUID(ids.paper),settings,limit=None)
+        codes={issue['code'] for issue in quality['issues']}
+        assert not codes & {'asset_physical_pages_unknown','source_physical_page_unknown','ooxml_identity_unverified'}
+        checks=table_representations(s,__import__('uuid').UUID(ids.paper),settings)
+        check=next(check for check in checks['tables'] if check.get('asset_id')==stored['id'])
+        assert check['complete'] and check['reason']=='formal_ooxml_representation'
+        assert check['binding']['physical_pages']==[] and check['binding']['ooxml_locator']==src['ooxml_locator']
+
+
+@pytest.mark.parametrize('change,error',[
+    ({'file_id':'pdf'},'ooxml_requires_registered_docx'),
+    ({'file_id':'foreign'},'source_file_belongs_to_other_paper'),
+    ({'source_sha256':'0'*64},'source_sha256_mismatch'),
+    ({'ooxml_locator':'word/document.xml#body-child[99]/w:tbl[1]'},'ooxml_locator_not_found'),
+    ({'ooxml_locator':'docProps/app.xml#Pages'},'ooxml_locator_invalid'),
+    ({'ooxml_locator':None},'ooxml_locator_invalid'),
+    ({'page_number':1},'ooxml_has_no_physical_page'),
+    ({'reading_pdf_sha256':'0'*64},'ooxml_has_no_physical_page'),
+    ({'page_basis':None},'ooxml_page_basis_required'),
+])
+def test_pageless_sources_reject_wrong_owner_format_hash_locator(env,change,error):
+    client,factory,settings,ids,root=env
+    change=dict(change)
+    if change.get('file_id') in ('pdf','foreign'):change['file_id']=getattr(ids,change['file_id'])
+    req=row_request(ids,xml_source(ids) | change)
+    before=counts(factory)
+    result=client.post('/api/rebuild/rows/import/preflight',json=req)
+    assert result.status_code==200 and error in result.text,result.text
+    assert counts(factory)==before
+
+
+@pytest.mark.parametrize('change,error',[
+    ({'file_id':'pdf'},'ooxml_requires_registered_docx'),
+    ({'file_id':'foreign'},'file_belongs_to_other_paper'),
+    ({'page_numbers':[1]},'ooxml_has_no_physical_page'),
+    ({'ooxml_locator':'word/document.xml#body-child[1]/w:tbl[1]'},'ooxml_locator_not_found'),
+])
+def test_pageless_assets_reject_wrong_owner_or_physical_page(env,change,error):
+    client,factory,settings,ids,root=env
+    asset=dict(asset_key='bad',asset_type='figure',file_id=ids.file,page_numbers=[],page_basis='ooxml',
+               source_sha256=ids.identity['source_sha256'],ooxml_locator='word/document.xml#body-child[1]/w:drawing[1]')
+    change=dict(change)
+    if change.get('file_id') in ('pdf','foreign'):change['file_id']=getattr(ids,change['file_id'])
+    result=client.post('/api/rebuild/papers/'+ids.paper+'/assets/import',json={'assets':[asset|change]})
+    assert result.status_code==200 and error in result.text,result.text
+    with factory() as s:assert s.scalar(select(func.count()).select_from(RebuildVisualAsset))==0
+
+
+def test_pdf_table_null_source_pages_cannot_use_ooxml_syntax(env):
+    client,factory,settings,ids,root=env
+    asset=dict(asset_key='bad-pdf',asset_type='table',file_id=ids.pdf,page_numbers=[],
+        provenance={'table_data':{'columns':['A'],'rows':[['1']]},'table_sources':[
+            {'file_id':ids.pdf,'page_number':None,'locator':'word/document.xml#body-child[2]/w:tbl[1]'}]})
+    response=client.post('/api/rebuild/papers/'+ids.paper+'/assets/import',json={'assets':[asset]})
+    assert 'table_source_page_not_in_asset' in response.text
+    with factory() as s:assert s.scalar(select(func.count()).select_from(RebuildVisualAsset))==0
+
+
+def test_ooxml_asset_metadata_cannot_fabricate_physical_pages(env):
+    from app.schemas.rebuild import RebuildAssetMetadataCorrection
+    from app.services.rebuild_metadata_cas import correct_metadata, metadata_state
+    from fastapi import HTTPException
+    client,factory,settings,ids,root=env
+    with factory() as s:
+        asset=RebuildVisualAsset(paper_id=__import__('uuid').UUID(ids.paper),file_id=__import__('uuid').UUID(ids.file),
+            asset_key='pageless-cas',asset_type='figure',page_numbers=[],
+            provenance={'page_identity':{'page_basis':'ooxml'}})
+        s.add(asset);s.commit()
+        _,state=metadata_state(s,asset.paper_id,'assets',asset.id)
+        request=RebuildAssetMetadataCorrection(request_id=uuid4(),expected_revision=state['expected_revision'],
+            reason='Synthetic forbidden page',changes={'page_numbers':[1]})
+        with pytest.raises(HTTPException) as error:correct_metadata(s,asset.paper_id,'assets',asset.id,request)
+        assert error.value.status_code==422 and error.value.detail=='ooxml_has_no_physical_page'
+        s.rollback();assert s.get(RebuildVisualAsset,asset.id).page_numbers==[]
+
+
+@pytest.mark.parametrize('identity', [None, [], 'legacy-value'])
+def test_legacy_nonobject_asset_page_identity_keeps_reads_compatible(env,identity):
+    from app.services.rebuild_workflow_service import serialize_asset
+    from app.services.rebuild_table_content import table_content
+    client,factory,settings,ids,root=env
+    with factory() as s:
+        asset=RebuildVisualAsset(paper_id=__import__('uuid').UUID(ids.paper),asset_key='legacy-identity',
+            asset_type='table',page_numbers=[1],provenance={'page_identity':identity})
+        s.add(asset);s.commit()
+        assert serialize_asset(asset)['page_numbers']==[1]
+        assert table_content(asset)['page_numbers']==[1]
+        assert 'ooxml_locator' not in serialize_asset(asset)
+
+
+def test_conflicting_null_asset_identity_is_rejected_before_mutation(env):
+    client,factory,settings,ids,root=env
+    asset=dict(asset_key='bad-identity',asset_type='figure',file_id=ids.file,page_basis='ooxml',
+        source_sha256=ids.identity['source_sha256'],ooxml_locator='word/document.xml#body-child[1]/w:drawing[1]',
+        provenance={'page_identity':None})
+    result=client.post('/api/rebuild/papers/'+ids.paper+'/assets/import',json={'assets':[asset]})
+    assert 'source_page_identity_invalid' in result.text
+    with factory() as s:assert s.scalar(select(func.count()).select_from(RebuildVisualAsset))==0
+
+
+def test_source_dialog_contract_retains_uuid_coordinates_and_pageless_locator(env):
+    """Both source endpoints must provide the fields consumed by source dialogs."""
+    client, factory, settings, ids, root = env
+    src = xml_source(ids, source_kind='table', table_row=0, table_column=2147483647)
+    imported = client.post('/api/rebuild/rows/import', json=row_request(ids, src))
+    assert imported.status_code == 200 and not imported.json()['errors'], imported.text
+    sid, detail = read_source(client, factory)
+    rows = client.get('/api/rebuild/rows', params={'paper_id': ids.paper})
+    assert rows.status_code == 200, rows.text
+    listed = rows.json()['items'][0]['values'][0]['sources'][0]
+    for response in (detail, listed):
+        assert response['id'] == sid
+        for key in ('file_id', 'page_number', 'page_basis', 'source_sha256',
+                    'reading_pdf_sha256', 'table_row', 'table_column', 'ooxml_locator'):
+            assert response[key] == src[key], key
+
+
+@pytest.mark.parametrize('form', ['legacy', 'derived_pdf', 'ooxml', 'explicit_merged_null', 'merged_cell'])
+def test_value_correction_frozen_wire_replay_and_changed_body(env, form):
+    """Hash an explicit wire contract independent of future Pydantic defaults."""
+    from uuid import UUID
+    from app.services.rebuild_workflow_service import value_revision
+
+    client, factory, settings, ids, root = env
+    imported = client.post('/api/rebuild/rows/import', json=row_request(ids, source(ids)))
+    assert imported.status_code == 200 and not imported.json()['errors'], imported.text
+    with factory() as session:
+        value = session.scalar(select(RebuildDataValue))
+        vid, revision = str(value.id), value_revision(value)
+
+    # These are the full historical source defaults, not a current model dump.
+    src = dict(file_id=ids.pdf, asset_id=None, source_key=None, source_kind='text',
+               page_number=1, label='Frozen source', table_row=None, table_column=None,
+               quote='fixture quote', estimate_basis=None)
+    if form in ('derived_pdf', 'ooxml'):
+        src.update(file_id=ids.file, **ids.identity)
+        if form == 'ooxml':
+            src.update(page_number=None, page_basis='ooxml', reading_pdf_sha256=None,
+                       ooxml_locator='word/document.xml#body-child[2]/w:tbl[1]')
+    if form == 'explicit_merged_null':
+        src['merged_cell'] = None
+    if form == 'merged_cell':
+        with factory() as session:
+            asset = RebuildVisualAsset(paper_id=UUID(ids.paper), file_id=UUID(ids.pdf),
+                asset_key='frozen-table', asset_type='table', page_numbers=[1],
+                provenance={'table_data': {'columns': ['energy'], 'rows': [['-1.230'], ['']]}})
+            session.add(asset)
+            session.flush()
+            src.update(asset_id=str(asset.id), source_kind='table', table_row=0, table_column=0,
+                merged_cell=dict(version='merged_cell_v1', coordinate_basis='zero_based_data_rows',
+                    merged_group_id='frozen-group', role='anchor', anchor_row=0, anchor_column=0,
+                    row_span=2, column_span=1, cell_content='printed', cell_bbox=None, bbox_basis=None))
+            session.commit()
+    wire = dict(raw_value='-1.230', numeric_value=-1.23, unit='eV', value_type='explicit',
+                precision_digits=3, missing_reason=None, correction_reason='Frozen wire contract',
+                expected_revision=revision, request_id=str(uuid4()), notes=None, source=src)
+    # Canonical serialization is pinned independently of the service helper.
+    expected = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False,
+                                        separators=(',', ':')).encode()).hexdigest()
+    path = '/api/rebuild/values/' + vid
+    if form == 'legacy':
+        # Simulate an already persisted pre-provenance decision. Replaying must
+        # find it before stale-CAS checking and must not append history/sources.
+        historical_wire = deepcopy(wire)
+        historical_wire['expected_revision'] = '0' * 64
+        historical_hash = hashlib.sha256(json.dumps(historical_wire, sort_keys=True,
+            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
+        with factory() as session:
+            value = session.get(RebuildDataValue, UUID(vid))
+            value.conflict = {**(value.conflict or {}), 'correction_requests': [dict(
+                request_id=wire['request_id'], request_fingerprint=historical_hash,
+                actor='fixture-actor', expected_revision='0' * 64)]}
+            session.commit()
+        before = client.get(path).json()
+        baseline = counts(factory)
+        replay = client.put(path, json=historical_wire)
+        assert replay.status_code == 200, replay.text
+        assert replay.json() == before and counts(factory) == baseline
+        assert client.put(path, json={**historical_wire, 'notes': 'changed'}).status_code == 409
+        assert client.get(path).json() == before and counts(factory) == baseline
+        # A fresh ID/CAS still creates a correction with the exact old wire hash.
+        wire['request_id'] = str(uuid4())
+        wire['expected_revision'] = before['value_revision']
+        expected = hashlib.sha256(json.dumps(wire, sort_keys=True, ensure_ascii=False,
+                                            separators=(',', ':')).encode()).hexdigest()
+
+    result = client.put(path, json=wire)
+    assert result.status_code == 200, result.text
+    accepted = result.json()
+    entries = accepted['conflict']['correction_requests']
+    assert entries[-1]['request_fingerprint'] == expected
+    baseline = counts(factory)
+    assert client.put(path, json=wire).json() == accepted
+    assert counts(factory) == baseline
+    changes = [dict(notes='changed'), dict(raw_value='-1.240', numeric_value=-1.24),
+               dict(correction_reason='changed'), dict(expected_revision='f' * 64),
+               dict(source={**src, 'quote': 'different source'})]
+    if form == 'legacy':
+        changes.append(dict(source={**src, 'merged_cell': None}))
+    if form == 'explicit_merged_null':
+        changes.append(dict(source={k: v for k, v in src.items() if k != 'merged_cell'}))
+    if form in ('derived_pdf', 'ooxml'):
+        changes.extend(dict(source={**src, key: replacement}) for key, replacement in [
+            ('source_sha256', '0' * 64), ('reading_pdf_sha256', '0' * 64),
+            ('page_basis', 'source_pdf'), ('ooxml_locator', 'changed-locator')])
+    if form == 'merged_cell':
+        changes.append(dict(source={**src, 'merged_cell': {**src['merged_cell'],
+                                                          'merged_group_id': 'changed-group'}}))
+    for change in changes:
+        rejected = client.put(path, json={**wire, **change})
+        assert rejected.status_code == 409, rejected.text
+        assert rejected.json()['detail'] == 'value_request_id_reused'
+        assert client.get(path).json() == accepted and counts(factory) == baseline

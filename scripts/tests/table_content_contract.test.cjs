@@ -18,6 +18,8 @@ function setup() {
     currentPdfLinks: (file,pages)=>`<a href="/api/rebuild/files/${file}/preview#page=${pages[0]}">Pages ${pages.join(',')}</a>`,
     currentScientificReading:()=>null, renderFigureReadingHtml:()=>'',
   });
+  ctx.window = ctx;
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../../frontend/shared/editable-data-grid.js'), 'utf8'), ctx);
   for (const name of ['visualLabelKey','renderPipeTable','tableBodyContent','tableClipboardText','copyTableOriginal','renderTableBody','tableEntryFromItem','tableEntryFromRecord','groupTableEntries','renderTableGroup']) vm.runInContext(source(name),ctx);
   return ctx;
 }
@@ -47,7 +49,7 @@ test('S13 caption on 71 and body on 72 retain pages, pointers, repeated rows and
     provenance:{table_sources:[{role:'caption',file_id:'si',page_number:71,locator:'bottom'},{role:'body',file_id:'si',page_number:72,locator:'top'}]}};
   const entry=c.tableEntryFromItem({figure:{_currentAsset:asset},text:null});
   const rendered=c.renderTableGroup({key:'s13',records:[entry]});
-  assert(rendered.includes('71,72')); assert(rendered.includes('caption · 第 71 页'));assert(rendered.includes('body · 第 72 页'));
+  assert(rendered.includes('71,72')); assert(rendered.includes('caption · 原件定位 71（未绑定 PDF 物理页）'));assert(rendered.includes('body · 原件定位 72（未绑定 PDF 物理页）'));
   assert.equal((rendered.match(/s 1.00s/g)||[]).length,2);
   const other={...asset,id:'b',page_numbers:[73],context_text:'0.0100\nmissing —'};
   const groups=c.groupTableEntries({tables:[{figure:{_currentAsset:asset}},{figure:{_currentAsset:other}}],remainingTables:[]});

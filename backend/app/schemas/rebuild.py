@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator, field_validator
 
+from app.schemas.merged_cell import MergedCellSource
+
 
 class RebuildSectionSourceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -146,7 +148,7 @@ AnalysisComparisonField = Literal[
 ]
 
 
-class RebuildValueSourceInput(BaseModel):
+class RebuildValueSourceInput(MergedCellSource):
     model_config = ConfigDict(extra="forbid")
 
     file_id: UUID | None = None
@@ -154,12 +156,13 @@ class RebuildValueSourceInput(BaseModel):
     source_key: str | None = Field(default=None, max_length=255)
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
     page_number: int | None = Field(default=None, ge=1, strict=True)
-    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    page_basis: Literal["source_pdf", "derived_pdf", "ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(default=None, max_length=128)
-    table_row: int | None = Field(default=None, ge=0)
-    table_column: int | None = Field(default=None, ge=0)
+    table_row: int | None = Field(default=None, ge=0, strict=True)
+    table_column: int | None = Field(default=None, ge=0, strict=True)
     quote: str | None = None
     estimate_basis: str | None = None
 
@@ -308,6 +311,9 @@ class RebuildVisualAssetRequest(BaseModel):
     subfigure_label: str | None = Field(default=None, max_length=64)
     caption: str | None = None
     page_numbers: list[int] = Field(default_factory=list)
+    page_basis: Literal["ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
+    source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     bbox: dict[str, Any] | None = None
     image_path: str | None = None
     x_axis_unit: str | None = Field(default=None, max_length=64)
@@ -467,7 +473,7 @@ class RebuildQueueAttemptRequest(BaseModel):
     manual_recheck: bool = False
 
 
-class RebuildSourceIdentity(BaseModel):
+class RebuildSourceIdentity(MergedCellSource):
     """Complete replacement; omitted fields cannot silently clear provenance."""
     model_config = ConfigDict(extra="forbid")
 
@@ -475,7 +481,8 @@ class RebuildSourceIdentity(BaseModel):
     asset_id: UUID | None
     source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
     page_number: int | None = Field(ge=1, le=2147483647, strict=True)
-    page_basis: Literal["source_pdf", "derived_pdf"] | None = None
+    page_basis: Literal["source_pdf", "derived_pdf", "ooxml"] | None = None
+    ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)
     source_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     reading_pdf_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     label: str | None = Field(max_length=128)
@@ -493,6 +500,16 @@ class RebuildSourceCorrectionRequest(BaseModel):
     request_id: UUID
     correction_reason: str = Field(min_length=1, max_length=4000)
     source: RebuildSourceIdentity
+
+
+class RebuildSourceAssetBindingRequest(BaseModel):
+    """Asset-only repair: callers cannot replace legacy source coordinates."""
+    model_config = ConfigDict(extra="forbid")
+    paper_id: UUID
+    expected_revision: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_id: UUID
+    target_asset_id: UUID
+    reason: str = Field(min_length=1, max_length=4000)
 
 
 class RebuildSourceLifecycleRequest(BaseModel):
@@ -531,6 +548,7 @@ class RebuildDedupApplyRequest(RebuildDedupPreviewRequest):
 class RebuildAssetMetadataChanges(BaseModel):
     model_config = ConfigDict(extra="forbid")
     page_numbers: list[Annotated[int, Field(strict=True, ge=1)]] | None = Field(default=None, min_length=1, max_length=1000)
+    material_mapping: dict[str, Any] | None = None
     y_axis_unit: Annotated[str, Field(strict=True, max_length=64)] | None = None
 
     @model_validator(mode="after")

@@ -194,12 +194,16 @@ function sourcePdfLink(row, source) {
   if (hasFileId && !(typeof source.file_id === "string" && uuid.test(source.file_id))) {
     return '<span class="rebuild-error">来源文件不可用：文件标注无效</span>';
   }
+  if (source.page_basis === "ooxml" || source.page_basis === "docx" ||
+      [source.page_identity,source.provenance?.page_identity,source.reading_identity].some(value => ["ooxml","docx"].includes(value?.page_basis))) {
+    return `<span>${escapeHtml(EditableDataGrid.sourcePageLabel(source, ""))}</span>${hasFileId ? ` <a href="/api/rebuild/files/${encodeURIComponent(source.file_id)}/download" download>下载 DOCX 原件</a>` : ""}`;
+  }
   const page = validSourcePage(source.page_number);
   const path = hasFileId ? `/api/rebuild/files/${source.file_id}/preview` :
     `/api/rebuild/papers/${encodeURIComponent(row.paper_id)}/source-pdf/preview`;
   const locator = page === null ? "" : `#page=${page}`;
   const label = (hasFileId ? "查看来源 PDF" : "查看正文 PDF") +
-    (page === null ? "（页码未标注）" : ` 第 ${page} 页`) +
+    (page === null ? "（页码未标注）" : EditableDataGrid.isPreviewPosition(source) ? ` 预览位置 ${page}（非原件物理页）` : ` 第 ${page} 页`) +
     (hasFileId ? "" : "（来源文件未标注）");
   return `<a class="rebuild-source-pdf-link" href="${escapeHtml(path + locator)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
 }
@@ -213,8 +217,8 @@ function showSource(rowId, fieldName) {
   const sourceItems = sources.map((source) => `
     <div class="rebuild-panel" style="box-shadow:none">
       ${value.preferred_source_id && source.id === value.preferred_source_id ? '<span class="rebuild-tag">当前首选来源</span>' : ""}
-      <div>来源 ID：${escapeHtml(source.id)}</div>
-      <div><strong>${escapeHtml(source.label || source.source_kind)}</strong> · ${validSourcePage(source.page_number) === null ? "页码未标注" : `第 ${validSourcePage(source.page_number)} 页`}</div>
+      ${EditableDataGrid.sourceTraceHtml(source)}
+      <div><strong>${escapeHtml(source.label || source.source_kind)}</strong> · ${escapeHtml(EditableDataGrid.sourcePageLabel(source, ""))}</div>
       ${source.quote ? `<p>${escapeHtml(source.quote)}</p>` : ""}
       ${source.estimate_basis ? `<p><strong>估读依据：</strong>${escapeHtml(source.estimate_basis)}</p>` : ""}
       ${source.asset_id ? `
@@ -226,7 +230,6 @@ function showSource(rowId, fieldName) {
         <img src="/api/rebuild/assets/${escapeHtml(encodeURIComponent(source.asset_id))}" alt="${escapeHtml(source.label || "图表证据")}" loading="lazy" style="max-width:100%;max-height:220px;object-fit:contain;border:1px solid var(--border,#e2e8f0);border-radius:8px;background:#fff">
       ` : ""}
       <p>${sourcePdfLink(row, source)}</p>
-      ${source.table_row != null ? `<p>表格位置：行 ${escapeHtml(source.table_row)}，列 ${escapeHtml(source.table_column ?? "?")}</p>` : ""}
     </div>
   `).join("");
   $("sourceBody").innerHTML = `
@@ -285,6 +288,7 @@ async function submitCorrection(event) {
   const sourceKind = $("correctionSourceKind").value.trim() || "text";
   const pageNumber = $("correctionPageNumber").value;
   const quote = $("correctionQuote").value.trim() || null;
+  const originalSource = value.sources?.find(item => item.id === value.preferred_source_id) || value.sources?.[0];
   const payload = {
     raw_value: valueType === "missing" ? null : ($("correctionRawValue").value.trim() || null),
     numeric_value: $("correctionNumericValue").value === "" ? null : Number($("correctionNumericValue").value),
@@ -294,6 +298,7 @@ async function submitCorrection(event) {
     missing_reason: valueType === "missing" ? ($("correctionMissingReason").value.trim() || "missing") : null,
     correction_reason: $("correctionReason").value.trim() || null,
     source: {
+      ...(originalSource?.page_basis === "ooxml" ? Object.fromEntries(["page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator"].map(key => [key, originalSource[key]])) : {}),
       file_id: $("correctionSourceFile").value || null,
       source_kind: sourceKind,
       page_number: pageNumber ? Number(pageNumber) : null,

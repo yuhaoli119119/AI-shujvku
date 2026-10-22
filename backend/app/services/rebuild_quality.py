@@ -258,6 +258,18 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             issue("error", "physical_page_invalid", kind, record_id, "Read the source PDF and supply its actual positive physical page.", file_id=str(file_id) if file_id else None)
         elif file_id in physical and physical[file_id]["physical_pages"] is not None and page > physical[file_id]["physical_pages"]:
             issue("error", "physical_page_out_of_range", kind, record_id, "Correct the source file/page from the actual PDF.", file_id=str(file_id), page=page)
+    def ooxml_check(file_id, identity, kind, record_id, page_number=None, pages=None):
+        if not isinstance(identity, dict) or identity.get("page_basis") != "ooxml":
+            return False
+        from app.services.rebuild_file_preview import validate_page_identity
+        try:
+            if file_id not in file_map or pages:
+                raise RebuildWorkflowError("ooxml_identity_owner_or_page_mismatch")
+            validate_page_identity(file_map[file_id], settings, {**identity, "page_number": page_number})
+        except (RebuildWorkflowError, OSError) as exc:
+            issue("error", "ooxml_identity_unverified", kind, record_id,
+                  "Verify same-file DOCX bytes/hash and exact OOXML locator; do not invent physical pages.", reason=str(exc))
+        return True  # OOXML failures are location failures, never missing PDF pages.
     if any(file.role == "main" for file in files) and lifecycle["preferred_main_id"] is None:
         issue("unknown", "preferred_main_source_ambiguous", "paper", paper_id,
               "Select the preferred active main through the authenticated CAS file lifecycle endpoint; do not infer the preferred source from insertion order.")
@@ -272,7 +284,9 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             issue("error" if asset.file_id else "unknown", "asset_file_identity_unverified", "asset", asset.id,
                   "Bind the asset to this paper's actual registered file with evidence.", file_id=str(asset.file_id) if asset.file_id else None)
         pages = asset.page_numbers or []
-        if not isinstance(pages, list) or not pages:
+        if ooxml_check(asset.file_id, (asset.provenance or {}).get("page_identity"), "asset", asset.id, pages=pages):
+            pass
+        elif not isinstance(pages, list) or not pages:
             issue("unknown", "asset_physical_pages_unknown", "asset", asset.id, "Read the source and record actual physical pages.")
         else:
             for page in pages: page_check(asset.file_id, page, "asset", asset.id)
@@ -305,7 +319,9 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
                 issue("warning", "source_page_outside_asset_pages", "source", source.id, "Check caption/body cross-page locators against the original PDF; do not rewrite automatically.")
         if not file_id:
             issue("unknown", "source_file_unknown", "source", source.id, "Locate the original registered file; a quote alone does not establish file identity.")
-        if source.page_number is None and not source.asset_id:
+        from app.services.rebuild_file_preview import stored_source_identity
+        is_ooxml = ooxml_check(file_id, stored_source_identity(source), "source", source.id, page_number=source.page_number)
+        if source.page_number is None and not source.asset_id and not is_ooxml:
             issue("unknown", "source_physical_page_unknown", "source", source.id, "Record an actual physical page once verified.")
     for value in values:
         if value.row_id not in row_map or value.paper_id != paper_id:
@@ -501,6 +517,13 @@ def producer_contract():
                 "continuation": "Use asset_mechanics.scope.next_asset_offset and expected_revision=output_revision; asset_limit is at most 32. Existing offset/limit paginate legacy issues only.",
                 "scope": "Independent per-slice status/issues; does not change stored-integrity counts or formal acceptance rules. Outside-slice, budget-limited and unknown records remain unverified. No scientific visual completeness claim."},
             "figures": "Keep whole figure/subfigure identities in the same paper/file with actual physical pages and explicit labels; no cross-file inheritance.",
+            "pageless_docx": {"page_basis": "ooxml", "page_number": None, "page_numbers": [],
+                "ooxml_locator": "word/document.xml#body-child[2]/w:tbl[1]",
+                "source_sha256": "exact registered DOCX SHA256, checked against original bytes",
+                "locator_rule": "1-based body-child and w:element indices; first element selects within the body child including itself, later steps select direct XML children. Target must exist in word/document.xml. DOCX only; no docProps page inference or borrowed PDF pages.",
+                "storage": "asset provenance.page_identity and value conflict.source_page_identities; original download, no physical-page link; does not certify scientific acceptance"},
+            "asset_metadata_cas": {"fields": ["page_numbers", "y_axis_unit", "material_mapping"],
+                "rule": "Exactly one field per expected_revision/request_id correction. material_mapping is a nonempty bounded JSON object; full before/after snapshots, semantic changed_fields only, immutable audit and same-body replay. Pageless OOXML assets cannot acquire PDF pages through metadata CAS."},
             "values": "One scientific fact per row identity/condition; source row/value/paper/asset/file must agree. Unreported items use missing_reason, not invented required numbers.",
             "sections": "Follow section_write_contract for complete original text, separate explanation and exact source/hash/pages. Unknown legacy coverage stays unknown.",
             "completion": "Use quality endpoint to identify errors/warnings/unknowns. Fix only authorized evidence-backed gaps; incomplete extraction remains partial. No counts, HTTP200 or model completion proves acceptance."}

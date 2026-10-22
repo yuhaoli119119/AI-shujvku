@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.db.models import Paper, RebuildDataRow, RebuildDataValue, RebuildValueSource
-from app.schemas.rebuild import RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest
+from app.schemas.rebuild import (
+    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSourceAssetBindingRequest,
+)
 from app.services.rebuild_source_lifecycle import source_is_current
 from app.services.rebuild_workflow_service import (
     RebuildWorkflowError, _canonical_json, _source_key, _source_is_sufficient,
@@ -45,17 +47,24 @@ def source_state(session: Session, source_id: UUID):
 
 def source_correction_contract():
     return {
+        'merged_cell': 'Optional merged_cell_v1: coordinate_basis=zero_based_data_rows; merged_group_id, role anchor/continuation, anchor_row/column, row_span/column_span, cell_content printed/blank; optional cell_bbox with bbox_basis=source_page_normalized. Requires structured table asset bounds. Blank continuation cannot supply raw/numeric values. Existing metadata must be explicitly replaced (null explicitly clears); omission is rejected. Stored in value.conflict.source_merged_cells, source-key/revision/history bound; no migration or legacy inference.',
         'read': 'GET /api/rebuild/sources/{source_id}',
         'write': 'PUT /api/rebuild/sources/{source_id}',
         'authentication': 'workbench session; writes also require same-origin and X-CSRF-Token',
+        'asset_binding': {
+            'write': 'POST /api/rebuild/sources/{source_id}/asset-binding',
+            'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision',
+                     'request_id': 'stable UUID', 'target_asset_id': 'same-paper same-file table asset UUID',
+                     'reason': 'mandatory nonblank reason'},
+            'semantics': 'Current table source only. Change asset_id and derived source_key only; preserve all coordinates exactly, including legacy nulls. Uses correction CAS, replay and append-only history; no scientific acceptance implied.'},
         'lifecycle': {'write': 'POST /api/rebuild/sources/{source_id}/lifecycle',
             'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision',
                      'request_id': 'stable UUID', 'action': 'deactivate', 'reason': 'mandatory reason'},
             'semantics': 'Append-only inactive declaration; preserve original source identity and quote, associations and scientific values. Current sources excludes inactive; historical_sources and source GET preserve it. Retiring preferred clears pointer; no automatic alternative selection. Last evidence becomes no_current_sources, not a missing scientific value. No restore operation. Same actor/body replay is read-only; stale revision or request reuse is 409. Inactive identity cannot be corrected or reimported; dedup requires separate explicit review.'},
         'body': {'paper_id': 'owning paper UUID', 'expected_revision': 'fresh source_revision from GET',
                  'request_id': 'new UUID; persist exact body for retries', 'correction_reason': 'mandatory nonblank reason',
-                 'source': 'complete replacement: file_id, asset_id, source_kind, page_number, page_basis, source_sha256, reading_pdf_sha256, label, table_row, table_column, quote, estimate_basis (legacy identity keys required; nullable except file_id and source_kind; page_basis/source_sha256/reading_pdf_sha256 optional for native PDF or null-page XML, required for a DOCX page)'},
-        'rules': ['page_number is 1-based in page_basis: source_pdf for original PDF, derived_pdf for registered DOCX reading PDF; derived writes require source_sha256 and reading_pdf_sha256; null page keeps XML locators',
+                 'source': 'complete replacement: file_id, asset_id, source_kind, page_number, page_basis, source_sha256, reading_pdf_sha256, label, table_row, table_column, quote, estimate_basis, optional ooxml_locator (legacy identity keys required; nullable except file_id and source_kind; page_basis/source_sha256/reading_pdf_sha256 optional for native PDF or null-page XML, required for a DOCX page)'},
+        'rules': ['page_number is 1-based in page_basis: source_pdf for original PDF, derived_pdf for registered DOCX reading PDF; derived writes require source_sha256 and reading_pdf_sha256; page_basis=ooxml requires null page_number, exact ooxml_locator and matching source_sha256 on a registered DOCX; original file download exposes the XML source, never a fabricated physical PDF page',
                   'table coordinates are zero-based nonnegative integers, both required for table kind; other kinds must use null',
                   'file and asset must belong to paper; asset.file_id must equal file_id',
                   'source_key is recomputed from all identity fields; collision is 409 without merge or deletion',
@@ -66,13 +75,12 @@ def source_correction_contract():
     }
 
 
-def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorrectionRequest,
-                   settings: Settings, *, actor: str):
+def _lock_source(session: Session, source_id: UUID, paper_id: UUID):
     # Same lock order as imports/value/row edits. Refresh ORM objects after waiting.
-    paper_id = session.scalar(select(RebuildValueSource.paper_id).where(RebuildValueSource.id == source_id))
-    if paper_id is None:
+    owner_id = session.scalar(select(RebuildValueSource.paper_id).where(RebuildValueSource.id == source_id))
+    if owner_id is None:
         raise RebuildWorkflowError('source_not_found')
-    if paper_id != payload.paper_id:
+    if owner_id != paper_id:
         raise RebuildWorkflowError('source_paper_mismatch')
     session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update())
     value_id = session.scalar(select(RebuildValueSource.value_id).where(RebuildValueSource.id == source_id))
@@ -83,6 +91,72 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     row = session.get(RebuildDataRow, source.row_id)
     if value is None or row is None or (value.paper_id, value.row_id, row.paper_id) != (paper_id, source.row_id, paper_id):
         raise RebuildWorkflowError('source_owner_inconsistent')
+    return source, value
+
+
+def bind_source_asset(session: Session, source_id: UUID, payload: RebuildSourceAssetBindingRequest,
+                      *, actor: str):
+    source, value = _lock_source(session, source_id, payload.paper_id)
+    if not actor or not actor.strip():
+        raise RebuildWorkflowError('source_actor_required')
+    fingerprint = hashlib.sha256(_canonical_json(payload.model_dump(mode='json')).encode()).hexdigest()
+    state = source_state(session, source_id)
+    conflict = dict(value.conflict or {})
+    for entry in [*conflict.get('source_corrections', []), *conflict.get('source_lifecycle', [])]:
+        if entry.get('request_id') == str(payload.request_id):
+            if (entry.get('request_fingerprint'), entry.get('actor'), entry.get('source_id')) != (fingerprint, actor, str(source_id)):
+                raise RebuildWorkflowError('source_request_id_reused')
+            return state
+    if state['source_revision'] != payload.expected_revision:
+        raise RebuildWorkflowError('source_revision_conflict')
+    if not source_is_current(value, source.id):
+        raise RebuildWorkflowError('source_inactive')
+    if not payload.reason.strip() or '\x00' in payload.reason:
+        raise RebuildWorkflowError('source_asset_binding_reason_required')
+    if source.source_kind != 'table':
+        raise RebuildWorkflowError('source_asset_binding_requires_table_source')
+    file = get_file(session, source.file_id)
+    if file.paper_id != payload.paper_id:
+        raise RebuildWorkflowError('source_file_belongs_to_other_paper')
+    asset = get_asset(session, payload.target_asset_id)
+    if asset.paper_id != payload.paper_id:
+        raise RebuildWorkflowError('source_asset_belongs_to_other_paper')
+    if asset.file_id != file.id:
+        raise RebuildWorkflowError('source_asset_file_mismatch')
+    if asset.asset_type != 'table':
+        raise RebuildWorkflowError('source_asset_binding_requires_table_asset')
+    data = {**serialize_source(source), 'asset_id': str(asset.id)}
+    key = _source_key(data)
+    for other in session.scalars(select(RebuildValueSource).where(RebuildValueSource.value_id == value.id,
+                                                                  RebuildValueSource.id != source.id)):
+        if other.source_key == key or _source_key(serialize_source(other)) == key:
+            raise RebuildWorkflowError('source_key_conflict')
+    from app.services.rebuild_merged_cell import validate_source_cell
+    try:
+        validate_source_cell({**serialize_source(source), 'asset_id': str(asset.id)}, asset)
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
+    before = _snapshot(source)
+    # No identity normalization or physical-page revalidation: this operation
+    # preserves every stored locator, including legacy null coordinates.
+    source.asset_id = asset.id
+    source.source_key = key
+    conflict['source_corrections'] = [*conflict.get('source_corrections', []), {
+        'source_id': str(source.id), 'value_id': str(value.id), 'paper_id': str(payload.paper_id),
+        'request_id': str(payload.request_id), 'request_fingerprint': fingerprint,
+        'expected_revision': payload.expected_revision, 'before': before, 'after': _snapshot(source),
+        'actor': actor, 'reason': payload.reason, 'action': 'asset_binding',
+        'recorded_at': datetime.now(timezone.utc).isoformat(),
+    }]
+    value.conflict = conflict
+    session.flush()
+    return source_state(session, source_id)
+
+
+def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorrectionRequest,
+                   settings: Settings, *, actor: str):
+    source, value = _lock_source(session, source_id, payload.paper_id)
+    paper_id = payload.paper_id
     if not actor or not actor.strip():
         raise RebuildWorkflowError('source_actor_required')
     request_body = payload.model_dump(mode='json')
@@ -91,6 +165,10 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     if all(request_body['source'].get(k) is None for k in ('page_basis', 'source_sha256', 'reading_pdf_sha256')):
         for k in ('page_basis', 'source_sha256', 'reading_pdf_sha256'):
             request_body['source'].pop(k, None)
+    if request_body["source"].get("ooxml_locator") is None:
+        request_body["source"].pop("ooxml_locator", None)
+    if "merged_cell" not in payload.source.model_fields_set:
+        request_body["source"].pop("merged_cell", None)
     fingerprint = hashlib.sha256(_canonical_json(request_body).encode()).hexdigest()
     state = source_state(session, source_id)
     for entry in [*((value.conflict or {}).get('source_corrections') or []),
@@ -119,6 +197,14 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
             raise RebuildWorkflowError('source_asset_belongs_to_other_paper')
         if asset.file_id != file.id:
             raise RebuildWorkflowError('source_asset_file_mismatch')
+    from app.services.rebuild_merged_cell import validate_source_cell, validate_merged_value, store_merged_cell
+    if state.get('merged_cell') is not None and 'merged_cell' not in payload.source.model_fields_set:
+        raise RebuildWorkflowError('merged_cell_replacement_required')
+    try:
+        validate_source_cell(data, get_asset(session, data['asset_id']) if data['asset_id'] else None)
+        validate_merged_value({'sources': [data], 'raw_value': value.raw_value, 'numeric_value': value.numeric_value})
+    except ValueError as exc:
+        raise RebuildWorkflowError(str(exc)) from exc
     coords = (data['table_row'], data['table_column'])
     if data['source_kind'] == 'table':
         if any(c is None for c in coords):
@@ -143,10 +229,11 @@ def correct_source(session: Session, source_id: UUID, payload: RebuildSourceCorr
     before = _snapshot(source)
     # No mutation before all preflight checks. Endpoint owns commit/rollback.
     for field, val in data.items():
-        if field not in PAGE_IDENTITY_FIELDS:
+        if field not in (*PAGE_IDENTITY_FIELDS, "merged_cell"):
             setattr(source, field, val)
     source.source_key = key
     store_source_identity(value, source, data)
+    store_merged_cell(value, source, data)
     conflict = dict(value.conflict or {})
     conflict['source_corrections'] = [*(conflict.get('source_corrections') or []), {
         'source_id': str(source.id), 'value_id': str(value.id), 'paper_id': str(paper_id),

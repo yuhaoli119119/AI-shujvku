@@ -127,6 +127,21 @@ def processing_statuses(session, paper_ids, include_attachments=True):
                 for file in status['files']:
                     if file['file_id'] in active_scope:
                         file.update(status=status['status'], label=LABELS[status['status']])
+            if latest_job and (latest_job.payload or {}).get('parse_contract') == 'ordinary_parse_v1':
+                from app.services.ordinary_parsing import progress_summary
+                plan = (latest_job.progress or {}).get('file_plan', {})
+                status['file_progress'] = progress_summary(plan)
+                for file in status['files']:
+                    item = plan.get(file['file_id'])
+                    if not item:
+                        continue
+                    states = [part['status'] for part in item['stages'].values()]
+                    state = ('parsed' if all(s == 'completed' for s in states) else
+                             'parsing' if 'running' in states and latest_job.status == 'running' else
+                             'partial' if any(s in ('completed', 'partial') for s in states) else
+                             'failed' if 'failed' in states else 'unparsed')
+                    file.update(status=state, label=LABELS[state], stages=item['stages'],
+                                reason=item.get('error') or '; '.join(s.get('reason') or '' for s in item['stages'].values() if s.get('reason')))
             apply_file_status(status)
             if lifecycle['ambiguous_main']:
                 status.update(status='needs_check', label=LABELS['needs_check'],

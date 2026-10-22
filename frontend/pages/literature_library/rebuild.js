@@ -10,6 +10,8 @@ const state = {
   selectionSeq: 0,
   files: null,
   uploadIntent: null,
+  parseSelection: null,
+  parseRequest: null,
 };
 
 const initialPaperId = new URLSearchParams(location.search).get("paper_id");
@@ -52,7 +54,9 @@ async function api(path, options) {
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
     try { const payload = await response.json(); detail = payload.detail || detail; } catch (_) {}
-    throw new Error(String(detail));
+    const error = new Error(String(detail));
+    error.httpStatus = response.status;
+    throw error;
   }
   return response.json();
 }
@@ -103,6 +107,7 @@ function markActiveResult() {
 async function selectPaper(id) {
   if (!id) return;
   const seq = ++state.selectionSeq;
+  if (state.selectedId !== id) { state.parseSelection = null; state.parseRequest = null; }
   state.selectedId = id;
   state.files = null;
   stopPolling();
@@ -158,9 +163,18 @@ function renderSelection() {
       <span class="rebuild-count"><strong>${count(paper, "assets")}</strong> 图表对象</span>
       <span class="rebuild-count"><strong>${count(paper, "rows")}</strong> 数据行</span>
     </div>
+    ${parseFileSelectionMarkup()}
     ${fileHistoryMarkup()}
     ${paper.has_pdf ? `<div class="rebuild-step-actions"><a class="rebuild-btn ghost" href="/api/rebuild/papers/${esc(paper.id)}/source-pdf/preview" target="_blank" rel="noopener">预览源 PDF</a></div>` : ""}
   `;
+}
+
+function parseFileSelectionMarkup() {
+  const files = (state.files?.items || []).filter(f => f.preferred && f.lifecycle_status !== 'superseded');
+  if (!files.length) return '<p>请先关联正文与补充材料。</p>';
+  if (!state.parseSelection) state.parseSelection = new Set(files.map(f => f.id));
+  const busy = state.job && ['running','dispatching','queued'].includes(state.job.status);
+  return `<fieldset><legend>本次解析文件</legend>${files.map(f => `<label style="display:block"><input type="checkbox" data-parse-file="${esc(f.id)}" ${state.parseSelection.has(f.id) ? 'checked' : ''} ${busy ? 'disabled' : ''}> ${f.role === 'main' ? '正文' : 'SI'} · ${esc(f.original_filename)}</label>`).join('')}<p>自动保留已有成果；局部失败可继续。科学精修与独立审核可稍后进行。</p></fieldset>`;
 }
 
 function fileHistoryMarkup() {
@@ -307,7 +321,7 @@ function renderJobArea() {
   const placeholder = $("aiPlaceholder");
   const paper = state.selected;
   const selector = $("aiExtractModel");
-  const pending = state.job && !["not_started", "completed"].includes(state.job.status);
+  const pending = state.job && ["queued", "dispatching", "running"].includes(state.job.status);
   if (selector) {
     selector.disabled = !paper || Boolean(pending);
     if (pending && ["gpt-6-luna", "cn:deepseek-v4.1-flash"].includes(state.job.model)) selector.value = state.job.model;
@@ -331,7 +345,10 @@ function renderJobArea() {
     btn.textContent = "让 AI 提取这篇文献";
   } else if (job.status === "completed") {
     btn.disabled = false;
-    btn.textContent = "重新提取";
+    btn.textContent = "继续未完成文件";
+  } else if (job.can_retry) {
+    btn.disabled = false;
+    btn.textContent = "保留成果并重试";
   } else {
     btn.disabled = false;
     btn.textContent = "查看当前任务";
@@ -389,13 +406,20 @@ function renderJobStatus() {
     statusArea.innerHTML = `<div class="ai-status-running">${esc(label)}</div>`;
     resultArea.hidden = true;
   }
+  if (job.file_progress) {
+    const fp = job.file_progress;
+    const names = {read:'读取原文',assets:'图表',rows:'数据'};
+    const labels = {pending:'待处理',running:'处理中',completed:'完成',partial:'部分完成',failed:'可重试'};
+    statusArea.innerHTML += `<div role="status"><p>文件 ${fp.completed_files}/${fp.total_files} 完成 · 阶段 ${fp.finished_stages}/${fp.total_stages} 已处理</p>${fp.files.map(f => `<p><strong>${f.role === 'main' ? '正文' : 'SI'} · ${esc(f.name)}</strong><br>${Object.entries(f.stages).map(([k,v]) => `${names[k]}：${labels[v.status] || esc(v.status)}${v.reason ? '（'+esc(v.reason)+'）' : ''}`).join(' · ')}</p>`).join('')}</div>`;
+    if (job.status === 'completed' && fp.content_status === 'partial') statusArea.innerHTML += '<p>已有成果可查看。部分文件或阶段尚未完成，可保留成果继续；不需要逐格审批。</p>';
+  }
   if (state.selected) statusArea.innerHTML = paperProcessingMarkup(state.selected) + statusArea.innerHTML;
 }
 
 async function startAiExtract() {
   const paper = state.selected;
   if (!paper) { renderStatus("请先选择论文", "error"); return; }
-  if (state.job && ["running", "queued", "dispatching", "failed"].includes(state.job.status)) {
+  if (state.job && (["running", "queued", "dispatching"].includes(state.job.status) || (state.job.status === "failed" && !state.job.can_retry))) {
     await pollJobStatus(paper.id);
     return;
   }
@@ -405,6 +429,9 @@ async function startAiExtract() {
     renderStatus("页面已更新，请刷新后选择提取模型与模式，再启动提取。", "error");
     return;
   }
+  const fileIds = [...(state.parseSelection || [])];
+  if (!fileIds.length) { renderStatus("请选择至少一个正文或 SI 文件", "error"); return; }
+  const previousJob = state.job;
   const btn = $("aiExtractBtn");
   btn.disabled = true;
   btn.textContent = "正在派发…";
@@ -417,7 +444,15 @@ async function startAiExtract() {
   selector.disabled = true;
 
   try {
-    const job = await api(`/api/rebuild/papers/${paper.id}/ai-extract/jobs`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({model}) });
+    const retry = Boolean(state.job && ['completed','failed'].includes(state.job.status));
+    const scope = JSON.stringify({model, file_ids:fileIds, retry});
+    const key = 'ordinary-parse-request:' + paper.id;
+    let intent;
+    try { intent = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch (_) {}
+    if (!intent || intent.scope !== scope) intent = {scope, request_id:crypto.randomUUID()};
+    sessionStorage.setItem(key, JSON.stringify(intent));
+    const job = await api(`/api/rebuild/papers/${paper.id}/ai-extract/jobs`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({model, file_ids:fileIds, retry, request_id:intent.request_id}) });
+    if (job.status === 'completed' || job.status === 'failed') sessionStorage.removeItem(key);
     if (state.selectedId !== paper.id) return;
     state.job = job;
     if (job.processing_status && state.selected && state.selected.id === state.selectedId) {
@@ -431,6 +466,12 @@ async function startAiExtract() {
     }
   } catch (error) {
     if (state.selectedId !== paper.id) return;
+    if (error.httpStatus && error.httpStatus < 500) {
+      state.job = previousJob;
+      renderStatus(`尚未启动：${error.message}`, "error");
+      renderJobStatus(); renderJobArea();
+      return;
+    }
     state.job = {status:"dispatching",phase:"needs_check",needs_check:true,model,
       dispatch_mode:model === "gpt-6-luna" ? "codex_web_ordinary" : "codex_web_target"};
     renderStatus(`派发响应未确认：${error.message}。请先查看当前任务。`, "error");
@@ -464,6 +505,7 @@ async function pollJobStatus(paperId) {
     renderJobArea();
     if (job.needs_attention) { stopPolling(); return; }
     if (job.status === "completed" || job.status === "failed") {
+      sessionStorage.removeItem("ordinary-parse-request:" + paperId);
       stopPolling();
       await selectPaper(paperId);
     }
@@ -539,6 +581,11 @@ document.addEventListener("DOMContentLoaded", () => {
   $("copyPackage").addEventListener("click", copyWorkPackage);
   $("uploadForm").addEventListener("submit", uploadFile);
   $("aiExtractBtn").addEventListener("click", startAiExtract);
+  $("selectedPaper").addEventListener("change", event => {
+    const fid = event.target.dataset.parseFile;
+    if (!fid || !state.parseSelection) return;
+    if (event.target.checked) state.parseSelection.add(fid); else state.parseSelection.delete(fid);
+  });
   renderSteps();
   renderJobArea();
   loadPapers();

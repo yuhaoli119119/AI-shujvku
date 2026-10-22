@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.db.models import Paper, WorkflowJob
+from app.db.models import Paper, WorkflowJob, RebuildPaperFile
 from app.main import app
 from app.security.session_auth import SessionState
 from app.services.ai_extract_service import JOB_TYPE
@@ -30,6 +30,17 @@ def _make_paper(session) -> Paper:
         paper_code="A9999",
     )
     session.add(paper)
+    session.flush()
+    from app.config import get_settings
+    import fitz, hashlib
+    path = get_settings().storage_root / 'pdf/test.pdf'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        with fitz.open() as document:
+            document.new_page().insert_text((30,40), 'Synthetic ordinary extraction fixture')
+            document.save(path)
+    session.add(RebuildPaperFile(paper_id=paper.id, role='main', storage_path='pdf/test.pdf', original_filename='test.pdf',
+        sha256=hashlib.sha256(path.read_bytes()).hexdigest(), file_size=path.stat().st_size))
     session.commit()
     return paper
 

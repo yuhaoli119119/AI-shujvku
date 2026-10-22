@@ -122,56 +122,18 @@ def _build_prompt(
         f"table for paper_id={paper_id}. Only process this paper."
     )
 
-    prompt = f"""# AI 文献提取任务（paper_id={paper_id}）
-
-## 论文信息
-- paper_id: {paper_id}
-- 编号: {paper_code}
-- 标题: {title}
-- DOI: {paper.doi or "(无)"}
-- 期刊: {paper.journal or "(无)"}
-
-## 源 PDF
-- {'路径: ' + pdf_path if pdf_path else '未关联源 PDF；请先通过工作包接口查看已关联文件。'}
-- 如果有 SI PDF，也在工作包中列出。
-
-## 工作包地址（分段读取，不把首包当全量）
-GET {origin}/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25
-先按stage_index和当前contract_refs读有限包及单类合同；必要时读{work_package_url}?view=compact的pages索引。
-rows/assets/sections/legacy_tables续读至has_more=false，output_revision须一致；409后重新只读收集，不混修订。
-保留已存正确legacy markdown；view=full仍需分页。按file/physical page复用text-pages/render-page缓存，章节原文不截断。
-
-## 分段提取与检查
-按producer_contract.staged_checks从来源→清单→补项→核对→交接；只读相关合同/缺项，核实原PDF/SI后显式保存范围与绑定。仅列原文明确对象/材料条件并精确链接输出，不造组合；图/表/章节分别核对。未报告附范围/方法，未知不猜；核对实际回执及输出，partial/unknown先恢复。stale重核，模型完成/计数/空errors不等于成功；元数据不代表全篇或科学通过，不启动任务。
-
-## 写入口（有界小批，逐项核对回执）
-1. 图表对象写入: POST {origin}/api/rebuild/papers/{paper_id}/assets/import
-2. 图表裁图: POST {origin}/api/rebuild/papers/{paper_id}/assets/crop
-3. 数据行先预检查（不保存）: POST {origin}/api/rebuild/rows/import/preflight；实际写入: POST {origin}/api/rebuild/rows/import
-4. 章节写入: POST {origin}/api/rebuild/papers/{paper_id}/sections/import（工作台会话 + X-CSRF-Token；按 section_write_contract）
-预检查与导入同体/鉴权/CSRF，模拟回滚、不占ID，结果仅当时有效。正式回执逐项检查outcome/summary/complete/results/errors；pending/conflict可能已存。
-recovery仅建议：先读回canonical身份/完整condition/来源，明确修正失败项后新ID补交；冲突/待定/不确定身份须人工核实，不覆盖或重建。未知结果严格原体原request_id查回。
-同篇最多200行，按来源小批；保存精确请求字节/request_id/task_id，HTTP200非全成功，不并行写同篇或扩并发。
-
-## 工作要求（严格遵守）
-1. **只处理 paper_id={paper_id} 这一篇论文**，不得跨论文合并来源。
-2. **不启动旧解析链**（不要调用 /api/papers/*/parse 或 docling 等接口）。
-3. **不改数据库 schema**；只通过上述写入口写入章节、图表对象和数据行。
-4. **不删除任何已有数据**。
-5. **逐图解释**：从真实 PDF 裁图，保留页码与来源。短 explanation 仅补充；完整结果用 assets/import 或 crop 的 reading_explanation 对象保存：summary_zh、detailed_explanation_zh、subfigures（label/description/methods/findings）、evidence_locators（自身 file_id、page、quote；visual 可用 visual_observation）、uncertainties_zh。只写已核实内容，缺项留待补，禁止固定句冒充详解；不覆盖旧 PaperFigure 或移植不明来源解读。
-6. **每个数值必须有来源**：标注页码、表号/图号、或引文；无法确定来源的留空。
-7. **缺失留空**：不要编造数据；缺失字段写 missing_reason 说明原因。
-8. **不同条件分行**：同一材料在不同测试条件下的数据应分成不同的数据行。
-9. **实验与 DFT 分开**：data_type 分别用 experimental 和 dft。
-10. **按反应模板填表**：SRR / HER / OER / ORR / CO2RR，每个反应的专属字段按模板填写；读取 producer_contract.field_semantics（templates.field_semantics 同源）区分字段适用/不适用及未知项，允许合法自定义字段，不猜对象或步骤。
-11. **章节科学写入由 DS 任务负责**：非 DS 模型仅报告章节缺口交 DS，不填科学章节。DS 先读 sections / section_coverage，保留成熟章节，仅增未覆盖正文/SI。text 保存完整章节原文，explanation_zh 单独保存有依据的中文解读；绑定本篇 file_id、原文件 SHA256、真实物理页、每页原句和具体段落定位。DOCX 只能用已有派生 PDF 并给 exact SHA256，不冒充原生 PDF 页。保存请求字节与稳定 request_id、file-local section_key，未知写结果重放原请求；409时读回，不覆盖旧章节，证据确有冲突时新 key + conflicts_with_section_ids 保留双方。未报告项不猜；接口成功不代表独立科学验收。
-12. **表格统一输出**：按 table_write_contract 在 asset.provenance 保存 table_data（columns 字符串、rows 每格字符串或 null）或原文 table_markdown，并保存 table_sources 的同 file_id、实际 caption/body 物理页、locator。跨页如 S13 表题71/正文72须同时保留；精度、s/1.00s、缺失均原样。context_text 仅可读草稿，不能声称结构化已完成；不猜行列，不双写 paper_tables、不重解析旧文献。
-13. **先检查再报告完成**：读取 quality_endpoint 的 error/warning/unknown 与具体 file/页/对象修正指引。error 未解决、表格待结构化或来源不明则报告 partial；未报告项写诚实 missing_reason，不强加科学必填字段。已存计数、HTTP200、模型 completed 均不能证明全 PDF 完整或科学 accepted；不启用队列/独立验收授权。
-
-## 完成标志
-当所有章节、图表对象和数据行写入完成后，在最终回复中输出：
-EXTRACT_DONE: assets=<数量> rows=<数量> values=<数量> sources=<数量>
-另报告 sections=<数量> 与各 file_id 的章节范围、reading_coverage 和未完成内容；执行结束不等于内容完整或独立科学验收。
+    prompt = f"""# 有界文献提取 paper_id={paper_id}
+编号 {paper_code}；标题 {title}；原始PDF {pdf_path or '通过工作包读取'}。
+只处理本篇，保留已有正确结果、不删除，不启动旧解析链，不改schema，不派子任务或自行部署。
+工作包：GET {origin}/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25。
+按stage_index读取当前合同、文件清单和需要的分页；rows/assets/sections/legacy_tables至has_more=false，保持output_revision一致，409后重新只读收集。复用未变来源与已存成果。
+按file_id和真实PDF物理页阅读正文/SI，DOCX可使用哈希绑定派生PDF或已有OOXML合同，page=null时保留合法ooxml_locator，不能伪造页码。
+图表写入 POST /api/rebuild/papers/{paper_id}/assets/import，裁图用assets/crop，数据先POST /api/rebuild/rows/import/preflight再rows/import，章节用POST /api/rebuild/papers/{paper_id}/sections/import。所有写入遵守工作包当前合同、登录会话与CSRF；读取逐项回执，有界小批，同篇串行。
+请求保存原始字节、稳定request_id/task_id。未知结果重放原体原ID查回，不能重建身份、覆盖冲突或因HTTP200当全成功。有限退避后保留诊断。
+实验与DFT分开、不同条件分行；每值保留自身file_id/页/图表/原句；未报告留空并注明missing_reason，不猜对象、组合或步骤。按field_semantics使用反应模板，允许有依据估读并标记。表格按table_write_contract保留原文结构、精度及跨页caption/body来源；图表用reading_explanation保存有依据的中文解读和不确定性。
+科学章节由DS负责；完整text与有依据explanation_zh分存，保留file-local section_key、源hash、原文定位；未知写结果重放原请求。非DS仅报告章节缺口。
+结束前读quality_endpoint，只修真实缺陷，局部失败保存可用成果、明确partial/unknown和未完成文件。已存计数、metadata、模型completed或空errors均不代表全篇覆盖或科学accepted。不要启动队列或另行独立验收；按上级指定范围交接。
+最终报告 EXTRACT_DONE: assets=<数量> rows=<数量> values=<数量> sources=<数量>，同时列各file_id已读范围、sections数量、未完成原因；执行结束不是科学验收。
 """
 
     return prompt, objective
@@ -241,6 +203,13 @@ def serialize_job(job: WorkflowJob, session: Session | None = None) -> dict[str,
         "paper_id": paper_id_str,
     }
 
+    if payload.get("parse_contract"):
+        from app.services.ordinary_parsing import progress_summary
+        result.update(parse_contract=payload["parse_contract"], checkpoint_revision=progress.get("checkpoint_revision", 0),
+                      file_progress=progress_summary(progress.get("file_plan", {})),
+                      native_terminal_verified=progress.get("native_terminal_verified", False),
+                      can_retry=job.status in TERMINAL_STATUSES and bool(progress.get("native_terminal_verified")),
+                      latest_progress=progress.get("latest_progress"))
     # Include result summary for completed jobs or when session is available.
     if job.status == "completed" and isinstance(job.result, dict):
         result["result"] = job.result
@@ -268,6 +237,9 @@ async def create_ai_extract_job(
     settings: Settings,
     *,
     model: str | None = None,
+    request_id: str | None = None,
+    file_ids: list[str] | None = None,
+    retry: bool = False,
 ) -> dict[str, Any]:
     """Create and dispatch an AI extract job for one paper.
 
@@ -280,12 +252,23 @@ async def create_ai_extract_job(
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise AiExtractError("paper_not_found")
+    from app.services.ordinary_parsing import VERSION, file_plan, build_prompt
+    if request_id:
+        replay = session.scalar(select(WorkflowJob).where(WorkflowJob.type == JOB_TYPE,
+            WorkflowJob.payload.op("->>")("paper_id") == str(paper_id),
+            WorkflowJob.payload.op("->>")("request_id") == request_id))
+        if replay:
+            if (replay.payload or {}).get("request_scope") != {"model": model, "file_ids": file_ids, "retry": retry}:
+                raise AiExtractError("parse_request_id_reused")
+            return serialize_job(replay, session)
     occupied = paper_busy(session, paper_id)
     if occupied is not None and occupied.type == PIPELINE_TYPE:
         raise AiExtractError("paper_has_unresolved_pipeline_attempt")
     if occupied is not None and occupied.type == "rebuild_external_extract":
         raise AiExtractError("paper_has_unresolved_external_writer_attempt")
     existing = has_running_job(session, paper_id)
+    if existing is not None and retry and existing.status == "failed" and (existing.progress or {}).get("native_terminal_verified"):
+        existing = None
     if existing is not None:
         result = serialize_job(existing, session)
         session.commit()
@@ -293,25 +276,29 @@ async def create_ai_extract_job(
     chosen_model = model or settings.codex_web_default_model
     chosen_mode = dispatch_mode_for_model(chosen_model)
     attempt_token = str(uuid4())
-    prompt, objective = _build_prompt(session, paper_id, settings)
-    mode_instruction = ("Luna 普通任务：没有目标；禁止 create_goal、goal/set、设置或创建目标。"
-                        if chosen_mode == "codex_web_ordinary" else
-                        "DeepSeek V4.1 flash 目标任务：派发器已设置 active 目标，必须保留目标模式，不得另建目标。")
-    prompt = (f"本轮派发边界：model={chosen_model}；mode={chosen_mode}；attempt_token={attempt_token}。\n"
-              f"{mode_instruction} 不创建子任务、子代理，不 fork，不换模型，不部署或重启服务。\n"
-              f"如回报 processing-status，run_id 固定为 {attempt_token}，不另造外部 writer 身份。\n"
-              "EXTRACT_DONE 与产物总数只表示本任务结束待科学验收，不表示用户或协调者科学验收通过。\n\n" + prompt)
-    if chosen_mode == "codex_web_target":
-        if not prompt.strip() or len(prompt) > 4000:
-            raise AiExtractError("目标任务说明超过 4000 字符或为空，未创建任务；请调整输入后重试。")
-        # An active goal can wake before turn/start: give both paths identical scope.
-        objective = prompt
+    from app.services.ordinary_parsing import saved_file_plan
+    old_plan = saved_file_plan(session, paper_id) if retry else {}
+    try:
+        plan = file_plan(session, paper_id, settings, previous=old_plan, selected=file_ids)
+    except ValueError as exc:
+        raise AiExtractError(str(exc)) from exc
+    jid = _job_id()
+    prompt = build_prompt(paper_id, plan, jid, getattr(settings, "oauth_issuer", "") or "https://47.94.252.147:49004")
+    mode_instruction = ("Luna 普通任务：没有目标，不创建目标。" if chosen_mode == "codex_web_ordinary" else
+                        "DeepSeek 目标任务：目标已设置；文件各阶段处理完（允许partial/failed）即结束普通解析目标。")
+    prompt = f"{mode_instruction} attempt_token={attempt_token}。不通过processing-status另建外部任务。\n" + prompt
+    objective = prompt
+    if chosen_mode == "codex_web_target" and len(prompt) > 4000:
+        raise AiExtractError("ordinary_prompt_exceeds_native_limit")
     from app.services.rebuild_progress_guard import initial_guard, evidence_signature
     evidence_guard = initial_guard(evidence_signature(session, paper_id))
-    job = WorkflowJob(job_id=_job_id(),type=JOB_TYPE,status="dispatching",library_name=paper.library_name,
+    job = WorkflowJob(job_id=jid,type=JOB_TYPE,status="dispatching",library_name=paper.library_name,
         payload={"paper_id":str(paper_id),"attempt_token":attempt_token,"chosen_model":chosen_model,
-                 "chosen_mode":chosen_mode,"file_ids":[str(fid) for fid in session.scalars(select(RebuildPaperFile.id).where(RebuildPaperFile.paper_id==paper_id))],"dispatch_intent_at":_utcnow().isoformat()},
-        progress={"evidence_guard": evidence_guard, "phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
+                 "parse_contract":VERSION,"request_id":request_id,
+                 "request_scope":{"model":model,"file_ids":file_ids,"retry":retry},
+                 "dispatch_prompt":prompt,"dispatch_objective":objective,
+                 "chosen_mode":chosen_mode,"file_ids":list(plan),"dispatch_intent_at":_utcnow().isoformat()},
+        progress={"file_plan":plan,"checkpoint_revision":0,"evidence_guard": evidence_guard, "phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
                   "dispatch_started":False,"events":[],"actual_inference_verified":False,
                   "model_verification_status":"pending_start_ack"})
     session.add(job)
@@ -374,7 +361,7 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
                                       model=primary_model,on_event=persist_event)
         with session_scope(database_url) as session:
             job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
-            if job is not None:
+            if job is not None and job.status in RUNNING_STATUSES and (job.payload or {}).get("attempt_token") == attempt_token:
                 job.status = "running"
                 job.error = None
                 job.progress = {**(job.progress or {}),"phase":"running","needs_check":False,
@@ -389,7 +376,7 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
         # preserve the same identity; none authorize fallback or another create.
         with session_scope(database_url) as session:
             job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
-            if job is not None:
+            if job is not None and job.status in RUNNING_STATUSES and (job.payload or {}).get("attempt_token") == attempt_token:
                 job.status = "dispatching"
                 job.error = f"{type(exc).__name__}: {exc}"[:1600]
                 job.progress = {**(job.progress or {}),"phase":"needs_check","needs_check":True,
@@ -416,7 +403,8 @@ async def sync_job_status(
     if job.status not in RUNNING_STATUSES:
         return job
     progress = dict(job.progress or {})
-    if progress.get("needs_attention"):
+    ordinary = (job.payload or {}).get("parse_contract") == "ordinary_parse_v1"
+    if progress.get("needs_attention") and not ordinary:
         return job  # Explicit reconciliation is required; no perpetual native reads.
     thread_id = progress.get("thread_id")
     if not thread_id:
@@ -431,6 +419,8 @@ async def sync_job_status(
     status = await read_thread_status(thread_id,settings=settings,include_goal=mode != "codex_web_ordinary")
     # Do not hold a DB lock while awaiting IPC; merge fresh progress after readback.
     session.refresh(job, with_for_update=True)
+    if job.status not in RUNNING_STATUSES:
+        return job
     progress = dict(job.progress or {})
     observed = {"thread_id": getattr(status, "thread_id", None), "turn_id": getattr(status, "turn_id", None),
                 "turn_status": getattr(status, "turn_status", None), "goal_status": getattr(status, "goal_status", None),
@@ -441,7 +431,7 @@ async def sync_job_status(
     paper_id_str = (job.payload or {}).get("paper_id")
     if paper_id_str:
         progress["evidence_guard"] = observe(progress.get("evidence_guard"), evidence_signature(session, UUID(paper_id_str)), observed)
-        if progress["evidence_guard"]["needs_attention"]:
+        if progress["evidence_guard"]["needs_attention"] and not ordinary:
             job.progress = {**progress, "phase": "needs_attention", "needs_attention": True,
                             "needs_check": True, "automatic_retry": False}
             session.flush()
@@ -464,7 +454,7 @@ async def sync_job_status(
         return job  # Unknown turn reply stays unknown; no turn mutation/replay.
     turn_status = (status.turn_status or "").lower()
     if turn_status == "completed" and (mode == "codex_web_ordinary" or status.goal_status in {"complete","completed"}):
-        if not (progress.get("evidence_guard") or {}).get("business_advanced"):
+        if not ordinary and not (progress.get("evidence_guard") or {}).get("business_advanced"):
             job.progress = {**progress, "phase": "awaiting_evidence", "needs_check": True,
                             "automatic_retry": False, "completion_blocked": "no_new_business_evidence"}
             session.flush()
@@ -473,17 +463,24 @@ async def sync_job_status(
         summary = _result_summary(session, UUID(paper_id_str)) if paper_id_str else {}
         if status.final_report:
             summary["final_report"] = status.final_report[:2000]
+        if ordinary:
+            from app.services.ordinary_parsing import progress_summary
+            ordinary_summary = progress_summary(progress.get("file_plan", {}))
+            progress.update(native_terminal_verified=True, native_terminal=observed,
+                            content_status=ordinary_summary["content_status"])
+            summary["file_progress"] = ordinary_summary
         job.status = "completed"
         observed_files = set(session.scalars(select(RebuildVisualAsset.file_id).where(RebuildVisualAsset.paper_id==UUID(paper_id_str),RebuildVisualAsset.file_id.is_not(None)))) | set(session.scalars(select(RebuildValueSource.file_id).where(RebuildValueSource.paper_id==UUID(paper_id_str),RebuildValueSource.file_id.is_not(None)))) if paper_id_str else set()
-        job.result = {**summary,"file_ids":[str(fid) for fid in observed_files if str(fid) in (job.payload or {}).get("file_ids",[])]}
+        job.result = {**summary,"file_ids":([f["file_id"] for f in ordinary_summary["files"] if all(s["status"] == "completed" for s in f["stages"].values())] if ordinary else [str(fid) for fid in observed_files if str(fid) in (job.payload or {}).get("file_ids",[])])}
         job.progress = {**progress,"phase":"completed","needs_check":False}
         session.flush()
         # Original detail reads both stores directly. Never overwrite legacy figures on job polling.
-    elif turn_status in {"failed","interrupted"}:
+    elif turn_status in {"failed","interrupted"} and (mode == "codex_web_ordinary" or status.goal_status in {"complete", "completed", "paused", "blocked"}):
         # Preserve a failed task for review, and block button-driven recreation.
         job.status = "failed"
         job.error = f"Codex-web turn {turn_status}"
-        job.progress = {**progress,"phase":turn_status,"needs_check":True,"automatic_retry":False}
+        job.progress = {**progress,"phase":turn_status,"needs_check":True,"automatic_retry":False,
+                        "native_terminal_verified":True,"native_terminal":observed}
         session.flush()
     else:
         # A completed DS turn with an active/null goal is not task completion.

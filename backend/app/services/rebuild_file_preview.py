@@ -119,7 +119,7 @@ def install_derived_pdf(record: RebuildPaperFile, settings: Settings, pdf_path: 
     return destination
 
 
-PAGE_IDENTITY_FIELDS = ("page_basis", "source_sha256", "reading_pdf_sha256")
+PAGE_IDENTITY_FIELDS = ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator")
 
 
 def reading_identity(record, settings):
@@ -131,8 +131,55 @@ def reading_identity(record, settings):
                   "reading_pdf_sha256": _sha256(path)}
 
 
+def validate_ooxml_identity(record, settings, data):
+    """Resolve a 1-based OOXML body-child locator against checked original bytes.
+
+    A locator selects the body child, then an indexed element in that child
+    (including the child itself), followed by indexed direct XML children.
+    No pagination metadata or derived PDF participates in this identity.
+    """
+    from xml.etree import ElementTree as ET
+    source, kind = _checked_source(record, settings)
+    if kind != "docx":
+        raise RebuildWorkflowError("ooxml_requires_registered_docx")
+    if source.stat().st_size != record.file_size:
+        raise RebuildWorkflowError("source_size_mismatch")
+    if data.get("source_sha256") != record.sha256:
+        raise RebuildWorkflowError("source_sha256_mismatch")
+    if data.get("page_number") is not None or data.get("reading_pdf_sha256") is not None:
+        raise RebuildWorkflowError("ooxml_has_no_physical_page")
+    locator = data.get("ooxml_locator") or ""
+    if not isinstance(locator, str) or len(locator) > 4000:
+        raise RebuildWorkflowError("ooxml_locator_invalid")
+    match = re.fullmatch(r"word/document\.xml#body-child\[([1-9][0-9]*)\]((?:/w:[A-Za-z][A-Za-z0-9]*\[[1-9][0-9]*\])+)", locator)
+    if not match or len(locator) > 4000:
+        raise RebuildWorkflowError("ooxml_locator_invalid")
+    try:
+        with zipfile.ZipFile(source) as archive:
+            if archive.getinfo("word/document.xml").file_size > 32 * 1024 * 1024:
+                raise ValueError("oversize XML")
+            xml = archive.read("word/document.xml")
+        if b"<!DOCTYPE" in xml.upper() or b"<!ENTITY" in xml.upper():
+            raise ValueError("XML declarations forbidden")
+        root = ET.fromstring(xml)
+        ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+        body = root.find(ns + "body")
+        node = list(body)[int(match[1]) - 1]
+        for index, (name, number) in enumerate(re.findall(r"/w:([A-Za-z][A-Za-z0-9]*)\[([1-9][0-9]*)\]", match[2])):
+            candidates = list(node.iter(ns + name)) if index == 0 else list(node.findall(ns + name))
+            node = candidates[int(number) - 1]
+    except (ET.ParseError, ValueError, IndexError, TypeError, KeyError, zipfile.BadZipFile) as exc:
+        raise RebuildWorkflowError("ooxml_locator_not_found") from exc
+    return {"page_basis": "ooxml", "source_sha256": record.sha256,
+            "reading_pdf_sha256": None, "ooxml_locator": locator}
+
+
 def validate_page_identity(record, settings, data):
     """Normalize new writes; a DOCX page always requires an explicit double binding."""
+    if data.get("page_basis") == "ooxml":
+        return validate_ooxml_identity(record, settings, data)
+    if data.get("ooxml_locator") is not None:
+        raise RebuildWorkflowError("ooxml_page_basis_required")
     _, kind = _checked_source(record, settings)
     if data.get("source_sha256") not in (None, record.sha256):
         raise RebuildWorkflowError("source_sha256_mismatch")
@@ -167,5 +214,6 @@ def store_source_identity(value, source, data):
     if not data.get("source_sha256"):
         return  # A fileless quote must not acquire a verified byte identity.
     identities = dict((value.conflict or {}).get("source_page_identities") or {})
-    identities[str(source.id)] = {k: data.get(k) for k in PAGE_IDENTITY_FIELDS}
+    identities[str(source.id)] = {k: data.get(k) for k in PAGE_IDENTITY_FIELDS
+                                  if k != "ooxml_locator" or data.get(k) is not None}
     value.conflict = {**(value.conflict or {}), "source_page_identities": identities}

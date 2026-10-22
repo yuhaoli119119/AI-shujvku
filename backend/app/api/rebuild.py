@@ -21,6 +21,7 @@ from pydantic import ValidationError
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.db.models import RebuildValueSource, RebuildDataValue
+from app.schemas.ordinary_parsing import ParseCheckpoint
 from app.schemas.rebuild import (
     ProcessingStatusReport,
     ProcessingStatusReportEnvelope,
@@ -32,15 +33,15 @@ from app.schemas.rebuild import (
     RebuildVisualAssetCropRequest,
     RebuildVisualAssetRequest,
     RebuildValueCorrectionRequest,
-    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSectionOrderRequest,
+    RebuildSourceCorrectionRequest, RebuildSourceLifecycleRequest, RebuildSourceAssetBindingRequest, RebuildSectionOrderRequest,
     RebuildDedupPreviewRequest, RebuildDedupApplyRequest,
     RebuildRowIdentityCorrectionRequest,
     RebuildSectionsImportRequest,
     RebuildSectionCorrectionsRequest,
 )
-from app.services.rebuild_metadata_cas import metadata_state, correct_metadata
+from app.services.rebuild_metadata_cas import metadata_state, correct_metadata, validate_material_mapping
 from app.services.rebuild_value_dedup import preview_dedup, apply_dedup, dedup_contract
-from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source
+from app.services.rebuild_source_correction import source_state, correct_source, source_correction_contract, deactivate_source, bind_source_asset
 from app.services.artifact_store import ArtifactStore
 from app.services.batch_catalog import batch_catalog
 from app.services.legacy_data_transfer import LegacyTransferRequest
@@ -73,7 +74,7 @@ from app.services.rebuild_workflow_service import (
 )
 from app.security.session_auth import require_session, SessionState, origin_allowed, csrf_token_valid
 from app.services.ai_extract_service import (
-    JOB_TYPE,
+    JOB_TYPE, AiExtractError,
     create_ai_extract_job,
     get_latest_job,
     has_running_job,
@@ -102,6 +103,9 @@ async def create_ai_extract_job_endpoint(
     paper_id: UUID,
     request: Request,
     model: Literal["gpt-6-luna", "cn:deepseek-v4.1-flash"] | None = Body(default=None, embed=True),
+    request_id: str | None = Body(default=None, min_length=1, max_length=128),
+    file_ids: list[UUID] | None = Body(default=None, max_length=30),
+    retry: bool = Body(default=False),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
     _auth: SessionState = Depends(require_session),
@@ -114,8 +118,13 @@ async def create_ai_extract_job_endpoint(
     creating a duplicate.
     """
     try:
-        return await create_ai_extract_job(session, paper_id, settings, model=model)
+        return await create_ai_extract_job(session, paper_id, settings, model=model, request_id=request_id,
+                                           file_ids=[str(fid) for fid in file_ids] if file_ids else None, retry=retry)
+    except AiExtractError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
+        session.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"ai_extract_job_failed: {type(exc).__name__}: {exc}",
@@ -278,6 +287,42 @@ async def _require_section_write_session(request: Request) -> SessionState:
     except (ValueError, TypeError, RecursionError) as exc:
         raise HTTPException(status_code=422, detail="section_body_must_be_finite_json") from exc
     return auth
+
+
+@router.get("/papers/{paper_id}/ai-extract/jobs/{job_id}")
+async def ordinary_job(paper_id: UUID, job_id: str, session: Session = Depends(get_db_session),
+                       _auth: SessionState = Depends(_require_work_package_session)):
+    from app.db.models import WorkflowJob
+    job = session.get(WorkflowJob, job_id)
+    if not job or job.type != JOB_TYPE or (job.payload or {}).get("paper_id") != str(paper_id):
+        raise HTTPException(404, "parse_job_not_found")
+    return serialize_job(job, session)
+
+
+@router.put("/papers/{paper_id}/ai-extract/jobs/{job_id}/checkpoints")
+async def ordinary_checkpoint(paper_id: UUID, job_id: str, payload: ParseCheckpoint,
+                              session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+                              _auth: SessionState = Depends(_require_section_write_session)):
+    from app.services.ordinary_parsing import checkpoint
+    try:
+        result = checkpoint(session, paper_id, job_id, payload.model_dump(mode="json"), settings)
+        session.commit()
+        return result
+    except (ValueError, RebuildWorkflowError) as exc:
+        session.rollback()
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/papers/{paper_id}/files/{file_id}/reading-text")
+async def ordinary_reading_text(paper_id: UUID, file_id: UUID, offset: int = Query(0, ge=0),
+                                limit: int = Query(25, ge=1, le=100),
+                                session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
+                                _auth: SessionState = Depends(_require_work_package_session)):
+    from app.services.ordinary_parsing import reading_text
+    try:
+        return reading_text(session, paper_id, file_id, settings, offset, limit)
+    except (ValueError, RebuildWorkflowError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/papers/{paper_id}/sections")
@@ -623,6 +668,7 @@ async def rebuild_ai_work_package(
                 "coverage_plan": f"/api/rebuild/papers/{paper_id}/coverage-plan",
                 "row_identity_correction": "/api/rebuild/rows/{row_id}/identity",
                 "source_correction": "/api/rebuild/sources/{source_id}",
+                "source_asset_binding": "/api/rebuild/sources/{source_id}/asset-binding",
                 "source_lifecycle": "/api/rebuild/sources/{source_id}/lifecycle",
                 "section_order": f"/api/rebuild/papers/{paper_id}/sections/order",
                 "value_dedup_preview": "/api/rebuild/papers/{paper_id}/value-dedup/preview",
@@ -1603,6 +1649,25 @@ async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrecti
         raise
 
 
+@router.post("/sources/{source_id}/asset-binding")
+async def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAssetBindingRequest,
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
+    try:
+        result = bind_source_asset(session, source_id, payload, actor=auth.username)
+        session.commit()
+        return result
+    except RebuildWorkflowError as exc:
+        session.rollback()
+        raise _http_error(exc) from exc
+    except (IntegrityError, DataError) as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail="source_database_constraint_conflict") from exc
+    except Exception:
+        session.rollback()
+        raise
+
+
 @router.post("/sources/{source_id}/lifecycle")
 async def change_rebuild_source_lifecycle(source_id: UUID, payload: RebuildSourceLifecycleRequest,
     session: Session = Depends(get_db_session),
@@ -1762,6 +1827,10 @@ async def correct_asset_metadata(paper_id: UUID, target_id: UUID,
     payload: RebuildAssetMetadataCorrection, request: Request,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)):
+    # Reject invalid JSON values before audit fingerprint serialization; otherwise
+    # NaN/unencodable strings could fail outside the metadata validation gate.
+    if "material_mapping" in payload.changes.model_fields_set:
+        validate_material_mapping(payload.changes.material_mapping)
     return _audited_response(session, request, payload, paper_id,
         f"assets.metadata.{target_id}", auth.username,
         lambda: correct_metadata(session, paper_id, "assets", target_id, payload),

@@ -8,6 +8,7 @@
 
 | 文档 | 作用 |
 |---|---|
+| [`ORDINARY_PARSING.md`](ORDINARY_PARSING.md) | 普通解析的一键启动、按文件断点、局部重试及后续精修边界 |
 | [`PIPELINE_TARGET.md`](PIPELINE_TARGET.md) | 目标流程：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析（**核心链路已实现，独立验收进行中**） |
 | [`REBUILD_RELIABILITY.md`](REBUILD_RELIABILITY.md) | 表格正文、分段工作包、只读质量检查、事务回执与独立验收合同；实际版本按发布回执核验，队列默认关闭 |
 | [`PAPER_PROCESSING_STATUS.md`](PAPER_PROCESSING_STATUS.md) | 统一解析状态、正文/SI 文件范围与其他 AI 状态回报 |
