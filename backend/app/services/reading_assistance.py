@@ -210,7 +210,9 @@ async def reconcile(session, job, settings):
               status.goal_observed and status.goal_status is None and status.thread_status in ('idle','notLoaded'))
     if status.turn_status in ('completed','failed','interrupted') and terminal:
         job.status='completed' if progress.get('reading_saved') else 'failed'
-        job.error=None if progress.get('reading_saved') else '本次未保存中文阅读内容，已有资料保留，可单独重试'
+        native_error = getattr(status, 'native_error', None)
+        progress['native_error'] = native_error
+        job.error = None if progress.get('reading_saved') else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试')
         progress.update(native_terminal_verified=True,phase=job.status)
     else:job.status='running';progress['phase']='running'
     job.progress=progress;session.flush();return job

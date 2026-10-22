@@ -278,6 +278,7 @@ class ThreadStatus:
     thread_status: str | None = None
     model_provider: str | None = None
     goal_observed: bool = False
+    native_error: str | None = None
 
 
 def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
@@ -368,6 +369,7 @@ async def read_thread_status(
                 cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
                 thread_status=(thread.get("status") or {}).get("type") if isinstance(thread.get("status"), dict) else thread.get("status"),
                 model_provider=thread.get("modelProvider"), goal_observed=goal_observed,
+                native_error=((last_turn.get("error") or {}).get("message") or "")[:1500] if isinstance(last_turn.get("error"), dict) else None,
             )
     except (CodexWebDispatchError, OSError, WebSocketException) as exc:
         logger.debug(
