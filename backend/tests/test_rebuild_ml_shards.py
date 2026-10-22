@@ -368,3 +368,75 @@ def test_publication_source_stays_anchored_when_wrapper_name_replaced(inputs, tm
     assert list(outside.iterdir()) == []
     assert {str(p.relative_to(tmp_path / 'build')): p.read_bytes()
             for p in (tmp_path / 'build').rglob('*') if p.is_file()} == out
+
+
+@pytest.mark.parametrize('case', ['snapshot_schema', 'snapshot_transaction', 'snapshot_scope',
+    'manifest_schema', 'row_authorization', 'value_authorization', 'source_authorization', 'bad_row_mask'])
+def test_extended_frozen_contract_rejected_by_all_gates(inputs, tmp_path, case):
+    s, p = inputs
+    out = build(s, p)
+    shard = p['shards']['experimental']; manifest = shard['manifest']
+    if case == 'snapshot_schema': s['schema_version'] = 'invalid'
+    elif case == 'snapshot_transaction': s['transaction']['read_only'] = 'off'
+    elif case == 'snapshot_scope': s['scope_paper_ids'] = []
+    elif case == 'manifest_schema': manifest['schema_version'] = 'invalid'
+    elif case == 'bad_row_mask': next(iter(manifest['rows'].values()))['eligible_value_mask'] = {}
+    else:
+        kind = {'row_authorization': 'rows', 'value_authorization': 'values',
+                'source_authorization': 'sources'}[case]
+        next(iter(manifest[kind].values()))['reviewer_authorization']['authorized'] = False
+    refresh(p)
+    # Embed the changed inputs and refresh all nested/outer integrity hashes,
+    # while retaining the previously eligible output records.
+    index = json.loads(out['shard_index.json'])
+    for sid, sh in p['shards'].items():
+        prefix = f'shards/{sid}/'
+        out[prefix + 'snapshot.json'] = encoded(s)
+        out[prefix + 'acceptance.json'] = encoded(sh['manifest'])
+        info = json.loads(out[prefix + 'build_manifest.json'])
+        info['acceptance_sha256'] = digest(sh['manifest'])
+        info['files'] = {k[len(prefix):]: hashlib.sha256(v).hexdigest() for k, v in out.items()
+                        if k.startswith(prefix) and k[len(prefix):] not in {'build_manifest.json', 'SHA256SUMS'}}
+        out[prefix + 'build_manifest.json'] = encoded(info)
+        out[prefix + 'SHA256SUMS'] = ''.join(hashlib.sha256(out[prefix + k]).hexdigest() + '  ' + k + '\n'
+            for k in sorted(FILES - {'SHA256SUMS'})).encode()
+        index['shards'][sid]['input_manifest_sha256'] = digest(sh['manifest'])
+        index['shards'][sid]['files'] = {prefix + k: hashlib.sha256(out[prefix + k]).hexdigest() for k in FILES}
+    out['shard_index.json'] = encoded(index)
+    out['shard_plan.json'] = encoded(p)
+    rehash_root(out)
+    with pytest.raises(ValueError): build(s, p)
+    with pytest.raises(ValueError): verify_sharded_dataset(out)
+    with pytest.raises(ValueError): write_sharded_dataset(out, tmp_path / 'rejected')
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize('post_rename_sync', [1, 2])
+def test_post_rename_sync_failure_explicitly_reports_complete_publication(inputs, tmp_path, monkeypatch, post_rename_sync):
+    from app.services import rebuild_ml_shards as module
+    out = build(*inputs)
+    original_publish = module._publish_no_clobber
+    original_sync = module.os.fsync
+    published = []; syncs = []
+    def publish(*args):
+        original_publish(*args)
+        published.append(True)
+    def sync(fd):
+        if published:
+            syncs.append(fd)
+            if len(syncs) == post_rename_sync:
+                raise OSError('injected post-rename sync')
+        original_sync(fd)
+    destination = tmp_path / 'build'
+    with monkeypatch.context() as m:
+        m.setattr(module, '_publish_no_clobber', publish)
+        m.setattr(module.os, 'fsync', sync)
+        with pytest.raises(module.PublishedDurabilityError) as caught:
+            write_sharded_dataset(out, destination)
+    error = caught.value
+    assert error.published is True and error.durability_confirmed is False
+    assert error.output == str(destination) and isinstance(error.__cause__, OSError)
+    readback = {str(p.relative_to(destination)): p.read_bytes() for p in destination.rglob('*') if p.is_file()}
+    assert readback == out
+    verify_sharded_dataset(readback)
+    with pytest.raises(FileExistsError): write_sharded_dataset(out, destination)

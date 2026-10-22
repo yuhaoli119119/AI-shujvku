@@ -107,8 +107,13 @@ def _union(shards, entries, overlap_policy):
             'deduplicated_memberships': sum(len(ids) - 1 for ids in owners.values())}
 
 
-def validate_frozen_plan(snapshot, plan):
-    """Shared fail-closed input contract for building and accepting readback."""
+def validate_frozen_plan(snapshot, plan, *, seed, code_revision):
+    """Derive canonical shard bytes through all dataset eligibility gates.
+
+    Hashes and caller review receipts alone cannot establish eligibility. Return
+    independently rebuilt contracts for both the builder and readback verifier.
+    This is pure computation: no database access or artifact writes.
+    """
     if plan.get('schema_version') != PLAN_VERSION:
         raise ValueError('unsupported shard plan schema')
     if (plan.get('snapshot_sha256') != snapshot.get('snapshot_sha256') or
@@ -131,6 +136,7 @@ def validate_frozen_plan(snapshot, plan):
                 approved.get('policy_sha256') != digest(policy) or
                 not _authorized({'schema_version': PARTIAL_ACCEPTANCE_VERSION}, approved)):
             raise ValueError('unapproved data_type/policy: ' + pid)
+    outputs = {}
     for sid, shard in sorted(shards.items()):
         if not SAFE_ID.fullmatch(sid):
             raise ValueError('invalid shard_id')
@@ -157,25 +163,28 @@ def validate_frozen_plan(snapshot, plan):
         for pid, decision in manifest.get('papers', {}).items():
             if decision.get('graph_revision') != paper_revision(snapshot, pid):
                 raise ValueError('stale paper graph revision')
-    return shards
+        out = build_dataset(snapshot, manifest, seed=seed, code_revision=code_revision)
+        _verify_shard(out)
+        if _membership(_formal(out)) != members:
+            raise ValueError('shard output membership mismatch (eligibility/provenance/scope)')
+        if 'expected_files_sha256' in shard and shard['expected_files_sha256'] != _hashes(out):
+            raise ValueError('shard output hash mismatch against plan')
+        outputs[sid] = out
+    return outputs
 
 
 def build_sharded_dataset(snapshot, plan, *, seed=0, code_revision):
     """Return a flat relative-path/bytes map; never reads DB or writes artifacts."""
-    shards = validate_frozen_plan(snapshot, plan)
+    normalized = validate_frozen_plan(snapshot, plan, seed=seed, code_revision=code_revision)
+    shards = plan['shards']
     outputs = {}; entries = {}; payload = {'shard_plan.json': encoded(plan)}
     for sid, shard in sorted(shards.items()):
         manifest = shard['manifest']
         approved = plan['approved_policies'][shard['policy_id']]
         members = shard['eligible_value_ids']
-        out = build_dataset(snapshot, manifest, seed=seed, code_revision=code_revision)
-        _verify_shard(out)
+        out = normalized[sid]
         formal = _formal(out)
-        if _membership(formal) != members:
-            raise ValueError('shard output membership mismatch (eligibility/provenance/scope)')
         hashes = _hashes(out)
-        if 'expected_files_sha256' in shard and shard['expected_files_sha256'] != hashes:
-            raise ValueError('shard output hash mismatch against plan')
         outputs[sid] = out
         entries[sid] = {'policy_id': shard['policy_id'], 'policy_sha256': digest(approved['policy']),
             'data_type': shard['data_type'], 'input_manifest_sha256': digest(manifest),
@@ -219,10 +228,13 @@ def verify_sharded_dataset(payload):
     plan = json.loads(payload['shard_plan.json'])
     # Validate every embedded snapshot against the exact same frozen contract.
     # Outer checksums are integrity checks, never authorization.
-    for sid in entries:
-        validate_frozen_plan(json.loads(payload[f'shards/{sid}/snapshot.json']), plan)
+    snapshots = [json.loads(payload[f'shards/{sid}/snapshot.json']) for sid in entries]
     if not entries:
         raise ValueError('explicit shards required')
+    if any(snapshot != snapshots[0] for snapshot in snapshots):
+        raise ValueError('all shards require the same complete snapshot')
+    normalized = validate_frozen_plan(snapshots[0], plan,
+        seed=aggregate['seed'], code_revision=aggregate['code_revision'])
     if (set(entries) != set(plan['shards']) or aggregate['plan_sha256'] != digest(plan) or
             aggregate['overlap_policy'] != plan['overlap_policy']):
         raise ValueError('shard index/plan mismatch')
@@ -232,6 +244,8 @@ def verify_sharded_dataset(payload):
         prefix = f'shards/{sid}/'
         out = {name: payload[prefix + name] for name in FILES}
         _verify_shard(out)
+        if out != normalized[sid]:
+            raise ValueError('shard differs from independently normalized contract')
         outputs[sid] = out
         members = _membership(_formal(out))
         shard = plan['shards'][sid]
@@ -327,12 +341,30 @@ def _identity(fd):
     return info.st_dev, info.st_ino
 
 
+class PublishedDurabilityError(OSError):
+    """Rename succeeded; complete output is visible, crash durability unconfirmed.
+
+    Never retry by overwriting/removing the destination. Read back and verify it;
+    the normal no-clobber retry raises FileExistsError. Original cause is chained.
+    """
+    published = True
+    durability_confirmed = False
+
+    def __init__(self, output):
+        self.output = os.path.abspath(output)
+        super().__init__('complete output published; directory durability unconfirmed: ' + self.output)
+
+
 def write_sharded_dataset(payload, output):
     """Verify private staging before atomic publication; retain failed evidence.
 
     Directory descriptors and O_NOFOLLOW protect every component. Staging is
     private (0700); this is not a security boundary against root or a hostile
     process with the same credentials able to mutate already-open files.
+    Success returns None after both post-rename directory syncs. A sync failure
+    after rename raises PublishedDurabilityError, with complete output already
+    visible; pre-rename failures retain staging and leave the destination absent
+    unless another actor created it. No failure deletes or overwrites evidence.
     """
     verify_sharded_dataset(payload)
     with _output_parent(output) as (parent_fd, destination):
@@ -406,5 +438,8 @@ def write_sharded_dataset(payload, output):
                         raise ValueError('staging root replaced')
                 os.fsync(root_fd)
                 _publish_no_clobber(workspace_fd, 'payload', parent_fd, destination)
-            os.fsync(workspace_fd)
-        os.fsync(parent_fd)
+            try:
+                os.fsync(workspace_fd)
+                os.fsync(parent_fd)
+            except OSError as exc:
+                raise PublishedDurabilityError(output) from exc
