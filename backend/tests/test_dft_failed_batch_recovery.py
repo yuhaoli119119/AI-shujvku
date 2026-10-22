@@ -115,13 +115,15 @@ def _populate_pair(backup_engine: Engine, live_engine: Engine) -> dict:
 
     def populate(engine: Engine, *, live: bool) -> None:
         with Session(engine) as session:
-            session.add_all(
+            # Model a restored historical dump, not a new catalogue intake: the
+            # current ORM intake hooks intentionally assign fresh paper codes.
+            session.execute(
+                sa.insert(Paper.__table__),
                 [
-                    Paper(id=paper_id, paper_code="B0102", title="B0102", pdf_path="B0102.pdf"),
-                    Paper(id=other_paper_id, paper_code="B9999", title="Other", pdf_path="other.pdf"),
-                ]
+                    dict(id=paper_id, paper_code="B0102", title="B0102", pdf_path="B0102.pdf"),
+                    dict(id=other_paper_id, paper_code="B9999", title="Other", pdf_path="other.pdf"),
+                ],
             )
-            session.flush()
             session.add(
                 ExternalAnalysisRun(
                     id=run_id,
@@ -513,3 +515,126 @@ def test_any_apply_exception_rolls_back_every_change(recovery_databases, monkeyp
         ) == 25
         assert session.get(DFTAuditIssue, recovery_databases.issue_ids[0]).status == "closed"
         assert session.scalar(sa.select(sa.func.count()).select_from(AuditLog).where(AuditLog.action == RECOVERY_ACTION)) == 0
+
+
+@pytest.mark.parametrize("mutation", ["restore_row", "delete_dependency", "delete_sample", "schema_version"])
+def test_rehashed_manifest_cannot_change_the_recovery_plan(recovery_databases, mutation):
+    service = recovery_databases.service()
+    manifest = service.build_dry_run_manifest()
+    if mutation == "restore_row":
+        manifest["items"][0]["backup_issue"]["resolution_note"] = "invented restoration"
+    elif mutation == "delete_dependency":
+        manifest["items"][0]["dependencies"]["extraction_field_reviews"]["delete_rows"] = []
+    elif mutation == "delete_sample":
+        for sample in manifest["candidate_sample_analysis"]:
+            sample["delete_allowed"] = True
+    else:
+        manifest["schema_version"] = "unknown"
+    manifest["manifest_sha256"] = recovery_module.manifest_sha256(manifest)
+    with pytest.raises(RecoveryRefused, match="manifest_plan_mismatch"):
+        service.apply_manifest(
+            manifest,
+            confirm_paper_code="B0102",
+            expected_backup_sha256=BACKUP_SHA256,
+            expected_live_fingerprint=manifest["live"]["fingerprint"],
+        )
+    assert service.build_dry_run_manifest()["live"]["fingerprint"] == manifest["live"]["fingerprint"]
+
+
+def test_apply_refuses_changed_backup_even_when_dump_label_matches(recovery_databases):
+    service = recovery_databases.service()
+    manifest = service.build_dry_run_manifest()
+    with Session(recovery_databases.backup_engine) as session:
+        session.get(DFTAuditIssue, recovery_databases.issue_ids[0]).resolution_note = "changed backup"
+        session.commit()
+    with pytest.raises(RecoveryRefused, match="backup_fingerprint_drift"):
+        service.apply_manifest(
+            manifest,
+            confirm_paper_code="B0102",
+            expected_backup_sha256=BACKUP_SHA256,
+            expected_live_fingerprint=manifest["live"]["fingerprint"],
+        )
+    assert service.build_dry_run_manifest()["live"]["fingerprint"] == manifest["live"]["fingerprint"]
+
+
+def test_dry_run_uses_read_only_transactions_and_preserves_full_snapshots(recovery_databases):
+    service = recovery_databases.service()
+    paper_code = "B0102"
+    before = []
+    for engine in (service.backup_engine, service.live_engine):
+        with recovery_module._transactional_session(engine, read_only=True) as session:
+            assert session.scalar(sa.text("SHOW transaction_read_only")) == "on"
+            assert session.scalar(sa.text("SHOW transaction_isolation")) == "repeatable read"
+            before.append(recovery_module._snapshot(session, paper_code).fingerprint)
+    manifest = service.build_dry_run_manifest()
+    assert before == [manifest["backup"]["fingerprint"], manifest["live"]["fingerprint"]]
+    for index, engine in enumerate((service.backup_engine, service.live_engine)):
+        with Session(engine) as session:
+            assert recovery_module._snapshot(session, paper_code).fingerprint == before[index]
+
+
+@pytest.mark.parametrize("database", ["backup_engine", "live_engine"])
+def test_dry_run_refuses_ambiguous_paper_codes_across_libraries(recovery_databases, database):
+    with getattr(recovery_databases, database).begin() as connection:
+        connection.execute(sa.insert(Paper.__table__).values(
+            id=uuid4(), library_name="another library", paper_code="B0102",
+            title="Different paper with same code", pdf_path="different.pdf",
+        ))
+    with pytest.raises(RecoveryRefused, match="paper_code_ambiguous:B0102"):
+        recovery_databases.service().build_dry_run_manifest()
+
+
+@pytest.mark.parametrize("drift", ["manual_review", "business_reference", "wrong_protocol"])
+def test_dry_run_refuses_unsafe_batch_rows(recovery_databases, drift):
+    with Session(recovery_databases.live_engine) as session:
+        result = session.get(DFTResult, recovery_databases.bad_result_ids[0])
+        if drift == "manual_review":
+            review = session.scalars(sa.select(ExtractionFieldReview).where(
+                ExtractionFieldReview.target_id == str(result.id))).first()
+            review.reviewer = "human"
+            reason = "review_has_non_batch_or_human_edit"
+        elif drift == "business_reference":
+            session.add(DFTAuditIssue(
+                paper_id=result.paper_id, target_type="dft_results", target_id=str(result.id),
+                issue_type="value_conflict", severity="medium", status="open", fingerprint="new-reference",
+            ))
+            reason = "new_business_reference:dft_audit_issues"
+        else:
+            result.extraction_protocol_version = "another-protocol"
+            reason = "repair_protocol_matches"
+        session.commit()
+    with pytest.raises(RecoveryRefused, match=reason):
+        recovery_databases.service().build_dry_run_manifest()
+
+
+@pytest.mark.parametrize("reference_type", ["support_writeback", "audit_result_id"])
+def test_apply_never_nulls_foreign_keys_in_other_papers(recovery_databases, reference_type):
+    service = recovery_databases.service()
+    manifest = service.build_dry_run_manifest()
+    result_id = recovery_databases.bad_result_ids[0]
+    with Session(recovery_databases.live_engine) as session:
+        other = session.get(DFTResult, recovery_databases.other_paper_result_id)
+        if reference_type == "support_writeback":
+            other.support_writeback_dft_result_id = result_id
+            referenced_id = other.id
+        else:
+            issue = DFTAuditIssue(
+                paper_id=other.paper_id, target_type="dft_results", target_id="unrelated",
+                result_id=result_id, issue_type="value_conflict", severity="medium",
+                status="open", fingerprint="other-paper-reference",
+            )
+            session.add(issue)
+            session.flush()
+            referenced_id = issue.id
+        session.commit()
+    with pytest.raises(RecoveryRefused, match="external_result_reference"):
+        service.apply_manifest(
+            manifest, confirm_paper_code="B0102", expected_backup_sha256=BACKUP_SHA256,
+            expected_live_fingerprint=manifest["live"]["fingerprint"],
+        )
+    with Session(recovery_databases.live_engine) as session:
+        assert session.get(DFTResult, result_id) is not None
+        if reference_type == "support_writeback":
+            assert session.get(DFTResult, referenced_id).support_writeback_dft_result_id == result_id
+        else:
+            assert session.get(DFTAuditIssue, referenced_id).result_id == result_id
