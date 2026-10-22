@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="../../shared/responsive.css">
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
-  <script src="../../shared/editable-data-grid.js?v=20261022-file-lifecycle"></script>
+  <script src="../../shared/editable-data-grid.js?v=20261022-source-traceability"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -3192,14 +3192,15 @@
       if (!file) return '<span class="muted">来源文件未登记，无法定位 PDF</span>';
       const role = currentDisplayRole(file) === 'si' ? 'SI' : file.role === 'main' ? '正文' : storedText(file.role);
       const xml = EditableDataGrid.ooxmlBinding(file, identity);
-      if (xml && !(pages || []).length) return `<span class="muted">OOXML 定位（DOCX 原件，无物理页）：<code>${esc(xml.ooxml_locator)}</code></span> <a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载 DOCX 原件</a>`;
+      if (xml && !(pages || []).some(page => page != null)) return `<span class="muted">OOXML 定位（DOCX 原件，无物理页）：<code>${esc(xml.ooxml_locator)}</code></span> <a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载 DOCX 原件</a>`;
       const validPages = [...new Set((pages || []).filter(page => Number.isSafeInteger(page) && page > 0))];
       const bindingIdentity = EditableDataGrid.pdfPageBinding(file, identity);
       if (!bindingIdentity.ok && (validPages.length || bindingIdentity.reason !== 'derived_identity_required')) return `<span class="warning">${bindingIdentity.reason === 'derived_identity_required' ? '旧记录未指定派生阅读版本；保留原件入口' : 'PDF 文件或版本绑定不一致，无法打开此页'}</span>` + `<a href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载原文件</a>`;
       const binding = bindingIdentity.ok ? ['page_basis','source_sha256','reading_pdf_sha256'].map(key => '&' + key + '=' + encodeURIComponent(bindingIdentity[key])).join('') : '';
-      const pageLabel = bindingIdentity.page_basis === 'derived_pdf' ? '派生阅读 PDF' : 'PDF';
+      const previewPosition = bindingIdentity.page_basis === 'derived_pdf' || EditableDataGrid.isPreviewPosition(identity);
+      const pageLabel = previewPosition ? '派生阅读 PDF（非原件物理页）' : 'PDF';
       const previewLinks = (validPages.length ? validPages : [null]).map(page =>
-        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${binding}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} ${pageLabel}${page ? ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
+        `<a class="btn btn-ghost btn-sm" data-current-file="${esc(file.id)}" href="/api/rebuild/files/${encodeURIComponent(file.id)}/preview?source=${encodeURIComponent(file.sha256 || '')}${binding}${page ? '#page=' + page : ''}" target="_blank" rel="noopener">${esc(role)} ${pageLabel}${page ? previewPosition ? ' 预览位置 ' + page : ' 第 ' + page + ' 页' : '（页码未记录）'}</a>`).join(' ');
       const originalLink = `<a class="btn btn-ghost btn-sm" href="/api/rebuild/files/${encodeURIComponent(file.id)}/download" download>下载${esc(role)}原文件</a>`;
       return (file.lifecycle_status === 'superseded' ? '<span class="warning">历史文件已被替代；原科学关联保留，需独立科学复核。</span> ' : '') + previewLinks + ' ' + originalLink;
     }
@@ -3332,6 +3333,7 @@
       const asset = state.rebuildAssets.find(item => item.id === source.asset_id && rebuildOwnerIsKnown(item.paper_id));
       const mismatch = asset && source.file_id && asset.file_id !== source.file_id;
       return `<div class="pd-current-source"><strong>${esc(source.label || source.source_kind || '来源')}</strong>
+        ${EditableDataGrid.sourceTraceHtml(source)}
         ${source.quote ? `<div class="prewrap">${esc(source.quote)}</div>` : ''}
         ${currentPdfLinks(source.file_id, [source.page_number], source)}
         ${asset ? `<a href="/api/rebuild/assets/${encodeURIComponent(asset.id)}" target="_blank" rel="noopener">关联图表 ${esc(asset.figure_label || asset.asset_key)}</a>` : source.asset_id ? '<span class="warning">关联图表未找到</span>' : ''}
@@ -3643,7 +3645,7 @@
         const sourceLinks = asset ? currentPdfLinks(asset.file_id, asset.page_numbers, asset) :
           (sourceId ? `<a class="btn btn-ghost btn-sm" href="${API_BASE}/${encodeURIComponent(sourceId)}/pdf?legacy_original=true${entry.page ? '#page=' + entry.page : ''}" target="_blank" rel="noopener">查看原 PDF${entry.page ? ' 第 ' + entry.page + ' 页' : ''}</a>` : '');
         const sources = asset?.table_content?.sources || asset?.provenance?.table_sources || [];
-        const pointers = sources.map(source => `<li>${esc(source.role || 'body')} · 第 ${esc(source.page_number)} 页 · ${esc(source.locator || '')}${source.quote ? ' · ' + esc(source.quote) : ''}</li>`).join('');
+        const pointers = sources.map(source => `<li>${esc(source.role || 'body')} · ${esc(EditableDataGrid.sourcePageLabel(source, ''))}${EditableDataGrid.sourceTraceHtml(source)}${source.quote ? ' · ' + esc(source.quote) : ''}</li>`).join('');
         return `<section class="section-item pd-paper-table" ${asset ? `data-current-asset="${esc(asset.id)}"` : `data-table-id="${esc(entry.rec?.id)}"`}>
           <div class="section-title">${esc(asset?.figure_label || (entry.label ? 'Table ' + entry.label.toUpperCase() : '表格'))}${(asset?.page_numbers || [entry.page]).filter(Number.isSafeInteger).map(page => `<span class="pd-figure-page-badge" data-pdf-page="${page}">Page ${page}</span>`).join('')}</div>
           <div class="muted prewrap">${esc(entry.caption || '未保存表题')}</div>${sourceLinks}
@@ -3795,10 +3797,14 @@
       if (source && source.file_id) {
         const base = `/api/rebuild/files/${encodeURIComponent(source.file_id)}`;
         const label = source.role === "si" ? "SI" : "正文";
-        const pageLabel = source.page_basis === "derived_pdf" ? "派生 PDF 物理页" : "PDF 物理页";
-        const evidence = (source.sources || []).map(item => `
-          <div class="muted"><a href="${base}/preview?section=${encodeURIComponent(section.id)}&page=${encodeURIComponent(item.page_number)}#page=${encodeURIComponent(item.page_number)}&toolbar=1" target="_blank" rel="noopener">${esc(pageLabel)} ${esc(item.page_number)}</a> · ${esc(item.locator || "")}</div>
-          <div class="prewrap">${esc(item.quote || "")}</div>`).join("");
+        const evidence = (source.sources || []).map(item => {
+          const identity = {...source,...item};
+          const page = item.page_number;
+          const canNavigate = Number.isSafeInteger(page) && page > 0 && !['ooxml','docx'].includes(identity.page_basis);
+          const pageLabel = EditableDataGrid.sourcePageLabel(identity, canNavigate ? 'page_basis=source_pdf' : '');
+          return `<div class="muted">${canNavigate ? `<a href="${base}/preview?section=${encodeURIComponent(section.id)}&page=${page}#page=${page}&toolbar=1" target="_blank" rel="noopener">${esc(pageLabel)}</a>` : esc(pageLabel)} · ${esc(item.locator || "")}${EditableDataGrid.sourceTraceHtml(item)}</div>
+            <div class="prewrap">${esc(item.quote || "")}</div>`;
+        }).join("");
         html += `<details><summary>章节来源：${esc(label)} · ${esc(source.original_filename || "")}</summary>${evidence}
           <a href="${base}/download" target="_blank" rel="noopener">原始文件</a></details>`;
       }

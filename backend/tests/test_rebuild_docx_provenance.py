@@ -420,3 +420,20 @@ def test_conflicting_null_asset_identity_is_rejected_before_mutation(env):
     result=client.post('/api/rebuild/papers/'+ids.paper+'/assets/import',json={'assets':[asset]})
     assert 'source_page_identity_invalid' in result.text
     with factory() as s:assert s.scalar(select(func.count()).select_from(RebuildVisualAsset))==0
+
+
+def test_source_dialog_contract_retains_uuid_coordinates_and_pageless_locator(env):
+    """Both source endpoints must provide the fields consumed by source dialogs."""
+    client, factory, settings, ids, root = env
+    src = xml_source(ids, source_kind='table', table_row=0, table_column=2147483647)
+    imported = client.post('/api/rebuild/rows/import', json=row_request(ids, src))
+    assert imported.status_code == 200 and not imported.json()['errors'], imported.text
+    sid, detail = read_source(client, factory)
+    rows = client.get('/api/rebuild/rows', params={'paper_id': ids.paper})
+    assert rows.status_code == 200, rows.text
+    listed = rows.json()['items'][0]['values'][0]['sources'][0]
+    for response in (detail, listed):
+        assert response['id'] == sid
+        for key in ('file_id', 'page_number', 'page_basis', 'source_sha256',
+                    'reading_pdf_sha256', 'table_row', 'table_column', 'ooxml_locator'):
+            assert response[key] == src[key], key
