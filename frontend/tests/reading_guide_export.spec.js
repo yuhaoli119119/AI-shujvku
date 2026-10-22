@@ -5,8 +5,8 @@ const start = detail.indexOf('    async function exportReadingGuideHtml()');
 const end = detail.indexOf('\n    document.addEventListener("keydown"', start);
 const exportFunction = detail.slice(start, end);
 
-for (const [key, id, code] of [['asset_id', 'stable-asset-uuid', 'image_undecodable'], ['section_id', 'stable-section-uuid', 'source_file_not_found_or_wrong_paper']]) {
-test(`guide export reports the exact failed ${key} and blocks download`, async ({page}) => {
+for (const [key, id, code] of [['asset_id', 'stable-asset-uuid', 'image_resource_limit_exceeded'], ['asset_id', 'stable-asset-uuid', 'image_undecodable'], ['section_id', 'stable-section-uuid', 'source_file_not_found_or_wrong_paper']]) {
+test(`guide export reports the exact failed ${key} (${code}) and blocks download`, async ({page}) => {
   const notices = [], downloads = [];
   const context = vm.createContext({
     state: {paperId: 'paper'}, API_BASE: '/api/papers', encodeURIComponent,

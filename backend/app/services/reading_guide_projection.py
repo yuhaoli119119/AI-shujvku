@@ -45,17 +45,142 @@ def guide_image_path(item, settings):
     return path
 
 
+# Per curated asset, inclusive limits. Animation work is charged at its largest
+# composited canvas for every frame, including an APNG default image. These
+# deterministic bounds apply both to projection and to the bytes embedded later.
+# Curated guide rasters use PNG (including APNG), JPEG or GIF; restrict Pillow
+# discovery to these formats so other animation plugins cannot decode on open.
+GUIDE_IMAGE_MAX_ENCODED_BYTES = 16 * 1024 * 1024
+GUIDE_IMAGE_MAX_DIMENSION = 16384
+GUIDE_IMAGE_MAX_FRAME_PIXELS = 16 * 1024 * 1024
+GUIDE_IMAGE_MAX_FRAMES = 128
+GUIDE_IMAGE_MAX_TOTAL_PIXELS = 64 * 1024 * 1024
+
+
+class _ImageResourceLimit(ValueError):
+    def __init__(self):
+        super().__init__("image_resource_limit_exceeded")
+
+
+def _check_image_budget(width, height, frames=1):
+    if width <= 0 or height <= 0 or frames <= 0:
+        raise ValueError("invalid_image_dimensions_or_frames")
+    if (max(width, height) > GUIDE_IMAGE_MAX_DIMENSION or
+            width * height > GUIDE_IMAGE_MAX_FRAME_PIXELS or
+            frames > GUIDE_IMAGE_MAX_FRAMES or
+            width * height * frames > GUIDE_IMAGE_MAX_TOTAL_PIXELS):
+        raise _ImageResourceLimit()
+
+
+def read_guide_image_bytes(path):
+    # Bound allocation as well as decoding, even if the file grows after stat.
+    with path.open("rb") as stream:
+        raw = stream.read(GUIDE_IMAGE_MAX_ENCODED_BYTES + 1)
+    if len(raw) > GUIDE_IMAGE_MAX_ENCODED_BYTES:
+        raise _ImageResourceLimit()
+    return raw
+
+
+def _gif_budget(raw, width, height):
+    """Walk descriptors/subblocks only; Pillow seek() may decode prior frames."""
+    pos = 13
+    frames = 0
+    if raw[10] & 128:
+        pos += 3 * (2 ** ((raw[10] & 7) + 1))
+
+    def skip_blocks(pos):
+        while True:
+            size = raw[pos]
+            pos += 1
+            if not size:
+                return pos
+            pos += size
+            if pos > len(raw):
+                raise ValueError("truncated_gif")
+
+    while pos < len(raw):
+        marker = raw[pos]
+        pos += 1
+        if marker == 0x3B:
+            _check_image_budget(width, height, frames)
+            return frames
+        if marker == 0x21:
+            pos = skip_blocks(pos + 1)  # extension label, then data subblocks
+        elif marker == 0x2C:
+            descriptor = raw[pos:pos + 9]
+            if len(descriptor) != 9:
+                raise ValueError("truncated_gif_descriptor")
+            x, y, w, h = [int.from_bytes(descriptor[i:i + 2], "little")
+                           for i in (0, 2, 4, 6)]
+            _check_image_budget(w, h)
+            width, height = max(width, x + w), max(height, y + h)
+            frames += 1
+            _check_image_budget(width, height, frames)
+            pos += 9
+            if descriptor[8] & 128:
+                pos += 3 * (2 ** ((descriptor[8] & 7) + 1))
+            pos = skip_blocks(pos + 1)  # LZW code size, then compressed subblocks
+        else:
+            raise ValueError("invalid_gif_block")
+    raise ValueError("missing_gif_trailer")
+
+
+def _png_budget(raw, width, height, frames, default_image):
+    # APNG n_frames is available in the header, but fcTL rectangles must also
+    # be checked before seek/load. Skip compressed IDAT/fdAT without inflating.
+    pos = 8
+    controls = 0
+    while pos < len(raw):
+        size = int.from_bytes(raw[pos:pos + 4], "big")
+        kind = raw[pos + 4:pos + 8]
+        end = pos + 12 + size
+        if end > len(raw) or len(kind) != 4:
+            raise ValueError("truncated_png_chunk")
+        if kind == b"fcTL":
+            if size != 26:
+                raise ValueError("invalid_png_frame_control")
+            w, h, x, y = [int.from_bytes(raw[pos + i:pos + i + 4], "big")
+                           for i in (12, 16, 20, 24)]
+            _check_image_budget(w, h)
+            if x + w > width or y + h > height:
+                raise ValueError("png_frame_outside_canvas")
+            controls += 1
+            _check_image_budget(width, height, controls)
+        pos = end
+        if kind == b"IEND":
+            if controls and controls != frames - int(default_image):
+                raise ValueError("png_frame_count_mismatch")
+            return
+    raise ValueError("missing_png_trailer")
+
+
 def validate_guide_image_bytes(raw):
-    # A filename or matching digest cannot establish decodability.
-    # Verify structure, then force pixel decoding (including all frames).
+    # A filename or matching digest cannot establish decodability. Reject
+    # resource excess BEFORE verify or pixel decoding; metadata scans are
+    # bounded by encoded size and do not decompress animation payloads.
+    if len(raw) > GUIDE_IMAGE_MAX_ENCODED_BYTES:
+        raise _ImageResourceLimit()
     try:
-        with Image.open(io.BytesIO(raw)) as image:
+        with Image.open(io.BytesIO(raw), formats=("PNG", "JPEG", "GIF")) as image:
+            width, height = image.size
+            _check_image_budget(width, height)
+            if image.format == "GIF":
+                frames = _gif_budget(raw, width, height)
+            else:
+                frames = getattr(image, "n_frames", 1)
+                _check_image_budget(width, height, frames)
+                if image.format == "PNG":
+                    _png_budget(raw, width, height, frames, image.info.get("default_image", False))
             image.verify()
-        with Image.open(io.BytesIO(raw)) as image:
-            for frame in range(getattr(image, "n_frames", 1)):
+        with Image.open(io.BytesIO(raw), formats=("PNG", "JPEG", "GIF")) as image:
+            for frame in range(frames):
                 image.seek(frame)
                 image.load()
-    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError):
+    except _ImageResourceLimit:
+        raise
+    except Image.DecompressionBombError:
+        raise _ImageResourceLimit() from None
+    except (OSError, ValueError, SyntaxError, IndexError, EOFError):
         raise ValueError("image_undecodable") from None
 
 
@@ -147,7 +272,7 @@ def stored_guide_projection(session, paper_id, settings):
         try:
             path = guide_image_path(item, settings)
             digest = media.get("sha256") if isinstance(media, dict) else None
-            raw = path.read_bytes()
+            raw = read_guide_image_bytes(path)
             if digest and hashlib.sha256(raw).hexdigest() != digest:
                 errors.append("media_sha256_mismatch")
             validate_guide_image_bytes(raw)

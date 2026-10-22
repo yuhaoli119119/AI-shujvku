@@ -346,3 +346,138 @@ def test_image_decoder_accepts_valid_curated_formats(format):
     with Image.open(io.BytesIO(PNG)) as image:
         image.convert('RGB').save(raw, format=format)
     validate_guide_image_bytes(raw.getvalue())
+
+
+def animation_bytes(frames=3, size=(8, 8), format='GIF', **kwargs):
+    images = [Image.new('RGB', size, (i % 256, i // 256, 0)) for i in range(frames)]
+    raw = io.BytesIO()
+    images[0].save(raw, format=format, save_all=True, append_images=images[1:],
+                   duration=20, loop=0, **kwargs)
+    return raw.getvalue()
+
+
+@pytest.mark.no_test_database
+@pytest.mark.parametrize('format', ['GIF', 'PNG'])
+def test_small_animation_within_all_budgets(format):
+    validate_guide_image_bytes(animation_bytes(format=format))
+
+
+@pytest.mark.no_test_database
+@pytest.mark.parametrize('budget,boundary,raw', [
+    ('GUIDE_IMAGE_MAX_ENCODED_BYTES', len(PNG), PNG),
+    ('GUIDE_IMAGE_MAX_DIMENSION', 8, animation_bytes(size=(8, 1))),
+    ('GUIDE_IMAGE_MAX_FRAME_PIXELS', 64, animation_bytes()),
+    ('GUIDE_IMAGE_MAX_FRAMES', 3, animation_bytes()),
+    ('GUIDE_IMAGE_MAX_TOTAL_PIXELS', 192, animation_bytes()),
+    ('GUIDE_IMAGE_MAX_FRAMES', 3, animation_bytes(format='PNG')),
+    ('GUIDE_IMAGE_MAX_TOTAL_PIXELS', 192, animation_bytes(format='PNG')),
+])
+def test_image_budgets_inclusive_boundary_and_reject_before_decode(monkeypatch, budget, boundary, raw):
+    from app.services import reading_guide_projection as projection
+    monkeypatch.setattr(projection, budget, boundary)
+    validate_guide_image_bytes(raw)
+    monkeypatch.setattr(projection, budget, boundary - 1)
+    # Rejection must precede even the first load/verify; using Pillow n_frames
+    # then seek across GIF frames would inadvertently decode prior frames.
+    def forbidden(*args, **kwargs):
+        pytest.fail('over-budget image reached decoding/verification')
+    from PIL import GifImagePlugin, PngImagePlugin
+    for cls in (GifImagePlugin.GifImageFile, PngImagePlugin.PngImageFile):
+        monkeypatch.setattr(cls, 'load', forbidden)
+        monkeypatch.setattr(cls, 'verify', forbidden)
+    with pytest.raises(ValueError, match='^image_resource_limit_exceeded$'):
+        validate_guide_image_bytes(raw)
+
+
+def test_600_frame_resource_probe_blocks_publication_preserves_export(guide_env):
+    factory, settings, ids, client = guide_env
+    raw = animation_bytes(600, (512, 512))
+    with Image.open(io.BytesIO(raw)) as image:
+        assert image.size == (512, 512) and image.n_frames == 600
+    with factory() as session:
+        service = FigureReadingService(session, settings)
+        exported = service.export_offline_html(ids['paper'])
+        path = Path(exported['runtime_path']); saved = path.read_bytes()
+        (settings.storage_root / 'figures' / 'over-budget.gif').write_bytes(raw)
+        asset = session.get(RebuildVisualAsset, ids['asset'])
+        asset.image_path = 'figures/over-budget.gif'; session.commit()
+        before = snapshot(session)
+        data = service.get_paper_reading_guide_data(ids['paper'])
+        assert not data['projection_complete']
+        assert snapshot(session) == before
+    issue = {'asset_id': str(ids['asset']), 'code': 'image_resource_limit_exceeded'}
+    assert issue in client.get(f'/api/papers/{ids["paper"]}/reading-guide').json()['projection_errors']
+    response = client.post(f'/api/papers/{ids["paper"]}/reading-guide/export-html')
+    assert response.status_code == 409 and issue in response.json()['detail']['issues']
+    assert path.read_bytes() == saved
+
+
+@pytest.mark.parametrize('changed_bytes', [animation_bytes(129), b'x' * (16 * 1024 * 1024 + 1)],
+                         ids=['frame-count', 'encoded-bytes'])
+def test_budget_rechecked_at_embedding_preserves_prior_export(guide_env, monkeypatch, changed_bytes):
+    factory, settings, ids, _ = guide_env
+    with factory() as session:
+        service = FigureReadingService(session, settings)
+        exported = service.export_offline_html(ids['paper'])
+        path = Path(exported['runtime_path']); saved = path.read_bytes()
+        original = service.get_paper_reading_guide_data
+        def change_after_projection(paper_id):
+            data = original(paper_id)
+            assert data['projection_complete']
+            (settings.storage_root / 'figures' / 'stored.png').write_bytes(changed_bytes)
+            return data
+        monkeypatch.setattr(service, 'get_paper_reading_guide_data', change_after_projection)
+        with pytest.raises(ReadingGuideProjectionError) as caught:
+            service.export_offline_html(ids['paper'])
+        assert {'asset_id': str(ids['asset']), 'code': 'image_resource_limit_exceeded'} in caught.value.issues
+        assert path.read_bytes() == saved
+
+
+@pytest.mark.no_test_database
+def test_apng_default_image_counts_toward_total_budget(monkeypatch):
+    from app.services import reading_guide_projection as projection
+    raw = animation_bytes(format='PNG', default_image=True)
+    validate_guide_image_bytes(raw)
+    monkeypatch.setattr(projection, 'GUIDE_IMAGE_MAX_TOTAL_PIXELS', 192)
+    validate_guide_image_bytes(raw)
+    monkeypatch.setattr(projection, 'GUIDE_IMAGE_MAX_TOTAL_PIXELS', 191)
+    with pytest.raises(ValueError, match='^image_resource_limit_exceeded$'):
+        validate_guide_image_bytes(raw)
+
+
+@pytest.mark.no_test_database
+def test_gif_descriptor_expansion_rejected_before_frame_decode(monkeypatch):
+    from app.services import reading_guide_projection as projection
+    from PIL import GifImagePlugin
+    raw = bytearray(animation_bytes())
+    # First descriptor is already read by Pillow on open. Change the SECOND
+    # descriptor: its extent must be budgeted without seeking to its pixels.
+    with Image.open(io.BytesIO(raw)) as image:
+        image.seek(1)
+        start = image.tile[0][2]
+    # This synthetic palette contains only 0, 1 and 2, so the last separator
+    # before Pillow's compressed-data offset identifies the second descriptor.
+    descriptor = raw.rfind(b'\x2c', 0, start)
+    assert descriptor > 0 and raw[descriptor + 5:descriptor + 7] == b'\x08\x00'
+    raw[descriptor + 1:descriptor + 3] = (8).to_bytes(2, 'little')  # x offset
+    monkeypatch.setattr(projection, 'GUIDE_IMAGE_MAX_DIMENSION', 8)
+    def forbidden(*args, **kwargs):
+        pytest.fail('expanded GIF reached decoding')
+    monkeypatch.setattr(GifImagePlugin.GifImageFile, 'load', forbidden)
+    with pytest.raises(ValueError, match='^image_resource_limit_exceeded$'):
+        validate_guide_image_bytes(bytes(raw))
+
+
+def test_small_animation_embeds_successfully(guide_env):
+    factory, settings, ids, client = guide_env
+    raw = animation_bytes()
+    with factory() as session:
+        asset = session.get(RebuildVisualAsset, ids['asset'])
+        asset.image_path = 'figures/small.gif'
+        (settings.storage_root / asset.image_path).write_bytes(raw)
+        session.commit()
+    data = client.get(f'/api/papers/{ids["paper"]}/reading-guide').json()
+    assert data['projection_complete']
+    response = client.post(f'/api/papers/{ids["paper"]}/reading-guide/export-html')
+    assert response.status_code == 200
+    assert 'data:image/gif;base64,' + base64.b64encode(raw).decode() in response.text

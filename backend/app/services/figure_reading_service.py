@@ -36,7 +36,8 @@ from app.db.models import (
 )
 from app.utils.artifact_paths import resolve_persisted_artifact_path
 from app.services.reading_guide_projection import (
-    ReadingGuideProjectionError, guide_image_path, stored_guide_projection, validate_guide_image_bytes,
+    ReadingGuideProjectionError, guide_image_path, read_guide_image_bytes,
+    stored_guide_projection, validate_guide_image_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -836,7 +837,8 @@ class FigureReadingService:
                     resolved = None
                 if resolved:
                     try:
-                        raw = resolved.read_bytes()
+                        raw = (read_guide_image_bytes(resolved) if fig.get("record_type") == "rebuild_visual_asset"
+                               else resolved.read_bytes())
                         provenance = fig.get("provenance") or {}
                         media = provenance.get("media") if isinstance(provenance, dict) else None
                         digest = media.get("sha256") if isinstance(media, dict) else None
@@ -851,6 +853,10 @@ class FigureReadingService:
                         img_b64 = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
                     except ReadingGuideProjectionError:
                         raise
+                    except ValueError as exc:
+                        if fig.get("record_type") == "rebuild_visual_asset":
+                            raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": str(exc)}]) from exc
+                        logger.warning("Failed to base64-encode image: %s", exc)
                     except Exception as exc:
                         if fig.get("record_type") == "rebuild_visual_asset":
                             raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": "image_unreadable"}]) from exc
