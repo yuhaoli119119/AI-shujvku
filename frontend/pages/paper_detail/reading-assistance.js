@@ -21,7 +21,8 @@ window.PaperReading = (() => {
       return;
     }
     notice.textContent = (scopes[guide.content_scope] || '依据范围待核实') + ' · 阅读辅助，科学结论请结合原文判断';
-    quick.innerHTML = `<div class="panel-title">30 秒读懂</div><p class="reading-takeaway">${escape(guide.one_sentence)}</p>${guide.problem ? `<p><strong>要解决什么问题</strong><br>${escape(guide.problem)}</p>`:''}${guide.main_finding ? `<p><strong>主要发现</strong><br>${escape(guide.main_finding)}</p>`:''}`;
+    const short = text => { const value=String(text || ''); const first=value.indexOf('。'); return first>=0 ? value.slice(0,first+1) : value; };
+    quick.innerHTML = `<div class="panel-title">30 秒读懂</div><p class="reading-takeaway">${escape(guide.one_sentence)}</p>${guide.problem ? `<p><strong>要解决什么问题</strong><br>${escape(short(guide.problem))}</p>`:''}${guide.main_finding ? `<p><strong>主要发现</strong><br>${escape(short(guide.main_finding))}</p>`:''}${short(guide.problem)!==guide.problem || short(guide.main_finding)!==guide.main_finding ? `<details class="reading-section"><summary>展开研究问题与主要发现的细节</summary><p>${escape(guide.problem)}</p><p>${escape(guide.main_finding)}</p></details>`:''}`;
     const g = guide.guide || {};
     const flow = list(guide.argument_flow);
     const evidence = Array.isArray(guide.evidence) ? guide.evidence.filter(e => /^[0-9a-f-]{36}$/i.test(e.asset_id || '')) : [];

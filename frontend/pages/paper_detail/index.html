@@ -3756,7 +3756,7 @@
       document.getElementById('pdDftMetricLabel').textContent = '当前数据';
       document.getElementById('pdDftTabLabel').textContent = '计算数据';
       document.getElementById('cntDftDesc').textContent = '吸附能、能垒、PDOS 等';
-      document.getElementById('cntDFT').textContent = state.rebuildRows.length;
+      document.getElementById('cntDFT').textContent = state.rebuildStatus === 'ready' ? state.rebuildRows.length : (state.paper?.processing_status?.counts?.rows ?? '…');
       document.getElementById('cntDftDesc').textContent = '当前提取数据行';
     }
 
@@ -3930,7 +3930,7 @@
 
       document.getElementById("cntSections").textContent = paper.counts?.sections || (paper.sections || []).length || 0;
       const figCount = ((paper.figures || []).length + (paper.tables || []).length);
-      document.getElementById("cntFigures").textContent = figCount;
+      document.getElementById("cntFigures").textContent = state.rebuildStatus === "ready" ? figCount : "…";
       document.getElementById("cntFiguresDesc").textContent = (paper.figures || []).length + " 图 · " + (paper.tables || []).length + " 表";
       document.getElementById("cntDFT").textContent = paper.counts?.dft_results || (paper.dft_results_items || []).length || 0;
 
