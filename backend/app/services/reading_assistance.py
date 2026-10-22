@@ -79,9 +79,12 @@ def input_context(session, paper_id, settings):
     result = {'paper_id': str(paper_id), 'title': paper.title, 'abstract_original': paper.abstract or '',
               'documents': documents, 'figures': assets[:100], 'reading_revision': reading_revision(paper),
               'instruction': '正文提供文字证据；未直接看图像，图表判断需说明依据是已有图注/解读。翻译原摘要，不扩写为全文总结。'}
+    from app.services.reading_abstract_source import select_abstract
+    result['abstract_for_translation'] = select_abstract(paper.abstract, documents)
     result['input_revision'] = digest(result)
-    from app.schemas.reading_assistance import ReadingAssistanceSave
+    from app.schemas.reading_assistance import ReadingAssistanceSave, AbstractTranslationSave
     result['save_contract'] = ReadingAssistanceSave.model_json_schema()
+    result['abstract_save_contract'] = AbstractTranslationSave.model_json_schema()
     return result
 
 
@@ -93,7 +96,7 @@ def latest(session, paper_id):
 def serialize(job):
     if not job: return {'status': 'not_started', 'job_id': None}
     progress = job.progress or {}
-    return {'job_id': job.job_id, 'status': job.status, 'phase': progress.get('phase'),
+    return {'job_id': job.job_id, 'status': job.status, 'phase': progress.get('phase'), 'scope':(job.payload or {}).get('reading_scope','full'),
         'message': '阅读内容已保存' if progress.get('reading_saved') else
                    '生成未完成，可保留已有内容后重试' if job.status == 'failed' else
                    '正在准备中文阅读内容' if job.status in RUNNING else '阅读内容待补充',
@@ -102,15 +105,24 @@ def serialize(job):
         'created_at': job.created_at.isoformat(), 'updated_at': job.updated_at.isoformat()}
 
 
-def prompt(paper_id, jid):
+def prompt(paper_id, jid, scope='full'):
+    if scope == 'abstract_only':
+        return abstract_prompt(paper_id, jid)
     return f'''为科研新人生成中文摘要和本文导读，只处理paper_id={paper_id}。这是独立阅读辅助，不解析/修改科学数据，不部署、不派子任务、不另建任务、不更换模型。只用现有统一客户端scripts/ordinary_parse_client.py，--job {jid} --paper {paper_id}；先--help。产物仅outputs/stable-parsing-command-20261023/detail-reading/jobs/{jid}/，不输出凭据。
 1) get /api/rebuild/papers/{paper_id}/reading-assistance/context，保存并完整读取返回原摘要、正文/SI文字与图注（分块看已保存JSON，不能只看终端截断）。缺失须标注，外部检索不是这次前置。
-2) 一次组织中文内容，abstract_zh必须忠实翻译abstract_original，仅翻译不可把全文结论扩写进去；原摘要为空则abstract_zh空并填abstract_missing_reason。one_sentence、problem、main_finding让新人30秒读懂；guide六项background_gap/research_objective/study_design/innovation/conclusions/limitations给出本文背景空白、目标、方案与关键对照、创新、结论适用条件、局限；argument_flow用4-6条串联问题→方案/假设→具体实验/计算证据→结论。只写本文真实内容，不用通用套话凑齐。innovation区分作者声称和已有对照直接支持，不能自称世界首创、猜作者心理。证据不足留空并missing。
+2) 一次组织中文内容，abstract_zh必须忠实翻译abstract_for_translation.text，仅翻译不可把全文结论扩写进去；元数据为空时仅用服务器核实的正文摘要回退，保存abstract_source_revision=abstract_for_translation.revision；text为空则abstract_zh空并填missing_reason。one_sentence、problem、main_finding让新人30秒读懂；guide六项background_gap/research_objective/study_design/innovation/conclusions/limitations给出本文背景空白、目标、方案与关键对照、创新、结论适用条件、局限；argument_flow用4-6条串联问题→方案/假设→具体实验/计算证据→结论。只写本文真实内容，不用通用套话凑齐。innovation区分作者声称和已有对照直接支持，不能自称世界首创、猜作者心理。证据不足留空并missing。
 3) evidence为3-5个关键图表asset_id/question/finding（只引用输入已有asset_id；说明回答什么问题、支持哪个结论，文字/图注依据明确），terms为少量term/explanation。content_scope只能abstract/main_text/main_and_si/partial_text，按实际documents完整范围选；未读完整正文不能称全文完成。DOCX未读图像写入missing，不能把图注冒充图像验证。
 4) 保存JSON：request_id稳定、job_id={jid}、input_revision来自context，其余字段abstract_zh/abstract_missing_reason/one_sentence/problem/main_finding/guide/argument_flow/evidence/terms/content_scope/missing。write /api/rebuild/papers/{paper_id}/reading-assistance JSON_FILE。未知结果原体原ID重放，客户端最多三次退避；拒绝则修正明确错误，不循环重建任务。最后get同路径读回中文摘要和导读。生成/保存失败只保留原因，不阻塞普通解析；可报告partial，非scientific accepted。全部保存读回后结束目标。'''
 
 
-async def create(session, paper_id, settings, request_id, retry=False):
+def abstract_prompt(paper_id, jid):
+    return f'''只补充paper_id={paper_id}的中文摘要，不重生成或改写任何已有导读、科学数据、Paper.abstract，不部署、不派发其他任务。仅使用scripts/ordinary_parse_client.py --job {jid} --paper {paper_id}；先--help。产物仅outputs/stable-parsing-command-20261023/detail-reading/jobs/{jid}/，不输出凭据。
+1) get /api/rebuild/papers/{paper_id}/reading-assistance/context，完整读取abstract_for_translation.text及source。它优先选择元数据，否则为服务端核实的正文Abstract段；不得换用全文总结。source包含真实file_id/sha256/物理页与字符定位。不确定或text空就报告待补，不猜、不重建任务。
+2) 一次忠实翻译该段为中文，保留原意、条件、数字与作者主张强度，不添加整篇结论。遵守abstract_save_contract，只写save_mode=abstract_only、request_id稳定、job_id={jid}、input_revision、abstract_source_revision=abstract_for_translation.revision、abstract_zh。服务端只补缺失译文及来源，保护所有已有导读。
+3) write /api/rebuild/papers/{paper_id}/reading-assistance JSON_FILE；未知结果原体原ID有界重放。保存后get同路径核对译文及abstract_translation来源。不调用其他写接口，不改原摘要字段。确认保存读回后结束原生目标并结束本轮，不等待后台job completed（它需要本轮先结束），不另开任务。'''
+
+
+async def create(session, paper_id, settings, request_id, retry=False, scope='full'):
     from app.services.rebuild_queue import lock_scheduler, paper_busy
     from app.services.ai_extract_service import _background_dispatch
     lock_scheduler(session)
@@ -119,20 +131,27 @@ async def create(session, paper_id, settings, request_id, retry=False):
     previous = session.scalar(select(WorkflowJob).where(WorkflowJob.type == TYPE,
         WorkflowJob.payload.op('->>')('paper_id') == str(paper_id),
         WorkflowJob.payload.op('->>')('request_id') == request_id))
-    if previous: return serialize(previous)
+    if previous:
+        if previous.payload.get('reading_scope','full')!=scope:raise ValueError('reading_request_scope_reused')
+        return serialize(previous)
     old = latest(session, paper_id)
     if old and old.status in RUNNING: return serialize(old)
     if old and old.status == 'failed' and not (old.progress or {}).get('native_terminal_verified'):
         return serialize(old)
     if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
     context = input_context(session, paper_id, settings)
+    if scope == 'abstract_only':
+        if (paper.comprehensive_analysis or {}).get('abstract_zh'):
+            raise ValueError('中文摘要已保存，无需重复补充')
+        if not context['abstract_for_translation']['text']:
+            raise ValueError(context['abstract_for_translation']['missing_reason'])
     jid = 'aiext-guide-' + uuid4().hex[:20]; token = str(uuid4())
-    instruction = 'attempt_token=' + token + '\n' + prompt(paper_id, jid)
+    instruction = 'attempt_token=' + token + '\n' + prompt(paper_id, jid, scope)
     model = 'cn:deepseek-v4.1-flash'
     job = WorkflowJob(job_id=jid, type=TYPE, status='dispatching', library_name=paper.library_name,
         payload={'paper_id':str(paper_id), 'request_id':request_id, 'attempt_token':token,
                  'chosen_model':model, 'chosen_mode':'codex_web_target', 'parse_contract':'ordinary_parse_v1',
-                 'reading_revision':context['reading_revision'], 'input_revision':context['input_revision'],
+                 'reading_revision':context['reading_revision'], 'input_revision':context['input_revision'], 'reading_scope':scope,
                  'dispatch_prompt':instruction, 'dispatch_objective':instruction},
         progress={'phase':'dispatching', 'dispatch_mode':'codex_web_target', 'model':model,
                   'dispatch_started':False, 'events':[]})
@@ -150,7 +169,13 @@ def save(session, paper_id, body, settings, actor):
     job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==body.job_id).with_for_update())
     if not job or job.type not in (TYPE,'ai_extract_rebuild') or job.payload.get('paper_id')!=str(paper_id):
         raise ValueError('reading_job_not_owned')
-    data=body.model_dump(mode='json');fingerprint=digest(data)
+    data=body.model_dump(mode='json')
+    abstract_only=body.save_mode=='abstract_only'
+    if not abstract_only:
+        # Preserve fingerprints of requests issued before the optional fields existed.
+        data.pop('save_mode',None)
+        if data.get('abstract_source_revision') is None:data.pop('abstract_source_revision',None)
+    fingerprint=digest(data)
     # Request IDs may be 128 characters; legacy audit target_id is only 64.
     # Keep existing short identities and use the complete long identity's digest.
     audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
@@ -159,35 +184,54 @@ def save(session, paper_id, body, settings, actor):
         if previous.payload['fingerprint']!=fingerprint or previous.payload['actor']!=actor: raise ValueError('reading_request_id_reused')
         return {**previous.payload['receipt'],'replayed':True}
     if job.status not in RUNNING: raise ValueError('reading_task_finished')
+    if job.payload.get('reading_scope')=='abstract_only' and not abstract_only:
+        raise ValueError('abstract_task_cannot_replace_guide')
     context=input_context(session,paper_id,settings)
     if context['input_revision']!=body.input_revision: raise ValueError('reading_inputs_changed_refresh_context')
+    if abstract_only and job.type==TYPE and job.payload.get('input_revision')!=body.input_revision:
+        raise ValueError('abstract_inputs_changed_since_dispatch')
     expected=job.payload.get('reading_revision')
     if expected and expected!=context['reading_revision']: raise ValueError('reading_content_changed_preserve_current')
-    if paper.abstract and not body.abstract_zh and not body.abstract_missing_reason:
+    source=context['abstract_for_translation']
+    if body.abstract_zh:
+        if not source['text']:raise ValueError('verified_abstract_source_required')
+        if body.abstract_source_revision is not None and body.abstract_source_revision!=source['revision']:
+            raise ValueError('abstract_source_changed_or_unverified')
+        if (abstract_only or source['source']['kind']=='main_text') and body.abstract_source_revision!=source['revision']:
+            raise ValueError('verified_abstract_source_revision_required')
+    if abstract_only and (paper.comprehensive_analysis or {}).get('abstract_zh'):
+        raise ValueError('existing_chinese_abstract_preserved')
+    if not abstract_only and paper.abstract and not body.abstract_zh and not body.abstract_missing_reason:
         raise ValueError('abstract_translation_or_reason_required')
     if body.abstract_zh and not any('\u4e00' <= ch <= '\u9fff' for ch in body.abstract_zh):
         raise ValueError('chinese_abstract_required')
-    docs=context['documents'];main=[d for d in docs if d['role']=='main'];si=[d for d in docs if d['role']=='si']
-    if body.content_scope in ('main_text','main_and_si') and (not main or not all(d['complete_text'] for d in main)):
-        raise ValueError('full_main_text_not_available')
-    if body.content_scope=='main_and_si' and (not si or not all(d['complete_text'] for d in si)):
-        raise ValueError('complete_si_text_not_available')
-    assets={a['asset_id'] for a in context['figures']}
-    if any(str(e.asset_id) not in assets for e in body.evidence):raise ValueError('evidence_asset_not_in_paper_context')
     old={'reading_guide':copy.deepcopy(paper.reading_guide),'abstract_zh':(paper.comprehensive_analysis or {}).get('abstract_zh')}
-    missing=list(body.missing)
-    if body.abstract_missing_reason: missing.append(body.abstract_missing_reason)
-    for d in docs:
-        if d.get('image_limit') and d['image_limit'] not in missing:missing.append(d['image_limit'])
-        if d.get('reason') and d['reason'] not in missing:missing.append(d['reason'])
-    guide={k:v for k,v in data.items() if k not in ('request_id','job_id','input_revision','abstract_zh','abstract_missing_reason')}
-    guide.update(version=VERSION,updated_at=datetime.utcnow().isoformat(),missing=missing,
-        source_files=[{k:d[k] for k in ('file_id','role','name','source_sha256','complete_text')} for d in docs],
-        abstract_source_sha256=hashlib.sha256((paper.abstract or '').encode()).hexdigest(),
-        input_revision=body.input_revision,scientific_acceptance='not_implied')
-    paper.reading_guide={**(paper.reading_guide or {}),'beginner_zh':guide}
-    if body.abstract_zh:paper.comprehensive_analysis={**(paper.comprehensive_analysis or {}),'abstract_zh':body.abstract_zh}
-    receipt={'paper_id':str(paper_id),'job_id':job.job_id,'saved':True,'content_scope':body.content_scope,
+    if not abstract_only:
+        docs=context['documents'];main=[d for d in docs if d['role']=='main'];si=[d for d in docs if d['role']=='si']
+        if body.content_scope in ('main_text','main_and_si') and (not main or not all(d['complete_text'] for d in main)):
+            raise ValueError('full_main_text_not_available')
+        if body.content_scope=='main_and_si' and (not si or not all(d['complete_text'] for d in si)):
+            raise ValueError('complete_si_text_not_available')
+        assets={a['asset_id'] for a in context['figures']}
+        if any(str(e.asset_id) not in assets for e in body.evidence):raise ValueError('evidence_asset_not_in_paper_context')
+        missing=list(body.missing)
+        if body.abstract_missing_reason: missing.append(body.abstract_missing_reason)
+        for d in docs:
+            if d.get('image_limit') and d['image_limit'] not in missing:missing.append(d['image_limit'])
+            if d.get('reason') and d['reason'] not in missing:missing.append(d['reason'])
+        guide={k:v for k,v in data.items() if k not in ('request_id','job_id','input_revision','abstract_zh','abstract_missing_reason','abstract_source_revision','save_mode')}
+        guide.update(version=VERSION,updated_at=datetime.utcnow().isoformat(),missing=missing,
+            source_files=[{k:d[k] for k in ('file_id','role','name','source_sha256','complete_text')} for d in docs],
+            abstract_source_sha256=hashlib.sha256((paper.abstract or '').encode()).hexdigest(),
+            input_revision=body.input_revision,scientific_acceptance='not_implied')
+        paper.reading_guide={**(paper.reading_guide or {}),'beginner_zh':guide}
+    if body.abstract_zh:
+        paper.comprehensive_analysis={**(paper.comprehensive_analysis or {}),'abstract_zh':body.abstract_zh}
+        paper.reading_guide={**(paper.reading_guide or {}),'abstract_translation':{
+            'original_text':source['text'],'source':source['source'],'source_revision':source['revision'],
+            'translation_sha256':hashlib.sha256(body.abstract_zh.encode()).hexdigest(),'supplement_only':abstract_only,
+            'updated_at':datetime.utcnow().isoformat()}}
+    receipt={'paper_id':str(paper_id),'job_id':job.job_id,'saved':True,'content_scope':(paper.reading_guide or {}).get('beginner_zh',{}).get('content_scope') if abstract_only else body.content_scope,
              'replayed':False,'reading_revision':reading_revision(paper)}
     session.add(AuditLog(action=VERSION,source=VERSION,paper_id=paper_id,target_type='paper_reading',target_id=audit_id,
         payload={'actor':actor,'fingerprint':fingerprint,'before':old,'after':{'reading_guide':paper.reading_guide,'abstract_zh':body.abstract_zh},'receipt':receipt}))
