@@ -122,7 +122,7 @@ def _valid_corrections(session, paper_id, rows, imports, files):
 def list_sections(session: Session, paper_id: UUID) -> list[dict]:
     """Batched reads; only explicit, source-bound declarations mark history."""
     rows = list(session.scalars(select(PaperSection).where(
-        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.section_title, PaperSection.text)))
+        PaperSection.paper_id == paper_id).order_by(PaperSection.page_start, PaperSection.section_title, PaperSection.text, PaperSection.id)))
     events = {event.target_id: event for event in _events(session, paper_id)}
     files = {str(file.id): file for file in session.scalars(select(RebuildPaperFile).where(
         RebuildPaperFile.paper_id == paper_id))}

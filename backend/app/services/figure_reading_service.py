@@ -10,12 +10,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import html
+import json
 import logging
 import mimetypes
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlsplit
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -33,6 +35,9 @@ from app.db.models import (
     PaperTable,
 )
 from app.utils.artifact_paths import resolve_persisted_artifact_path
+from app.services.reading_guide_projection import (
+    ReadingGuideProjectionError, guide_image_path, stored_guide_projection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -602,6 +607,11 @@ class FigureReadingService:
         }
 
     def get_paper_reading_guide_data(self, paper_id: UUID) -> dict[str, Any]:
+        # A read must not flush pending unrelated changes in a caller's session.
+        with self.session.no_autoflush:
+            return self._get_paper_reading_guide_data(paper_id)
+
+    def _get_paper_reading_guide_data(self, paper_id: UUID) -> dict[str, Any]:
         """Aggregate full paper reading guide data: metadata, logical thread, figures, SI, and DFT."""
         paper = self.session.get(Paper, paper_id)
         if not paper:
@@ -626,7 +636,15 @@ class FigureReadingService:
                 "reading": reading,
                 "has_reading": isinstance(reading, dict) and bool(reading.get("detailed_explanation")),
                 "image_path": f.image_path,
+                "record_type": "paper_figure",
+                "provenance": f.prov,
             })
+
+        sections, media, issues = stored_guide_projection(self.session, paper_id, self.settings)
+        # UUID identity, never labels/captions, determines membership. Distinct
+        # legacy and curated records stay distinct; neither borrows the other's
+        # image or reading. Each stored record occurs once.
+        figure_items.extend(media)
 
         si_context = self._get_supplementary_context(paper_id)
 
@@ -668,6 +686,9 @@ class FigureReadingService:
             "abstract": paper.abstract,
             "abstract_zh": localized.get("abstract_zh") if isinstance(localized.get("abstract_zh"), str) else None,
             "figures": figure_items,
+            "sections": sections,
+            "projection_errors": issues,
+            "projection_complete": not issues,
             "supplementary": si_context,
             "dft_summary": dft_summary,
             "saved_guide": saved_guide,
@@ -701,9 +722,22 @@ class FigureReadingService:
         self.session.commit()
         return {"paper_id": str(paper_id), "status": "saved", "guide": clean_guide}
 
-    def render_offline_html(self, paper_id: UUID) -> str:
+    def render_offline_html(self, paper_id: UUID, *, source_base_url: str | None = None) -> str:
         """Render a completely self-contained single-file HTML reading guide."""
         data = self.get_paper_reading_guide_data(paper_id)
+        if data.get("projection_errors"):
+            raise ReadingGuideProjectionError(data["projection_errors"])
+
+        def source_link(url):
+            # A downloaded file has no workbench origin. Only an explicit HTTP
+            # origin may turn its source API path into a working online link.
+            if source_base_url and urlsplit(source_base_url).scheme in {"http", "https"} and urlsplit(source_base_url).netloc:
+                target = html.escape(urljoin(source_base_url, url), quote=True)
+                return f'<a href="{target}">下载来源原件（需连接工作台）</a>'
+            return f'<p>来源原件工作台路径：<code>{html.escape(url)}</code></p>'
+
+        def reading_list_text(value):
+            return html.escape("; ".join(str(v) for v in value) if isinstance(value, list) else str(value or ""))
         paper_title = html.escape(data.get("title") or "文献导读")
         paper_doi = html.escape(data.get("doi") or "")
         paper_journal = html.escape(data.get("journal") or "")
@@ -771,30 +805,54 @@ class FigureReadingService:
                 </section>
                 """
 
+        sections_html = []
+        for section in data.get("sections", []):
+            title = html.escape(section.get("section_title") or section.get("section_type") or "未命名章节")
+            text = html.escape(section.get("text") or "")
+            metadata = html.escape(json.dumps({k: v for k, v in section.items() if k != "text"}, ensure_ascii=False))
+            provenance = section.get("provenance") or {}
+            section_source_link = source_link(provenance["download_url"]) if provenance.get("download_url") else ''
+            sections_html.append(f'<article class="card section-block" id="section-{section["id"]}" data-order="{section["order"]}">'
+                                 f'<h3>{title}</h3><div style="white-space:pre-wrap">{text}</div>'
+                                 f'<details><summary>章节来源与顺序</summary><pre style="white-space:pre-wrap">{metadata}</pre></details>{section_source_link}</article>')
+        sections_str = "".join(sections_html) or '<p>暂无解析章节。</p>'
+
         figures_html = []
         for fig in data["figures"]:
             label = html.escape(fig.get("figure_label") or "Figure")
+            if fig.get("subfigure_label"):
+                label += ' · ' + html.escape(fig["subfigure_label"])
             caption = html.escape(fig.get("caption") or "")
             page = fig.get("page")
             reading = fig.get("reading") or {}
 
             img_b64 = None
             if fig.get("image_path"):
-                resolved = resolve_persisted_artifact_path(
-                    fig["image_path"],
-                    category="figures",
-                    settings=self.settings,
-                )
-                if resolved and resolved.is_file():
+                try:
+                    resolved = guide_image_path(fig, self.settings)
+                except (ValueError, OSError) as exc:
+                    if fig.get("record_type") == "rebuild_visual_asset":
+                        raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": "image_unreadable"}]) from exc
+                    resolved = None
+                if resolved:
                     try:
                         raw = resolved.read_bytes()
+                        provenance = fig.get("provenance") or {}
+                        media = provenance.get("media") if isinstance(provenance, dict) else None
+                        digest = media.get("sha256") if isinstance(media, dict) else None
+                        if digest and hashlib.sha256(raw).hexdigest() != digest:
+                            raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": "media_sha256_mismatch"}])
                         mime = mimetypes.guess_type(resolved.name)[0] or "image/png"
                         img_b64 = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+                    except ReadingGuideProjectionError:
+                        raise
                     except Exception as exc:
+                        if fig.get("record_type") == "rebuild_visual_asset":
+                            raise ReadingGuideProjectionError([{"asset_id": fig["figure_id"], "code": "image_unreadable"}]) from exc
                         logger.warning("Failed to base64-encode image: %s", exc)
 
-            summary = html.escape(reading.get("summary") or fig.get("content_summary") or "尚未生成解读")
-            detailed = html.escape(reading.get("detailed_explanation") or "").replace("\n", "<br>")
+            summary = html.escape(reading.get("summary") or reading.get("summary_zh") or fig.get("content_summary") or "尚未生成解读")
+            detailed = html.escape(reading.get("detailed_explanation") or reading.get("detailed_explanation_zh") or "").replace("\n", "<br>")
 
             subfigs_html = ""
             subfigs = reading.get("subfigures") or []
@@ -803,8 +861,8 @@ class FigureReadingService:
                 for s in subfigs:
                     label_str = html.escape(s.get("label", ""))
                     desc_str = html.escape(s.get("description", ""))
-                    m_tag = f"<span class='tag'>方法: {html.escape(s.get('methods', ''))}</span>" if s.get("methods") else ""
-                    f_tag = f"<span class='finding'>{html.escape(s.get('findings', ''))}</span>" if s.get("findings") else ""
+                    m_tag = f"<span class='tag'>方法: {reading_list_text(s.get('methods'))}</span>" if s.get("methods") else ""
+                    f_tag = f"<span class='finding'>{reading_list_text(s.get('findings'))}</span>" if s.get("findings") else ""
                     sub_items_list.append(
                         f"<div class='subfig-item'><strong>{label_str}</strong> {desc_str} {m_tag} {f_tag}</div>"
                     )
@@ -818,15 +876,17 @@ class FigureReadingService:
                 for l in locators:
                     q = html.escape(l.get("quote", ""))
                     sec = html.escape(l.get("section", ""))
-                    p_num = l.get("page", "-")
-                    loc_chips.append(f"<span class='chip' title='{q}'>P.{p_num} · {sec}</span>")
+                    locator = ("OOXML: " + str(l.get("ooxml_locator") or l.get("locator") or "")
+                               if l.get("page_basis") == "ooxml" or l.get("ooxml_locator")
+                               else "P." + str(l["page"]) if l.get("page") is not None else "未记录物理页")
+                    loc_chips.append(f"<span class='chip' title='{q}'>{html.escape(locator)} · {sec}</span>")
                 chips_str = "".join(loc_chips)
                 locators_html = f"<div class='locators-box'><h4>证据定位</h4><div class='chip-row'>{chips_str}</div></div>"
 
             # Check whether figure has deep evidence-backed reading
             has_deep_reading = (
                 isinstance(reading, dict)
-                and bool(reading.get("detailed_explanation"))
+                and bool(reading.get("detailed_explanation") or reading.get("detailed_explanation_zh"))
                 and bool(reading.get("evidence_locators"))
             )
             is_stale = bool(reading.get("is_stale")) if isinstance(reading, dict) else False
@@ -837,12 +897,17 @@ class FigureReadingService:
             image_element = f'<img src="{img_b64}" alt="{label}">' if img_b64 else '<div class="no-img">图片未内嵌或暂不可用</div>'
             body_element = f'<div class="reading-body">{detailed}</div>' if detailed else ''
             caption_element = f'<details class="caption-details"><summary>原文图注</summary><p>{caption}</p></details>' if caption else ''
+            source_metadata = html.escape(json.dumps({k: v for k, v in fig.items() if k != "reading"}, ensure_ascii=False))
+            source_element = f'<details><summary>图片来源与状态</summary><pre style="white-space:pre-wrap">{source_metadata}</pre></details>'
+            if fig.get("download_url"):
+                source_element += source_link(fig["download_url"])
+            location = "OOXML 定位（无物理页）" if fig.get("page_basis") == "ooxml" else f"Page {page}" if page is not None else "未记录物理页"
 
             figures_html.append(f"""
             <article class="figure-block" id="fig-{fig['figure_id']}">
               <div class="figure-head">
                 <h3>{label}</h3>
-                <span class="page-badge">Page {page or '-'}</span>
+                <span class="page-badge">{location}</span>
               </div>
               <div class="figure-media">
                 {image_element}
@@ -858,6 +923,7 @@ class FigureReadingService:
                 {locators_html}
               </div>
               {caption_element}
+              {source_element}
             </article>
             """)
 
@@ -876,7 +942,7 @@ class FigureReadingService:
             <div class='card si-card'>
               <h3>关联补充材料 (Supporting Information)</h3>
               <ul>{si_items_str}</ul>
-              <div class="si-disclaimer">注：按本次极简处理规范，SI 图表维持原始图注与短概括索引，离线导读不嵌入 SI 图片与深度阅读解读。</div>
+              <div class="si-disclaimer">本指南包含当前文献已存图片；关联文献的图片数量仅作索引，不表示科学验收通过。</div>
             </div>
             """
 
@@ -1218,8 +1284,10 @@ footer {{
 
   {guide_overview_html}
 
+  <section class="sections-container"><h2>已存章节原文</h2>{sections_str}</section>
+
   <section class="figures-container" style="display:flex; flex-direction:column; gap:24px;">
-    <h2>正文关键图片深度解读与论证脉络</h2>
+    <h2>已存正文与补充材料图片及解读</h2>
     {figures_str}
   </section>
 
@@ -1227,7 +1295,7 @@ footer {{
   {dft_section_html}
 
   <footer>
-    本导读由 Literature AI 系统基于论文正文切图、原文图注、引用上下文及已核验科学数据生成。<br>
+    本导读展示数据库已存章节、图片、来源及解读；保留各记录原状态，不代表科学验收通过。<br>
     导出时间: {export_time_str} · 单文件离线自包含版本
   </footer>
 </div>
@@ -1235,9 +1303,9 @@ footer {{
 </html>"""
 
 
-    def export_offline_html(self, paper_id: UUID) -> dict[str, Any]:
+    def export_offline_html(self, paper_id: UUID, *, source_base_url: str | None = None) -> dict[str, Any]:
         """Atomically persist the self-contained guide on the server and return traceable metadata."""
-        html_content = self.render_offline_html(paper_id)
+        html_content = self.render_offline_html(paper_id, source_base_url=source_base_url)
         output_dir = self.settings.storage_paths["root"] / "exports" / "reading_guides" / str(paper_id)
         output_dir.mkdir(parents=True, exist_ok=True)
         target = output_dir / "reading_guide.html"
@@ -1257,5 +1325,5 @@ footer {{
             "size_bytes": len(raw),
             "sha256": hashlib.sha256(raw).hexdigest(),
             "self_contained": True,
-            "supplementary_images_embedded": False,
+            "supplementary_images_embedded": True,
         }

@@ -45,6 +45,7 @@ from app.schemas.api import (
     PaperKnowledgeContextResponse,
 )
 from app.services.paper_codes import next_supplementary_paper_code, supplementary_base_code, lock_catalog_numbering
+from app.services.reading_guide_projection import ReadingGuideProjectionError
 from pydantic import BaseModel, Field
 
 class RelationshipCreateRequest(BaseModel):
@@ -1804,12 +1805,13 @@ async def save_paper_reading_guide(
 @router.post("/{paper_id}/reading-guide/export-html")
 async def export_paper_reading_guide_html(
     paper_id: UUID,
+    request: Request,
     session: Session = Depends(get_db_session),
 ) -> FileResponse:
     """Generate the self-contained guide on the server and download the final artifact."""
     from app.services.figure_reading_service import FigureReadingService
     try:
-        exported = FigureReadingService(session).export_offline_html(paper_id)
+        exported = FigureReadingService(session).export_offline_html(paper_id, source_base_url=str(request.base_url))
         return FileResponse(
             path=exported["runtime_path"],
             media_type="text/html; charset=utf-8",
@@ -1819,5 +1821,9 @@ async def export_paper_reading_guide_html(
                 "X-Export-Size": str(exported["size_bytes"]),
             },
         )
+    except ReadingGuideProjectionError as exc:
+        raise HTTPException(status_code=409, detail={
+            "code": str(exc), "issues": exc.issues,
+        }) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

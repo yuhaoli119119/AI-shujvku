@@ -4222,7 +4222,11 @@
         const resp = await fetch(exportUrl, { method: "POST", credentials: "same-origin" });
         if (!resp.ok) {
           const result = await resp.json().catch(() => ({}));
-          showToast("导出失败: " + (result.detail || "网络请求异常"));
+          const detail = result.detail;
+          const message = detail && typeof detail === "object"
+            ? [detail.code, ...(detail.issues || []).map(issue => `${issue.asset_id || ''}: ${issue.code}`)].filter(Boolean).join(" · ")
+            : detail;
+          showToast("导出失败: " + (message || "网络请求异常"));
           return;
         }
         const blob = await resp.blob();
