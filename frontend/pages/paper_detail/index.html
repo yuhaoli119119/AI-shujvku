@@ -15,6 +15,7 @@
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
   <script src="../../shared/editable-data-grid.js?v=20261022-source-traceability"></script>
+  <script src="reading-assistance.js?v=20261023"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -543,6 +544,7 @@
     }
   </style>
 
+<link rel="stylesheet" href="reading-assistance.css?v=20261023">
 </head>
 <body>
   <div id="topnav-mount"></div>
@@ -579,26 +581,15 @@
               <span id="paperDoiWrap" style="display:none;"><span class="pd-meta-sep">·</span> <span class="pd-doi" id="paperDoi"></span></span>
             </div>
             <div id="paperBadges" class="pd-badges"></div>
-            <div id="pdAcceptanceStatus" class="muted" aria-live="polite">科学验收：待读取；已解析不代表验收通过。</div>
-            <details><summary>检查已存结果缺项（只读）</summary>
-              <p class="muted">检查已保存的来源和格式，不代表全文提取或科学验收通过。</p>
-              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality()">读取缺项清单</button>
-              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCoveragePlan()">查看原文覆盖清单</button>
-              <div id="pdStoredQuality" aria-live="polite"></div>
-              <div id="pdCoveragePlan" aria-live="polite"></div>
-              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('source_scope')">查看分段提取与检查记录</button>
-              <div id="pdStagedChecks" aria-live="polite"></div>
-              <button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('attempts')">查看历史尝试与验收报告索引</button>
-              <div id="pdHistoryReconciliation" aria-live="polite"></div>
-            </details>
+
           </div>
           <div class="pd-actions">
-            <button class="btn btn-primary btn-sm" type="button" id="pdViewPdfBtn" onclick="viewPaperPdf()">查看 PDF</button>
-            <button class="btn btn-ghost btn-sm" type="button" id="pdExportGuideBtn" onclick="exportReadingGuideHtml()" title="导出包含全文研究脉络、图片科学解读与已核验DFT分析的离线HTML导读"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出导读 HTML</button>
-            <button class="btn btn-ghost btn-sm" type="button" onclick="loadPaperData()">刷新详情</button>
+            <button class="btn btn-primary btn-sm" type="button" id="pdViewPdfBtn" onclick="viewPaperPdf()">阅读原文</button>
             <button class="btn btn-ghost btn-sm" type="button" id="pdReparseBtn" onclick="openPaperPreparation()">整理 / 更新资料</button>
             <button class="btn btn-ghost btn-sm" type="button" onclick="togglePdMoreMenu(event)">更多操作 ▾</button>
             <div id="pdMoreMenu" style="display:none; position:absolute; background:var(--color-surface); border:1px solid var(--color-border); border-radius:var(--radius); box-shadow:var(--shadow-elevated); padding:6px; z-index:200; flex-direction:column; gap:2px; margin-top:4px;">
+            <button class="btn btn-ghost btn-sm" type="button" id="pdExportGuideBtn" onclick="exportReadingGuideHtml()" title="导出已保存的导读与来源资料"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>导出导读 HTML</button>
+            <button class="btn btn-ghost btn-sm" type="button" onclick="loadPaperData()">刷新详情</button>
               <button class="btn btn-ghost btn-sm" type="button" onclick="copyPaperMeta()" style="justify-content:flex-start;">复制 DOI / 标题</button>
               <button class="btn btn-ghost btn-sm" type="button" onclick="document.getElementById('pdSupplementaryPdfInput').click()" style="justify-content:flex-start;">上传 SI / 支撑文献</button>
               <button class="btn btn-ghost btn-sm" type="button" onclick="associateExistingSupplementary()" style="justify-content:flex-start;">关联已入库 SI</button>
@@ -610,7 +601,7 @@
             </div>
           </div>
         </div>
-        <div id="paperSummary" class="pd-summary"></div>
+        <div id="paperSummary" class="pd-summary" hidden></div>
         <div id="paperRelatedDocuments" hidden style="margin-top:12px;overflow-wrap:anywhere"></div>
       </header>
 
@@ -633,6 +624,18 @@
 
       </div>
 
+<details class="pd-parsing-details" id="pdParsingDetails"><summary>解析详情 · 覆盖范围与记录</summary><div class="pd-parsing-body">            <div id="pdAcceptanceStatus" class="muted" aria-live="polite">科学验收：待读取；已解析不代表验收通过。</div>
+            <details><summary>已存资料检查与记录</summary>
+              <p class="muted">检查已保存的来源和格式，不代表全文提取或科学验收通过。</p>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality()">读取缺项清单</button>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCoveragePlan()">查看原文覆盖清单</button>
+              <div id="pdStoredQuality" aria-live="polite"></div>
+              <div id="pdCoveragePlan" aria-live="polite"></div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadStagedChecks('source_scope')">查看分段提取与检查记录</button>
+              <div id="pdStagedChecks" aria-live="polite"></div>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadHistoryReconciliation('attempts')">查看历史尝试与验收报告索引</button>
+              <div id="pdHistoryReconciliation" aria-live="polite"></div>
+            </details></div></details>
       <section class="layout">
         <div>
           <div class="tabs">
@@ -646,10 +649,13 @@
           </div>
 
           <div id="tab-summary" class="tab-pane active">
-            <div class="panel-card"><div class="panel-title" style="display:flex;justify-content:space-between;align-items:center;">摘要 <button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" style="display:none;">查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div></div>
+            <div class="panel-card" id="pdQuickReading" hidden></div>
+            <div class="panel-card"><div class="pd-reading-head"><div><div class="panel-title">中文摘要</div><p id="pdAbstractNote" class="muted" style="font-size:12px"></p></div><button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" hidden>查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div></div>
+            <div class="panel-card" id="pdReadingCard"><div class="pd-reading-head"><div><div class="panel-title">论文导读</div><p id="pdReadingScope" class="muted"></p></div><button class="btn btn-ghost btn-sm" type="button" id="pdGenerateReading">补充中文导读</button></div><p id="pdReadingJob" role="status" aria-live="polite"></p><div id="pdBeginnerGuide"></div></div>
+
             <div id="paperKeywordsPanel" class="pd-keywords" style="display:none;"></div>
             <div class="panel-card">
-              <div class="panel-title">研究重点 / 综合分析</div>
+              <div class="panel-title">已有研究重点</div>
               <div id="comprehensiveJSON" class="pd-analysis-grid"></div>
             </div>
 
@@ -3379,7 +3385,7 @@
         state.defaultDataTabApplied=true;
         const hasCalculation=state.rebuildRows.some(row=>row.data_type==='dft');
         const hasExperiment=state.rebuildRows.some(row=>row.data_type!=='dft') || (state.paper?.counts?.electrochemical_performance || state.paper?.counts?.electrochemical_performance_items || state.paper?.electrochemical_performance_items?.length || 0)>0;
-        switchDetailTab(hasCalculation?'dft':hasExperiment?'experimental':'summary');
+        // Overview remains the default reading entry; explicit tab and user selection are preserved.
       }
       renderSupplementaryFiles();
       installHistoryTransferButtons();
@@ -3930,18 +3936,22 @@
 
       const abstractEl = document.getElementById("paperAbstract");
       const abstractToggle = document.getElementById("abstractLanguageBtn");
-      const abstractZh = String(paper.abstract_zh || "").trim();
+      let abstractZh = String(paper.abstract_zh || "").trim();
       const abstractEn = String(paper.abstract || "").trim();
       let showingEnglishAbstract = false;
       const renderAbstract = function() {
+        abstractZh = String(paper.abstract_zh || "").trim();
+        document.getElementById('pdAbstractNote').textContent = showingEnglishAbstract ? '原文摘要保留，未做改写' : abstractZh ? '依据原摘要的中文译文' : '中文译文待补充，先展示原文摘要';
         abstractEl.textContent = showingEnglishAbstract ? (abstractEn || "暂无英文原摘要") : (abstractZh || abstractEn || "暂无摘要");
         if (abstractToggle) {
           abstractToggle.textContent = showingEnglishAbstract ? "查看中文摘要" : "查看英文原摘要";
+          abstractToggle.hidden = !(abstractZh && abstractEn);
           abstractToggle.style.display = abstractZh && abstractEn ? "inline-flex" : "none";
         }
       };
       if (abstractToggle) abstractToggle.onclick = function() { showingEnglishAbstract = !showingEnglishAbstract; renderAbstract(); };
       renderAbstract();
+      PaperReading.mount({paper, fetch:fetchJSON, abstract:renderAbstract});
 
       const keywordsPanel = document.getElementById("paperKeywordsPanel");
       const rawKeywords = Array.isArray(paper.keywords) ? paper.keywords

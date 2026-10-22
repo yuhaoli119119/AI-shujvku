@@ -20,6 +20,7 @@ from app.api.papers.listing import list_papers
 from app.schemas.api import PaperListItemResponse
 from app.api.references import router as references_router
 from app.api.rebuild import router as rebuild_router
+from app.api.reading_assistance import router as reading_assistance_router
 from app.api.share import router as share_router
 from app.api.settings import (
     apply_persisted_settings_to_runtime,
@@ -123,6 +124,7 @@ app.include_router(module_locks_router, prefix="/api/module-locks", tags=["modul
 app.add_api_route("/api/papers", list_papers, methods=["GET"], response_model=list[PaperListItemResponse], response_model_exclude_unset=True)
 app.include_router(papers_router, prefix="/api/papers", tags=["papers"])
 app.include_router(rebuild_router, prefix="/api/rebuild", tags=["rebuild"])
+app.include_router(reading_assistance_router)
 app.include_router(references_router, prefix="/api/papers", tags=["references"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
 app.include_router(share_router, prefix="/api")
