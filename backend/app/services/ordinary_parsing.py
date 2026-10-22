@@ -235,13 +235,17 @@ def recover_auto_started_turn(payload, progress, status, settings):
     """
     if (payload.get('parse_contract') != VERSION or payload.get('chosen_mode') != 'codex_web_target'
             or progress.get('turn_id') or status is None or status.thread_id != progress.get('thread_id')
-            or status.cwd != settings.codex_web_cwd or status.model_provider != 'workbuddy'):
+            or status.model_provider != 'workbuddy'):
         return None
     tid = progress['thread_id']
     events = progress.get('events', [])
     if any(e.get('method') == 'turn/start' and e.get('phase') == 'request_prepared' for e in events):
         return None
     fresh = False; goal_sent = False; acked = False; checked = False
+    project_paths = {'/opt/literature-ai', '/opt/AI-shujvku/literature-ai'}
+    cwd_matches = status.cwd == settings.codex_web_cwd or {status.cwd, settings.codex_web_cwd} == project_paths
+    if not cwd_matches:
+        return None
     for event in events:
         result = (event.get('response') or {}).get('result') or {}
         method, phase = event.get('method'), event.get('phase')
