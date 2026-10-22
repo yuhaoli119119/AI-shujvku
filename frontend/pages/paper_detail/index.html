@@ -15,7 +15,7 @@
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
   <script src="../../shared/editable-data-grid.js?v=20261022-source-traceability"></script>
-  <script src="reading-assistance.js?v=20261023-state2"></script>
+  <script src="reading-assistance.js?v=20261023-abstract-source"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -650,7 +650,7 @@
 
           <div id="tab-summary" class="tab-pane active">
             <div class="panel-card" id="pdQuickReading" hidden></div>
-            <div class="panel-card"><div class="pd-reading-head"><div><div class="panel-title">中文摘要</div><p id="pdAbstractNote" class="muted" style="font-size:12px"></p></div><button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" hidden>查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div></div>
+            <div class="panel-card"><div class="pd-reading-head"><div><div class="panel-title">中文摘要</div><p id="pdAbstractNote" class="muted" style="font-size:12px"></p></div><button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" hidden>查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div><a id="pdAbstractSourceLink" class="muted" hidden target="_blank" rel="noopener">查看摘要来源</a></div>
             <div class="panel-card" id="pdReadingCard"><div class="pd-reading-head"><div><div class="panel-title">论文导读</div><p id="pdReadingScope" class="muted"></p></div><button class="btn btn-ghost btn-sm" type="button" id="pdGenerateReading">补充中文导读</button></div><p id="pdReadingJob" role="status" aria-live="polite"></p><button id="pdRefreshReadingState" class="btn btn-ghost btn-sm" type="button" hidden>重新核对状态</button><div id="pdBeginnerGuide"></div></div>
 
             <div id="paperKeywordsPanel" class="pd-keywords" style="display:none;"></div>
@@ -3937,11 +3937,20 @@
       const abstractEl = document.getElementById("paperAbstract");
       const abstractToggle = document.getElementById("abstractLanguageBtn");
       let abstractZh = String(paper.abstract_zh || "").trim();
-      const abstractEn = String(paper.abstract || "").trim();
       let showingEnglishAbstract = false;
       const renderAbstract = function() {
         abstractZh = String(paper.abstract_zh || "").trim();
-        document.getElementById('pdAbstractNote').textContent = showingEnglishAbstract ? '原文摘要保留，未做改写' : abstractZh ? '依据原摘要的中文译文' : '中文译文待补充，先展示原文摘要';
+        const translation=paper.reading_guide?.abstract_translation;
+        const source=translation?.source;
+        const abstractEn=String(translation?.original_text || paper.abstract || '').trim();
+        const fromMain=source?.kind==='main_text';
+        document.getElementById('pdAbstractNote').textContent = showingEnglishAbstract ?
+          (fromMain?'正文摘要原文保留，未做改写':'原文摘要保留，未做改写') : abstractZh ?
+          (fromMain?`译自正文摘要 · PDF物理第${Number(source.physical_page)}页`:'依据原摘要的中文译文') : '中文译文待补充，先展示原文摘要';
+        const sourceLink=document.getElementById('pdAbstractSourceLink');
+        const hasSource=fromMain && /^[0-9a-f-]{36}$/i.test(source.file_id || '') && /^[0-9a-f]{64}$/.test(source.source_sha256 || '') && Number.isInteger(source.physical_page) && source.physical_page>0;
+        sourceLink.hidden=!hasSource;
+        if(hasSource)sourceLink.href=`/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview?source_sha256=${encodeURIComponent(source.source_sha256)}&page_basis=source_pdf&page=${source.physical_page}#page=${source.physical_page}`;
         abstractEl.textContent = showingEnglishAbstract ? (abstractEn || "暂无英文原摘要") : (abstractZh || abstractEn || "暂无摘要");
         if (abstractToggle) {
           abstractToggle.textContent = showingEnglishAbstract ? "查看中文摘要" : "查看英文原摘要";

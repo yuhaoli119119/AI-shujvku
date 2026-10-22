@@ -28,6 +28,8 @@ class GuideTerm(BaseModel):
 
 class ReadingAssistanceSave(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    save_mode: Literal['full'] = 'full'
+    abstract_source_revision: str | None = Field(default=None, min_length=64, max_length=64)
     request_id: str = Field(min_length=1, max_length=128)
     job_id: str = Field(min_length=1, max_length=100)
     input_revision: str = Field(min_length=64, max_length=64)
@@ -42,3 +44,13 @@ class ReadingAssistanceSave(BaseModel):
     terms: list[GuideTerm] = Field(default_factory=list, max_length=8)
     content_scope: Literal['abstract', 'main_text', 'main_and_si', 'partial_text']
     missing: list[str] = Field(default_factory=list, max_length=15)
+
+
+class AbstractTranslationSave(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    save_mode: Literal['abstract_only']
+    request_id: str = Field(min_length=1, max_length=128)
+    job_id: str = Field(min_length=1, max_length=100)
+    input_revision: str = Field(min_length=64, max_length=64)
+    abstract_source_revision: str = Field(min_length=64, max_length=64)
+    abstract_zh: str = Field(min_length=1, max_length=15000)

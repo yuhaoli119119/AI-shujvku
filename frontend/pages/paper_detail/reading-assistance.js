@@ -33,7 +33,7 @@ window.PaperReading = (() => {
       host.innerHTML = '<p class="muted">补充后可阅读研究目标、创新点、关键对照、结论条件及文章论证脉络。</p>';
       return;
     }
-    notice.textContent = (scopes[guide.content_scope] || '依据范围待核实') + ' · 阅读辅助，科学结论请结合原文判断';
+    notice.textContent = (scopes[guide.content_scope] || '依据范围待核实') + ' · 阅读辅助，科学结论请结合原文判断' + (paper.reading_guide?.abstract_translation?.supplement_only?' · 中文摘要已单独补充，导读待补记录保留生成时状态':'');
     const short = text => { const value=String(text || ''); const first=value.indexOf('。'); return first>=0 ? value.slice(0,first+1) : value; };
     quick.innerHTML = `<div class="panel-title">30 秒读懂</div><p class="reading-takeaway">${escape(guide.one_sentence)}</p>${guide.problem ? `<p><strong>要解决什么问题</strong><br>${escape(short(guide.problem))}</p>`:''}${guide.main_finding ? `<p><strong>主要发现</strong><br>${escape(short(guide.main_finding))}</p>`:''}${short(guide.problem)!==guide.problem || short(guide.main_finding)!==guide.main_finding ? `<details class="reading-section"><summary>展开研究问题与主要发现的细节</summary><p>${escape(guide.problem)}</p><p>${escape(guide.main_finding)}</p></details>`:''}`;
     const g = guide.guide || {};
@@ -54,9 +54,11 @@ window.PaperReading = (() => {
     const running=isRunning(currentJob);
     // Unknown readback is not proof that a generation task has finished.
     btn.disabled=Boolean(running || checking || readNote);
-    btn.textContent=running?(currentJob.saved?'导读已保存，正在收尾…':'正在补充中文导读…'):currentJob?.can_retry?'重试中文导读':'补充中文导读';
+    const abstractOnly=Boolean(options?.paper.reading_guide?.beginner_zh && !options?.paper.abstract_zh);
+    const abstractTask=currentJob?.scope==='abstract_only';
+    btn.textContent=running?(currentJob.saved?(abstractTask?'摘要已保存，正在收尾…':'导读已保存，正在收尾…'):(abstractTask?'正在补充中文摘要…':'正在补充中文导读…')):currentJob?.can_retry?(abstractTask?'重试中文摘要':'重试中文导读'):abstractOnly?'补充中文摘要':'补充中文导读';
     const message=currentJob?.status==='failed' ? (currentJob.error || '本次未生成，可重试，已有资料已保留。') : running ?
-      (currentJob.saved ? '中文导读已保存，可以阅读；任务正在收尾，正在核对完成状态。' : '生成中，离开或刷新页面不会重复启动；已有结果不受影响。') : currentJob?.saved ? '中文导读已保存。' : '';
+      (currentJob.saved ? (abstractTask?'中文摘要已保存，可以阅读；任务正在收尾，正在核对完成状态。':'中文导读已保存，可以阅读；任务正在收尾，正在核对完成状态。') : '生成中，离开或刷新页面不会重复启动；已有结果不受影响。') : currentJob?.saved ? (abstractTask?'中文摘要已保存。':'中文导读已保存。') : '';
     status.textContent=[message,readNote].filter(Boolean).join(' ');
     const resume=document.getElementById('pdRefreshReadingState');
     if(resume){resume.hidden=!stopped;resume.disabled=checking;}
@@ -75,8 +77,10 @@ window.PaperReading = (() => {
         if(JSON.stringify(options.paper.reading_guide?.beginner_zh)!==JSON.stringify(data.guide)) {
           options.paper.reading_guide={...(options.paper.reading_guide || {}),beginner_zh:data.guide};render(options.paper);
         }
-        if(options.paper.abstract_zh!==data.abstract_zh){options.paper.abstract_zh=data.abstract_zh;options.abstract();}
       }
+      const translationChanged=JSON.stringify(options.paper.reading_guide?.abstract_translation)!==JSON.stringify(data.abstract_translation || undefined);
+      if(translationChanged){options.paper.reading_guide={...(options.paper.reading_guide || {}),abstract_translation:data.abstract_translation};render(options.paper);}
+      if(options.paper.abstract_zh!==data.abstract_zh || translationChanged){options.paper.abstract_zh=data.abstract_zh;options.abstract();}
       // Saving the content precedes the native terminal state: keep reading both stages.
       if(isRunning(currentJob)) schedule(Math.min(6000 + polls * 2000,15000));
       else { stopped=false;sessionStorage.removeItem('reading-help:'+id); }
@@ -101,7 +105,7 @@ window.PaperReading = (() => {
     const btn=document.getElementById('pdGenerateReading');btn.disabled=true;
     try {
       const me=await options.fetch('/api/auth/me');
-      currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry)})});
+      currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry),scope:options.paper.reading_guide?.beginner_zh && !options.paper.abstract_zh?'abstract_only':'full'})});
       renderJob();await read();
     } catch(error) {
       readNote='本次生成请求尚未确认，正在核对原任务状态；已有内容保留。';

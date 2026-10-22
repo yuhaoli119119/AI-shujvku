@@ -4,18 +4,18 @@ const root=path.resolve(__dirname,'..');
 const html=fs.readFileSync(path.join(root,'pages/paper_detail/index.html'),'utf8');
 const id='c0abf59a-c8ac-4c7f-aa56-a81a0a637f1f';
 const guide={one_sentence:'一句话研究结论',problem:'本文研究问题',main_finding:'主要发现与测试条件',content_scope:'main_text',guide:{research_objective:'确定反应目标',innovation:'作者提出，本文对照仅支持局部比较',limitations:'范围有限'},argument_flow:['问题→方案','证据→结论'],evidence:[{asset_id:'12345678-abcd-abcd-abcd-123456789abc',question:'哪个对照支持结论？',finding:'由已存图注支持'}],missing:['SI 图像未读取'],source_files:[{role:'main',name:'paper.pdf',complete_text:true}]};
-async function boot(page,{saved=guide,job={status:'not_started'},english='Original English abstract',chinese='忠实中文摘要',responses=[]}={}){
+async function boot(page,{saved=guide,job={status:'not_started'},english='Original English abstract',chinese='忠实中文摘要',responses=[],translation=null}={}){
  await page.goto('http://127.0.0.1:4173/pages/paper_detail/reading-assistance.js');
  await page.setContent(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
  await page.addScriptTag({path:path.join(root,'pages/paper_detail/reading-assistance.js')});
  await page.addScriptTag({content:html.slice(html.indexOf('    const API_BASE ='),html.lastIndexOf('</script>'))});
- await page.evaluate(({id,saved,job,english,chinese,responses})=>{
+ await page.evaluate(({id,saved,job,english,chinese,responses,translation})=>{
   window.posts=[];window.gets=[];window.readIndex=0;
-  fetchJSON=async(url,opt)=>{if(opt?.method==='POST'){posts.push({url,body:JSON.parse(opt.body)});return {status:'running',job_id:'guide-one'}}gets.push(url);if(url==='/api/auth/me')return {csrf_token:'fixture'};const next=responses[window.readIndex++];if(next?.error)throw Error(next.error);if(next?.hang)return new Promise((_,reject)=>opt.signal.addEventListener('abort',()=>reject(Error('request timed out'))));return {guide:saved,abstract_zh:chinese,job,...next};};
+  fetchJSON=async(url,opt)=>{if(opt?.method==='POST'){posts.push({url,body:JSON.parse(opt.body)});return {status:'running',job_id:'guide-one'}}gets.push(url);if(url==='/api/auth/me')return {csrf_token:'fixture'};const next=responses[window.readIndex++];if(next?.error)throw Error(next.error);if(next?.hang)return new Promise((_,reject)=>opt.signal.addEventListener('abort',()=>reject(Error('request timed out'))));return {guide:saved,abstract_zh:chinese,abstract_translation:translation,job,...next};};
   renderCurrentFigures=()=>{};renderDeepLinkBar=()=>{};applyDftDeepLink=()=>{};applyStructuredDeepLink=()=>{};ensureFullDetail=()=>{};
-  Object.assign(state,{paperId:id,paper:{id,title:'Test title',abstract:english,abstract_zh:chinese,reading_guide:saved?{beginner_zh:saved}:null,comprehensive_analysis:{},counts:{},authors:[],figures:[],tables:[]},deepLink:{},rebuildStatus:'ready',rebuildRows:[]});
+  Object.assign(state,{paperId:id,paper:{id,title:'Test title',abstract:english,abstract_zh:chinese,reading_guide:saved?{beginner_zh:saved,abstract_translation:translation}:null,comprehensive_analysis:{},counts:{},authors:[],figures:[],tables:[]},deepLink:{},rebuildStatus:'ready',rebuildRows:[]});
   renderPaperDetails();
- },{id,saved,job,english,chinese,responses});
+ },{id,saved,job,english,chinese,responses,translation});
 }
 
 test('saved Chinese defaults, English toggle, progressive guide and scoped evidence links',async({page})=>{
@@ -145,4 +145,37 @@ test('an unresponsive GET times out and recovers with a read-only retry',async({
  await expect(page.locator('#pdReadingJob')).toHaveText('中文导读已保存。');
  await expect(page.locator('#pdGenerateReading')).toBeEnabled();
  expect(await page.evaluate(()=>posts.length)).toBe(0);
+});
+
+
+const pdfAbstract={original_text:'A specific source abstract from the original PDF.',source:{kind:'main_text',file_id:'12345678-abcd-abcd-abcd-123456789abc',source_sha256:'a'.repeat(64),physical_page:2},source_revision:'b'.repeat(64)};
+
+test('PDF abstract fallback displays Chinese, retained source English and bound page link without metadata overwrite',async({page})=>{
+ await boot(page,{english:'',translation:pdfAbstract});
+ await expect(page.locator('#paperAbstract')).toHaveText('忠实中文摘要');
+ await expect(page.locator('#pdAbstractNote')).toContainText('PDF物理第2页');
+ await expect(page.locator('#pdAbstractSourceLink')).toHaveAttribute('href',/source_sha256=a{64}.*page_basis=source_pdf.*#page=2/);
+ await page.getByRole('button',{name:'查看英文原摘要'}).click();
+ await expect(page.locator('#paperAbstract')).toHaveText(pdfAbstract.original_text);
+ expect(await page.evaluate(()=>state.paper.abstract)).toBe('');
+ expect(await page.evaluate(()=>posts.length)).toBe(0);
+});
+
+test('existing guide supplements only abstract and source, then exits finalization without reload',async({page})=>{
+ await page.clock.install();
+ await boot(page,{english:'',chinese:'',responses:[
+  {job:{status:'completed',saved:true}},
+  {guide,abstract_zh:'新保存的中文摘要',abstract_translation:pdfAbstract,job:{status:'running',saved:true,scope:'abstract_only'}},
+  {guide,abstract_zh:'新保存的中文摘要',abstract_translation:pdfAbstract,job:{status:'completed',saved:true,scope:'abstract_only'}}
+ ]});
+ await page.getByRole('button',{name:'补充中文摘要'}).click();
+ const posts=await page.evaluate(()=>window.posts);expect(posts).toHaveLength(1);expect(posts[0].body.scope).toBe('abstract_only');
+ await expect(page.locator('#paperAbstract')).toHaveText('新保存的中文摘要');
+ await expect(page.locator('#pdReadingJob')).toContainText('中文摘要已保存，可以阅读；任务正在收尾');
+ await page.clock.runFor(6000);
+ await expect(page.locator('#pdReadingJob')).toHaveText('中文摘要已保存。');
+ expect(await page.evaluate(()=>state.paper.reading_guide.beginner_zh)).toEqual(guide);
+ expect(await page.evaluate(()=>state.paper.abstract)).toBe('');
+ await page.getByRole('button',{name:'查看英文原摘要'}).click();await expect(page.locator('#paperAbstract')).toHaveText(pdfAbstract.original_text);
+ expect(await page.evaluate(()=>window.posts.length)).toBe(1);
 });
