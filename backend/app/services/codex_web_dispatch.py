@@ -189,7 +189,7 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
         objective = prompt
     timeout = runtime.codex_web_dispatch_timeout_seconds
     try:
-        async with websockets.connect(runtime.codex_web_ipc_uri, open_timeout=timeout) as ws:
+        async with websockets.connect(runtime.codex_web_ipc_uri, open_timeout=timeout, max_size=32 * 1024 * 1024) as ws:
             started = await _call(ws,"thread/start",{"cwd":runtime.codex_web_cwd,
                 "approvalPolicy":"never","sandbox":"danger-full-access","model":chosen_model,
                 "modelProvider":chosen_provider,"allowProviderModelFallback":False,
@@ -222,12 +222,24 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
                 observed = snapshot.get("thread")
                 status = observed.get("status") if isinstance(observed,dict) else None
                 status_type = status.get("type") if isinstance(status,dict) else status
-                if (not isinstance(observed,dict) or observed.get("id") != thread_id or
+                if (not isinstance(observed, dict) or observed.get("id") != thread_id or
                         observed.get("modelProvider") != chosen_provider or
-                        status_type not in {"idle","notLoaded"} or
-                        (isinstance(status,dict) and status.get("activeFlags")) or
-                        not isinstance(observed.get("turns"),list) or observed["turns"] or
-                        not isinstance(thread.get("turns"),list) or thread["turns"]):
+                        not isinstance(observed.get("turns"), list) or
+                        not isinstance(thread.get("turns"), list) or thread["turns"]):
+                    raise CodexWebDispatchError("target thread identity unknown; readback required")
+                turns = observed["turns"]
+                if turns:
+                    # This is the fresh empty thread we just created, with our exact
+                    # goal acknowledged twice. The goal runtime may start it before
+                    # turn/start; adopt its first turn and never send a second one.
+                    if status_type not in {"active", "idle"} or any(not isinstance(t, dict) or not isinstance(t.get("id"), str) or not t["id"] for t in turns):
+                        raise CodexWebDispatchError("target auto-start identity unknown; readback required")
+                    on_event({"method": "thread/read", "phase": "auto_start_adopted",
+                              "thread_id": thread_id, "turn_id": turns[0]["id"]})
+                    return DispatchResult(thread_id=thread_id, turn_id=turns[0]["id"], model=chosen_model,
+                        goal_status=goal_status, dispatch_mode=mode, start_effective_model=started["model"],
+                        start_effective_provider=started["modelProvider"], start_collaboration_verification=collaboration_verification)
+                if status_type not in {"idle", "notLoaded"} or (isinstance(status, dict) and status.get("activeFlags")):
                     raise CodexWebDispatchError("target goal may have auto-started or thread state unknown; readback required")
             result = await _call(ws,"turn/start",{"threadId":thread_id,"input":[{"type":"text","text":prompt}],
                 "approvalPolicy":"never","sandboxPolicy":{"type":"dangerFullAccess"},
@@ -263,6 +275,9 @@ class ThreadStatus:
     tokens_used: int | None = None
     turn_ids: tuple[str, ...] | None = None
     cwd: str | None = None
+    thread_status: str | None = None
+    model_provider: str | None = None
+    goal_observed: bool = False
 
 
 def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
@@ -290,7 +305,7 @@ async def read_thread_status(
     timeout = min(runtime.codex_web_dispatch_timeout_seconds, 15.0)
 
     try:
-        async with websockets.connect(uri, open_timeout=timeout) as ws:
+        async with websockets.connect(uri, open_timeout=timeout, max_size=32 * 1024 * 1024) as ws:
             # Read the thread
             thread_result = await _call(
                 ws, "thread/read", {"threadId": thread_id, "includeTurns": True}, timeout
@@ -302,12 +317,14 @@ async def read_thread_status(
             if thread.get("id") != thread_id:
                 raise CodexWebDispatchError("thread/read identity mismatch")
             goal_status = None
+            goal_observed = False
             tokens_used = None
             if include_goal:
                 try:
                     goal_result = await _call(ws,"thread/goal/get",{"threadId":thread_id},timeout)
                     goal = goal_result.get("goal")
-                    goal_status = goal.get("status") if isinstance(goal,dict) else None
+                    goal_observed = "goal" in goal_result and (goal is None or isinstance(goal, dict) and goal.get("threadId") == thread_id)
+                    goal_status = goal.get("status") if goal_observed and isinstance(goal,dict) else None
                     if isinstance(goal, dict) and goal.get("threadId") == thread_id:
                         usage = goal.get("tokensUsed")
                         tokens_used = usage if type(usage) is int and usage >= 0 else None
@@ -334,11 +351,9 @@ async def read_thread_status(
 
             final_report = None
             if turn_status == "completed" and agent_messages:
-                final_report = (
-                    agent_messages[-2]
-                    if len(agent_messages) > 1
-                    else agent_messages[-1]
-                )
+                finals = [item["text"] for item in items if isinstance(item, dict) and item.get("type") == "agentMessage"
+                          and item.get("phase") == "final_answer" and isinstance(item.get("text"), str)]
+                final_report = finals[-1] if finals else agent_messages[-1]
 
             return ThreadStatus(
                 turn_status=turn_status,
@@ -351,6 +366,8 @@ async def read_thread_status(
                 tokens_used=tokens_used,
                 turn_ids=tuple(turn["id"] for turn in turns if isinstance(turn, dict) and isinstance(turn.get("id"), str)),
                 cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
+                thread_status=(thread.get("status") or {}).get("type") if isinstance(thread.get("status"), dict) else thread.get("status"),
+                model_provider=thread.get("modelProvider"), goal_observed=goal_observed,
             )
     except (CodexWebDispatchError, OSError, WebSocketException) as exc:
         logger.debug(

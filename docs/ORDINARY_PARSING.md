@@ -22,3 +22,5 @@
 `GET /api/rebuild/papers/{paper_id}/files/{file_id}/reading-text?offset=0&limit=25` 分页读取原始 DOCX；PDF沿用 text-pages/render-page。仅以注册文件自身的哈希和合法定位作为来源。
 
 客户端 `--help` 列出 get/write/checkpoint；仅支持本篇图表与数据幂等导入，登录凭据只在本机读取，不写入请求日志。每篇无需新建临时导入脚本。
+
+目标任务由原生运行时自动启动时，系统从新建空任务和精确目标回执接认原 turn，不再发送第二个启动。历史派发中记录仅在派发日志与实时同一原生线程交叉匹配后恢复身份；大于1MB的原生记录使用有界32MB读取。普通解析六阶段均已处理、原生 idle 且目标明确为空时可记执行结束；目标读取失败与未知身份仍保留待核实。
