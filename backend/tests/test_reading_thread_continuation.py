@@ -151,3 +151,36 @@ def test_resume_effective_model_permissions_cannot_be_overridden(monkeypatch,fie
     monkeypatch.setattr(c,'_call',rpc)
     with pytest.raises(CodexWebDispatchError):asyncio.run(c.dispatch(object(),{'thread_id':'owned','turn_id':'audit'},'new goal',1,lambda e:None))
     assert 'thread/goal/set' not in calls and 'turn/start' not in calls and 'thread/start' not in calls
+
+
+def test_local_parse_supplement_reuses_completed_guide_thread_and_replays(ready):
+    e=ready;endpoint=f'/api/rebuild/papers/{e["paper"]}/ai-extract/jobs'
+    request={'model':c.MODEL,'request_id':'local-supplement','retry':True,'source_job_id':'registered-audit'}
+    r=e['client'].post(endpoint,json=request);assert r.status_code==200,r.text
+    jid=r.json()['job_id']
+    assert e['client'].post(endpoint,json=request).json()['job_id']==jid
+    with e['factory']() as s:
+        j=s.get(WorkflowJob,jid)
+        assert j.payload['continuation']['thread_id']=='owned' and j.progress['previous_turn_id']=='audit'
+        assert j.progress['thread_id']=='owned' and not j.progress.get('turn_id')
+        assert s.scalar(select(func.count()).select_from(WorkflowJob))==2
+
+
+def test_parse_supplement_refuses_active_reading_and_model_switch(ready):
+    e=ready;endpoint=f'/api/rebuild/papers/{e["paper"]}/ai-extract/jobs'
+    r=e['client'].post(endpoint,json={'model':'gpt-6-luna','request_id':'wrong-model','retry':True})
+    assert r.status_code==409 and 'same_thread_requires_deepseek' in r.text
+    with e['factory']() as s:
+        s.add(WorkflowJob(job_id='active-reading',type='paper_reading_assistance',status='running',payload={'paper_id':str(e['paper'])}));s.commit()
+    assert e['client'].post(endpoint,json={'model':c.MODEL,'request_id':'busy','retry':True}).status_code==409
+
+
+def test_parse_unknown_followup_does_not_adopt_old_audit_as_its_own(ready,monkeypatch):
+    from app.services.ai_extract_service import sync_job_status
+    e=ready;endpoint=f'/api/rebuild/papers/{e["paper"]}/ai-extract/jobs'
+    r=e['client'].post(endpoint,json={'model':c.MODEL,'request_id':'unknown-supplement','retry':True});assert r.status_code==200,r.text
+    with e['factory']() as s:
+        j=s.get(WorkflowJob,r.json()['job_id']);j.progress={**j.progress,'dispatch_started':True};s.commit()
+    with e['factory']() as s:
+        j=s.get(WorkflowJob,r.json()['job_id']);asyncio.run(sync_job_status(s,j,e['settings']));s.commit()
+        assert j.status=='dispatching' and not j.progress.get('turn_id') and j.progress['needs_check']

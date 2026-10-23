@@ -106,6 +106,7 @@ async def create_ai_extract_job_endpoint(
     request_id: str | None = Body(default=None, min_length=1, max_length=128),
     file_ids: list[UUID] | None = Body(default=None, max_length=30),
     retry: bool = Body(default=False),
+    source_job_id: str | None = Body(default=None, min_length=1, max_length=128),
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
     _auth: SessionState = Depends(require_session),
@@ -119,7 +120,8 @@ async def create_ai_extract_job_endpoint(
     """
     try:
         return await create_ai_extract_job(session, paper_id, settings, model=model, request_id=request_id,
-                                           file_ids=[str(fid) for fid in file_ids] if file_ids else None, retry=retry)
+                                           file_ids=[str(fid) for fid in file_ids] if file_ids else None, retry=retry,
+                                           source_job_id=source_job_id, actor=_auth.username)
     except AiExtractError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc

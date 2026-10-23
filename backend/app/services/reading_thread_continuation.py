@@ -31,6 +31,19 @@ def source_for(session, paper_id, source_job_id=None, actor=None):
     return {'source_job_id': job.job_id, 'thread_id': r['thread_id'], 'turn_id': r['turn_id']}
 
 
+async def confirmed_source(session, paper_id, settings, source_job_id=None, actor=None):
+    binding = source_for(session, paper_id, source_job_id, actor)
+    if binding:
+        from app.services.codex_web_dispatch import read_thread_status
+        native = await read_thread_status(binding['thread_id'], settings)
+        if (native is None or native.thread_id != binding['thread_id'] or
+                native.turn_id != binding['turn_id'] or native.turn_status not in ('completed','failed','interrupted') or
+                native.thread_status not in ('idle','notLoaded') or not native.goal_observed or
+                native.goal_status not in (None,'complete','completed') or native.model_provider != 'workbuddy'):
+            raise ValueError('same_thread_native_busy_or_unverified')
+    return binding
+
+
 def verify_thread(thread, binding):
     status = thread.get('status')
     kind = status.get('type') if isinstance(status, dict) else status

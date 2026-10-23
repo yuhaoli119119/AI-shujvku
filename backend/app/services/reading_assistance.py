@@ -144,16 +144,8 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
     if old and old.status == 'failed' and not (old.progress or {}).get('native_terminal_verified'):
         return serialize(old)
     if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
-    from app.services.reading_thread_continuation import source_for
-    continuation = source_for(session, paper_id, source_job_id, actor)
-    if continuation:
-        from app.services.codex_web_dispatch import read_thread_status
-        native = await read_thread_status(continuation['thread_id'], settings)
-        if (native is None or native.thread_id != continuation['thread_id'] or
-                native.turn_id != continuation['turn_id'] or native.turn_status not in ('completed','failed','interrupted') or
-                native.thread_status not in ('idle','notLoaded') or not native.goal_observed or
-                native.goal_status not in (None,'complete','completed') or native.model_provider != 'workbuddy'):
-            raise ValueError('same_thread_native_busy_or_unverified')
+    from app.services.reading_thread_continuation import confirmed_source
+    continuation = await confirmed_source(session, paper_id, settings, source_job_id, actor)
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
         if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
