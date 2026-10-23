@@ -29,3 +29,5 @@ GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定req
 正式请求：`POST /api/rebuild/papers/PAPER_UUID/reading-assistance/jobs`，JSON 为 `{"request_id":"稳定请求ID","source_job_id":"登记返回的source_job_id","scope":"full","retry":false}`。保存与读回合同不变，响应增加原 thread_id、新 turn_id 和 source_job_id。相同请求重放返回同一 job，未知 RPC 只读回原句柄，不自动重新发 turn。若请求刚建立，turn_id 可暂为空；不可用旧验收 turn 冒充导读完成。保存成功和原生终态分别记录。
 
 后续同篇补缺可省略 source_job_id，沿最新已核实阅读 job 续接；原登记来源如果已被后续 turn 推进，不应强制再次指定旧 turn。整篇 accepted 与原线程终态齐全后，由原总指挥按现有归档机制归档并记录回执；失败保留原句柄，不创建替代对话。
+
+普通解析的局部补缺也使用相同续接分支：`POST /api/rebuild/papers/PAPER_UUID/ai-extract/jobs` 仍保留原 file_ids/retry/checkpoint 合同，可选 source_job_id；默认发现本篇可复用身份时绑定原线程。补缺 job 与原 job 分开保存回执，原科学任务 thread 身份不改。存在阅读任务写者或续接未知时拒绝新写者；重放、模型与原生终态规则相同。无既有可复用身份的首次解析仍兼容原新任务路径。

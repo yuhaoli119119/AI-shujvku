@@ -240,6 +240,8 @@ async def create_ai_extract_job(
     request_id: str | None = None,
     file_ids: list[str] | None = None,
     retry: bool = False,
+    source_job_id: str | None = None,
+    actor: str | None = None,
 ) -> dict[str, Any]:
     """Create and dispatch an AI extract job for one paper.
 
@@ -258,7 +260,9 @@ async def create_ai_extract_job(
             WorkflowJob.payload.op("->>")("paper_id") == str(paper_id),
             WorkflowJob.payload.op("->>")("request_id") == request_id))
         if replay:
-            if (replay.payload or {}).get("request_scope") != {"model": model, "file_ids": file_ids, "retry": retry}:
+            if ((replay.payload or {}).get("request_scope") != {"model": model, "file_ids": file_ids, "retry": retry} or
+                    (replay.payload or {}).get("requested_source_job_id") != source_job_id or
+                    (replay.payload or {}).get("actor") is not None and replay.payload["actor"] != actor):
                 raise AiExtractError("parse_request_id_reused")
             return serialize_job(replay, session)
     occupied = paper_busy(session, paper_id)
@@ -266,6 +270,8 @@ async def create_ai_extract_job(
         raise AiExtractError("paper_has_unresolved_pipeline_attempt")
     if occupied is not None and occupied.type == "rebuild_external_extract":
         raise AiExtractError("paper_has_unresolved_external_writer_attempt")
+    if occupied is not None and occupied.type == "paper_reading_assistance":
+        raise AiExtractError("paper_has_unresolved_reading_attempt")
     existing = has_running_job(session, paper_id)
     if existing is not None and retry and existing.status == "failed" and (existing.progress or {}).get("native_terminal_verified"):
         existing = None
@@ -275,6 +281,13 @@ async def create_ai_extract_job(
         return result
     chosen_model = model or settings.codex_web_default_model
     chosen_mode = dispatch_mode_for_model(chosen_model)
+    from app.services.reading_thread_continuation import confirmed_source
+    try:
+        continuation = await confirmed_source(session, paper_id, settings, source_job_id, actor)
+    except ValueError as exc:
+        raise AiExtractError(str(exc)) from exc
+    if continuation and chosen_model != 'cn:deepseek-v4.1-flash':
+        raise AiExtractError('same_thread_requires_deepseek')
     attempt_token = str(uuid4())
     from app.services.ordinary_parsing import saved_file_plan
     old_plan = saved_file_plan(session, paper_id) if retry else {}
@@ -295,11 +308,14 @@ async def create_ai_extract_job(
     job = WorkflowJob(job_id=jid,type=JOB_TYPE,status="dispatching",library_name=paper.library_name,
         payload={"paper_id":str(paper_id),"attempt_token":attempt_token,"chosen_model":chosen_model,
                  "parse_contract":VERSION,"request_id":request_id,
+                 "actor":actor,"requested_source_job_id":source_job_id,
+                 **({"continuation":continuation} if continuation else {}),
                  "request_scope":{"model":model,"file_ids":file_ids,"retry":retry},
                  "dispatch_prompt":prompt,"dispatch_objective":objective,
                  "chosen_mode":chosen_mode,"file_ids":list(plan),"dispatch_intent_at":_utcnow().isoformat()},
         progress={"file_plan":plan,"checkpoint_revision":0,"evidence_guard": evidence_guard, "phase":"dispatching","dispatch_mode":chosen_mode,"model":chosen_model,
                   "dispatch_started":False,"events":[],"actual_inference_verified":False,
+                  **({"thread_id":continuation["thread_id"],"previous_turn_id":continuation["turn_id"]} if continuation else {}),
                   "model_verification_status":"pending_start_ack"})
     session.add(job)
     session.commit()  # Durable intent precedes scheduling and every native request.
@@ -451,6 +467,14 @@ async def sync_job_status(
         job.progress = {**progress, "phase": "needs_check", "needs_check": True, "automatic_retry": False}
         session.flush()
         return job
+    if ordinary and not progress.get("turn_id") and (job.payload or {}).get('continuation'):
+        from app.services.reading_thread_continuation import recover_turn
+        recovered = recover_turn(job, status)
+        if recovered: progress['turn_id'] = recovered
+        else:
+            job.progress = {**progress,'phase':'needs_check','needs_check':True,'automatic_retry':False}
+            session.flush()
+            return job
     if ordinary and not progress.get("turn_id"):
         from app.services.ordinary_parsing import recover_auto_started_turn
         recovered = recover_auto_started_turn(job.payload or {}, progress, status, settings)
