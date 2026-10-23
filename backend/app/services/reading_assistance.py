@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.db.models import AuditLog, Paper, RebuildVisualAsset, WorkflowJob
 from app.services.rebuild_file_lifecycle import active_files
 from app.services.rebuild_file_preview import _checked_source
+from app.services.reading_abstract_source import invalid_translation
 
 TYPE = 'paper_reading_assistance'
 VERSION = 'beginner_zh_v1'
@@ -117,8 +118,8 @@ def prompt(paper_id, jid, scope='full'):
 
 def abstract_prompt(paper_id, jid):
     return f'''只补充paper_id={paper_id}的中文摘要，不重生成或改写任何已有导读、科学数据、Paper.abstract，不部署、不派发其他任务。仅使用scripts/ordinary_parse_client.py --job {jid} --paper {paper_id}；先--help。产物仅outputs/stable-parsing-command-20261023/detail-reading/jobs/{jid}/，不输出凭据。
-1) get /api/rebuild/papers/{paper_id}/reading-assistance/context，完整读取abstract_for_translation.text及source。它优先选择元数据，否则为服务端核实的正文Abstract段；不得换用全文总结。source包含真实file_id/sha256/物理页与字符定位。不确定或text空就报告待补，不猜、不重建任务。
-2) 一次忠实翻译该段为中文，保留原意、条件、数字与作者主张强度，不添加整篇结论。遵守abstract_save_contract，只写save_mode=abstract_only、request_id稳定、job_id={jid}、input_revision、abstract_source_revision=abstract_for_translation.revision、abstract_zh。服务端只补缺失译文及来源，保护所有已有导读。
+1) get /api/rebuild/papers/{paper_id}/reading-assistance/context，完整读取abstract_for_translation.text及source。它优先选择科研摘要元数据，明确的出版社版本声明被排除，否则为服务端核实的正文Abstract段；不得换用全文总结。source包含真实file_id/sha256/物理页与字符定位。不确定或text空就报告待补，不猜、不重建任务。
+2) 一次忠实翻译该段为中文，保留原意、条件、数字与作者主张强度，不添加整篇结论。遵守abstract_save_contract，只写save_mode=abstract_only、request_id稳定、job_id={jid}、input_revision、abstract_source_revision=abstract_for_translation.revision、abstract_zh。服务端只补缺失译文或纠正已核实误译的出版社版本说明及来源，保留旧译文历史，保护所有已有导读。
 3) write /api/rebuild/papers/{paper_id}/reading-assistance JSON_FILE；未知结果原体原ID有界重放。保存后get同路径核对译文及abstract_translation来源。不调用其他写接口，不改原摘要字段。确认保存读回后结束原生目标并结束本轮，不等待后台job completed（它需要本轮先结束），不另开任务。'''
 
 
@@ -141,7 +142,7 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
     if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
-        if (paper.comprehensive_analysis or {}).get('abstract_zh'):
+        if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
             raise ValueError('中文摘要已保存，无需重复补充')
         if not context['abstract_for_translation']['text']:
             raise ValueError(context['abstract_for_translation']['missing_reason'])
@@ -199,7 +200,7 @@ def save(session, paper_id, body, settings, actor):
             raise ValueError('abstract_source_changed_or_unverified')
         if (abstract_only or source['source']['kind']=='main_text') and body.abstract_source_revision!=source['revision']:
             raise ValueError('verified_abstract_source_revision_required')
-    if abstract_only and (paper.comprehensive_analysis or {}).get('abstract_zh'):
+    if abstract_only and (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
         raise ValueError('existing_chinese_abstract_preserved')
     if not abstract_only and paper.abstract and not body.abstract_zh and not body.abstract_missing_reason:
         raise ValueError('abstract_translation_or_reason_required')
@@ -226,6 +227,11 @@ def save(session, paper_id, body, settings, actor):
             input_revision=body.input_revision,scientific_acceptance='not_implied')
         paper.reading_guide={**(paper.reading_guide or {}),'beginner_zh':guide}
     if body.abstract_zh:
+        if invalid_translation(paper):
+            history=list((paper.reading_guide or {}).get('abstract_translation_history') or [])
+            history.append({'abstract_zh':old['abstract_zh'],'translation':copy.deepcopy((paper.reading_guide or {}).get('abstract_translation')),
+                            'reason':'publisher_version_notice_not_research_abstract','superseded_at':datetime.utcnow().isoformat()})
+            paper.reading_guide={**(paper.reading_guide or {}),'abstract_translation_history':history}
         paper.comprehensive_analysis={**(paper.comprehensive_analysis or {}),'abstract_zh':body.abstract_zh}
         paper.reading_guide={**(paper.reading_guide or {}),'abstract_translation':{
             'original_text':source['text'],'source':source['source'],'source_revision':source['revision'],
