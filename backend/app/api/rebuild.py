@@ -102,7 +102,7 @@ def _http_error(exc: RebuildWorkflowError) -> HTTPException:
 async def create_ai_extract_job_endpoint(
     paper_id: UUID,
     request: Request,
-    model: Literal["gpt-6-luna", "cn:deepseek-v4.1-flash"] | None = Body(default=None, embed=True),
+    model: Literal["gpt-6-luna", "cn:deepseek-v4.1-flash", "cn:glm-5.3-flash", "cn:glm-5.2"] | None = Body(default=None, embed=True),
     request_id: str | None = Body(default=None, min_length=1, max_length=128),
     file_ids: list[UUID] | None = Body(default=None, max_length=30),
     retry: bool = Body(default=False),
@@ -1848,3 +1848,18 @@ async def correct_section_metadata(paper_id: UUID, target_id: UUID,
         f"sections.metadata.{target_id}", auth.username,
         lambda: correct_metadata(session, paper_id, "sections", target_id, payload),
         receipt_serializer=lambda value: value)
+
+
+@router.post('/papers/{paper_id}/ai-extract/jobs/{job_id}/resume')
+async def resume_same_paper_extract(
+    paper_id:UUID,job_id:str,request_id:str=Body(...,min_length=1,max_length=128),
+    model:str | None=Body(default=None),session:Session=Depends(get_db_session),
+    settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session),
+):
+    from app.services.paper_native_recovery import resume_job
+    from app.services.ai_extract_service import serialize_job
+    try:
+        job=await resume_job(session,paper_id,job_id,settings,request_id=request_id,actor=auth.username,model=model,expected_type="ai_extract_rebuild")
+        return serialize_job(job,session)
+    except ValueError as exc:
+        session.rollback();raise HTTPException(409,str(exc)) from exc

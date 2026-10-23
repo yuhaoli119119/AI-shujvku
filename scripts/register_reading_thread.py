@@ -12,6 +12,7 @@ import subprocess
 
 ROOT = Path('/opt/AI-shujvku/literature-ai')
 BATCH = ROOT / 'outputs/full-library-acceptance-20261024'
+VISION_MODELS = ('cn:deepseek-v4.1-flash','cn:glm-5.3-flash','cn:glm-5.2')
 SESSIONS = Path('/home/2401liyuhao/apps/codex/web-state/sessions')
 
 
@@ -49,7 +50,7 @@ def verified_proof(paper_id, actor):
             same_paper_input |= paper_id in item['payload'].get('message', '')
     if (not context or context.get('cwd') not in (str(ROOT), '/opt/literature-ai') or
             not same_paper_input or context.get('turn_id') != permission.get('turn_id') or
-            context.get('model') != 'cn:deepseek-v4.1-flash' or context.get('approval_policy') != 'never' or
+            context.get('model') not in VISION_MODELS or context.get('approval_policy') != 'never' or
             (context.get('sandbox_policy') or {}).get('type') != 'danger-full-access'):
         raise ValueError('native_paper_model_permissions_unverified')
     # Coordinator's terminal receipt also must cover exactly the last audit turn.
@@ -58,7 +59,7 @@ def verified_proof(paper_id, actor):
     if not turns or turns[-1].get('id') != context['turn_id'] or turns[-1].get('status') not in ('completed', 'failed', 'interrupted'):
         raise ValueError('audit_terminal_receipt_missing')
     return {'paper_id':paper_id, 'code':row['code'], 'actor':actor, 'thread_id':tid,
-        'turn_id':context['turn_id'], 'receipt_sha256':hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+        'turn_id':context['turn_id'], 'model':context['model'], 'receipt_sha256':hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
         'roster_request_id':row['request_id'], 'archived':files[0].parent.name=='archived_sessions', 'rollout_file':str(files[0]), 'receipt_file':str(receipt_path)}
 
 

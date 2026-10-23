@@ -61,14 +61,16 @@ def _outer_id() -> str:
     return f"dispatch-{secrets.token_hex(8)}"
 
 
-MODEL_PROVIDERS = {"gpt-6-luna": "openai", "cn:deepseek-v4.1-flash": "workbuddy"}
+from app.services.paper_native_models import MODELS as PAPER_MODELS
 
-ALLOWED_MODEL_MODES = {"gpt-6-luna": "codex_web_ordinary", "cn:deepseek-v4.1-flash": "codex_web_target"}
+MODEL_PROVIDERS = {"gpt-6-luna": "openai", **{m:"workbuddy" for m in PAPER_MODELS}}
+
+ALLOWED_MODEL_MODES = {"gpt-6-luna": "codex_web_ordinary", **{m:"codex_web_target" for m in PAPER_MODELS}}
 
 
 def dispatch_mode_for_model(model: str) -> str:
     if model not in ALLOWED_MODEL_MODES:
-        raise CodexWebDispatchError("unsupported_extraction_model: choose gpt-6-luna or cn:deepseek-v4.1-flash")
+        raise CodexWebDispatchError("unsupported_extraction_model: choose gpt-6-luna or a verified paper vision WorkBuddy model")
     return ALLOWED_MODEL_MODES[model]
 
 
@@ -192,10 +194,10 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
     try:
         async with websockets.connect(runtime.codex_web_ipc_uri, open_timeout=timeout, max_size=32 * 1024 * 1024) as ws:
             if continuation is not None:
-                if chosen_model != "cn:deepseek-v4.1-flash":
+                if chosen_model not in PAPER_MODELS:
                     raise CodexWebDispatchError("same_thread_requires_deepseek")
                 from app.services.reading_thread_continuation import dispatch
-                return await dispatch(ws, continuation, prompt, timeout, on_event)
+                return await dispatch(ws, {**continuation,"target_model":chosen_model}, prompt, timeout, on_event)
             started = await _call(ws,"thread/start",{"cwd":runtime.codex_web_cwd,
                 "approvalPolicy":"never","sandbox":"danger-full-access","model":chosen_model,
                 "modelProvider":chosen_provider,"allowProviderModelFallback":False,
@@ -286,6 +288,8 @@ class ThreadStatus:
     goal_observed: bool = False
     native_error: str | None = None
     goal_objective: str | None = None
+    model: str | None = None
+    input_text: str | None = None
 
 
 def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
@@ -376,9 +380,11 @@ async def read_thread_status(
                 turn_ids=tuple(turn["id"] for turn in turns if isinstance(turn, dict) and isinstance(turn.get("id"), str)),
                 cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
                 thread_status=(thread.get("status") or {}).get("type") if isinstance(thread.get("status"), dict) else thread.get("status"),
-                model_provider=thread.get("modelProvider"), goal_observed=goal_observed,
+                input_text='\n'.join(part.get('text','') for item in items if isinstance(item,dict) and item.get('type')=='userMessage'
+                    for part in (item.get('content') or []) if isinstance(part,dict)),
+                model=thread.get("model"), model_provider=thread.get("modelProvider"), goal_observed=goal_observed,
                 goal_objective=goal.get("objective") if isinstance(goal, dict) else None,
-                native_error=((last_turn.get("error") or {}).get("message") or "")[:1500] if isinstance(last_turn.get("error"), dict) else None,
+                native_error=((last_turn.get("error") or {}).get("message", "") + " " + json.dumps((last_turn.get("error") or {}).get("codexErrorInfo", ""),ensure_ascii=False))[:1500] if isinstance(last_turn.get("error"), dict) else None,
             )
     except (CodexWebDispatchError, OSError, WebSocketException) as exc:
         logger.debug(

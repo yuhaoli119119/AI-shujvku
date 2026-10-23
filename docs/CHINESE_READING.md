@@ -31,3 +31,13 @@ GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定req
 后续同篇补缺可省略 source_job_id，沿最新已核实阅读 job 续接；原登记来源如果已被后续 turn 推进，不应强制再次指定旧 turn。整篇 accepted 与原线程终态齐全后，由原总指挥按现有归档机制归档并记录回执；失败保留原句柄，不创建替代对话。
 
 普通解析的局部补缺也使用相同续接分支：`POST /api/rebuild/papers/PAPER_UUID/ai-extract/jobs` 仍保留原 file_ids/retry/checkpoint 合同，可选 source_job_id；默认发现本篇可复用身份时绑定原线程。补缺 job 与原 job 分开保存回执，原科学任务 thread 身份不改。存在阅读任务写者或续接未知时拒绝新写者；重放、模型与原生终态规则相同。无既有可复用身份的首次解析仍兼容原新任务路径。
+
+### WorkBuddy图像模型额度回退与原job恢复
+
+已核实本机图像能力的有限白名单为DS4.1Flash、GLM5.3Flash、GLM5.2；两款GLM有最小真实图像试验和完整turn_context权限读回。只在同篇原线程明确终态、实际native错误为额度耗尽或模型不可用时，按此顺序有界续接，最多向后两次。不因网络、未知结果、普通429或业务保存错误换模型，不创建替代thread/job。chosen_model、effective_model、原生尝试历史、恢复回执与实际turn_context证明分别保留；不改用户全局模型。
+
+阅读jobs可选model，普通解析jobs亦允许这些模型；已有同篇来源默认沿原有效模型。任务进行中不换模型。`POST reading-assistance/jobs/JOB_ID/resume`（或`ai-extract/jobs/JOB_ID/resume`）使用稳定request_id，恢复同一job；已被总指挥恢复的确切原目标turn仅接认、不再派发。暂停中断仅同模型恢复，额度终态才允许向后模型切换。未知/其他写者/来源缺失均拒绝。
+
+误停后原job被标failed但原线程已生成内容、终态明确报告reading_task_finished时，可在阅读resume请求中携带原`prepared_content`保存JSON。同一事务恢复原job并调用原保存合同，原request_id、job_id、thread_id不变；来源版本/CAS/图表归属/科学字段保护全部保留，不重新生成现有成果。请求重放校验原体指纹。服务器原生终态与保存回执各自核实后才能收尾。
+
+`verify_paper_turn_context.py --job JOB_ID --paper PAPER_UUID`由服务器核对真实rollout、实际turn/model/cwd/full权限，再写入该job的turn_context_proof和actual_inference_verified，不接受浏览器自称证明。不读取或修改原文与科学字段。

@@ -6,7 +6,7 @@ from app.db.models import WorkflowJob
 from app.services.codex_web_dispatch import CodexWebDispatchError, _call, _verify_goal, DispatchResult
 
 BINDING = 'paper_native_thread_binding'
-MODEL = 'cn:deepseek-v4.1-flash'
+from app.services.paper_native_models import MODELS, DEFAULT as MODEL, require_model, fallback_reason
 CWD = {'/opt/literature-ai', '/opt/AI-shujvku/literature-ai'}
 
 
@@ -25,10 +25,10 @@ def source_for(session, paper_id, source_job_id=None, actor=None):
     p, r = job.payload or {}, job.progress or {}
     if p.get('actor') and p['actor'] != actor:
         raise ValueError('same_thread_actor_mismatch')
-    if (p.get('chosen_model') != MODEL or not r.get('thread_id') or not r.get('turn_id') or
+    if ((r.get('effective_model') or p.get('chosen_model')) not in MODELS or not r.get('thread_id') or not r.get('turn_id') or
             job.status not in ('completed', 'failed') or not r.get('native_terminal_verified')):
         raise ValueError('same_thread_source_unverified_or_busy')
-    return {'source_job_id': job.job_id, 'thread_id': r['thread_id'], 'turn_id': r['turn_id']}
+    return {'source_job_id': job.job_id, 'thread_id': r['thread_id'], 'turn_id': r['turn_id'], 'source_model':r.get('effective_model') or p['chosen_model']}
 
 
 async def confirmed_source(session, paper_id, settings, source_job_id=None, actor=None):
@@ -64,11 +64,19 @@ async def prepare(ws, binding, timeout, on_event):
     goal = await _call(ws, 'thread/goal/get', {'threadId': tid}, timeout, on_event)
     g = goal.get('goal')
     if ('goal' not in goal or g is not None and
-            (not isinstance(g, dict) or g.get('threadId') != tid or g.get('status') not in ('complete', 'completed'))):
+            (not isinstance(g, dict) or g.get('threadId') != tid or g.get('status') not in (('complete','completed','paused','blocked') if binding.get('resume_paused') else ('complete','completed')))):
         raise CodexWebDispatchError('same_thread_goal_not_terminal')
-    resumed = await _call(ws, 'thread/resume', {'threadId': tid}, timeout, on_event)
+    target = require_model(binding.get('target_model',binding.get('source_model',MODEL)))
+    source = require_model(binding.get('source_model',MODEL))
+    if target != source and binding.get('switch_reason') not in ('quota_exhausted','model_unavailable'):
+        raise CodexWebDispatchError('unverified_model_switch')
+    params = {'threadId':tid}
+    if target != source:
+        params.update(model=target,modelProvider='workbuddy',approvalPolicy='never',sandbox='danger-full-access',
+            allowProviderModelFallback=False,config={'model_reasoning_effort':'high'})
+    resumed = await _call(ws, 'thread/resume', params, timeout, on_event)
     verify_thread(resumed.get('thread') or {}, binding)
-    if (resumed.get('model') != MODEL or resumed.get('modelProvider') != 'workbuddy' or
+    if (resumed.get('model') != target or resumed.get('modelProvider') != 'workbuddy' or
             resumed.get('approvalPolicy') != 'never' or
             (resumed.get('sandbox') or {}).get('type') != 'dangerFullAccess' or resumed.get('cwd') not in CWD):
         raise CodexWebDispatchError('same_thread_model_or_permissions_mismatch')
@@ -76,7 +84,9 @@ async def prepare(ws, binding, timeout, on_event):
 
 
 async def dispatch(ws, binding, prompt, timeout, on_event):
+    model = require_model(binding.get('target_model',binding.get('source_model',MODEL)))
     before = await prepare(ws, binding, timeout, on_event)
+    on_event({'method':'thread/resume','phase':'effective_verified','effective_model':model,'effective_provider':'workbuddy','approval_policy':'never','sandbox_type':'dangerFullAccess'})
     tid = binding['thread_id']
     goal = await _call(ws, 'thread/goal/set', {'threadId': tid, 'objective': prompt, 'status': 'active'}, timeout, on_event)
     _verify_goal(goal, tid, active=True, objective=prompt)
@@ -97,13 +107,13 @@ async def dispatch(ws, binding, prompt, timeout, on_event):
     else:
         verify_thread(t, binding)
         result = await _call(ws, 'turn/start', {'threadId': tid, 'input': [{'type': 'text', 'text': prompt}],
-            'approvalPolicy': 'never', 'sandboxPolicy': {'type': 'dangerFullAccess'}, 'model': MODEL, 'effort': 'high',
-            'collaborationMode': {'mode': 'default', 'settings': {'model': MODEL, 'reasoning_effort': 'high', 'developer_instructions': None}}}, timeout, on_event)
+            'approvalPolicy': 'never', 'sandboxPolicy': {'type': 'dangerFullAccess'}, 'model': model, 'effort': 'high',
+            'collaborationMode': {'mode': 'default', 'settings': {'model': model, 'reasoning_effort': 'high', 'developer_instructions': None}}}, timeout, on_event)
         turn_id = (result.get('turn') or {}).get('id')
         if not turn_id or result.get('threadId', tid) != tid or turn_id in old_ids:
             raise CodexWebDispatchError('same_thread_new_turn_unknown')
-    return DispatchResult(thread_id=tid, turn_id=turn_id, model=MODEL, goal_status='active',
-        start_effective_model=MODEL, start_effective_provider='workbuddy',
+    return DispatchResult(thread_id=tid, turn_id=turn_id, model=model, goal_status='active',
+        start_effective_model=model, start_effective_provider='workbuddy',
         start_collaboration_verification='verified_resume')
 
 
@@ -153,9 +163,9 @@ async def register(session, proof, settings):
             # Host verifier proved the archived rollout and its terminal audit turn.
             # Restore that original thread only; never create a replacement.
             await _call(ws, 'thread/unarchive', {'threadId':tid}, timeout, events.append)
-        await prepare(ws, proof, timeout, events.append)
+        await prepare(ws, {**proof,'source_model':proof.get('model',MODEL)}, timeout, events.append)
     session.add(WorkflowJob(job_id=jid, type=BINDING, status='completed', library_name=paper.library_name,
-        payload={'paper_id':pid, 'actor':proof['actor'], 'chosen_model':MODEL, 'ownership_proof':proof},
+        payload={'paper_id':pid, 'actor':proof['actor'], 'chosen_model':proof.get('model',MODEL), 'ownership_proof':proof},
         progress={'thread_id':tid, 'turn_id':proof['turn_id'], 'native_terminal_verified':True, 'events':events}))
     session.add(AuditLog(action='paper_thread_registered', source='host_coordinator_receipt', paper_id=pid,
         target_type='workflow_job', target_id=jid, payload={'actor':proof['actor'], 'proof_sha256':hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest()}))

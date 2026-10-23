@@ -286,7 +286,10 @@ async def create_ai_extract_job(
         continuation = await confirmed_source(session, paper_id, settings, source_job_id, actor)
     except ValueError as exc:
         raise AiExtractError(str(exc)) from exc
-    if continuation and chosen_model != 'cn:deepseek-v4.1-flash':
+    if continuation and model is None:
+        chosen_model=continuation['source_model']
+        chosen_mode=dispatch_mode_for_model(chosen_model)
+    if continuation and chosen_model != continuation.get('source_model', 'cn:deepseek-v4.1-flash'):
         raise AiExtractError('same_thread_requires_deepseek')
     attempt_token = str(uuid4())
     from app.services.ordinary_parsing import saved_file_plan
@@ -365,6 +368,9 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
             elif event["method"] == "turn/start" and isinstance(result.get("turn"),dict):
                 if result["turn"].get("id"):
                     progress["turn_id"] = result["turn"]["id"]
+            if event["method"] == "thread/resume" and event["phase"] == "effective_verified":
+                progress.update(effective_model=event['effective_model'],effective_provider=event['effective_provider'],
+                    effective_permissions={'approval_policy':event['approval_policy'],'sandbox_type':event['sandbox_type']})
             if event["phase"] == "auto_start_adopted":
                 progress["turn_id"] = event["turn_id"]
             if event["method"] == "thread/start" and event["phase"] == "effective_verified":
@@ -386,6 +392,7 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
                 job.progress = {**(job.progress or {}),"phase":"running","needs_check":False,
                     "dispatch_mode":result.dispatch_mode,"thread_id":result.thread_id,"turn_id":result.turn_id,
                     "model":result.model,"goal_status":result.goal_status,
+                    "effective_model":result.start_effective_model,"effective_provider":result.start_effective_provider,
                     "start_effective_model":result.start_effective_model,
                     "start_effective_provider":result.start_effective_provider,
                     "start_collaboration_verification":result.start_collaboration_verification,
@@ -482,6 +489,13 @@ async def sync_job_status(
             progress.update(turn_id=recovered["turn_id"], identity_recovery=recovered)
             job.error = None
             job.status = "running"
+    from app.services.paper_native_models import stage_fallback
+    if (ordinary and status.goal_objective==(job.payload or {}).get('dispatch_objective') and
+            matches_owned_attempt(status,thread_id,progress.get('turn_id'),allow_goal_continuations=True)):
+        progress.update(start_turn_id=progress.get('start_turn_id') or progress.get('turn_id'),turn_id=status.turn_id)
+        job.progress=progress
+    if ordinary and stage_fallback(job,status):
+        session.flush();return job
     plan = progress.get("file_plan", {})
     stages_processed = bool(plan) and all(part.get("status") in {"completed", "partial", "failed"}
         for file in plan.values() for part in file.get("stages", {}).values())
@@ -519,7 +533,7 @@ async def sync_job_status(
     elif turn_status in {"failed","interrupted"} and (mode == "codex_web_ordinary" or status.goal_status in {"complete", "completed", "paused", "blocked"}):
         # Preserve a failed task for review, and block button-driven recreation.
         job.status = "failed"
-        job.error = f"Codex-web turn {turn_status}"
+        job.error = job.error if job.error and "fallback_exhausted" in job.error else f"Codex-web turn {turn_status}: {status.native_error or ''}"[:1600]
         job.progress = {**progress,"phase":turn_status,"needs_check":True,"automatic_retry":False,
                         "native_terminal_verified":True,"native_terminal":observed}
         session.flush()
