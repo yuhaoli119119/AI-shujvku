@@ -84,7 +84,7 @@ def test_bound_job_source_revision_ownership_and_csrf(reading_env):
 
 def test_failed_generation_does_not_touch_scientific_or_stop_next_parse_and_retry(reading_env,monkeypatch):
     e=reading_env;j=create(e)
-    async def done(*a,**k):return ThreadStatus('completed','complete',None,'could not translate',thread_id='owned',turn_id='turn',native_error='exceeded retry limit, last status: 429 Too Many Requests')
+    async def done(*a,**k):return ThreadStatus('completed','complete',None,'could not translate',thread_id='owned',turn_id='turn',thread_status='idle',goal_observed=True,model_provider='workbuddy',native_error='exceeded retry limit, last status: 429 Too Many Requests')
     monkeypatch.setattr('app.services.codex_web_dispatch.read_thread_status',done)
     with e['factory']() as s:
         job=s.get(WorkflowJob,j['job_id']);job.progress={**job.progress,'thread_id':'owned','turn_id':'turn'};s.commit()

@@ -47,10 +47,10 @@ def _ordering(filters):
     direction = lambda c: (c.desc() if filters.sort_order == "desc" else c.asc()).nulls_last()
     # CASE guards malformed codes before numeric conversion; arbitrary precision
     # avoids integer overflow. Unknown/missing codes sort after valid codes.
-    valid = p.paper_code.op("~")(r"^[A-Za-z]+[0-9]+$")
-    prefix = func.substring(p.paper_code, r"^([A-Za-z]+)")
+    valid = func.coalesce(p.paper_code.op("~")(r"^[A-Za-z]+[0-9]+$"), False)
+    prefix = case((valid, func.substring(p.paper_code, r"^([A-Za-z]+)")), else_=None)
     number = case((valid, cast(func.substring(p.paper_code, r"([0-9]+)$"), Numeric)), else_=None)
-    code = (valid.desc().nulls_last(), direction(number), direction(func.lower(prefix)), direction(p.paper_code))
+    code = (valid.desc().nulls_last(), direction(func.lower(prefix).collate("C")), direction(number), direction(func.coalesce(p.paper_code, "").collate("C")))
     if filters.sort_by in {"paper_code", "paper_code_numeric"}:
         order = code
     elif filters.sort_by == "title":

@@ -102,6 +102,8 @@ def serialize(job):
                    '生成未完成，可保留已有内容后重试' if job.status == 'failed' else
                    '正在准备中文阅读内容' if job.status in RUNNING else '阅读内容待补充',
         'saved': bool(progress.get('reading_saved')), 'error': job.error,
+        'thread_id':progress.get('thread_id'), 'turn_id':progress.get('turn_id'),
+        'source_job_id':(job.payload or {}).get('continuation',{}).get('source_job_id'),
         'can_retry': job.status == 'failed' and bool(progress.get('native_terminal_verified')),
         'created_at': job.created_at.isoformat(), 'updated_at': job.updated_at.isoformat()}
 
@@ -123,7 +125,7 @@ def abstract_prompt(paper_id, jid):
 3) write /api/rebuild/papers/{paper_id}/reading-assistance JSON_FILE；未知结果原体原ID有界重放。保存后get同路径核对译文及abstract_translation来源。不调用其他写接口，不改原摘要字段。确认保存读回后结束原生目标并结束本轮，不等待后台job completed（它需要本轮先结束），不另开任务。'''
 
 
-async def create(session, paper_id, settings, request_id, retry=False, scope='full'):
+async def create(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None):
     from app.services.rebuild_queue import lock_scheduler, paper_busy
     from app.services.ai_extract_service import _background_dispatch
     lock_scheduler(session)
@@ -133,13 +135,25 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
         WorkflowJob.payload.op('->>')('paper_id') == str(paper_id),
         WorkflowJob.payload.op('->>')('request_id') == request_id))
     if previous:
-        if previous.payload.get('reading_scope','full')!=scope:raise ValueError('reading_request_scope_reused')
+        if (previous.payload.get('reading_scope','full')!=scope or
+                previous.payload.get('actor') is not None and previous.payload.get('actor') != actor or
+                previous.payload.get('requested_source_job_id') != source_job_id):raise ValueError('reading_request_scope_reused')
         return serialize(previous)
     old = latest(session, paper_id)
     if old and old.status in RUNNING: return serialize(old)
     if old and old.status == 'failed' and not (old.progress or {}).get('native_terminal_verified'):
         return serialize(old)
     if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
+    from app.services.reading_thread_continuation import source_for
+    continuation = source_for(session, paper_id, source_job_id, actor)
+    if continuation:
+        from app.services.codex_web_dispatch import read_thread_status
+        native = await read_thread_status(continuation['thread_id'], settings)
+        if (native is None or native.thread_id != continuation['thread_id'] or
+                native.turn_id != continuation['turn_id'] or native.turn_status not in ('completed','failed','interrupted') or
+                native.thread_status not in ('idle','notLoaded') or not native.goal_observed or
+                native.goal_status not in (None,'complete','completed') or native.model_provider != 'workbuddy'):
+            raise ValueError('same_thread_native_busy_or_unverified')
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
         if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
@@ -151,11 +165,14 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
     model = 'cn:deepseek-v4.1-flash'
     job = WorkflowJob(job_id=jid, type=TYPE, status='dispatching', library_name=paper.library_name,
         payload={'paper_id':str(paper_id), 'request_id':request_id, 'attempt_token':token,
+                 'actor':actor, 'requested_source_job_id':source_job_id,
+                 **({'continuation':continuation} if continuation else {}),
                  'chosen_model':model, 'chosen_mode':'codex_web_target', 'parse_contract':'ordinary_parse_v1',
                  'reading_revision':context['reading_revision'], 'input_revision':context['input_revision'], 'reading_scope':scope,
                  'dispatch_prompt':instruction, 'dispatch_objective':instruction},
         progress={'phase':'dispatching', 'dispatch_mode':'codex_web_target', 'model':model,
-                  'dispatch_started':False, 'events':[]})
+                  'dispatch_started':False, 'events':[],
+                  **({'thread_id':continuation['thread_id'], 'previous_turn_id':continuation['turn_id']} if continuation else {})})
     session.add(job);session.commit()
     asyncio.create_task(_background_dispatch(job_id=jid, database_url=settings.database_url,
         prompt=instruction, objective=instruction, settings=settings, primary_model=model, attempt_token=token))
@@ -255,6 +272,11 @@ async def reconcile(session, job, settings):
     session.refresh(job,with_for_update=True)
     if job.status not in RUNNING or status is None:return job
     progress=dict(job.progress or {})
+    if not progress.get('turn_id') and (job.payload or {}).get('continuation'):
+        from app.services.reading_thread_continuation import recover_turn
+        recovered = recover_turn(job, status)
+        if recovered: progress['turn_id'] = recovered
+        else: return job
     if not progress.get('turn_id'):
         recovered=recover_auto_started_turn(job.payload,progress,status,settings)
         if recovered:progress.update(turn_id=recovered['turn_id'],identity_recovery=recovered)
