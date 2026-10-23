@@ -4,18 +4,18 @@ const root=path.resolve(__dirname,'..');
 const html=fs.readFileSync(path.join(root,'pages/paper_detail/index.html'),'utf8');
 const id='c0abf59a-c8ac-4c7f-aa56-a81a0a637f1f';
 const guide={one_sentence:'一句话研究结论',problem:'本文研究问题',main_finding:'主要发现与测试条件',content_scope:'main_text',guide:{research_objective:'确定反应目标',innovation:'作者提出，本文对照仅支持局部比较',limitations:'范围有限'},argument_flow:['问题→方案','证据→结论'],evidence:[{asset_id:'12345678-abcd-abcd-abcd-123456789abc',question:'哪个对照支持结论？',finding:'由已存图注支持'}],missing:['SI 图像未读取'],source_files:[{role:'main',name:'paper.pdf',complete_text:true}]};
-async function boot(page,{saved=guide,job={status:'not_started'},english='Original English abstract',chinese='忠实中文摘要',responses=[],translation=null}={}){
+async function boot(page,{saved=guide,job={status:'not_started'},english='Original English abstract',chinese='忠实中文摘要',responses=[],translation=null,postError=null}={}){
  await page.goto('http://127.0.0.1:4173/pages/paper_detail/reading-assistance.js');
  await page.setContent(html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,''));
  await page.addScriptTag({path:path.join(root,'pages/paper_detail/reading-assistance.js')});
  await page.addScriptTag({content:html.slice(html.indexOf('    const API_BASE ='),html.lastIndexOf('</script>'))});
- await page.evaluate(({id,saved,job,english,chinese,responses,translation})=>{
+ await page.evaluate(({id,saved,job,english,chinese,responses,translation,postError})=>{
   window.posts=[];window.gets=[];window.readIndex=0;
-  fetchJSON=async(url,opt)=>{if(opt?.method==='POST'){posts.push({url,body:JSON.parse(opt.body)});return {status:'running',job_id:'guide-one'}}gets.push(url);if(url==='/api/auth/me')return {csrf_token:'fixture'};const next=responses[window.readIndex++];if(next?.error)throw Error(next.error);if(next?.hang)return new Promise((_,reject)=>opt.signal.addEventListener('abort',()=>reject(Error('request timed out'))));return {guide:saved,abstract_zh:chinese,abstract_translation:translation,job,...next};};
+  fetchJSON=async(url,opt)=>{if(opt?.method==='POST'){posts.push({url,body:JSON.parse(opt.body)});if(postError)throw Object.assign(Error(postError.message),{status:postError.status});return {status:'running',job_id:'guide-one'}}gets.push(url);if(url==='/api/auth/me')return {csrf_token:'fixture'};const next=responses[window.readIndex++];if(next?.error)throw Error(next.error);if(next?.hang)return new Promise((_,reject)=>opt.signal.addEventListener('abort',()=>reject(Error('request timed out'))));return {guide:saved,abstract_zh:chinese,abstract_translation:translation,job,...next};};
   renderCurrentFigures=()=>{};renderDeepLinkBar=()=>{};applyDftDeepLink=()=>{};applyStructuredDeepLink=()=>{};ensureFullDetail=()=>{};
   Object.assign(state,{paperId:id,paper:{id,title:'Test title',abstract:english,abstract_zh:chinese,reading_guide:saved?{beginner_zh:saved,abstract_translation:translation}:null,comprehensive_analysis:{},counts:{},authors:[],figures:[],tables:[]},deepLink:{},rebuildStatus:'ready',rebuildRows:[]});
   renderPaperDetails();
- },{id,saved,job,english,chinese,responses,translation});
+ },{id,saved,job,english,chinese,responses,translation,postError});
 }
 
 test('saved Chinese defaults, English toggle, progressive guide and scoped evidence links',async({page})=>{
@@ -178,4 +178,18 @@ test('existing guide supplements only abstract and source, then exits finalizati
  expect(await page.evaluate(()=>state.paper.abstract)).toBe('');
  await page.getByRole('button',{name:'查看英文原摘要'}).click();await expect(page.locator('#paperAbstract')).toHaveText(pdfAbstract.original_text);
  expect(await page.evaluate(()=>window.posts.length)).toBe(1);
+});
+
+
+test('uncertain abstract boundary retains a clear pending reason without background generation',async({page})=>{
+ await page.clock.install();
+ await boot(page,{english:'',chinese:'',job:{status:'completed',saved:true},postError:{status:409,message:'正文中未找到边界唯一且可核实的摘要段；中文摘要待补。'}});
+ await page.getByRole('button',{name:'补充中文摘要'}).click();
+ await expect(page.locator('#pdReadingJob')).toContainText('正文中未找到边界唯一');
+ await expect(page.locator('#pdReadingJob')).toContainText('中文摘要待补');
+ await expect(page.locator('#pdGenerateReading')).toBeEnabled();
+ const gets=await page.evaluate(()=>window.gets.length);await page.clock.runFor(60000);
+ expect(await page.evaluate(()=>window.gets.length)).toBe(gets);
+ expect(await page.evaluate(()=>window.posts.length)).toBe(1);
+ expect(await page.evaluate(()=>state.paper.reading_guide.beginner_zh)).toEqual(guide);
 });
