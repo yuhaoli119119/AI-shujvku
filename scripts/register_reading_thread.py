@@ -40,16 +40,24 @@ def verified_proof(paper_id, actor):
     files = list(SESSIONS.glob('*/*/*/rollout-*' + tid + '.jsonl')) + list((SESSIONS.parent / 'archived_sessions').glob('rollout-*' + tid + '.jsonl'))
     if len(files) != 1:
         raise ValueError('native_rollout_missing_or_ambiguous')
-    context = None; same_paper_input = False
+    context = None; contexts = {}; same_paper_input = False
     for line in files[0].open():
         item = json.loads(line)
-        if item.get('type') == 'turn_context': context = item['payload']
+        if item.get('type') == 'turn_context':
+            context = item['payload']; contexts[context.get('turn_id')] = context
         if item.get('type') == 'response_item' and item.get('payload', {}).get('role') == 'user':
             same_paper_input |= any(paper_id in part.get('text', '') for part in item['payload'].get('content', []) if isinstance(part, dict))
         if item.get('type') == 'event_msg' and item.get('payload', {}).get('type') == 'user_message':
             same_paper_input |= paper_id in item['payload'].get('message', '')
+    # A completed audit may have been resumed after the original receipt.
+    # Validate that receipt against its own real turn, and attest the newest
+    # terminal turn independently; copied stale claims cannot authorize it.
+    original = contexts.get(permission.get('turn_id'))
+    if not original or any(permission[k] != original.get(k) for k in
+            ('model','approval_policy','sandbox_policy','permission_profile') if k in permission):
+        raise ValueError('native_permission_receipt_not_in_owned_rollout')
     if (not context or context.get('cwd') not in (str(ROOT), '/opt/literature-ai') or
-            not same_paper_input or context.get('turn_id') != permission.get('turn_id') or
+            not same_paper_input or
             context.get('model') not in VISION_MODELS or context.get('approval_policy') != 'never' or
             (context.get('sandbox_policy') or {}).get('type') != 'danger-full-access'):
         raise ValueError('native_paper_model_permissions_unverified')

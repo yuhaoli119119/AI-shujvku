@@ -48,3 +48,21 @@ def test_host_registration_rejects_unowned_receipt_or_busy_roster(tmp_path,monke
         if fault=='foreign_cwd':items[1]['payload']['cwd']='/another/project'
         f.write_text('\n'.join(json.dumps(x) for x in items))
     with pytest.raises(ValueError):m.verified_proof('paper-id','writer')
+
+
+@pytest.mark.parametrize('fault',[None,'missing_old_turn','forged_old_model','latest_restricted'])
+def test_resumed_audit_attests_latest_turn_without_trusting_stale_permissions(tmp_path,monkeypatch,fault):
+    m,batch,folder,f=verifier(tmp_path,monkeypatch)
+    items=[json.loads(x) for x in f.read_text().splitlines()]
+    latest={**items[-1]['payload'],'turn_id':'resumed','model':'cn:glm-5.2'}
+    if fault=='latest_restricted':latest['sandbox_policy']={'type':'read-only'}
+    items.append({'type':'turn_context','payload':latest})
+    f.write_text('\n'.join(json.dumps(x) for x in items))
+    (folder/'terminal-native.json').write_text(json.dumps({'thread':{'id':'owned','turns':[{'id':'resumed','status':'completed'}]}}))
+    permission={'turn_id':'missing' if fault=='missing_old_turn' else 'audit','model':'gpt-6-luna' if fault=='forged_old_model' else 'cn:deepseek-v4.1-flash'}
+    (folder/'permissions.json').write_text(json.dumps(permission))
+    if fault:
+        with pytest.raises(ValueError):m.verified_proof('paper-id','writer')
+    else:
+        proof=m.verified_proof('paper-id','writer')
+        assert proof['turn_id']=='resumed' and proof['model']=='cn:glm-5.2'
