@@ -185,3 +185,10 @@ def test_default_parse_supplement_keeps_previously_effective_glm_model(ready,mon
     assert r.status_code==200,r.text
     with e['factory']() as s:
         j=s.get(WorkflowJob,r.json()['job_id']);assert j.payload['chosen_model']==m.MODELS[1] and j.progress['thread_id']=='owned'
+
+
+@pytest.mark.no_test_database
+def test_prior_manual_resume_budget_exhaustion_keeps_terminal_error_no_retry_loop():
+    j=SimpleNamespace(type='paper_reading_assistance',job_id='same',payload={'chosen_model':m.DEFAULT},progress={'thread_id':'owned','turn_id':'audit','native_attempts':[{'model':m.DEFAULT}]*4},status='running',error=None)
+    assert not m.stage_fallback(j,status(native_error='quota exceeded'))
+    assert 'fallback_exhausted' in j.error and j.progress['turn_id']=='audit'
