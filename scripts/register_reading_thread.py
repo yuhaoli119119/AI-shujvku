@@ -30,7 +30,9 @@ def verified_proof(paper_id, actor):
     receipt_path = folder / 'dispatch' / (tid + '.json')
     receipt = json.loads(receipt_path.read_text())
     prompt = (folder / 'PROMPT.md').read_text()
-    if receipt.get('threadId') != tid or paper_id not in prompt or receipt.get('cwd') not in (str(ROOT), '/opt/literature-ai'):
+    cwd_owned = receipt.get('cwd') in (str(ROOT), '/opt/literature-ai')
+    followup = receipt.get('kind') == 'followup' and row.get('reuse_for_audit') and row.get('parse_thread_id') == tid
+    if receipt.get('threadId') != tid or paper_id not in prompt or not (cwd_owned or followup):
         raise ValueError('coordinator_receipt_mismatch')
     permission = json.loads((folder / 'permissions.json').read_text())
     # Re-read actual native rollout, rather than trusting copied model claims.
@@ -45,7 +47,8 @@ def verified_proof(paper_id, actor):
             same_paper_input |= any(paper_id in part.get('text', '') for part in item['payload'].get('content', []) if isinstance(part, dict))
         if item.get('type') == 'event_msg' and item.get('payload', {}).get('type') == 'user_message':
             same_paper_input |= paper_id in item['payload'].get('message', '')
-    if (not context or not same_paper_input or context.get('turn_id') != permission.get('turn_id') or
+    if (not context or context.get('cwd') not in (str(ROOT), '/opt/literature-ai') or
+            not same_paper_input or context.get('turn_id') != permission.get('turn_id') or
             context.get('model') != 'cn:deepseek-v4.1-flash' or context.get('approval_policy') != 'never' or
             (context.get('sandbox_policy') or {}).get('type') != 'danger-full-access'):
         raise ValueError('native_paper_model_permissions_unverified')
