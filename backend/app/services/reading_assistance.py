@@ -105,6 +105,7 @@ def serialize(job):
         'thread_id':progress.get('thread_id'), 'turn_id':progress.get('turn_id'),
         'chosen_model':(job.payload or {}).get('chosen_model'),'effective_model':progress.get('effective_model'),
         'fallback_attempts':len(progress.get('native_attempts') or []),
+        'native_error':progress.get('native_error'),
         'source_job_id':(job.payload or {}).get('continuation',{}).get('source_job_id'),
         'can_retry': job.status == 'failed' and bool(progress.get('native_terminal_verified')),
         'created_at': job.created_at.isoformat(), 'updated_at': job.updated_at.isoformat()}
@@ -292,7 +293,7 @@ async def reconcile(session, job, settings):
         job.status='completed' if progress.get('reading_saved') else 'failed'
         native_error = getattr(status, 'native_error', None)
         progress['native_error'] = native_error
-        job.error = None if progress.get('reading_saved') else job.error if job.error and 'fallback_exhausted' in job.error else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试')
+        job.error = None if progress.get('reading_saved') else job.error if job.error and 'fallback_exhausted' in job.error else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试'+('：'+native_error[:500] if native_error else ''))
         progress.update(native_terminal_verified=True,phase=job.status)
     else:job.status='running';progress['phase']='running'
     job.progress=progress;session.flush();return job

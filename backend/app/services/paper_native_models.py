@@ -85,7 +85,7 @@ def stage_fallback(job,status):
     current=r.get('effective_model') or p.get('chosen_model')
     if current not in MODELS:return False
     target=next_model(current,[x['model'] for x in r.get('native_attempts',[])])
-    if not target:
+    if not target or len(r.get('native_attempts') or [])>=len(MODELS)+1:
         job.error='paper_model_fallback_exhausted: '+str(status.native_error or '')[:1000]
         return False
     stage_followup(job,status,target,reason=reason)
