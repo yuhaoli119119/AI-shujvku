@@ -1,6 +1,10 @@
 /* Stored Chinese reading help: no model calls on mount, refresh or tab navigation. */
 window.PaperReading = (() => {
   const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function invalidAbstract(paper) {
+    const text=String(paper.reading_guide?.abstract_translation?.original_text || paper.abstract || '').normalize('NFKC').toLowerCase().replace(/\s+/g,' ').trim();
+    return Boolean(paper.abstract_invalid_notice || (text.startsWith('this is a pdf file of an article') && text.includes('definitive version of record') && text.includes('copyediting') && text.includes('typesetting')));
+  }
   const scopes = {abstract:'仅依据摘要',main_text:'依据正文文字与已有图表资料',main_and_si:'依据正文与 SI 文字、已有图表资料',partial_text:'依据部分文字资料'};
   let timer = null, paperId = null, currentJob = null, options = null;
   let epoch = 0, polls = 0, failures = 0, stopped = false, checking = false, readNote = '', generationError = '';
@@ -54,9 +58,9 @@ window.PaperReading = (() => {
     const running=isRunning(currentJob);
     // Unknown readback is not proof that a generation task has finished.
     btn.disabled=Boolean(running || checking || readNote);
-    const abstractOnly=Boolean(options?.paper.reading_guide?.beginner_zh && !options?.paper.abstract_zh);
+    const abstractOnly=Boolean(options?.paper.reading_guide?.beginner_zh && (!options?.paper.abstract_zh || invalidAbstract(options.paper)));
     const abstractTask=currentJob?.scope==='abstract_only';
-    btn.textContent=running?(currentJob.saved?(abstractTask?'摘要已保存，正在收尾…':'导读已保存，正在收尾…'):(abstractTask?'正在补充中文摘要…':'正在补充中文导读…')):currentJob?.can_retry?(abstractTask?'重试中文摘要':'重试中文导读'):abstractOnly?'补充中文摘要':'补充中文导读';
+    btn.textContent=running?(currentJob.saved?(abstractTask?'摘要已保存，正在收尾…':'导读已保存，正在收尾…'):(abstractTask?'正在补充中文摘要…':'正在补充中文导读…')):currentJob?.can_retry?(abstractTask?'重试中文摘要':'重试中文导读'):abstractOnly?(invalidAbstract(options.paper)?'纠正中文摘要':'补充中文摘要'):'补充中文导读';
     const message=currentJob?.status==='failed' ? (currentJob.error || '本次未生成，可重试，已有资料已保留。') : running ?
       (currentJob.saved ? (abstractTask?'中文摘要已保存，可以阅读；任务正在收尾，正在核对完成状态。':'中文导读已保存，可以阅读；任务正在收尾，正在核对完成状态。') : '生成中，离开或刷新页面不会重复启动；已有结果不受影响。') : currentJob?.saved ? (abstractTask?'中文摘要已保存。':'中文导读已保存。') : '';
     status.textContent=[message,readNote,generationError].filter(Boolean).join(' ');
@@ -80,7 +84,9 @@ window.PaperReading = (() => {
       }
       const translationChanged=JSON.stringify(options.paper.reading_guide?.abstract_translation)!==JSON.stringify(data.abstract_translation || undefined);
       if(translationChanged){options.paper.reading_guide={...(options.paper.reading_guide || {}),abstract_translation:data.abstract_translation};render(options.paper);}
-      if(options.paper.abstract_zh!==data.abstract_zh || translationChanged){options.paper.abstract_zh=data.abstract_zh;options.abstract();}
+      const validityChanged=options.paper.abstract_invalid_notice!==Boolean(data.abstract_invalid_notice);
+      options.paper.abstract_invalid_notice=Boolean(data.abstract_invalid_notice);
+      if(options.paper.abstract_zh!==data.abstract_zh || translationChanged || validityChanged){options.paper.abstract_zh=data.abstract_zh;options.abstract();}
       // Saving the content precedes the native terminal state: keep reading both stages.
       if(isRunning(currentJob)) schedule(Math.min(6000 + polls * 2000,15000));
       else { stopped=false;sessionStorage.removeItem('reading-help:'+id); }
@@ -105,7 +111,7 @@ window.PaperReading = (() => {
     const btn=document.getElementById('pdGenerateReading');btn.disabled=true;generationError='';
     try {
       const me=await options.fetch('/api/auth/me');
-      currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry),scope:options.paper.reading_guide?.beginner_zh && !options.paper.abstract_zh?'abstract_only':'full'})});
+      currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry),scope:options.paper.reading_guide?.beginner_zh && (!options.paper.abstract_zh || invalidAbstract(options.paper))?'abstract_only':'full'})});
       renderJob();await read();
     } catch(error) {
       if(error.status>=400 && error.status<500 && error.status!==429){
@@ -124,5 +130,5 @@ window.PaperReading = (() => {
     document.getElementById('pdRefreshReadingState').onclick=resumeRead;
     read();
   }
-  return {mount,render};
+  return {mount,render,invalidAbstract};
 })();

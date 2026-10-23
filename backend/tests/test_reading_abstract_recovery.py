@@ -150,3 +150,49 @@ def test_same_generation_request_cannot_be_reused_with_another_scope(reading_env
     r=e['client'].post(base(e)+'/jobs',json={'request_id':'same-intent','scope':'abstract_only'})
     assert r.status_code==409 and 'scope_reused' in r.text
     with e['factory']() as s:assert s.scalar(select(func.count()).select_from(WorkflowJob))==1
+
+NOTICE='This is a PDF file of an article that is not yet the definitive version of record. This version will undergo additional copyediting, typesetting and review.'
+
+
+def test_notice_is_rejected_and_adjacent_pages_have_exact_spans():
+    from app.services.reading_abstract_source import publisher_notice
+    assert publisher_notice(NOTICE)
+    assert not publisher_notice(ABSTRACT)
+    first='Title\nAbstract\n'+ABSTRACT[:110]+' but the\n  '
+    second=' 2 \n\nunderlying mechanism remains unknown. '+ABSTRACT+'\nKey words: cells\n1. Introduction\nBody'
+    docs=[{'role':'main','file_id':str(uuid4()),'source_sha256':'a'*64,'pages':[{'page':2,'text':first},{'page':3,'text':second}]}]
+    selected=select_abstract(NOTICE,docs);assert selected['source']['physical_page_end']==3
+    assert '\n'.join(docs[0]['pages'][i]['text'][span['start_char']:span['end_char']] for i,span in enumerate(selected['source']['spans']))==selected['text']
+    docs[0]['pages'][1]['text']='Unknown Journal Header\n'+second
+    assert not select_abstract(NOTICE,docs)['text']
+    assert not select_abstract(NOTICE,[])['text']
+    assert select_abstract(ABSTRACT,docs)['text']==ABSTRACT
+    docs[0]['pages']=[{'page':1,'text':'ABSTRACT: '+ABSTRACT+'\n■INTRODUCTION\nBody'}]
+    assert select_abstract(None,docs)['text']==ABSTRACT
+
+
+def test_notice_correction_preserves_history_guide_english_science_and_cas(reading_env):
+    e=reading_env;source_pdf(e)
+    from app.services.reading_abstract_source import revision
+    with e['factory']() as s:
+        p=s.get(Paper,e['paper']);p.abstract=NOTICE
+        src={'kind':'metadata','text_sha256':hashlib.sha256(NOTICE.encode()).hexdigest()}
+        p.comprehensive_analysis={**p.comprehensive_analysis,'abstract_zh':'出版社版本声明旧译文'}
+        p.reading_guide={**p.reading_guide,'abstract_translation':{'original_text':NOTICE,'source':src,'source_revision':revision({'text':NOTICE,'source':src}),'translation_sha256':hashlib.sha256('出版社版本声明旧译文'.encode()).hexdigest()}}
+        s.commit();old=copy.deepcopy(p.reading_guide)
+    before=science(e);assert e['client'].get(base(e)).json()['abstract_invalid_notice']
+    j=start_patch(e);data=patch(e,j['job_id'])
+    bad=copy.deepcopy(data);bad['abstract_source_revision']='f'*64
+    assert e['client'].post(base(e),json=bad).status_code==409
+    r=e['client'].post(base(e),json=data);assert r.status_code==200,r.text
+    assert e['client'].post(base(e),json=data).json()['replayed']
+    with e['factory']() as s:
+        p=s.get(Paper,e['paper']);assert p.abstract==NOTICE
+        assert p.reading_guide['beginner_zh']==old['beginner_zh']
+        history=p.reading_guide['abstract_translation_history'];assert len(history)==1
+        assert history[0]['abstract_zh']=='出版社版本声明旧译文' and history[0]['translation']==old['abstract_translation']
+        assert p.reading_guide['abstract_translation']['source']['kind']=='main_text'
+        job=s.get(WorkflowJob,j['job_id']);job.status='completed';s.commit()
+    assert not e['client'].get(base(e)).json()['abstract_invalid_notice']
+    assert e['client'].post(base(e)+'/jobs',json={'request_id':'no-second-correction','scope':'abstract_only'}).status_code==409
+    assert science(e)==before

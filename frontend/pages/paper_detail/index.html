@@ -15,7 +15,7 @@
   <script src="../../shared/topnav.js?v=20261003-original-design"></script>
   <link rel="stylesheet" href="../../shared/editable-data-grid.css?v=20261011-metric-details">
   <script src="../../shared/editable-data-grid.js?v=20261022-source-traceability"></script>
-  <script src="reading-assistance.js?v=20261023-abstract-source2"></script>
+  <script src="reading-assistance.js?v=20261023-abstract-notice1"></script>
   <script>ThemeManager.init();</script>
 <style>
     /* ============================================================
@@ -3939,23 +3939,24 @@
       let abstractZh = String(paper.abstract_zh || "").trim();
       let showingEnglishAbstract = false;
       const renderAbstract = function() {
-        abstractZh = String(paper.abstract_zh || "").trim();
+        const invalidNotice=PaperReading.invalidAbstract(paper);
+        abstractZh = invalidNotice ? '' : String(paper.abstract_zh || "").trim();
         const translation=paper.reading_guide?.abstract_translation;
         const source=translation?.source;
         const abstractEn=String(translation?.original_text || paper.abstract || '').trim();
         const fromMain=source?.kind==='main_text';
-        document.getElementById('pdAbstractNote').textContent = showingEnglishAbstract ?
+        document.getElementById('pdAbstractNote').textContent = invalidNotice ? '原始记录是出版社版本说明，不能作为科研摘要；中文摘要待补充，旧译文已保留。' : showingEnglishAbstract ?
           (fromMain?'正文摘要原文保留，未做改写':'原文摘要保留，未做改写') : abstractZh ?
-          (fromMain?`译自正文摘要 · PDF物理第${Number(source.physical_page)}页`:'依据原摘要的中文译文') : '中文译文待补充，先展示原文摘要';
+          (fromMain?`译自正文摘要 · PDF物理第${Number(source.physical_page)}${source.physical_page_end ? '–'+Number(source.physical_page_end) : ''}页`:'依据原摘要的中文译文') : '中文译文待补充，先展示原文摘要';
         const sourceLink=document.getElementById('pdAbstractSourceLink');
         const hasSource=fromMain && /^[0-9a-f-]{36}$/i.test(source.file_id || '') && /^[0-9a-f]{64}$/.test(source.source_sha256 || '') && Number.isInteger(source.physical_page) && source.physical_page>0;
         sourceLink.hidden=!hasSource;
         if(hasSource)sourceLink.href=`/api/rebuild/files/${encodeURIComponent(source.file_id)}/preview?source_sha256=${encodeURIComponent(source.source_sha256)}&page_basis=source_pdf&page=${source.physical_page}#page=${source.physical_page}`;
-        abstractEl.textContent = showingEnglishAbstract ? (abstractEn || "暂无英文原摘要") : (abstractZh || abstractEn || "暂无摘要");
+        abstractEl.textContent = showingEnglishAbstract ? (abstractEn || "暂无英文原摘要") : (invalidNotice ? "待从正文明确摘要段补充中文译文。" : (abstractZh || abstractEn || "暂无摘要"));
         if (abstractToggle) {
-          abstractToggle.textContent = showingEnglishAbstract ? "查看中文摘要" : "查看英文原摘要";
-          abstractToggle.hidden = !(abstractZh && abstractEn);
-          abstractToggle.style.display = abstractZh && abstractEn ? "inline-flex" : "none";
+          abstractToggle.textContent = showingEnglishAbstract ? "查看中文摘要" : (invalidNotice ? "查看原始版本说明" : "查看英文原摘要");
+          abstractToggle.hidden = !((abstractZh || invalidNotice) && abstractEn);
+          abstractToggle.style.display = (abstractZh || invalidNotice) && abstractEn ? "inline-flex" : "none";
         }
       };
       if (abstractToggle) abstractToggle.onclick = function() { showingEnglishAbstract = !showingEnglishAbstract; renderAbstract(); };

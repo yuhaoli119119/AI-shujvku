@@ -193,3 +193,23 @@ test('uncertain abstract boundary retains a clear pending reason without backgro
  expect(await page.evaluate(()=>window.posts.length)).toBe(1);
  expect(await page.evaluate(()=>state.paper.reading_guide.beginner_zh)).toEqual(guide);
 });
+
+test('publisher notice is not presented as a trusted Chinese abstract and correction stays abstract-only',async({page})=>{
+ const notice='This is a PDF file of an article that is not yet the definitive version of record. It will undergo copyediting and typesetting.';
+ await boot(page,{english:notice,chinese:'错误的出版社声明译文',translation:{original_text:notice,source:{kind:'metadata'}},job:{status:'completed',saved:true}});
+ await expect(page.locator('#paperAbstract')).not.toContainText('错误的出版社声明译文');
+ await expect(page.locator('#pdAbstractNote')).toContainText('不能作为科研摘要');
+ await page.getByRole('button',{name:'查看原始版本说明'}).click();await expect(page.locator('#paperAbstract')).toHaveText(notice);
+ await expect(page.locator('#pdQuickReading')).toContainText('一句话研究结论');
+ await page.getByRole('button',{name:'纠正中文摘要'}).click();
+ expect((await page.evaluate(()=>posts))[0].body.scope).toBe('abstract_only');
+});
+
+test('corrected cross-page abstract has a source link and original toggle, with no generation on read',async({page})=>{
+ const original='Research abstract from adjacent PDF pages.';
+ await boot(page,{english:'This is a PDF file of an article that is not yet the definitive version of record with copyediting and typesetting.',translation:{original_text:original,source:{kind:'main_text',file_id:'12345678-abcd-abcd-abcd-123456789abc',source_sha256:'a'.repeat(64),physical_page:2,physical_page_end:3}}});
+ await expect(page.locator('#paperAbstract')).toHaveText('忠实中文摘要');await expect(page.locator('#pdAbstractNote')).toContainText('第2–3页');
+ await expect(page.locator('#pdAbstractSourceLink')).toHaveAttribute('href',/page=2#page=2/);
+ await page.getByRole('button',{name:'查看英文原摘要'}).click();await expect(page.locator('#paperAbstract')).toHaveText(original);
+ expect(await page.evaluate(()=>posts.length)).toBe(0);
+});

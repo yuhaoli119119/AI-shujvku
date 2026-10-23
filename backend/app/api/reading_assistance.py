@@ -25,7 +25,7 @@ def read_saved(paper_id:UUID,session:Session=Depends(get_db_session),auth:Sessio
     paper=session.get(Paper,paper_id)
     if not paper:raise HTTPException(404,'paper_not_found')
     return {'paper_id':str(paper_id),'abstract_zh':(paper.comprehensive_analysis or {}).get('abstract_zh'),
-            'abstract_original':paper.abstract,'abstract_translation':(paper.reading_guide or {}).get('abstract_translation'),'guide':(paper.reading_guide or {}).get('beginner_zh'),
+            'abstract_invalid_notice':service.invalid_translation(paper),'abstract_original':paper.abstract,'abstract_translation':(paper.reading_guide or {}).get('abstract_translation'),'guide':(paper.reading_guide or {}).get('beginner_zh'),
             'job':service.serialize(service.latest(session,paper_id))}
 
 
