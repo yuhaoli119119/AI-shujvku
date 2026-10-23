@@ -36,7 +36,7 @@ function comparePaperCodes(a,b){
  const ac=String(a.paper_code||""),bc=String(b.paper_code||""),am=/^([A-Za-z]+)([0-9]+)$/.exec(ac),bm=/^([A-Za-z]+)([0-9]+)$/.exec(bc);
  const lexical=(x,y)=>x<y?-1:x>y?1:0;
  if(Boolean(am)!==Boolean(bm))return am?-1:1;
- if(am&&bm){const prefix=lexical(am[1].toLowerCase(),bm[1].toLowerCase());if(prefix)return prefix;const an=BigInt(am[2]),bn=BigInt(bm[2]);if(an!==bn)return an<bn?-1:1}
+ if(am&&bm){const an=BigInt(am[2]),bn=BigInt(bm[2]);if(an!==bn)return an<bn?-1:1;const prefix=lexical(am[1].toLowerCase(),bm[1].toLowerCase());if(prefix)return prefix}
  return lexical(ac,bc)||lexical(paperId(a),paperId(b));
 }
 function compare(a,b){const mode=$("sortSelect").value;if(mode==="year_asc")return Number(a.year||0)-Number(b.year||0);if(mode==="code_asc")return comparePaperCodes(a,b);if(mode==="title_asc")return String(a.title_zh||a.title||"").localeCompare(String(b.title_zh||b.title||""),"zh-CN");return Number(b.year||0)-Number(a.year||0)||String(a.paper_code||"").localeCompare(String(b.paper_code||""),undefined,{numeric:true})}

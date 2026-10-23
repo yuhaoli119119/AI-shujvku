@@ -5,6 +5,9 @@ const scope={document:{addEventListener(){}},console};vm.createContext(scope);vm
 const codes=['B1','A10','A2','A002','A010','A999999999999999999999999999999','AA1','bad!','',null];
 const rows=codes.map((paper_code,i)=>({paper_code,paper_id:String(i)}));
 rows.sort(scope.comparePaperCodes);
-assert.deepEqual(rows.slice(0,7).map(x=>x.paper_code),['A002','A2','A010','A10','A999999999999999999999999999999','AA1','B1']);
+assert.deepEqual(rows.slice(0,7).map(x=>x.paper_code),['AA1','B1','A002','A2','A010','A10','A999999999999999999999999999999']);
 assert.equal(new Set(rows.map(x=>x.paper_id)).size,codes.length);
-console.log('Natural prefix, numeric magnitude, leading zeros, malformed tail: passed');
+console.log('Numeric magnitude before type prefix, leading zeros, malformed tail: passed');
+
+assert(scope.comparePaperCodes({paper_code:'B001',paper_id:'1'},{paper_code:'A002',paper_id:'2'})<0);
+assert(scope.comparePaperCodes({paper_code:'C009',paper_id:'1'},{paper_code:'A010',paper_id:'2'})<0);
