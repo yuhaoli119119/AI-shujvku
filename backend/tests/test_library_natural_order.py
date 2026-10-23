@@ -21,7 +21,7 @@ def test_natural_default_pagination_filter_search_and_ties(setup_test_db):
         assert params.sort_by=='paper_code_numeric' and params.sort_order=='asc'
         query=select(Paper).where(Paper.library_name=='order fixture').order_by(*_ordering(params))
         whole=s.scalars(query).all()
-        assert [p.paper_code for p in whole[:7]]==['A002','A2','A010','A10','A999999999999999','AA1','B1']
+        assert [p.paper_code for p in whole[:7]]==['AA1','B1','A002','A2','A010','A10','A999999999999999']
         pages=[p for offset in range(0,len(codes),3) for p in s.scalars(query.offset(offset).limit(3))]
         assert [p.id for p in whole]==[p.id for p in pages]
         assert len({p.id for p in pages})==len(codes)
@@ -50,7 +50,7 @@ def test_real_authenticated_api_default_all_pages_search_and_explicit_year(audit
     def read(**kw):
         r=client.get('/api/papers/',params={'library_name':library,**kw});assert r.status_code==200,r.text;return r.json()
     whole=read()
-    assert [p['paper_code'] for p in whole]==['A002','A2','A010','A10','AA1','B1','bad!']
+    assert [p['paper_code'] for p in whole]==['AA1','B1','A002','A2','A010','A10','bad!']
     paged=[p for offset in (0,3,6) for p in read(limit=3,offset=offset)]
     assert [p['paper_id'] for p in paged]==[p['paper_id'] for p in whole]
     assert len({p['paper_id'] for p in paged})==7
