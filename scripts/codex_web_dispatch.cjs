@@ -621,6 +621,26 @@ async function cmdFollowup(opts) {
       );
     }
 
+    const allowedVisionModels = ["cn:deepseek-v4.1-flash","cn:glm-5.3-flash","cn:glm-5.2"];
+    if (opts.model) {
+      const current = thread?.model;
+      const chosen = String(opts.model);
+      const message = (String(lastTurnBeforeFollowup?.error?.message || "")+" "+JSON.stringify(lastTurnBeforeFollowup?.error?.codexErrorInfo||"")).toLowerCase();
+      const quotaEligible = /usage.?limit.?exceeded/.test(message) || !/too many requests|per minute|requests per|rate.?limit/.test(message) || /insufficient.{0,20}(credit|balance)|额度.{0,12}(耗尽|不足|用完)|余额不足|积分不足/.test(message);
+      const reason = quotaEligible && /quota.{0,40}(exhaust|exceed)|insufficient.{0,20}(credit|balance|quota)|usage.?limit.?exceeded|额度.{0,12}(耗尽|不足|用完)|余额不足|积分不足/.test(message) ? "quota_exhausted" :
+        /model[_ ]not[_ ]found|model.{0,40}(unavailable|not available|not supported)|模型.{0,12}(不可用|不存在|下线)/.test(message) ? "model_unavailable" : null;
+      if (!allowedVisionModels.includes(current) || !allowedVisionModels.includes(chosen) ||
+          !["completed","failed","interrupted"].includes(turnStatusBeforeFollowup) ||
+          goal && !["complete","completed","blocked","paused"].includes(goal.status) ||
+          chosen !== current && (!reason || allowedVisionModels.indexOf(chosen)!==allowedVisionModels.indexOf(current)+1)) {
+        throw new Error("same_thread_model_switch_requires_verified_terminal_quota_or_unavailable");
+      }
+      saveState({threadId,turnId:null,cwd:thread.cwd,kind:"followup",phase:"resume_prepared",model:chosen,sourceModel:current,reason});
+      const resumed = await bridge.call("thread/resume",{threadId,model:chosen,modelProvider:"workbuddy",approvalPolicy:"never",sandbox:"danger-full-access",allowProviderModelFallback:false},60000);
+      if (resumed.thread?.id!==threadId || resumed.model!==chosen || resumed.modelProvider!=="workbuddy" ||
+          resumed.approvalPolicy!=="never" || resumed.sandbox?.type!=="dangerFullAccess") throw new Error("effective_model_or_permissions_mismatch");
+    }
+
     if (needsExplicitGoal || objective !== undefined) {
       const goalResult = await bridge.call(
         "thread/goal/set",
@@ -633,10 +653,15 @@ async function cmdFollowup(opts) {
 
     let turnId = null;
     try {
-      const turnResult = await bridge.call(
+      const observed = await readThread(bridge,threadId);
+      const previousIds = new Set((thread?.turns||[]).map(t=>t.id));
+      const newTurns = (observed.thread?.turns||[]).filter(t=>!previousIds.has(t.id));
+      if (observed.thread?.id!==threadId || newTurns.length>1) throw new Error("followup_auto_start_unknown_readback_required");
+      const turnResult = newTurns.length ? {turn:newTurns[0]} : await bridge.call(
         "turn/start",
         {
           threadId,
+          ...(opts.model ? {model:String(opts.model)} : {}),
           input: [{ type: "text", text: prompt }],
           approvalPolicy: "never",
           sandboxPolicy: { type: "dangerFullAccess" },
@@ -652,6 +677,8 @@ async function cmdFollowup(opts) {
         objective: goal ? goal.objective : objective,
         goalStatus: goal ? goal.status : undefined,
         kind: "followup",
+        cwd: thread.cwd,
+        model: opts.model || thread.model,
       });
     } catch (err) {
       saveState({
@@ -661,6 +688,8 @@ async function cmdFollowup(opts) {
         goalStatus: goal ? goal.status : undefined,
         phase: "turn-start-failed",
         kind: "followup",
+        cwd: thread.cwd,
+        model: opts.model || thread.model,
       });
       console.error(
         `[dispatch] turn/start 未确认成功: ${err.message}\n` +

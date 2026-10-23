@@ -18,6 +18,7 @@ class GenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1,max_length=128)
     retry: bool = False
+    model: str | None = None
     source_job_id: str | None = Field(default=None, min_length=1, max_length=128)
     scope: Literal['full','abstract_only'] = 'full'
 
@@ -39,7 +40,7 @@ def read_context(paper_id:UUID,session:Session=Depends(get_db_session),settings:
 
 @router.post('/{paper_id}/reading-assistance/jobs')
 async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
-    try:return await service.create(session,paper_id,settings,body.request_id,body.retry,body.scope,source_job_id=body.source_job_id,actor=auth.username)
+    try:return await service.create(session,paper_id,settings,body.request_id,body.retry,body.scope,source_job_id=body.source_job_id,actor=auth.username,model=body.model)
     except ValueError as exc:
         session.rollback();raise HTTPException(409,str(exc)) from exc
 
@@ -48,5 +49,22 @@ async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(ge
 def save_reading(paper_id:UUID,body:ReadingAssistanceSave | AbstractTranslationSave,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
     try:
         result=service.save(session,paper_id,body,settings,auth.username);session.commit();return result
+    except ValueError as exc:
+        session.rollback();raise HTTPException(409,str(exc)) from exc
+
+
+class ResumeRequest(BaseModel):
+    prepared_content: ReadingAssistanceSave | AbstractTranslationSave | None = None
+    model_config = ConfigDict(extra='forbid')
+    request_id: str = Field(min_length=1,max_length=128)
+    model: str | None = None
+
+
+@router.post('/{paper_id}/reading-assistance/jobs/{job_id}/resume')
+async def resume_reading(paper_id:UUID,job_id:str,body:ResumeRequest,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
+    from app.services.paper_native_recovery import resume_job
+    try:
+        job=await resume_job(session,paper_id,job_id,settings,request_id=body.request_id,actor=auth.username,model=body.model,prepared_content=body.prepared_content,expected_type=service.TYPE)
+        return service.serialize(job)
     except ValueError as exc:
         session.rollback();raise HTTPException(409,str(exc)) from exc

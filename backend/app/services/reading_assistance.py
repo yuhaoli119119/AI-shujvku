@@ -103,6 +103,8 @@ def serialize(job):
                    '正在准备中文阅读内容' if job.status in RUNNING else '阅读内容待补充',
         'saved': bool(progress.get('reading_saved')), 'error': job.error,
         'thread_id':progress.get('thread_id'), 'turn_id':progress.get('turn_id'),
+        'chosen_model':(job.payload or {}).get('chosen_model'),'effective_model':progress.get('effective_model'),
+        'fallback_attempts':len(progress.get('native_attempts') or []),
         'source_job_id':(job.payload or {}).get('continuation',{}).get('source_job_id'),
         'can_retry': job.status == 'failed' and bool(progress.get('native_terminal_verified')),
         'created_at': job.created_at.isoformat(), 'updated_at': job.updated_at.isoformat()}
@@ -125,7 +127,7 @@ def abstract_prompt(paper_id, jid):
 3) write /api/rebuild/papers/{paper_id}/reading-assistance JSON_FILE；未知结果原体原ID有界重放。保存后get同路径核对译文及abstract_translation来源。不调用其他写接口，不改原摘要字段。确认保存读回后结束原生目标并结束本轮，不等待后台job completed（它需要本轮先结束），不另开任务。'''
 
 
-async def create(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None):
+async def create(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None, model=None):
     from app.services.rebuild_queue import lock_scheduler, paper_busy
     from app.services.ai_extract_service import _background_dispatch
     lock_scheduler(session)
@@ -137,7 +139,8 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
     if previous:
         if (previous.payload.get('reading_scope','full')!=scope or
                 previous.payload.get('actor') is not None and previous.payload.get('actor') != actor or
-                previous.payload.get('requested_source_job_id') != source_job_id):raise ValueError('reading_request_scope_reused')
+                previous.payload.get('requested_source_job_id') != source_job_id or
+                previous.payload.get('requested_model') != model):raise ValueError('reading_request_scope_reused')
         return serialize(previous)
     old = latest(session, paper_id)
     if old and old.status in RUNNING: return serialize(old)
@@ -154,10 +157,14 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
             raise ValueError(context['abstract_for_translation']['missing_reason'])
     jid = 'aiext-guide-' + uuid4().hex[:20]; token = str(uuid4())
     instruction = 'attempt_token=' + token + '\n' + prompt(paper_id, jid, scope)
-    model = 'cn:deepseek-v4.1-flash'
+    from app.services.paper_native_models import require_model
+    requested_model=model
+    model=require_model(model or (continuation or {}).get('source_model') or 'cn:deepseek-v4.1-flash')
+    if continuation and model!=continuation['source_model']:
+        raise ValueError('use_same_job_recovery_for_model_switch')
     job = WorkflowJob(job_id=jid, type=TYPE, status='dispatching', library_name=paper.library_name,
         payload={'paper_id':str(paper_id), 'request_id':request_id, 'attempt_token':token,
-                 'actor':actor, 'requested_source_job_id':source_job_id,
+                 'actor':actor, 'requested_source_job_id':source_job_id, 'requested_model':requested_model,
                  **({'continuation':continuation} if continuation else {}),
                  'chosen_model':model, 'chosen_mode':'codex_web_target', 'parse_contract':'ordinary_parse_v1',
                  'reading_revision':context['reading_revision'], 'input_revision':context['input_revision'], 'reading_scope':scope,
@@ -275,11 +282,17 @@ async def reconcile(session, job, settings):
     if not matches_owned_attempt(status,tid,progress.get('turn_id'),allow_goal_continuations=True):return job
     terminal=(status.goal_status in ('complete','completed','blocked','paused') or
               status.goal_observed and status.goal_status is None and status.thread_status in ('idle','notLoaded'))
+    from app.services.paper_native_models import stage_fallback
+    if (status.turn_id!=progress.get('turn_id') and status.goal_objective==(job.payload or {}).get('dispatch_objective')):
+        progress.update(start_turn_id=progress.get('start_turn_id') or progress.get('turn_id'),turn_id=status.turn_id)
+        job.progress=progress
+    if stage_fallback(job,status):
+        session.flush();return job
     if status.turn_status in ('completed','failed','interrupted') and terminal:
         job.status='completed' if progress.get('reading_saved') else 'failed'
         native_error = getattr(status, 'native_error', None)
         progress['native_error'] = native_error
-        job.error = None if progress.get('reading_saved') else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试')
+        job.error = None if progress.get('reading_saved') else job.error if job.error and 'fallback_exhausted' in job.error else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试')
         progress.update(native_terminal_verified=True,phase=job.status)
     else:job.status='running';progress['phase']='running'
     job.progress=progress;session.flush();return job
@@ -289,7 +302,7 @@ async def monitor_once(settings):
     from app.db.session import session_scope
     from app.services.ai_extract_service import _background_dispatch
     with session_scope(settings.database_url) as s:
-        ids=list(s.scalars(select(WorkflowJob.job_id).where(WorkflowJob.type==TYPE,WorkflowJob.status.in_(RUNNING)).limit(3)))
+        ids=list(s.scalars(select(WorkflowJob.job_id).where(WorkflowJob.type==TYPE,WorkflowJob.status.in_(RUNNING)).order_by(WorkflowJob.updated_at).limit(5)))
     for jid in ids:
         with session_scope(settings.database_url) as s:
             job=s.get(WorkflowJob,jid);p=job.payload
