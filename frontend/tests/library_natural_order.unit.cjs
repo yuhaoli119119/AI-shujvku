@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const vm=require('node:vm');
+const source=fs.readFileSync(__dirname+'/../pages/literature_library/page.js','utf8');
+const scope={document:{addEventListener(){}},console};vm.createContext(scope);vm.runInContext(source,scope);
+const codes=['B1','A10','A2','A002','A010','A999999999999999999999999999999','AA1','bad!','',null];
+const rows=codes.map((paper_code,i)=>({paper_code,paper_id:String(i)}));
+rows.sort(scope.comparePaperCodes);
+assert.deepEqual(rows.slice(0,7).map(x=>x.paper_code),['A002','A2','A010','A10','A999999999999999999999999999999','AA1','B1']);
+assert.equal(new Set(rows.map(x=>x.paper_id)).size,codes.length);
+console.log('Natural prefix, numeric magnitude, leading zeros, malformed tail: passed');

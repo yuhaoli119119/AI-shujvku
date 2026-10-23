@@ -349,6 +349,8 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
             elif event["method"] == "turn/start" and isinstance(result.get("turn"),dict):
                 if result["turn"].get("id"):
                     progress["turn_id"] = result["turn"]["id"]
+            if event["phase"] == "auto_start_adopted":
+                progress["turn_id"] = event["turn_id"]
             if event["method"] == "thread/start" and event["phase"] == "effective_verified":
                 for key in ("start_effective_model","start_effective_provider","start_collaboration_verification"):
                     progress[key] = event[key]
@@ -358,7 +360,8 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
 
     try:
         result = await dispatch_agent(prompt=prompt,objective=objective,settings=settings,
-                                      model=primary_model,on_event=persist_event)
+                                      model=primary_model,on_event=persist_event,
+                                      **({"continuation": intent["continuation"]} if intent.get("continuation") else {}))
         with session_scope(database_url) as session:
             job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
             if job is not None and job.status in RUNNING_STATUSES and (job.payload or {}).get("attempt_token") == attempt_token:

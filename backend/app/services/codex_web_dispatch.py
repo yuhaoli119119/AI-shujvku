@@ -169,6 +169,7 @@ def _verify_goal(result: dict[str, Any], thread_id: str, *, active: bool,
 async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | None = None,
                          model: str | None = None,
                          token_budget: int | None = None,
+                         continuation: dict | None = None,
                          on_event: Callable[[dict[str, Any]], None] | None = None) -> DispatchResult:
     """One attempt only: Luna ordinary or DeepSeek active-goal mode.
 
@@ -190,6 +191,11 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
     timeout = runtime.codex_web_dispatch_timeout_seconds
     try:
         async with websockets.connect(runtime.codex_web_ipc_uri, open_timeout=timeout, max_size=32 * 1024 * 1024) as ws:
+            if continuation is not None:
+                if chosen_model != "cn:deepseek-v4.1-flash":
+                    raise CodexWebDispatchError("same_thread_requires_deepseek")
+                from app.services.reading_thread_continuation import dispatch
+                return await dispatch(ws, continuation, prompt, timeout, on_event)
             started = await _call(ws,"thread/start",{"cwd":runtime.codex_web_cwd,
                 "approvalPolicy":"never","sandbox":"danger-full-access","model":chosen_model,
                 "modelProvider":chosen_provider,"allowProviderModelFallback":False,
@@ -279,6 +285,7 @@ class ThreadStatus:
     model_provider: str | None = None
     goal_observed: bool = False
     native_error: str | None = None
+    goal_objective: str | None = None
 
 
 def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
@@ -318,6 +325,7 @@ async def read_thread_status(
             if thread.get("id") != thread_id:
                 raise CodexWebDispatchError("thread/read identity mismatch")
             goal_status = None
+            goal = None
             goal_observed = False
             tokens_used = None
             if include_goal:
@@ -369,6 +377,7 @@ async def read_thread_status(
                 cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
                 thread_status=(thread.get("status") or {}).get("type") if isinstance(thread.get("status"), dict) else thread.get("status"),
                 model_provider=thread.get("modelProvider"), goal_observed=goal_observed,
+                goal_objective=goal.get("objective") if isinstance(goal, dict) else None,
                 native_error=((last_turn.get("error") or {}).get("message") or "")[:1500] if isinstance(last_turn.get("error"), dict) else None,
             )
     except (CodexWebDispatchError, OSError, WebSocketException) as exc:

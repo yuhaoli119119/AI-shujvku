@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
@@ -15,8 +15,10 @@ router=APIRouter(prefix='/api/rebuild/papers',tags=['reading-assistance'])
 
 
 class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1,max_length=128)
     retry: bool = False
+    source_job_id: str | None = Field(default=None, min_length=1, max_length=128)
     scope: Literal['full','abstract_only'] = 'full'
 
 
@@ -37,7 +39,7 @@ def read_context(paper_id:UUID,session:Session=Depends(get_db_session),settings:
 
 @router.post('/{paper_id}/reading-assistance/jobs')
 async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
-    try:return await service.create(session,paper_id,settings,body.request_id,body.retry,body.scope)
+    try:return await service.create(session,paper_id,settings,body.request_id,body.retry,body.scope,source_job_id=body.source_job_id,actor=auth.username)
     except ValueError as exc:
         session.rollback();raise HTTPException(409,str(exc)) from exc
 
