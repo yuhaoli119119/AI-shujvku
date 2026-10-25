@@ -84,9 +84,19 @@ def _validate_upload_request(file: UploadFile) -> None:
 
 
 async def _stage_uploaded_pdf(file: UploadFile, settings: Settings) -> Path:
+    import asyncio
+    from app.security.files import validate_pdf_file
     store = ArtifactStore(settings)
-    suffix_name = Path(file.filename or "upload.pdf").name
-    return await store.save_upload(file, f"{uuid4()}_{suffix_name}")
+    destination = settings.storage_paths["pdf"] / f"{uuid4()}_{Path(file.filename or 'upload.pdf').name}"
+    try:
+        with destination.open('xb') as handle:
+            while chunk := await file.read(1024 * 1024):
+                handle.write(chunk)
+        await asyncio.to_thread(validate_pdf_file, destination)
+        return destination
+    except BaseException:
+        destination.unlink(missing_ok=True)  # only this request's new staging file
+        raise
 
 
 async def _uploaded_digest_and_size(file: UploadFile) -> tuple[str, int]:
@@ -130,8 +140,7 @@ def _upload_only_job(
         progress={**progress, "automatic_parsing_started": False},
     )
     session.add(job)
-    session.commit()
-    session.refresh(job)
+    session.flush()
     return job
 
 
@@ -196,6 +205,56 @@ def _raise_identity_guard(exc: PaperIdentityMismatchError) -> None:
             "match_reason": exc.match_report.get("reason", ""),
         },
     ) from exc
+
+
+def _upload_target_pin(paper):
+    return (paper.library_name, paper.pdf_path, paper.paper_type)
+
+
+async def _upload_snapshot(session, paper_id):
+    from app.services.paper_db_phase import run_phase
+    def snapshot(worker):
+        paper = worker.get(Paper, paper_id)
+        if paper is None:
+            raise HTTPException(404, 'Paper not found')
+        return _upload_target_pin(paper)
+    return await run_phase(session, snapshot)
+
+
+async def _persist_staged_upload(session, file, settings, persist):
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    staged_pdf = None
+    retained = False
+    commit_candidate_returned = False
+    def committed(result):
+        nonlocal retained
+        retained = not result.get('duplicate', False)
+    try:
+        # Preflight may reject conflicts or replay without saving another file.
+        existing = await run_phase(session, lambda worker: persist(worker, None))
+        if existing is not None:
+            return existing
+        # No Session/connection/lock is open while awaiting file I/O.
+        staged_pdf = await _stage_uploaded_pdf(file, settings)
+        # Reacquire locks and revalidate identity/duplicates after staging.
+        def finalize(worker):
+            nonlocal commit_candidate_returned
+            result = persist(worker, staged_pdf)
+            commit_candidate_returned = not result.get('duplicate', False)
+            return result
+        return await run_phase(session, finalize, after_commit=committed)
+    except LockConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    finally:
+        if staged_pdf is not None and not retained and not commit_candidate_returned:
+            # The phase is shielded through after_commit even on cancellation.
+            # Never unlink a committed file when the HTTP response is lost.
+            staged_pdf.unlink(missing_ok=True)
+        elif staged_pdf is not None and not retained:
+            # SQL COMMIT may have succeeded before its ACK was lost. Preserve
+            # the immutable source for request readback; never delete a possibly
+            # committed file or replay the upload automatically.
+            logger.warning("Upload commit outcome unknown; retained staged source %s", staged_pdf.name)
 
 
 @router.post("/ingest/path/jobs")
@@ -343,28 +402,16 @@ async def ingest_upload(
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
 
-@router.post("/ingest/upload/jobs")
-async def queue_ingest_upload(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    library_name: str | None = Form(default=None, description="Target literature library"),
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, Any]:
-    _validate_upload_request(file)
-
-    target_library = normalize_library_name(library_name)
-    sha256, file_size = await _uploaded_digest_and_size(file)
+def _main_upload_phase(session, *, target_library, sha256, file_size, staged_pdf, filename, settings):
     _lock_upload(session, "main:" + target_library, sha256)
     existing = session.scalar(select(RebuildPaperFile).join(Paper, Paper.id == RebuildPaperFile.paper_id).where(
-        RebuildPaperFile.role == "main", RebuildPaperFile.sha256 == sha256,
-        Paper.library_name == target_library,
-    ))
+        RebuildPaperFile.role == "main", RebuildPaperFile.sha256 == sha256, Paper.library_name == target_library))
     if existing is not None:
         return _existing_upload_response(session, existing, session.get(Paper, existing.paper_id))
-    staged_pdf = await _stage_uploaded_pdf(file, settings)
+    if staged_pdf is None:
+        return None
     pdf_reference = _pdf_reference(staged_pdf, settings)
-    title = Path(file.filename or "未命名 PDF").stem or "未命名 PDF"
+    title = Path(filename or "未命名 PDF").stem or "未命名 PDF"
     paper = Paper(
         library_name=target_library,
         title=title,
@@ -380,7 +427,7 @@ async def queue_ingest_upload(
         paper_id=paper.id,
         role="main",
         saved_path=staged_pdf,
-        original_filename=file.filename or "upload.pdf",
+        original_filename=filename or "upload.pdf",
         sha256=sha256,
         file_size=file_size,
         settings=settings,
@@ -388,7 +435,7 @@ async def queue_ingest_upload(
     job_payload = {
         "pdf_path": pdf_reference,
         "library_name": target_library,
-        "original_filename": file.filename,
+        "original_filename": filename,
         "trusted_staged_upload": True,
         "paper_id": str(paper.id),
         "upload_only": True,
@@ -411,6 +458,19 @@ async def queue_ingest_upload(
     data["paper_id"] = str(paper.id)
     data["automatic_parsing_started"] = False
     return data
+
+
+@router.post("/ingest/upload/jobs")
+async def queue_ingest_upload(background_tasks: BackgroundTasks, file: UploadFile = File(...),
+    library_name: str | None = Form(default=None, description="Target literature library"), session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    _validate_upload_request(file)
+    target_library = normalize_library_name(library_name)
+    sha256, file_size = await _uploaded_digest_and_size(file)
+    def persist(worker, staged_pdf):
+        return _main_upload_phase(worker, target_library=target_library, sha256=sha256,
+            file_size=file_size, staged_pdf=staged_pdf, filename=file.filename, settings=settings)
+    return await _persist_staged_upload(session, file, settings, persist)
 
 
 @router.post("/{paper_id}/supplementary/upload", response_model=IngestResponse)
@@ -450,23 +510,14 @@ async def upload_supplementary_pdf(
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
 
-@router.post("/{paper_id}/supplementary/upload/jobs")
-async def queue_upload_supplementary_pdf(
-    paper_id: UUID,
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, Any]:
-    target = session.get(Paper, paper_id)
-    if not target:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    _validate_upload_request(file)
-
-    sha256, file_size = await _uploaded_digest_and_size(file)
-    _lock_upload(session, "si:" + str(target.id), sha256)
+def _si_upload_phase(session, *, paper_id, pin, sha256, file_size, staged_pdf, filename, settings):
+    _lock_upload(session, "si:" + str(paper_id), sha256)
     lock_catalog_numbering(session)
-    session.refresh(target, with_for_update=True)
+    target = session.get(Paper, paper_id, with_for_update=True)
+    if target is None:
+        raise HTTPException(404, 'Paper not found')
+    if _upload_target_pin(target) != pin:
+        raise HTTPException(409, 'upload_target_changed_refresh')
     existing = session.scalar(select(RebuildPaperFile).where(
         RebuildPaperFile.paper_id == target.id, RebuildPaperFile.role == "si", RebuildPaperFile.sha256 == sha256))
     if existing is not None:
@@ -478,7 +529,8 @@ async def queue_upload_supplementary_pdf(
         if relation is not None:
             data["supplementary_paper_id"] = str(relation.target_paper_id)
         return data
-    staged_pdf = await _stage_uploaded_pdf(file, settings)
+    if staged_pdf is None:
+        return None
     pdf_reference = _pdf_reference(staged_pdf, settings)
     ensure_paper_codes(session, [target])
     supplementary = Paper(
@@ -514,7 +566,7 @@ async def queue_upload_supplementary_pdf(
         paper_id=target.id,
         role="si",
         saved_path=staged_pdf,
-        original_filename=file.filename or "supplementary.pdf",
+        original_filename=filename or "supplementary.pdf",
         sha256=sha256,
         file_size=file_size,
         settings=settings,
@@ -522,7 +574,7 @@ async def queue_upload_supplementary_pdf(
     job_payload = {
         "pdf_path": pdf_reference,
         "library_name": target.library_name,
-        "original_filename": file.filename,
+        "original_filename": filename,
         "trusted_staged_upload": True,
         "supplementary_for_paper_id": str(target.id),
         "supplementary_paper_id": str(supplementary.id),
@@ -549,6 +601,19 @@ async def queue_upload_supplementary_pdf(
     data["supplementary_paper_id"] = str(supplementary.id)
     data["automatic_parsing_started"] = False
     return data
+
+
+@router.post("/{paper_id}/supplementary/upload/jobs")
+async def queue_upload_supplementary_pdf(paper_id: UUID, background_tasks: BackgroundTasks,
+    file: UploadFile = File(...), session: Session = Depends(get_db_session),
+    settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    _validate_upload_request(file)
+    pin = await _upload_snapshot(session, paper_id)
+    sha256, file_size = await _uploaded_digest_and_size(file)
+    def persist(worker, staged_pdf):
+        return _si_upload_phase(worker, paper_id=paper_id, pin=pin, sha256=sha256,
+            file_size=file_size, staged_pdf=staged_pdf, filename=file.filename, settings=settings)
+    return await _persist_staged_upload(session, file, settings, persist)
 
 
 @router.post("/{paper_id}/attach-pdf", response_model=IngestResponse)
@@ -603,26 +668,22 @@ async def attach_pdf_to_existing_paper(
     return IngestResponse(paper_id=paper.id, title=paper.title, status=getattr(paper, "_ingest_status", "completed"))
 
 
-@router.post("/{paper_id}/attach-pdf/jobs")
-async def queue_attach_pdf_to_existing_paper(
-    paper_id: UUID,
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    confirm_identity_mismatch: bool = Form(
-        default=False,
-        description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected.",
-    ),
-    session: Session = Depends(get_db_session),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, Any]:
-    target = session.get(Paper, paper_id)
-    if not target:
-        raise HTTPException(status_code=404, detail="Paper not found")
-    _validate_upload_request(file)
-
-    staged_pdf = await _stage_uploaded_pdf(file, settings)
+def _attach_upload_phase(session, *, paper_id, pin, sha256, file_size, staged_pdf,
+    filename, settings, confirm_identity_mismatch):
+    _lock_upload(session, "attach:" + str(paper_id), sha256)
+    lock_catalog_numbering(session)
+    target = session.get(Paper, paper_id, with_for_update=True)
+    if target is None:
+        raise HTTPException(404, 'Paper not found')
+    if _upload_target_pin(target) != pin:
+        raise HTTPException(409, 'upload_target_changed_refresh')
+    existing = session.scalar(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id,
+        RebuildPaperFile.role == 'main', RebuildPaperFile.sha256 == sha256))
+    if existing is not None:
+        return _existing_upload_response(session, existing, target)
+    if staged_pdf is None:
+        return None
     pdf_reference = _pdf_reference(staged_pdf, settings)
-    sha256, file_size = _file_digest_and_size(staged_pdf)
     ensure_paper_codes(session, [target])
     target.pdf_path = pdf_reference
     session.add(target)
@@ -631,7 +692,7 @@ async def queue_attach_pdf_to_existing_paper(
         paper_id=target.id,
         role="main",
         saved_path=staged_pdf,
-        original_filename=file.filename or "main.pdf",
+        original_filename=filename or "main.pdf",
         sha256=sha256,
         file_size=file_size,
         settings=settings,
@@ -639,7 +700,7 @@ async def queue_attach_pdf_to_existing_paper(
     job_payload = {
         "pdf_path": pdf_reference,
         "library_name": target.library_name,
-        "original_filename": file.filename,
+        "original_filename": filename,
         "trusted_staged_upload": True,
         "attach_to_paper_id": str(target.id),
         "confirm_identity_mismatch": bool(confirm_identity_mismatch),
@@ -647,10 +708,10 @@ async def queue_attach_pdf_to_existing_paper(
     }
     job = _upload_only_job(
         session=session,
-        job_type=JOB_TYPE_LOCAL_PDF_PATH_INGEST,
+        job_type="local_pdf_path_ingest",
         library_name=target.library_name,
         payload=job_payload,
-        runtime_context=build_job_runtime_context(settings),
+        runtime_context={},
         progress={
             "phase": "completed",
             "message": "正文 PDF 已保存并关联，未启动自动解析。",
@@ -659,7 +720,22 @@ async def queue_attach_pdf_to_existing_paper(
         },
     )
 
-    data = serialize_job(job)
+    data = _serialize_upload_job(job)
     data["paper_id"] = str(target.id)
     data["automatic_parsing_started"] = False
     return data
+
+
+@router.post("/{paper_id}/attach-pdf/jobs")
+async def queue_attach_pdf_to_existing_paper(paper_id: UUID, background_tasks: BackgroundTasks,
+    file: UploadFile = File(...), confirm_identity_mismatch: bool = Form(default=False,
+        description="Allow low-confidence title/year binding. Explicit DOI conflicts are still rejected."),
+    session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    _validate_upload_request(file)
+    pin = await _upload_snapshot(session, paper_id)
+    sha256, file_size = await _uploaded_digest_and_size(file)
+    def persist(worker, staged_pdf):
+        return _attach_upload_phase(worker, paper_id=paper_id, pin=pin, sha256=sha256,
+            file_size=file_size, staged_pdf=staged_pdf, filename=file.filename, settings=settings,
+            confirm_identity_mismatch=confirm_identity_mismatch)
+    return await _persist_staged_upload(session, file, settings, persist)

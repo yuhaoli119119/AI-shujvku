@@ -1595,15 +1595,17 @@ async def preflight_rebuild_rows(
         raise _http_error(exc) from exc
     # get_bind may be a Connection in dependency overrides. Always acquire a
     # separate Engine connection, never join an enclosing caller transaction.
-    bind = session.get_bind()
-    engine = getattr(bind, "engine", bind)
-    with Session(bind=engine, autoflush=False) as simulation:
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    def simulate(worker):
         try:
-            simulation.begin()
-            result = _import_rows(simulation, payload)
-            return simulated_result(result)
+            return simulated_result(_import_rows(worker, payload))
         finally:
-            simulation.rollback()
+            # Fixture-like simulation: no audit/scientific writes may commit.
+            worker.rollback()
+    try:
+        return await run_phase(session, simulate)
+    except LockConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 def _import_rows(session, payload):

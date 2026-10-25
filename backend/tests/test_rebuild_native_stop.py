@@ -35,9 +35,9 @@ def test_protective_stop_pauses_goal_interrupts_owned_turn_and_is_idempotent(aud
     async def command(thread_id, turn_id, **kwargs):
         nonlocal halted
         calls.append((thread_id, turn_id))
-        kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared", "rpc_id": "r1"})
-        kwargs["on_event"]({"method": "thread/goal/set", "phase": "response_received"})
-        kwargs["on_event"]({"method": "turn/interrupt", "phase": "request_prepared", "rpc_id": "r2"})
+        await kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared", "rpc_id": "r1"})
+        await kwargs["on_event"]({"method": "thread/goal/set", "phase": "response_received"})
+        await kwargs["on_event"]({"method": "turn/interrupt", "phase": "request_prepared", "rpc_id": "r2"})
         halted = True
     for _ in range(2):
         result = asyncio.run(protective_stop(settings.database_url, "owned-attempt", settings=settings, native_read=read, native_command=command))
@@ -53,7 +53,7 @@ def test_lost_pause_ack_requires_readback_and_does_not_replay_mutation(audit_env
     async def read(*args, **kwargs): return status()
     async def lost(*args, **kwargs):
         calls.append(1)
-        kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared", "rpc_id": "unknown-rpc"})
+        await kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared", "rpc_id": "unknown-rpc"})
         raise TimeoutError("lost pause ACK")
     for _ in range(2):
         result = asyncio.run(protective_stop(settings.database_url, "owned-attempt", settings=settings, native_read=read, native_command=lost))
@@ -107,7 +107,7 @@ def test_concurrent_protective_stop_has_one_mutation_claim(audit_env, monkeypatc
         return status()
     async def command(*args, **kwargs):
         calls.append(1)
-        kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared"})
+        await kwargs["on_event"]({"method": "thread/goal/set", "phase": "request_prepared"})
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: asyncio.run(protective_stop(settings.database_url, "owned-attempt", settings=settings, native_read=read, native_command=command)), range(2)))
     assert len(calls) == 1 and not any(item["verified_stop"] for item in results)

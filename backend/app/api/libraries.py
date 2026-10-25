@@ -189,7 +189,7 @@ async def create_library(payload: LibraryCreateRequest) -> LibraryInfoResponse:
 
 
 @router.post("/{name}/activate", response_model=LibraryInfoResponse)
-async def activate_library(name: str) -> LibraryInfoResponse:
+def activate_library(name: str) -> LibraryInfoResponse:
     mgr = _get_manager()
     try:
         lib = mgr.activate_library(name)

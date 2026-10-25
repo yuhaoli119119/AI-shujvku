@@ -12,7 +12,9 @@ from uuid import uuid4
 import websockets
 
 from app.db.models import WorkflowJob
-from app.db.session import session_scope
+from app.db.session import get_engine
+from sqlalchemy.orm import Session
+import copy
 from app.services.codex_web_dispatch import _call, read_thread_status, matches_owned_attempt
 from app.services.rebuild_workflow_service import RebuildWorkflowError
 
@@ -41,8 +43,15 @@ async def _native_command(thread_id, turn_id, *, goal_mode, settings, on_event, 
 async def protective_stop(database_url, job_id, *, settings, native_read=None, native_command=None):
     if not settings.rebuild_native_stop_enabled:
         return {"verified_stop": False, "status": "disabled_detection_only"}
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    async def phase(operation):
+        with Session(bind=get_engine(database_url)) as descriptor:
+            try:
+                return await run_phase(descriptor, operation)
+            except LockConflictError as exc:
+                raise RebuildWorkflowError(str(exc)) from exc
     read = native_read or read_thread_status
-    with session_scope(database_url) as session:
+    def claim(session):
         job = session.get(WorkflowJob, job_id, with_for_update=True)
         if job is None or job.type not in {"ai_extract_rebuild", "rebuild_pipeline_attempt"}:
             raise RebuildWorkflowError("native_stop_attempt_not_found")
@@ -52,7 +61,7 @@ async def protective_stop(database_url, job_id, *, settings, native_read=None, n
             raise RebuildWorkflowError("native_stop_missing_owned_handle")
         existing = progress.get("native_stop") or {}
         if existing.get("verified_stop"):
-            return existing
+            return {"already_verified": copy.deepcopy(existing)}
         # Reserve once. A concurrent/restarted caller may only reconcile.
         may_send = not existing or existing.get("phase") == "identity_unverified_no_mutation"
         stop = existing or {"request_id": str(uuid4()), "thread_id": thread_id, "start_turn_id": turn_id,
@@ -62,22 +71,37 @@ async def protective_stop(database_url, job_id, *, settings, native_read=None, n
             stop = {**stop, "phase": "intent", "execution_claim_id": str(uuid4())}
         job.progress = {**progress, "native_stop": stop}
         goal_mode = progress.get("dispatch_mode") != "codex_web_ordinary" and (job.payload or {}).get("model") != "gpt-6-luna"
+        return {"thread_id": thread_id, "turn_id": turn_id, "goal_mode": goal_mode,
+                "may_send": may_send, "attempt_token": copy.deepcopy((job.payload or {}).get("attempt_token")),
+                "stop_id": stop["request_id"], "claim_id": stop.get("execution_claim_id")}
+    snapshot = await phase(claim)
+    if "already_verified" in snapshot:
+        return snapshot["already_verified"]
+    thread_id, turn_id = snapshot["thread_id"], snapshot["turn_id"]
+    goal_mode, may_send = snapshot["goal_mode"], snapshot["may_send"]
+    def locked_job(session):
+        job = session.get(WorkflowJob, job_id, with_for_update=True)
+        stop = (job.progress or {}).get("native_stop", {}) if job else {}
+        if (job is None or job.progress.get("thread_id") != thread_id or job.progress.get("turn_id") != turn_id
+                or (job.payload or {}).get("attempt_token") != snapshot["attempt_token"]
+                or stop.get("request_id") != snapshot["stop_id"]
+                or stop.get("execution_claim_id") != snapshot["claim_id"]):
+            raise RebuildWorkflowError("native_stop_attempt_changed")
+        return job
     # First reconcile an uncertain prior stop without any mutation replay.
     observed = await read(thread_id, settings=settings, include_goal=goal_mode)
     owned = matches_owned_attempt(observed, thread_id, turn_id, allow_goal_continuations=goal_mode)
     ended = owned and observed.turn_status in {"completed", "failed", "interrupted"}
     halted = ended and (not goal_mode or observed.goal_status in {"paused", "complete", "completed"})
-    def journal(event):
-        with session_scope(database_url) as session:
-            job = session.get(WorkflowJob, job_id, with_for_update=True)
-            if job.progress.get("thread_id") != thread_id or job.progress.get("turn_id") != turn_id:
-                raise RebuildWorkflowError("native_stop_attempt_changed")
-            old = dict(job.progress["native_stop"])
-            # Store only protocol identity/phase, not arbitrary prompt or secrets.
-            old["events"] = [*old.get("events", []), {"method": event.get("method"), "phase": event.get("phase"),
-                            "rpc_id": event.get("rpc_id"), "at": datetime.utcnow().isoformat()}]
-            old["phase"] = "request_sent_or_unknown" if event.get("phase") == "request_prepared" else "ack_received"
-            job.progress = {**job.progress, "native_stop": old}
+    def record_event(session, event):
+        job = locked_job(session)
+        old = dict(job.progress["native_stop"])
+        old["events"] = [*old.get("events", []), {"method": event.get("method"), "phase": event.get("phase"),
+                        "rpc_id": event.get("rpc_id"), "at": datetime.utcnow().isoformat()}]
+        old["phase"] = "request_sent_or_unknown" if event.get("phase") == "request_prepared" else "ack_received"
+        job.progress = {**job.progress, "native_stop": old}
+    async def journal(event):
+        await phase(lambda worker: record_event(worker, event))
     error = None
     if not halted and may_send and owned:
         try:
@@ -89,8 +113,8 @@ async def protective_stop(database_url, job_id, *, settings, native_read=None, n
         owned = matches_owned_attempt(observed, thread_id, turn_id, allow_goal_continuations=goal_mode)
         halted = bool(owned and observed.turn_status in {"completed", "failed", "interrupted"} and
                       (not goal_mode or observed.goal_status in {"paused", "complete", "completed"}))
-    with session_scope(database_url) as session:
-        job = session.get(WorkflowJob, job_id, with_for_update=True)
+    def finish(session):
+        job = locked_job(session)
         if job.progress.get("thread_id") != thread_id or job.progress.get("turn_id") != turn_id:
             raise RebuildWorkflowError("native_stop_attempt_changed")
         if job.progress["native_stop"].get("verified_stop"):
@@ -102,3 +126,4 @@ async def protective_stop(database_url, job_id, *, settings, native_read=None, n
                 "observed_goal_status": getattr(observed, "goal_status", None)}
         job.progress = {**job.progress, "native_stop": stop}
         return stop
+    return await phase(finish)
