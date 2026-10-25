@@ -277,6 +277,15 @@ async def _guard_request_work(session, request, auth, body=None):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _guard_sync_write(session: Session, paper_id: UUID, actor: str, task_id: str | None = None):
+    """Atomic occupancy guard for routes already running in FastAPI's threadpool."""
+    from app.services.external_paper_work import guard_workbench_write
+    try:
+        guard_workbench_write(session, paper_id, actor, task_id)
+    except RebuildWorkflowError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.put("/papers/{paper_id}/processing-status")
 async def report_paper_processing_status(
     paper_id: UUID,
@@ -545,6 +554,7 @@ def freeze_rebuild_extraction(
 ):
     from app.services.rebuild_acceptance import freeze
     try:
+        _guard_sync_write(session, paper_id, auth.username, payload.task_id)
         result = freeze(session, paper_id, payload, settings, actor=auth.username)
         session.commit()
         return result
@@ -564,6 +574,7 @@ def report_independent_review_progress(
 ):
     from app.services.rebuild_review_progress import record_progress
     try:
+        _guard_sync_write(session, paper_id, auth.username, payload.reviewer_task_id)
         result = record_progress(session, paper_id, freeze_id, payload, settings, actor=auth.username,
                                  authorization=request.headers.get("X-Reviewer-Authorization"))
         session.commit()
@@ -584,6 +595,7 @@ def review_rebuild_extraction(
 ):
     from app.services.rebuild_acceptance import review
     try:
+        _guard_sync_write(session, paper_id, auth.username, payload.reviewer_task_id)
         result = review(session, paper_id, freeze_id, payload, settings, actor=auth.username,
                         authorization=request.headers.get("X-Reviewer-Authorization"))
         session.commit()
@@ -606,6 +618,7 @@ def import_rebuild_sections(
 ) -> dict[str, Any]:
     from app.services.rebuild_sections import import_sections
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         result = import_sections(session, paper_id, payload, settings, actor=auth.username)
         session.commit()
         return result
@@ -628,6 +641,7 @@ def declare_rebuild_section_order(paper_id: UUID, payload: RebuildSectionOrderRe
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     from app.services.rebuild_sections import declare_section_order
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         result = declare_section_order(session, paper_id, payload, actor=auth.username)
         session.commit()
         return result
@@ -652,6 +666,7 @@ def declare_rebuild_section_corrections(
 ) -> dict[str, Any]:
     from app.services.rebuild_sections import declare_section_corrections
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         result = declare_section_corrections(session, paper_id, payload, settings, actor=auth.username)
         session.commit()
         return result
@@ -859,6 +874,7 @@ def write_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
     from app.services.extraction_coverage import save_plan
     from app.services.rebuild_acceptance import current_snapshot, _locked_paper
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         _locked_paper(session, paper_id)
         receipt, report = save_plan(session, paper_id, payload, current_snapshot(session, paper_id, force_physical=True)[0], actor=auth.username)
         if receipt is None:
@@ -962,6 +978,7 @@ async def write_extraction_check(paper_id: UUID, payload: StageCheckRequest,
     from app.services.staged_extraction import save_check
     from app.services.rebuild_acceptance import _locked_paper
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         _locked_paper(session,paper_id)
         receipt,assessment=save_check(session,paper_id,payload,_stage_context(session,paper_id,auth.username,force=True),auth.username)
         if receipt is None:raise HTTPException(422,detail={"code":"stage_check_references_invalid","errors":assessment['reference_errors']})
@@ -1062,6 +1079,7 @@ def select_rebuild_file(paper_id: UUID, payload: RebuildFileLifecycleRequest,
     from app.services.rebuild_file_lifecycle import _hash, locked_replay, validate_change, apply_change
     body = payload.model_dump(mode='json')
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         fingerprint = _hash({'body': payload.model_dump(mode='json', exclude_unset=True), 'operation': 'select_existing'})
         replay = locked_replay(session, paper_id, body['request_id'], fingerprint, auth.username)
         if replay is not None:
@@ -1663,6 +1681,7 @@ async def correct_rebuild_row_identity(
     if not csrf_token_valid(request, auth):
         raise HTTPException(status_code=403, detail="csrf_token_invalid")
     try:
+        _guard_sync_write(session, payload.paper_id, auth.username)
         result = correct_row_identity(session, row_id=row_id, payload=payload, actor=auth.username)
         session.commit()
         return result
@@ -1718,6 +1737,7 @@ def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrectionRequ
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
+        _guard_sync_write(session, payload.paper_id, auth.username)
         result = correct_source(session, source_id, payload, settings, actor=auth.username)
         session.commit()
         return result
@@ -1737,6 +1757,7 @@ def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAssetBindin
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
+        _guard_sync_write(session, payload.paper_id, auth.username)
         result = bind_source_asset(session, source_id, payload, actor=auth.username)
         session.commit()
         return result
@@ -1756,6 +1777,7 @@ def change_rebuild_source_lifecycle(source_id: UUID, payload: RebuildSourceLifec
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
+        _guard_sync_write(session, payload.paper_id, auth.username)
         result = deactivate_source(session, source_id, payload, actor=auth.username)
         session.commit()
         return result
@@ -1797,6 +1819,11 @@ def correct_rebuild_value(
     auth: SessionState = Depends(_require_value_write_session),
 ) -> dict[str, Any]:
     try:
+        paper_id = session.execute(select(RebuildDataValue.paper_id).where(
+            RebuildDataValue.id == value_id)).scalar_one_or_none()
+        if paper_id is None:
+            raise RebuildWorkflowError("value_not_found")
+        _guard_sync_write(session, paper_id, auth.username)
         value = update_data_value(session, value_id=value_id, payload=payload, actor=auth.username)
     except RebuildWorkflowError as exc:
         session.rollback()
@@ -1874,6 +1901,7 @@ def apply_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupApplyRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         result = apply_dedup(session, paper_id, payload, actor=auth.username)
         session.commit()
         return result

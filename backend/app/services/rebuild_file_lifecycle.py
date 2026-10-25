@@ -62,6 +62,8 @@ def active_files(session, paper_id):
 
 
 def locked_replay(session, paper_id, request_id, fingerprint, actor):
+    from app.services.external_paper_work import guard_workbench_write
+    guard_workbench_write(session, paper_id, actor)
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise HTTPException(404, 'paper_not_found')
