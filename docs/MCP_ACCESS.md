@@ -65,3 +65,7 @@ actor 来自服务器验证的 OAuth/key 身份，客户端不能自报账号；
 > 使用 Literature AI 查询《论文标题》。先核对 paper_id、正文/SI、已有成果、具体缺项和当前占用；先只读汇报。经我选定本篇范围后，由你阅读原文并通过新版工具保存结果，不启动其他 AI，不自动处理下一篇。缺失或看不清保留为空，保留来源与原始精度，最后读回并报告已保存和未完成范围。
 
 代码、GitHub 发布、真实域名 MCP 协议和网页版 ChatGPT/Claude 操作须分别验收；不能只凭源码或 OAuth discovery 声称已接通。
+
+### 2026-10-26 B批交付索引源码候选（未部署）
+
+现有 `get_paper_workspace` 可选 `view=delivery|delivery_checkpoints|delivery_gaps|delivery_receipts|delivery_jobs`，直接复用正式HTTP `/api/rebuild/papers/{paper_id}/delivery-package` 的同一只读投影。默认compact及旧参数保持兼容；delivery分页使用交付revision，旧视图仍用科学output_revision。三层状态、缺项、来源与原始占用保持一致，不触发模型、续接或解占用。本改动仅业务只读视图，不安装平台、不改变鉴权。真实Streamable transport和并发的实际结果见本轮独立交付回执，不以本文声称上线。

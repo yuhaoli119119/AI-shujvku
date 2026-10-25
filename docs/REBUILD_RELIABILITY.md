@@ -94,3 +94,24 @@ writer 无进展按真实语义输出、经过验证的覆盖和回执变化判�
 章节来源按现行 RebuildSectionInput 合同重新核每页非空原句/定位与完整页集合，并核 page_basis、登记原文件大小/哈希、实际阅读 PDF 哈希（含既有 DOCX 派生 PDF）。实际引文的科学支持关系仍由独立原文复核，不自动裁决。旧表分页逐条返回 source_identity；仅列为冻结依赖不代表来源已核实或可用于补齐另一张表。
 
 章节分页仅在原文与导入事件正文完全相等时去重：items.text 保存原文，source_import_event.section 不重复拷贝相同 text；如两者冲突则完整保留两份原文，不省略证据。source_event_projection 明示如何以 item.text 重建源事件快照并核 content_sha256，其余引文、定位和中文解释均保留，不截断科学正文。
+
+## 2026-10-26 C源码候选：对象版本退修与独审复核（未部署）
+
+新freeze在既有科学snapshot之外记录`object_versions`（对象kind、稳定ID、规范保存图像hash、已有来源file_ids；阅读模块abstract/guide分别记录）。旧freeze缺字段仍按原合同可读，不追造历史版本。新freeze在正式review决策前核对对象版本，阅读变化虽不改变原科学revision仍拒绝陈旧accepted；review_incomplete可如实记录。
+
+review请求可选`failed_items`：`issue_id,kind,object_id,object_version,source_file_ids,required_change`。对象必须属于该冻结、当前版本一致，已提供来源必须属于对象已存绑定与冻结文件集合。accepted不得包含failed_items。旧请求未发送新字段时保留原幂等指纹，旧回执不改写。
+
+`resolved_items`绑定`prior_freeze_id,issue_id,kind,object_id,prior_object_version,current_object_version,correction_event_id,note`，章节替换可额外给`current_object_id`。仅独立reviewer可记录：服务端核对原独审问题、原版本、正式修正before/after及其成功事务receipt、当前独立读取及新冻结版本。mutations用原before/after作写前保全；阅读复用beginner_zh_v1专用原before/after/保存receipt；来源化章节复用真实导入hash、section_boundary_corrected声明和专用correction receipt，明确新章节ID，保留旧章节字节，不拿新文本冒充覆盖旧记录。
+
+同账号review仍必须原服务端签发的独立原生授权，禁止修正者自闭合。阅读事件没有task_id时，服务端可用原保存receipt.job_id→已存WorkflowJob的paper/actor/thread与授权核实过的writer thread绑定；不从客户端补身份。旧阅读job缺actor/thread或来源章节专用事件缺原生身份时，默认同账号关闭保持fail-closed；只有下述私有总指挥对精确事件提供签名归属见证才可受控复核。独立不同认证主体仍可走专用证据链；相关真实生产闭环仍需独审。
+
+历史结构化问题从immutable independent_review审计receipt投影，新的freeze不隐藏旧open问题；对象变化标需独立复核，不自动关闭。新accepted若遗漏任何未关闭问题则拒绝。交付包summary返回`independent_issue_summary`，gaps返回精确未关闭问题、原对象版本及当前新旧状态。旧review没有结构化项时保持unknown，不把旧message自动解析成问题或伪造closed状态。已解决对象再变化重新标记需核实，不自动继承通过。
+
+恢复继续复用原稳定request_id与持久receipt；未知ACK不重复create。隔离测试允许新进程/Session读回同一回执及同actor work身份，不派模型，不释放未知占用。本候选测试、独立快照、最终提交与生产/视觉证据各自报告，不将文档作为上线证明。
+
+
+C3候选受控归属见证：服务端本地`issue_reviewer_authorization`可选成对提供`correction_event_ids`、`writer_ownership_evidence`（受控evidence_root内的普通非symlink文件）及`writer_ownership_sha256`。不是HTTP输入，也不能用工作台会话密钥签发；必须总指挥持独立私有key调用，并沿用真实native readback核对writer/reviewer不同、项目与turn。
+
+证据JSON格式`coordinator_correction_witness_v1`，字段paper_id、writer_thread_id、events。每项严格为event_id、event_sha256、prior_freeze_id、issue_id。签发前后均核对原事件同paper/actor、原始完整存储内容hash（不二次脱敏掩盖科学键变化）、原问题→冻结时间区间和真实对应成功receipt；原问题及目标不得借用。claims签入精确事件集合、内容hash和证据artifact相对路径/hash；复核时再次验证原字节、事件与回执，不允许普通grant认领其它历史事件。
+
+签名结果明确标记`current_coordinator_witness_not_historical_event_identity`，是当前总指挥核实归属的见证，不回填旧事件task_id、不改旧文件/章节/审计。无见证、错误hash、证据变化、不同actor/篇、时间错位或原回执不符均拒绝。生产authority未在本轮配置，隔离fixture签发不代表生产授权已接入。

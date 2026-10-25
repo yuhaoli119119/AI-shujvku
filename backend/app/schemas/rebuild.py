@@ -407,6 +407,29 @@ class ExtractionReviewEvidence(RebuildSectionSourceInput):
     page_number: int = Field(ge=1, strict=True)
 
 
+class ExtractionFailedItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    issue_id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9_.:-]+$')
+    kind: Literal['rebuild_visual_assets', 'rebuild_data_rows', 'rebuild_data_values', 'rebuild_value_sources', 'paper_sections', 'reading_module']
+    object_id: str = Field(min_length=1, max_length=64)
+    object_version: str = Field(pattern=r'^[0-9a-f]{64}$')
+    source_file_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    required_change: str = Field(min_length=1, max_length=4000)
+
+
+class ExtractionResolvedItem(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    prior_freeze_id: str = Field(min_length=1, max_length=100)
+    issue_id: str = Field(min_length=1, max_length=64)
+    kind: Literal['rebuild_visual_assets', 'rebuild_data_rows', 'rebuild_data_values', 'rebuild_value_sources', 'paper_sections', 'reading_module']
+    object_id: str = Field(min_length=1, max_length=64)
+    prior_object_version: str = Field(pattern=r'^[0-9a-f]{64}$')
+    current_object_version: str = Field(pattern=r'^[0-9a-f]{64}$')
+    current_object_id: str | None = Field(default=None, min_length=1, max_length=64)
+    correction_event_id: UUID
+    note: str = Field(min_length=1, max_length=4000)
+
+
 class ExtractionReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_.:-]+$")
@@ -418,6 +441,8 @@ class ExtractionReviewRequest(BaseModel):
     reviewed_file_ids: list[UUID] = Field(default_factory=list, max_length=100)
     evidence_locators: list[ExtractionReviewEvidence] = Field(default_factory=list, max_length=1000)
     unresolved_conflicts: list[str] = Field(default_factory=list, max_length=1000)
+    failed_items: list[ExtractionFailedItem] = Field(default_factory=list, max_length=1000)
+    resolved_items: list[ExtractionResolvedItem] = Field(default_factory=list, max_length=1000)
 
     @model_validator(mode="after")
     def nonblank_review(self):
@@ -425,6 +450,10 @@ class ExtractionReviewRequest(BaseModel):
             raise ValueError("review_identity_and_message_required")
         if self.decision == "accepted" and (not self.reviewed_file_ids or not self.evidence_locators):
             raise ValueError("accepted_review_evidence_required")
+        if self.decision == 'accepted' and self.failed_items:
+            raise ValueError('accepted_cannot_include_failed_items')
+        if len({item.issue_id for item in self.failed_items}) != len(self.failed_items):
+            raise ValueError('failed_issue_id_repeated')
         return self
 
 

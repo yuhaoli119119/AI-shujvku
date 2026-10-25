@@ -139,6 +139,7 @@ def compact_package(session, paper_id, snapshot):
             "file_history": [item for item in lifecycle["items"] if item["id"] not in active_ids],
             "file_lifecycle": lifecycle,
             "pages": {name: endpoint(paper_id, view=name, rows_limit=50, rows_offset=0, expected_revision=revision) for name in totals},
+            "delivery_package_endpoint": f"/api/rebuild/papers/{paper_id}/delivery-package",
             "quality_endpoint": f"/api/rebuild/papers/{paper_id}/quality?expected_revision={revision}",
             "staged_package_endpoint": f"/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25",
             "coverage_plan_endpoint": f"/api/rebuild/papers/{paper_id}/coverage-plan?limit=50",

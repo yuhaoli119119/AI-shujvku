@@ -29,7 +29,8 @@ class Catalog(Contract):
 
 
 class Workspace(PaperRequest):
-    view: Literal['compact', 'rows', 'assets', 'sections', 'legacy_tables'] = 'compact'
+    view: Literal['compact', 'rows', 'assets', 'sections', 'legacy_tables',
+                  'delivery', 'delivery_checkpoints', 'delivery_gaps', 'delivery_receipts', 'delivery_jobs'] = 'compact'
     offset: int = Field(default=0, ge=0, strict=True)
     limit: int = Field(default=25, ge=1, le=100, strict=True)
     expected_revision: Revision | None = None

@@ -697,6 +697,29 @@ def declare_rebuild_section_corrections(
         raise
 
 
+@router.get("/papers/{paper_id}/delivery-package")
+def read_delivery_package(
+    paper_id: UUID,
+    view: Literal["summary", "checkpoints", "gaps", "receipts", "jobs"] = "summary",
+    offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100),
+    expected_revision: str | None = Query(None, pattern="^[0-9a-f]{64}$"),
+    session: Session = Depends(get_db_session),
+    auth: SessionState = Depends(_require_work_package_session),
+):
+    """Read existing delivery records without native calls or status reconciliation."""
+    from app.services.paper_delivery import delivery_package
+    from app.services.rebuild_acceptance import current_snapshot
+    try:
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        _required_paper(session, paper_id)
+        return delivery_package(session, paper_id, current_snapshot(session, paper_id)[0], get_settings(),
+                                view=view, offset=offset, limit=limit, expected_revision=expected_revision)
+    except RebuildWorkflowError as exc:
+        if str(exc) in {"delivery_revision_changed", "delivery_page_revision_required"}:
+            raise HTTPException(409, str(exc)) from exc
+        raise _http_error(exc) from exc
+
+
 @router.get("/papers/{paper_id}/ai-work-package")
 async def rebuild_ai_work_package(
     paper_id: UUID,

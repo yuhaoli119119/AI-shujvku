@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -87,13 +88,66 @@ def resolve_original_download(record: RebuildPaperFile, settings: Settings) -> t
     return source, media_type
 
 
-def install_derived_pdf(record: RebuildPaperFile, settings: Settings, pdf_path: Path) -> Path:
+def versioned_preview_path(record, settings, converter):
+    """An explicit converter identity selects a separate immutable artifact."""
+    if (not isinstance(converter, dict) or set(converter) != {'name', 'version'} or
+            any(not isinstance(v, str) or not v.strip() or len(v) > 200 for v in converter.values())):
+        raise RebuildWorkflowError('preview_converter_identity_invalid')
+    identity = hashlib.sha256(json.dumps(converter, sort_keys=True).encode()).hexdigest()
+    return preview_cache_path(record, settings).parent / 'versions' / record.sha256 / identity / 'reading.pdf'
+
+
+def preview_provenance(record, settings):
+    """Read legacy identity without requiring a new manifest or conversion."""
+    path = preview_cache_path(record, settings)
+    manifest = path.with_suffix('.json')
+    if not manifest.is_file():
+        return {'status': 'legacy_converter_unknown', 'source_sha256': record.sha256,
+                'reading_pdf_sha256': _sha256(path) if _readable_pdf(path) else None}
+    try:
+        data = json.loads(manifest.read_text())
+        if data['source_sha256'] != record.sha256 or data['reading_pdf_sha256'] != _sha256(path):
+            raise ValueError('preview_manifest_mismatch')
+        return {**data, 'status': 'manifest_identity_match_only'}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'status': 'preview_manifest_unverified', 'source_sha256': record.sha256}
+
+
+def resolve_versioned_preview(record, settings, converter):
+    """Reuse only a fully checked source/tool/output tuple; never convert on GET."""
+    _checked_source(record, settings)
+    path = versioned_preview_path(record, settings, converter)
+    try:
+        manifest = json.loads(path.with_suffix('.json').read_text())
+        if (manifest.get('converter') != converter or manifest.get('source_sha256') != record.sha256 or
+                not _readable_pdf(path) or manifest.get('reading_pdf_sha256') != _sha256(path)):
+            raise ValueError('cache_identity_mismatch')
+    except (OSError, ValueError, TypeError) as exc:
+        raise RebuildWorkflowError('versioned_preview_unavailable_or_corrupt') from exc
+    return path
+
+
+def install_derived_pdf(record: RebuildPaperFile, settings: Settings, pdf_path: Path, *, converter=None) -> Path:
     """Install a separately rendered PDF once, without replacing either artifact."""
     _, source_format = _checked_source(record, settings)
     if source_format != "docx":
         raise RebuildWorkflowError("derived_pdf_requires_docx_source")
     if not _readable_pdf(pdf_path):
         raise RebuildWorkflowError("derived_pdf_invalid")
+    if converter is not None:
+        destination = versioned_preview_path(record, settings, converter)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        body = pdf_path.read_bytes()
+        manifest = {'version': 'derived_pdf_converter_v1', 'converter': converter,
+                    'converter_basis': 'operator_declared_not_execution_verified',
+                    'source_sha256': record.sha256, 'reading_pdf_sha256': hashlib.sha256(body).hexdigest()}
+        from app.services.rebuild_read_cache import _install, _cache_lock
+        with _cache_lock(destination.parent):
+            _install(destination, body)
+            _install(destination.with_suffix('.json'), json.dumps(manifest, sort_keys=True).encode())
+        # Converter updates never silently change the PDF to which old pages
+        # point. Versioned artifacts remain explicit candidates for future use.
+        return destination
     destination = preview_cache_path(record, settings)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():

@@ -358,3 +358,34 @@ UUID `request_id`、新鲜 `expected_revision`、`action: add|supersede`、非�
 只有明确的 `?legacy_original=true` 返回原 `Paper.pdf_path`，供未绑定文件 UUID 的
 历史表格/历史定位使用；这条链接明确保留原记录，不随文件替换改到新正文。
 已绑定文件 UUID 的证据继续使用 `/api/rebuild/files/{file_id}/preview`。
+
+## 当前交付包只读索引（2026-10-26 源码候选，未部署）
+
+`GET /api/rebuild/papers/{paper_id}/delivery-package` 以正常会话和 PostgreSQL REPEATABLE READ READ ONLY 汇集当前数据库成果，不创建另一份交付数据、不协调或回查原生任务。默认 `view=summary` 返回科学 `output_revision`、独立 `revision`、原工作包（文件角色/hash/历史及各类成果分页入口）、中文摘要和新人导读分别的新旧/未知状态、原验收投影及冻结版本、覆盖声明和占用索引。摘要 metadata 为空不会否定正文来源的已存译文。阅读来源仅身份匹配称 `source_identity_match_only`，不宣称语义正确；旧成果无 provenance 显示 unknown 并保留原文。
+
+`view=checkpoints|gaps|receipts|jobs` 使用 `limit=1..100`、`offset` 分页；必须跟随 `next_page`，续页缺版本或任何相关记录变化返回409。交付 `revision` 另绑定阅读、审计和job库内记录；它不会修改原科学revision、旧工作包或既有状态。持续活动job更新可能要求重新读取交付索引。
+
+- checkpoints 从已有 mutation before/after 和原事务receipt建立逐资产、行、字段值、来源的当前保存/读回投影；只有原事件被回执引用且当前对象与after一致才为 `matches_saved_image`。章节复用原section hash/receipt，摘要与导读各自追踪最近实际改变该模块的专用保存记录。没有历史回执的旧对象为 `stored_legacy_receipt_unknown`，不要求重解析，不伪造保存失败。
+- gaps 复用现有quality/coverage精确对象问题并单列阅读模块缺失/陈旧/来源未知。原文未报告和不适用由原coverage声明/依据表达；缺声明仍是unknown，不能按数量或空metadata判定原文无内容。
+- receipts 返回原mutation回执及定点读取入口；重放旧partial回执不代表当前失败仍存在，也不构成当前成功。读取checkpoints/coverage输出核对当前对象。
+- jobs 保留原job状态、文件阶段checkpoint及原回执，不返回派发提示或凭据；本接口不证明当前原生执行、安全停止或可解除占用，`can_unlock=false`。
+
+只读索引没有新增保存接口：图表/值/来源仍用正式幂等写接口，章节和阅读仍用原保存协议，文件阶段仍用普通解析checkpoint。页面接入、真实MCP和生产兼容验收尚未完成；不得把本候选称为已上线。
+
+A退修 r3 另补：checkpoints 每个对象含 `object_read_endpoint`，行/字段/来源给稳定 `row_id/row_key/value_id/field_name`（适用项）和 `source_bindings`。每个绑定分列 `saved_source_pin`（仅来自原保存事件及同请求/actor的源和值图像）、`current_stored_pin`、`current_registered_source`、`current_physical_identity`、`source_readback_status`。没有原历史pin不从当前登记补造。`matches_saved_image`只说明当前存储内容与原after相等；来源身份另比较，可能为 `source_changed_since_save`、`reading_pdf_changed_since_save`、`source_binding_changed_since_save`、`current_physical_source_unverified` 或 `unknown_saved_source_pin`。只标有关对象，不写回或失效其它旧成果。章节与阅读复用各自原保存的文件/metadata身份，metadata来源不伪装成物理PDF。
+
+## B批跨入口交付视图（2026-10-26 源码候选，未部署）
+
+所有delivery页返回同一`status_layers`：execution保留库内job与原生未知，content明确声明范围及新旧、待补页入口，independent_review复用正式冻结/验收版本。三层独立，不据计数推断accepted、不改历史job。摘要、导读、图表和字段来源沿A的对象/来源分离检查；新增SI只增加需声明范围，不清空旧图表或阅读内容。
+
+MCP现有`get_paper_workspace`新增`view=delivery|delivery_checkpoints|delivery_gaps|delivery_receipts|delivery_jobs`。默认compact及旧views/参数保持原义。delivery视图的expected_revision是交付revision，与HTTP delivery完全一致；旧views继续使用科学output_revision。MCP使用同一paper_delivery服务与RR READ ONLY事务，并在工作线程执行数据库读取。续页缺pin或旧pin拒绝，不混版本。接口没有新增工具数量、认证或派发流程。
+
+文献详情“解析详情”下“当前交付与待补内容”提供当前交付、待补内容、保存记录入口及有界下一页。正常用户读中文状态，不要求理解hash/CAS。原摘要、导读、图表、数据及来源标签保留。视觉可用性待独立浏览器验收，API/源码测试不能代替。
+
+检查点分页仅加载本页对象正文及对应有界导入批次；摘要不搬回全量审计正文。科学revision仍由数据库全对象hash计算、交付revision仍全审计hash取ID/digest，并非常数成本。quality/coverage的全图核查仍有每篇对象规模成本；不承诺无限规模常数时间。
+
+DOCX旧`rebuild_previews/{source_sha256}.pdf`继续作为既有阅读版本，旧来源页不自动重绑。新增显式converter `{name,version}` 的预览安装写到独立versions/source/tool-hash/reading.pdf及hash manifest；相同源/工具复用并校验，版本变更新建独立缓存，损坏显式拒绝，不覆盖旧版本。`install_rebuild_preview.py`可选`--converter-name/--converter-version`须成对；此模式只登记候选字节、不转换、不激活或替换原预览。无converter参数沿用旧合同；旧预览工具未知如实保留，不要求重转。现有原文件下载入口继续复用已登记存储，不新建下载器。
+
+C候选扩展：`acceptance/freeze`新增只读返回对象版本索引，新review可选结构化`failed_items/resolved_items`，字段与保全/独立身份门禁见REBUILD_RELIABILITY.md“对象版本退修与独审复核”。交付summary增加`independent_issue_summary`，gaps按原独审审计记录呈现未关闭issue，新freeze/版本变化不会清空。旧review body缺新字段仍保留原指纹和回执读取，不迁移生产或自动补文献。
+
+C3进一步允许可信总指挥用独立私有key和原生读回，对精确历史修正事件签发归属见证，使同账号章节专用修正可受控独审；见REBUILD_RELIABILITY.md的C3合同。没有精确见证时仍拒绝，旧事件不补造task身份，生产authority不在本轮配置。

@@ -53,7 +53,8 @@ def _token(key, claims):
 
 async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner, reviewer_task_id,
                                         reviewer_thread_id, writer_thread_id, evidence_root,
-                                        issuer_key, settings, native_read=None, ttl_seconds=3600):
+                                        issuer_key, settings, native_read=None, ttl_seconds=3600,
+                                        correction_event_ids=None, writer_ownership_evidence=None, writer_ownership_sha256=None):
     """Trusted local coordinator API. Never call with shared login credentials.
 
     issuer_key is NOT the workbench session secret and never goes to the model.
@@ -75,6 +76,17 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
     request = {"freeze_id": freeze_id, "owner": owner, "reviewer_task_id": reviewer_task_id,
                "reviewer_thread_id": reviewer_thread_id, "writer_thread_id": writer_thread_id,
                "evidence_root": str(evidence_root)}
+    witnessed = any(v is not None for v in (correction_event_ids, writer_ownership_evidence, writer_ownership_sha256))
+    witness_data = None
+    if witnessed:
+        if not correction_event_ids or not writer_ownership_evidence or not writer_ownership_sha256:
+            raise RebuildWorkflowError('correction_witness_all_fields_required')
+        import asyncio
+        from app.services.rebuild_correction_witness import load_artifact
+        witness_data, relative = await asyncio.to_thread(load_artifact, evidence_root, writer_ownership_evidence, writer_ownership_sha256)
+        request['correction_witness'] = {'event_ids': sorted(str(i) for i in correction_event_ids),
+            'artifact_relative_path': relative, 'artifact_sha256': writer_ownership_sha256,
+            'basis': 'current_coordinator_witness_not_historical_event_identity'}
     grant_id = "reviewauth-" + hashlib.sha256((freeze_id + "|" + request_id).encode()).hexdigest()[:48]
 
     def snapshot(worker):
@@ -83,6 +95,9 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
             raise RebuildWorkflowError("review_authority_freeze_owner_mismatch")
         if reviewer_task_id == frozen.payload["writer_task_id"]:
             raise RebuildWorkflowError("independent_reviewer_required")
+        if witnessed:
+            from app.services.rebuild_correction_witness import validate_entries
+            validate_entries(worker, frozen, owner, writer_thread_id, request['correction_witness']['event_ids'], witness_data)
         existing = worker.get(WorkflowJob, grant_id)
         if existing:
             if (existing.payload["request"] != request or existing.status != "active" or
@@ -137,6 +152,11 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
                   "verified_writer_turn_id": statuses[0].turn_id,
                   "verified_reviewer_turn_id": statuses[1].turn_id,
                   "authority": "separate_private_coordinator_key_and_native_readback"}
+        if witnessed:
+            from app.services.rebuild_correction_witness import load_artifact, validate_entries
+            current_data, _ = load_artifact(evidence_root, writer_ownership_evidence, writer_ownership_sha256)
+            entries = validate_entries(worker, frozen, owner, writer_thread_id, request['correction_witness']['event_ids'], current_data)
+            claims['correction_witness'] = {**request['correction_witness'], 'events': entries}
         token = _token(key, claims)
         worker.add(WorkflowJob(job_id=grant_id, type=TYPE, status="active", library_name=frozen.library_name,
                                payload={"request": request, "claims": claims,
@@ -171,4 +191,11 @@ def verify_reviewer_authorization(session, *, authorization, frozen, actor, revi
             claims["writer_thread_id"] == claims["reviewer_thread_id"] or
             datetime.fromisoformat(claims["expires_at"]) <= datetime.utcnow()):
         raise RebuildWorkflowError("independent_task_authorization_invalid")
+    if claims.get('correction_witness'):
+        from app.services.rebuild_correction_witness import load_artifact, validate_entries
+        witness = claims['correction_witness']
+        data, _ = load_artifact(claims['evidence_root'], witness['artifact_relative_path'], witness['artifact_sha256'])
+        entries = validate_entries(session, frozen, actor, claims['writer_thread_id'], witness['event_ids'], data)
+        if entries != witness['events']:
+            raise RebuildWorkflowError('correction_witness_claim_changed')
     return claims

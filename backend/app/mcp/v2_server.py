@@ -227,6 +227,11 @@ def get_paper_workspace(request: Workspace) -> dict:
     """Read bounded current outputs, file lifecycle, write contracts and work revision."""
     from app.services.rebuild_work_package import compact_package, bounded_view
     with _database() as (session, actor):
+        if request.view.startswith('delivery'):
+            from app.services.paper_delivery import delivery_package
+            return delivery_package(session, request.paper_id, _snapshot(session, request.paper_id), get_settings(),
+                                    view=request.view.removeprefix('delivery_') if request.view != 'delivery' else 'summary',
+                                    offset=request.offset, limit=request.limit, expected_revision=request.expected_revision)
         if request.offset and request.expected_revision is None:
             raise RebuildWorkflowError('revision_required')
         snapshot = _snapshot(session, request.paper_id, request.expected_revision)

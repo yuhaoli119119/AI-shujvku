@@ -625,6 +625,13 @@
       </div>
 
 <details class="pd-parsing-details" id="pdParsingDetails"><summary>解析详情 · 覆盖范围与记录</summary><div class="pd-parsing-body">            <div id="pdAcceptanceStatus" class="muted" aria-live="polite">科学验收：待读取；已解析不代表验收通过。</div>
+            <details><summary>当前交付与待补内容</summary>
+              <p class="muted">分别查看任务记录、内容待补项和独立验收。已保存资料继续保留。</p>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCurrentDelivery('summary')">查看当前交付</button>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCurrentDelivery('gaps')">查看待补内容</button>
+              <button class="btn btn-ghost btn-sm" type="button" onclick="loadCurrentDelivery('checkpoints')">查看保存记录</button>
+              <div id="pdCurrentDelivery" aria-live="polite"></div>
+            </details>
             <details><summary>已存资料检查与记录</summary>
               <p class="muted">检查已保存的来源和格式，不代表全文提取或科学验收通过。</p>
               <button class="btn btn-ghost btn-sm" type="button" onclick="loadStoredQuality()">读取缺项清单</button>
@@ -2885,6 +2892,53 @@
       }
     }
 
+    let deliveryReadSequence = 0;
+    async function loadCurrentDelivery(view='summary', offset=0, revision=null) {
+      const paperId=state.paperId, generation=state.detailGeneration, sequence=++deliveryReadSequence;
+      const area=document.getElementById('pdCurrentDelivery');
+      if (!paperId || !area) return;
+      area.textContent='正在读取当前交付…';
+      try {
+        const params=new URLSearchParams({view,offset:String(offset),limit:'25'});
+        if (revision) params.set('expected_revision',revision);
+        const data=await fetchJSON(`/api/rebuild/papers/${encodeURIComponent(paperId)}/delivery-package?${params}`);
+        if (!currentDetailIs(paperId,generation) || sequence!==deliveryReadSequence) return;
+        area.replaceChildren();
+        const line=(text)=>{const p=document.createElement('p');p.textContent=text;area.appendChild(p);};
+        const layers=data.status_layers;
+        line('执行：当前运行情况待核实；原任务记录保留。');
+        line('内容：'+(layers.content.scope==='unknown_no_coverage_declaration'?'原文覆盖范围尚未声明。':'按已声明范围核对，不能据结果数量推断完整。'));
+        line(acceptanceStatusText(layers.independent_review));
+        if (view==='summary') {
+          const names={missing:'待补',stale:'来源已变化，待核对',source_unverified:'来源待核实',unknown_legacy_provenance:'已存内容保留，来源记录待核实',source_identity_match_only:'已存来源身份对应',invalid_source_notice:'摘要来源需修正'};
+          line('中文摘要：'+(names[data.reading.abstract_status] || '待核实'));
+          line('新人导读：'+(names[data.reading.guide_status] || '待核实'));
+          if (data.reading.guide_coverage_status==='additional_files_not_in_saved_scope') line('新增文件尚未纳入原导读范围；已保存导读继续可读。');
+          line('图表、数据和原文来源可继续从原有标签查看。');
+        } else {
+          for (const item of data.items || []) {
+            const card=document.createElement('article');card.className='reading-section';
+            const title=document.createElement('strong');title.textContent=item.title || item.field_name || item.asset_key || item.id || '待核对对象';card.appendChild(title);
+            const description=document.createElement('p');
+            description.textContent=view==='gaps' ? (item.action_zh || item.reason || '保存时曾报告问题，需核对当前对象。') :
+              (item.readback_status==='matches_saved_image'?'当前内容与保存记录相符。':item.save_status==='missing'?'尚无已存内容。':'内容或历史保存记录仍需核对。');
+            card.appendChild(description);
+            if ((item.source_bindings || []).some(b=>b.source_readback_status!=='matches_saved_source_identity')) {
+              const source=document.createElement('p');source.textContent='部分来源身份待核对；原成果保留。';card.appendChild(source);
+            }
+            area.appendChild(card);
+          }
+          if (!(data.items || []).length) line('本页没有列出的对象；不代表全文内容已通过验收。');
+          if (data.has_more) {
+            const next=document.createElement('button');next.type='button';next.className='btn btn-ghost btn-sm';next.textContent='下一页';
+            next.onclick=()=>loadCurrentDelivery(view,data.next_offset,data.revision);area.appendChild(next);
+          }
+          if (offset) {const first=document.createElement('button');first.type='button';first.className='btn btn-ghost btn-sm';first.textContent='回到第一页';first.onclick=()=>loadCurrentDelivery(view);area.appendChild(first);}
+        }
+      } catch (error) {
+        if (currentDetailIs(paperId,generation) && sequence===deliveryReadSequence) area.textContent=error.status===409?'资料版本已变化，请重新点击读取当前交付。':'当前交付暂时无法读取，请重试。已有资料仍可从原有标签查看。';
+      }
+    }
     function acceptanceStatusText(acceptance) {
       const labels = {pending:'待提取验收',extracted:'已提取，待规则检查',rules_checked:'规则检查通过，待独立验收',
         needsfix:'需要修正',accepted:'独立验收通过',partial:'原文冲突 / 部分覆盖',review_incomplete:'独立验收未完成'};

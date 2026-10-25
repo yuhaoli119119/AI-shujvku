@@ -249,6 +249,8 @@ def freeze(session, paper_id, payload, settings, *, actor):
                       payload={"paper_id": str(paper_id), "writer": actor, "writer_task_id": payload.task_id,
                                "request_sha256": request_hash, "snapshot": snapshot, "coverage": coverage},
                       progress={"extraction": "extracted", "rules": rules, "independent_review": "pending"})
+    from app.services.rebuild_review_items import object_versions
+    job.payload = {**job.payload, 'object_versions': object_versions(session, paper_id)}
     session.add(job)
     session.add(AuditLog(paper_id=paper_id, action="extraction_frozen", source=VERSION, target_type="workflow_jobs", target_id=job_id,
                         payload={"actor": actor, "task_id": payload.task_id, "request_id": payload.request_id,
@@ -263,7 +265,8 @@ def serialize(job):
             "writer": job.payload["writer"], "writer_task_id": job.payload["writer_task_id"],
             "revision": job.payload["snapshot"]["revision"], "coverage": job.payload["coverage"],
             "output_manifest": job.payload["snapshot"]["output_manifest"], "progress": job.progress, "review": job.result,
-            "parsed_implies_accepted": False}
+            "parsed_implies_accepted": False,
+            **({'object_versions': job.payload['object_versions']} if 'object_versions' in job.payload else {})}
 
 
 def review(session, paper_id, job_id, payload, settings, *, actor, authorization=None):
@@ -280,10 +283,15 @@ def review(session, paper_id, job_id, payload, settings, *, actor, authorization
                                                reviewer_task_id=payload.reviewer_task_id, settings=settings)
         identity = {"kind": "coordinator_authorized_native_task", "actor": actor, "task_id": payload.reviewer_task_id,
                     "grant_id": claims["grant_id"], "reviewer_thread_id": claims["reviewer_thread_id"],
-                    "writer_thread_id": claims["writer_thread_id"]}
+                    "writer_thread_id": claims["writer_thread_id"],
+                    **({'correction_witness': claims['correction_witness']} if claims.get('correction_witness') else {})}
     elif payload.reviewer_task_id == job.payload["writer_task_id"]:
         raise RebuildWorkflowError("independent_reviewer_required")
-    request_hash = _digest(payload.model_dump(mode="json"))
+    request_data = payload.model_dump(mode='json')
+    for optional in ('failed_items', 'resolved_items'):
+        if optional not in payload.model_fields_set:
+            request_data.pop(optional, None)
+    request_hash = _digest(request_data)
     events = session.scalars(select(AuditLog).where(AuditLog.paper_id == paper_id,
         AuditLog.action == "independent_review", AuditLog.source == VERSION, AuditLog.target_id == job_id)).all()
     for event in events:
@@ -294,6 +302,10 @@ def review(session, paper_id, job_id, payload, settings, *, actor, authorization
     if job.status == "accepted":
         raise RebuildWorkflowError("accepted_receipt_is_immutable_freeze_new_revision")
     snapshot, files = current_snapshot(session, paper_id, force_physical=True)
+    if 'object_versions' in job.payload and payload.decision != 'review_incomplete':
+        from app.services.rebuild_review_items import object_versions
+        if job.payload['object_versions'] != object_versions(session, paper_id):
+            raise RebuildWorkflowError('acceptance_frozen_revision_changed')
     if (payload.expected_revision != job.payload["snapshot"]["revision"] or
             payload.decision != "review_incomplete" and snapshot["revision"] != payload.expected_revision):
         raise RebuildWorkflowError("acceptance_frozen_revision_changed")
@@ -314,6 +326,8 @@ def review(session, paper_id, job_id, payload, settings, *, actor, authorization
         if _sha256(resolve_reading_pdf(file, settings)) != reading_hashes[str(file.id)]:
             raise RebuildWorkflowError("acceptance_reading_pdf_hash_mismatch")
     rules = _rules(session, paper_id, snapshot, job.payload["coverage"])
+    from app.services.rebuild_review_items import validate_review_items
+    validate_review_items(session, paper_id, job, payload, actor=actor, identity=identity)
     if payload.decision == "accepted" and (not rules["passed"] or payload.unresolved_conflicts):
         raise RebuildWorkflowError("acceptance_gates_not_satisfied")
     before = job.status
@@ -335,6 +349,11 @@ def acceptance_status(session, paper_id, *, snapshot=None):
         return {"status": "pending", "label": LABELS["pending"], "parsed_implies_accepted": False, "reason": "no_explicit_freeze_and_review_receipt"}
     result = serialize(job)
     current = snapshot if snapshot is not None else current_snapshot(session, paper_id)[0]
+    if 'object_versions' in job.payload:
+        from app.services.rebuild_review_items import object_versions
+        if job.payload['object_versions'] != object_versions(session, paper_id):
+            return {**result, 'status': 'review_incomplete', 'label': LABELS['review_incomplete'],
+                    'frozen_status': job.status, 'stale': True, 'reason': 'frozen_object_or_reading_module_changed'}
     if current["revision"] != result["revision"]:
         return {**result, "status": "review_incomplete", "label": LABELS["review_incomplete"],
                 "frozen_status": job.status, "stale": True, "reason": "paper_file_or_output_changed_since_freeze"}

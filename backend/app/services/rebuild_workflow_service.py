@@ -891,6 +891,39 @@ def _same_value(existing: RebuildDataValue, incoming: dict[str, Any]) -> bool:
                              ("raw_value", "numeric_value", "unit")}) == _value_signature(incoming)
 
 
+def _trusted_candidate_role(session, paper_id, candidate):
+    """Only registered, active, physically hash-checked files establish role."""
+    from app.services.rebuild_file_lifecycle import active_files
+    from app.services.rebuild_file_preview import _checked_source
+    from app.config import get_settings
+    ids = candidate.get('source_ids') or []
+    if not ids:
+        return 'unknown'
+    try:
+        parsed_ids = [UUID(i) for i in ids]
+    except (TypeError, ValueError, AttributeError):
+        return 'unknown'
+    rows = list(session.scalars(select(RebuildValueSource).where(
+        RebuildValueSource.paper_id == paper_id, RebuildValueSource.id.in_(parsed_ids))))
+    files = {f.id: f for f in active_files(session, paper_id)}
+    roles = set()
+    for source in rows:
+        value = session.get(RebuildDataValue, source.value_id)
+        if value is None or not source_is_current(value, source.id):
+            return 'unknown'
+        file = files.get(source.file_id)
+        if file is None:
+            return 'unknown'
+        try:
+            _checked_source(file, get_settings())
+        except (RebuildWorkflowError, OSError, ValueError):
+            return 'unknown'
+        roles.add(file.role)
+    if len(rows) != len(set(ids)) or not roles or roles - {'main', 'si'}:
+        return 'unknown'
+    return 'main' if 'main' in roles else 'si'
+
+
 def _import_value(
     session: Session,
     *,
@@ -977,10 +1010,22 @@ def _import_value(
         value.value_type == "missing" and value_type != "missing" or
         (value.unit or "") == (unit or "") and value_type == "explicit" and value.value_type == "estimated"
     )
+    main_priority = False
+    if existing is not None and not same and (value.unit or '') == (unit or '') and value.value_type == value_type == 'explicit':
+        current_candidates = [c for c in candidates if _value_signature(c) == _value_signature(
+            {key: getattr(value, key) for key in ('raw_value', 'numeric_value', 'unit')})]
+        incoming_role = _trusted_candidate_role(session, row.paper_id, {'source_ids': incoming_ids})
+        prior_roles = {_trusted_candidate_role(session, row.paper_id, c) for c in current_candidates}
+        main_priority = incoming_role == 'main' and prior_roles == {'si'}
+        if main_priority:
+            promote = True
+        if incoming_role in {'main', 'si'} and prior_roles <= {'main', 'si'} and incoming_role not in prior_roles:
+            conflict['source_priority'] = {'rule': 'registered_main_over_si_same_identity_condition_field_unit',
+                'preferred_role': 'main', 'scientific_conflict': 'retained_not_independently_resolved'}
     if existing is None:
         status = "created"
     elif promote:
-        status = "filled" if value.value_type == "missing" else "explicit_value_promoted"
+        status = 'main_text_value_promoted' if main_priority else "filled" if value.value_type == "missing" else "explicit_value_promoted"
     elif same:
         status = "evidence_added" if candidate_changed or created_sources else "deduplicated"
     elif value_type == "missing":
