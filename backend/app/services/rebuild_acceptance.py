@@ -190,7 +190,20 @@ def _rules(session, paper_id, snapshot, coverage):
 
 
 def _locked_paper(session, paper_id):
-    paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+    from app.services.paper_db_phase import BUSY, LockConflictError, is_lock_conflict
+
+    # Every direct synchronous caller gets the same transaction-local bound,
+    # not only routes that happen to run the HTTP preflight guard first.
+    session.execute(text("SET LOCAL lock_timeout = '1000ms'"))
+    try:
+        paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
+    except OperationalError as exc:
+        session.rollback()
+        if is_lock_conflict(exc):
+            raise LockConflictError(BUSY) from exc
+        raise
     if paper is None:
         raise RebuildWorkflowError("paper_not_found")
     # The established assets/rows/value/source/section/dedup write services all

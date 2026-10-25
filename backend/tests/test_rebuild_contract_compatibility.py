@@ -36,6 +36,19 @@ def status_api(monkeypatch):
     monkeypatch.setattr(workflow, "_required_paper", lambda session, paper_id: NS(id=paper_id))
     report = MagicMock(return_value={"status": "partial"})
     monkeypatch.setattr(paper_processing_status, "report_processing", report)
+
+    async def worker_boundary(request_session, paper_id, payload):
+        """The production boundary owns a real Session; this fixture makes its
+        commit/rollback contract observable without putting SQL on the loop."""
+        try:
+            result = report(request_session, NS(id=paper_id), payload)
+            request_session.commit()
+            return result
+        except Exception:
+            request_session.rollback()
+            raise
+
+    monkeypatch.setattr(api, "_processing_status_write", worker_boundary)
     return TestClient(app), session, report, auth_calls
 
 

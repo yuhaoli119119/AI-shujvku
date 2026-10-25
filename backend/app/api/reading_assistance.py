@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from app.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.db.models import Paper
@@ -51,8 +52,14 @@ async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(ge
 def save_reading(paper_id:UUID,body:ReadingAssistanceSave | AbstractTranslationSave,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
     try:
         result=service.save(session,paper_id,body,settings,auth.username);session.commit();return result
-    except ValueError as exc:
-        session.rollback();raise HTTPException(409,str(exc)) from exc
+    except (ValueError, OperationalError) as exc:
+        session.rollback()
+        if isinstance(exc, OperationalError):
+            from app.services.paper_db_phase import BUSY, is_lock_conflict
+            if not is_lock_conflict(exc):
+                raise
+            raise HTTPException(409, BUSY) from exc
+        raise HTTPException(409,str(exc)) from exc
 
 
 class ResumeRequest(BaseModel):

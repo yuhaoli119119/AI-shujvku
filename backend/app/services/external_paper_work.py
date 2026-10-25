@@ -13,6 +13,7 @@ from pathlib import Path
 from uuid import UUID
 
 from sqlalchemy import select, text
+from sqlalchemy.exc import OperationalError
 
 from app.config import get_settings
 from app.db.models import AuditLog, Paper, WorkflowJob
@@ -42,8 +43,15 @@ def _identity(actor, request_id):
 def _lock(session, paper_id):
     # The Paper row is the per-paper writer mutex. Global scheduler control is
     # unrelated to an individual paper and must never serialize cross-paper AI.
+    from app.services.paper_db_phase import BUSY, LockConflictError, is_lock_conflict
     session.execute(text("SET LOCAL lock_timeout = '1000ms'"))
-    paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
+    try:
+        paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
+    except OperationalError as exc:
+        session.rollback()
+        if is_lock_conflict(exc):
+            raise LockConflictError(BUSY) from exc
+        raise
     if paper is None:
         raise RebuildWorkflowError("paper_not_found")
     return paper

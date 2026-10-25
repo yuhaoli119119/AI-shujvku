@@ -280,10 +280,26 @@ async def _guard_request_work(session, request, auth, body=None):
 def _guard_sync_write(session: Session, paper_id: UUID, actor: str, task_id: str | None = None):
     """Atomic occupancy guard for routes already running in FastAPI's threadpool."""
     from app.services.external_paper_work import guard_workbench_write
+    from app.services.paper_db_phase import BUSY, LockConflictError, is_lock_conflict
     try:
         guard_workbench_write(session, paper_id, actor, task_id)
+    except (LockConflictError, OperationalError) as exc:
+        session.rollback()
+        if isinstance(exc, LockConflictError) or is_lock_conflict(exc):
+            raise HTTPException(status_code=409, detail=BUSY) from exc
+        raise
     except RebuildWorkflowError as exc:
+        session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+async def _processing_status_write(session: Session, paper_id: UUID, payload):
+    """Injectable worker-session boundary for status transport compatibility."""
+    from app.services.paper_db_phase import run_phase
+    from app.services.paper_processing_status import report_processing
+    from app.services.rebuild_workflow_service import _required_paper
+    return await run_phase(session, lambda worker: report_processing(
+        worker, _required_paper(worker, paper_id), payload))
 
 
 @router.put("/papers/{paper_id}/processing-status")
@@ -293,14 +309,11 @@ async def report_paper_processing_status(
     session: Session = Depends(get_db_session),
     _auth: SessionState = Depends(_require_work_package_session),
 ):
-    from app.services.paper_processing_status import report_processing
-    from app.services.rebuild_workflow_service import _required_paper
     if isinstance(payload, ProcessingStatusReportEnvelope):
         payload = payload.payload
-    from app.services.paper_db_phase import LockConflictError, run_phase
+    from app.services.paper_db_phase import LockConflictError
     try:
-        result = await run_phase(session, lambda worker: report_processing(
-            worker, _required_paper(worker, paper_id), payload))
+        result = await _processing_status_write(session, paper_id, payload)
         return {'paper_id':str(paper_id),'processing_status':result}
     except (ValueError, RebuildWorkflowError, LockConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -1047,12 +1060,13 @@ def save_history_registration(paper_id: UUID, payload: HistoryRegistration,
     from app.services.history_reconciliation import save
     from app.services.rebuild_acceptance import _locked_paper
     try:
+        _guard_sync_write(session, paper_id, auth.username)
         _locked_paper(session,paper_id)
         receipt,result=save(session,paper_id,payload,_history_context(session,paper_id,settings,auth.username,force=True),auth.username)
         if receipt is None:raise HTTPException(422,detail={'code':'history_registration_invalid','errors':result['errors']})
         session.commit()
         return receipt
-    except RebuildWorkflowError as exc:
+    except (RebuildWorkflowError, ValueError) as exc:
         session.rollback()
         raise _http_error(exc) from exc
     except Exception:
