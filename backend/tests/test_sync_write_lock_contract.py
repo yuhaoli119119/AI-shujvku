@@ -17,7 +17,7 @@ from app.api import rebuild as rebuild_api
 from app.db.models import Paper
 from app.main import app
 from app.security.session_auth import SessionState
-from app.services.paper_db_phase import is_lock_conflict
+from app.services.paper_db_phase import LockConflictError, is_lock_conflict
 
 
 class PaperLock:
@@ -129,6 +129,25 @@ def test_history_write_uses_database_bounded_lock_timeout(setup_test_db):
             timer.cancel()
         app.dependency_overrides.pop(
             rebuild_api._require_section_write_session, None)
+
+
+def test_direct_locked_paper_has_database_bounded_timeout(setup_test_db):
+    from app.services.rebuild_acceptance import _locked_paper
+    paper_id = _seed_paper(setup_test_db)
+    holder = PaperLock(setup_test_db, paper_id)
+    timer = None
+    started = time.perf_counter()
+    try:
+        with holder:
+            timer = threading.Timer(2.2, holder.release.set)
+            timer.start()
+            with Session(bind=setup_test_db) as session, pytest.raises(LockConflictError):
+                _locked_paper(session, paper_id)
+        elapsed = time.perf_counter() - started
+        assert elapsed < 1.8, elapsed
+    finally:
+        if timer is not None:
+            timer.cancel()
 
 
 def test_processing_status_worker_commit_and_rollback(setup_test_db, monkeypatch):
