@@ -21,3 +21,7 @@ data、outputs、deliverables、backend/reports、凭据、.env、.history、rel
 freeze/current-20261009 保留整理前冻结代码；当前服务器数据库冻结检查点不入 Git。目录统一不删除数据库记录、不改文献或图表。
 
 依赖镜像由 deploy/runtime-image.json 的镜像 ID 与 requirements 哈希固定；Dockerfile.frozen 在固定依赖上清除旧应用源码后复制 GitHub 源码。部署检查固定镜像 ID，依赖升级须在 GitHub 明确更新并验证清单。换服务器需提供精确镜像或验证新的依赖镜像。
+
+## 独立验收授权部署配置（2026-10-26）
+
+同账号的独立窗口复核需要单独的协调者私有 authority。部署通过 `LITAI_REBUILD_REVIEW_AUTHORITY_KEY_FILE` 显式传递容器内路径，默认空保持关闭；不是工作台密码或会话密钥。经用户授权后，可将新建的独立随机密钥存于既有 `/data` 挂载内受限目录，目录700、文件600，仅实际应用用户和可信协调者可读；密钥不入Git、不进提示词或普通报告。不自动签发任务或恢复旧工作。部署后分别检查配置路径、权限、正式独立复核合同及真实页面，不以存在文件代替业务验收。
