@@ -41,3 +41,12 @@ GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定req
 误停后原job被标failed但原线程已生成内容、终态明确报告reading_task_finished时，可在阅读resume请求中携带原`prepared_content`保存JSON。同一事务恢复原job并调用原保存合同，原request_id、job_id、thread_id不变；来源版本/CAS/图表归属/科学字段保护全部保留，不重新生成现有成果。请求重放校验原体指纹。服务器原生终态与保存回执各自核实后才能收尾。
 
 `verify_paper_turn_context.py --job JOB_ID --paper PAPER_UUID`由服务器核对真实rollout、实际turn/model/cwd/full权限，再写入该job的turn_context_proof和actual_inference_verified，不接受浏览器自称证明。不读取或修改原文与科学字段。
+
+
+### 无标题灰框摘要的来源回退（2026-10-25）
+
+原科研摘要元数据和有 `Abstract` 标题的正文摘要仍优先。元数据为空或明确是出版社版本声明、正文没有 `Abstract` 起点时，context 可识别前五个物理页内唯一的灰底粗体摘要框：必须在较大题名之后、唯一的 Introduction 标题之前，与正文同左边界且比正文单栏宽，侧边真实渲染像素为灰底。普通白底段落、出版社声明、图注、多正文或多候选、旋转页及不满足边界的版式继续拒绝，不把 Introduction 内容作为摘要。
+
+`abstract_for_translation.source` 仍为 `main_text`，附 `selection_method=shaded_abstract_box_v1`、真实 `file_id`、`source_sha256`、`physical_page`、`bbox`、`start_char/end_char`、`text_sha256` 和版面证据；revision 由服务器生成。坐标单位为 PDF point，原点在页面左上。原文保留 PDF 文字层的换行与连字符，字符范围可在 context 同页 text 中精确读回。
+
+不新增任务或保存入口：读取最新 context 后，沿现有同篇 job 的 `abstract_only` 合同提交返回的 `input_revision`、`abstract_source_revision` 和忠实译文。保存时再次核实真实源文件字节及来源版本；不能自造 revision。合法已有译文、英文元数据、导读和科学资料的保护保持不变。不匹配这种明确版式时仍需进一步人工核对，不表示支持任意无标题摘要。

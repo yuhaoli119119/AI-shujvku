@@ -49,7 +49,18 @@ def input_context(session, paper_id, settings):
                         text = page.get_text()
                         if len(text) > remaining:
                             item['complete_text'] = False; break
-                        item['pages'].append({'page': index + 1, 'text': text}); remaining -= len(text)
+                        page_item = {'page': index + 1, 'text': text}
+                        if file.role == 'main' and index < 5:
+                            from app.services.reading_abstract_source import publisher_notice, pdf_abstract_boxes
+                            if not (paper.abstract or '').strip() or publisher_notice(paper.abstract):
+                                try:
+                                    boxes = pdf_abstract_boxes(page, text)
+                                except (RuntimeError, ValueError):
+                                    # Optional layout recovery must not hide readable text.
+                                    boxes = []
+                                if boxes:
+                                    page_item['abstract_boxes'] = boxes
+                        item['pages'].append(page_item); remaining -= len(text)
                     if not any(p['text'].strip() for p in item['pages']):
                         item['complete_text'] = False; item['reason'] = '扫描页未提供可读文字'
             elif kind == 'docx':

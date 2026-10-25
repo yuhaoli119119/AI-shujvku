@@ -36,6 +36,94 @@ def _bounds(raw, first, last):
     return first, last
 
 
+def pdf_abstract_boxes(page, raw):
+    """Read-only evidence for a narrow unlabelled, shaded abstract layout.
+
+    Text order alone is unsafe in two columns. Require an isolated bold
+    paragraph on a neutral grey background, wider than the body column,
+    below a larger title and immediately above the first Introduction.
+    The caller supplies a hash-checked main PDF, never client-provided boxes.
+    """
+    import fitz
+
+    if page.rotation or page.rect.width > 1600 or page.rect.height > 2400:
+        return []
+    blocks = [b for b in page.get_text('dict', flags=fitz.TEXTFLAGS_TEXT)['blocks']
+              if b['type'] == 0]
+
+    def block_text(block):
+        return '\n'.join(''.join(span['text'] for span in line['spans'])
+                         for line in block['lines'])
+
+    def max_size(block):
+        return max((s['size'] for line in block['lines'] for s in line['spans']), default=0)
+
+    intros = [b for b in blocks if re.fullmatch(
+        r'(?:1[.\s]+)?introduction', block_text(b).strip(), re.I)]
+    if len(intros) != 1:
+        return []
+    intro = intros[0]; ib = fitz.Rect(intro['bbox']); width = page.rect.width
+    bodies = [b for b in blocks if 0 <= b['bbox'][1] - ib.y1 <= 40
+              and abs(b['bbox'][0] - ib.x0) <= 5
+              and .25 * width <= b['bbox'][2] - b['bbox'][0] <= .55 * width
+              and len(block_text(b)) >= 80]
+    if not bodies:
+        return []
+    body = min(bodies, key=lambda b: b['bbox'][1]); bb = fitz.Rect(body['bbox'])
+    candidates = []; pixmap = None
+    for block in blocks:
+        rect = fitz.Rect(block['bbox']); text = block_text(block).strip()
+        size = max_size(block)
+        if not (100 <= len(text) <= 15000 and len(text.split()) >= 50
+                and 6 <= size <= 14 and rect.height >= size * 3
+                and abs(rect.x0 - ib.x0) <= 5
+                and 0 < ib.y0 - rect.y1 <= 60
+                and rect.width >= 1.15 * bb.width and rect.width <= .85 * width):
+            continue
+        # Notices/captions/headings are not scientific abstracts, even in boxes.
+        if (publisher_notice(text) or not re.search(r'[.!?]$', text)
+                or re.search(r'(?im)^\s*(?:publisher|copyright|accepted manuscript|'
+                             r'journal pre-proof|disclaimer|key[ -]?words|'
+                             r'\d*[.\s]*introduction|fig(?:ure)?[.\s]|table\s)', text)):
+            continue
+        spans = [s for line in block['lines'] for s in line['spans']]
+        count = sum(len(s['text']) for s in spans)
+        bold = sum(len(s['text']) for s in spans if s['flags'] & 16)
+        if not count or bold / count < .8:
+            continue
+        titles = [b for b in blocks if b['bbox'][3] < rect.y0
+                  and b['bbox'][2] - b['bbox'][0] >= .6 * width
+                  and max_size(b) >= size * 1.4]
+        if not titles:
+            continue
+        start = raw.find(text)
+        if start < 0 or raw.find(text, start + 1) >= 0:
+            continue
+        # Render source pixels: actual fills may be raster images, not PDF paths.
+        if pixmap is None:
+            pixmap = page.get_pixmap(colorspace=fitz.csRGB, alpha=False)
+        pixels = []
+        for x in (rect.x0 - 3, rect.x1 + 3):
+            for y in (rect.y0, (rect.y0 + rect.y1) / 2, rect.y1):
+                px, py = int(x) - pixmap.x, int(y) - pixmap.y
+                if not (0 <= px < pixmap.width and 0 <= py < pixmap.height):
+                    pixels = []; break
+                pixels.append(pixmap.pixel(px, py)[:3])
+        if len(pixels) != 6 or any(max(rgb) - min(rgb) > 20
+                or not 165 <= sum(rgb) / 3 <= 238 for rgb in pixels):
+            continue
+        candidates.append({'start_char': start, 'end_char': start + len(text),
+            'bbox': [round(x, 3) for x in rect],
+            'selection_method': 'shaded_abstract_box_v1',
+            'layout_evidence': {'introduction_bbox': [round(x, 3) for x in ib],
+                'body_column_bbox': [round(x, 3) for x in bb],
+                'title_bbox': [round(x, 3) for x in max(titles, key=max_size)['bbox']],
+                'background_samples_rgb': pixels},
+            'start_marker': 'layout:unique_shaded_bold_paragraph',
+            'end_marker': block_text(intro).strip()})
+    return candidates
+
+
 def select_abstract(metadata, documents):
     rejected = publisher_notice(metadata)
     if (metadata or '').strip() and not rejected:
@@ -80,6 +168,23 @@ def select_abstract(metadata, documents):
                         'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
                 if len(spans)>1: source.update(physical_page_end=spans[-1]['physical_page'],spans=spans)
                 candidates.append({'text':text,'source':source,'revision':revision({'text':text,'source':source}),'missing_reason':''})
+    # Never use layout to break a labelled Abstract ambiguity or failed boundary.
+    if len(mains) == 1 and not starts:
+        # A later page must not turn an Introduction callout into an abstract.
+        introduction_count = sum(bool(re.fullmatch(r'(?:1[. \t]+)?introduction', line.strip(), re.I))
+                                 for page in pages for line in page['text'].splitlines())
+        doc = mains[0]
+        boxes = [(page, box) for page in pages
+                 for box in page.get('abstract_boxes', [])]
+        if len(boxes) == 1 and introduction_count == 1:
+            page, box = boxes[0]
+            text = page['text'][box['start_char']:box['end_char']]
+            if 100 <= len(text) <= 15000 and not publisher_notice(text):
+                source = {'kind': 'main_text', 'file_id': doc['file_id'],
+                    'source_sha256': doc['source_sha256'], 'physical_page': page['page'],
+                    **box, 'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
+                candidates.append({'text': text, 'source': source,
+                    'revision': revision({'text': text, 'source': source}), 'missing_reason': ''})
     if len(candidates)==1:return candidates[0]
     return {'text':'','source':None,'revision':None,'missing_reason':
             ('元数据是出版社版本说明，不能作为科研摘要；' if rejected else '原摘要元数据为空；')+
