@@ -1594,12 +1594,28 @@ async def get_paper_pdf(
 
 
 @router.post("/{paper_id}/relationships", response_model=RelationshipCreateResponse)
-async def create_paper_relationship(
+def create_paper_relationship(
     paper_id: UUID,
     payload: RelationshipCreateRequest,
     session: Session = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ):
+    from sqlalchemy.exc import OperationalError
+    from app.services.paper_db_phase import bound_lock_wait, is_lock_conflict, BUSY
+    try:
+        bound_lock_wait(session)
+        return _create_paper_relationship(paper_id, payload, session, settings)
+    except OperationalError as exc:
+        session.rollback()
+        if is_lock_conflict(exc):
+            raise HTTPException(409, BUSY) from exc
+        raise
+    except Exception:
+        session.rollback()
+        raise
+
+
+def _create_paper_relationship(paper_id, payload, session, settings):
     from app.db.models import PaperRelationship
     from app.services.rebuild_workflow_service import register_paper_source_files
     source = session.get(Paper, paper_id)

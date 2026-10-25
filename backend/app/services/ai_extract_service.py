@@ -370,81 +370,128 @@ async def _background_dispatch(*, job_id: str, database_url: str, prompt: str, o
                                attempt_token: str | None = None,
                                fallback_model: str | None = None) -> None:
     """Execute exactly one persisted attempt. fallback_model is ignored compatibility input."""
-    from app.db.session import session_scope
-    with session_scope(database_url) as session:
+    from app.db.session import get_engine
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    import copy
+
+    async def phase(operation):
+        # This descriptor never opens a transaction. Only worker-owned Sessions
+        # do DB work; run_phase shields their commit/rollback/close on cancel.
+        with Session(bind=get_engine(database_url)) as descriptor:
+            return await run_phase(descriptor, operation)
+
+    def claim(session):
         job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
         if job is None:
-            return
+            return None
         intent, progress = job.payload or {}, dict(job.progress or {})
         if (not attempt_token or intent.get("attempt_token") != attempt_token or
             intent.get("chosen_model") != primary_model or job.status != "dispatching" or
             progress.get("dispatch_started")):
-            return  # A restart/second worker must never replay an intent.
-        progress.update(dispatch_started=True,dispatch_started_at=_utcnow().isoformat())
+            return None  # Never replay a persisted started/unknown attempt.
+        progress.update(dispatch_started=True, dispatch_started_at=_utcnow().isoformat())
         job.progress = progress
+        return copy.deepcopy(intent)
 
-    def persist_event(event: dict[str, Any]) -> None:
-        with session_scope(database_url) as session:
-            job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
-            if job is None or (job.payload or {}).get("attempt_token") != attempt_token:
-                raise AiExtractError("dispatch_intent_identity_changed")
-            progress = dict(job.progress or {})
-            progress["events"] = [*(progress.get("events") or []), {**event,"recorded_at":_utcnow().isoformat()}]
-            progress["last_method"] = event["method"]
-            progress["last_rpc_phase"] = event["phase"]
-            response = event.get("response") or {}
-            result = response.get("result") if isinstance(response,dict) else {}
-            if not isinstance(result,dict):
-                result = {}
-            if event["method"] == "thread/start" and isinstance(result.get("thread"),dict):
-                if result["thread"].get("id"):
-                    progress["thread_id"] = result["thread"]["id"]
-                    progress["host_id"] = "local"
-            elif event["method"] == "thread/goal/set" and isinstance(result.get("goal"),dict):
-                progress["goal_status"] = result["goal"].get("status")
-            elif event["method"] == "turn/start" and isinstance(result.get("turn"),dict):
-                if result["turn"].get("id"):
-                    progress["turn_id"] = result["turn"]["id"]
-            if event["method"] == "thread/resume" and event["phase"] == "effective_verified":
-                progress.update(effective_model=event['effective_model'],effective_provider=event['effective_provider'],
-                    effective_permissions={'approval_policy':event['approval_policy'],'sandbox_type':event['sandbox_type']})
-            if event["phase"] == "auto_start_adopted":
-                progress["turn_id"] = event["turn_id"]
-            if event["method"] == "thread/start" and event["phase"] == "effective_verified":
-                for key in ("start_effective_model","start_effective_provider","start_collaboration_verification"):
-                    progress[key] = event[key]
-                progress["actual_inference_verified"] = False
-                progress["model_verification_status"] = "pending_rollout_verification"
-            job.progress = progress  # Each context commits before the next RPC.
+    def owned(session):
+        job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
+        if (job is None or (job.payload or {}).get("attempt_token") != attempt_token
+                or (job.payload or {}).get("chosen_model") != primary_model):
+            raise AiExtractError("dispatch_intent_identity_changed")
+        return job
+
+    def record_event(session, event):
+        job = owned(session)
+        progress = dict(job.progress or {})
+        progress["events"] = [*(progress.get("events") or []), {**event,"recorded_at":_utcnow().isoformat()}]
+        progress["last_method"] = event["method"]
+        progress["last_rpc_phase"] = event["phase"]
+        response = event.get("response") or {}
+        result = response.get("result") if isinstance(response,dict) else {}
+        if not isinstance(result,dict):
+            result = {}
+        if event["method"] == "thread/start" and isinstance(result.get("thread"),dict):
+            if result["thread"].get("id"):
+                progress["thread_id"] = result["thread"]["id"]
+                progress["host_id"] = "local"
+        elif event["method"] == "thread/goal/set" and isinstance(result.get("goal"),dict):
+            progress["goal_status"] = result["goal"].get("status")
+        elif event["method"] == "turn/start" and isinstance(result.get("turn"),dict):
+            if result["turn"].get("id"):
+                progress["turn_id"] = result["turn"]["id"]
+        if event["method"] == "thread/resume" and event["phase"] == "effective_verified":
+            progress.update(effective_model=event['effective_model'],effective_provider=event['effective_provider'],
+                effective_permissions={'approval_policy':event['approval_policy'],'sandbox_type':event['sandbox_type']})
+        if event["phase"] == "auto_start_adopted":
+            progress["turn_id"] = event["turn_id"]
+        if event["method"] == "thread/start" and event["phase"] == "effective_verified":
+            for key in ("start_effective_model","start_effective_provider","start_collaboration_verification"):
+                progress[key] = event[key]
+            progress["actual_inference_verified"] = False
+            progress["model_verification_status"] = "pending_rollout_verification"
+        job.progress = progress  # Each context commits before the next RPC.
+
+
+    async def persist_event(event):
+        # Every journal commit finishes before dispatch_agent sends/continues RPC.
+        await phase(lambda worker: record_event(worker, event))
+
+    def finish(session, result):
+        job = owned(session)
+        if job.status in RUNNING_STATUSES:
+            job.status = "running"
+            job.error = None
+            job.progress = {**(job.progress or {}),"phase":"running","needs_check":False,
+                "dispatch_mode":result.dispatch_mode,"thread_id":result.thread_id,"turn_id":result.turn_id,
+                "model":result.model,"goal_status":result.goal_status,
+                "effective_model":result.start_effective_model,"effective_provider":result.start_effective_provider,
+                "start_effective_model":result.start_effective_model,
+                "start_effective_provider":result.start_effective_provider,
+                "start_collaboration_verification":result.start_collaboration_verification,
+                "actual_inference_verified":False,"model_verification_status":"pending_rollout_verification"}
+
+    def fail(session, exc):
+        job = owned(session)
+        if job.status == "dispatching" and (job.progress or {}).get("dispatch_started"):
+            job.status = "dispatching"
+            job.error = f"{type(exc).__name__}: {exc}"[:1600]
+            job.progress = {**(job.progress or {}),"phase":"needs_check","needs_check":True,
+                            "automatic_retry":False}
+
+    try:
+        intent = await phase(claim)
+    except LockConflictError:
+        # No started marker or native call was made. Keep the durable intent;
+        # a timeout does not authorize a new attempt, task or automatic retry.
+        logger.warning("AI extract attempt %s lock busy before claim; no dispatch", job_id)
+        return
+    except asyncio.CancelledError as exc:
+        # A shielded claim may have committed before cancellation was observed.
+        # Mark only this same started identity unknown; never dispatch on cancel.
+        try:
+            await phase(lambda worker: fail(worker, exc))
+        except Exception:
+            logger.warning("AI extract attempt %s cancelled; preserve intent for readback", job_id)
+        raise
+    if intent is None:
+        return
 
     try:
         result = await dispatch_agent(prompt=prompt,objective=objective,settings=settings,
                                       model=primary_model,on_event=persist_event,
                                       **({"continuation": intent["continuation"]} if intent.get("continuation") else {}))
-        with session_scope(database_url) as session:
-            job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
-            if job is not None and job.status in RUNNING_STATUSES and (job.payload or {}).get("attempt_token") == attempt_token:
-                job.status = "running"
-                job.error = None
-                job.progress = {**(job.progress or {}),"phase":"running","needs_check":False,
-                    "dispatch_mode":result.dispatch_mode,"thread_id":result.thread_id,"turn_id":result.turn_id,
-                    "model":result.model,"goal_status":result.goal_status,
-                    "effective_model":result.start_effective_model,"effective_provider":result.start_effective_provider,
-                    "start_effective_model":result.start_effective_model,
-                    "start_effective_provider":result.start_effective_provider,
-                    "start_collaboration_verification":result.start_collaboration_verification,
-                    "actual_inference_verified":False,"model_verification_status":"pending_rollout_verification"}
-    except Exception as exc:
-        # RPC rejection, lost response, transport error, and persistence uncertainty all
-        # preserve the same identity; none authorize fallback or another create.
-        with session_scope(database_url) as session:
-            job = session.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
-            if job is not None and job.status in RUNNING_STATUSES and (job.payload or {}).get("attempt_token") == attempt_token:
-                job.status = "dispatching"
-                job.error = f"{type(exc).__name__}: {exc}"[:1600]
-                job.progress = {**(job.progress or {}),"phase":"needs_check","needs_check":True,
-                                "automatic_retry":False}
+        await phase(lambda worker: finish(worker, result))
+    except (Exception, asyncio.CancelledError) as exc:
+        # Lost RPC/persistence outcomes retain the same identity and journal.
+        # Failure recording is itself bounded; a second lock timeout must not
+        # leak a worker or turn into replay/fallback/another native task.
+        try:
+            await phase(lambda worker: fail(worker, exc))
+        except Exception:
+            logger.warning("AI extract attempt %s outcome unknown; persistence unavailable", job_id)
         logger.warning("AI extract attempt %s needs readback; no task retried", job_id)
+        if isinstance(exc, asyncio.CancelledError):
+            raise
 
 
 def _paper_library_name(session: Session, paper_id: UUID) -> str:

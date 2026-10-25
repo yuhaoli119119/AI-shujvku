@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from app.db.models import WorkflowJob
-from app.services.codex_web_dispatch import CodexWebDispatchError, _call, _verify_goal, DispatchResult
+from app.services.codex_web_dispatch import CodexWebDispatchError, _call, _emit_event, _verify_goal, DispatchResult
 
 BINDING = 'paper_native_thread_binding'
 from app.services.paper_native_models import MODELS, DEFAULT as MODEL, require_model, fallback_reason
@@ -86,7 +86,7 @@ async def prepare(ws, binding, timeout, on_event):
 async def dispatch(ws, binding, prompt, timeout, on_event):
     model = require_model(binding.get('target_model',binding.get('source_model',MODEL)))
     before = await prepare(ws, binding, timeout, on_event)
-    on_event({'method':'thread/resume','phase':'effective_verified','effective_model':model,'effective_provider':'workbuddy','approval_policy':'never','sandbox_type':'dangerFullAccess'})
+    await _emit_event(on_event, {'method':'thread/resume','phase':'effective_verified','effective_model':model,'effective_provider':'workbuddy','approval_policy':'never','sandbox_type':'dangerFullAccess'})
     tid = binding['thread_id']
     goal = await _call(ws, 'thread/goal/set', {'threadId': tid, 'objective': prompt, 'status': 'active'}, timeout, on_event)
     _verify_goal(goal, tid, active=True, objective=prompt)
@@ -102,7 +102,7 @@ async def dispatch(ws, binding, prompt, timeout, on_event):
     if new:
         if len(new) != 1 or not new[0].get('id'):
             raise CodexWebDispatchError('same_thread_auto_start_unknown')
-        on_event({'method': 'thread/read', 'phase': 'auto_start_adopted', 'thread_id': tid, 'turn_id': new[0]['id']})
+        await _emit_event(on_event, {'method': 'thread/read', 'phase': 'auto_start_adopted', 'thread_id': tid, 'turn_id': new[0]['id']})
         turn_id = new[0]['id']
     else:
         verify_thread(t, binding)

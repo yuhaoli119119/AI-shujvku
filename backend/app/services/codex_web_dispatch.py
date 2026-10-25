@@ -18,11 +18,12 @@ or another thread creation. Luna ordinary mode skips goal creation entirely.
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 import websockets
 from websockets.exceptions import WebSocketException
@@ -74,8 +75,20 @@ def dispatch_mode_for_model(model: str) -> str:
     return ALLOWED_MODEL_MODES[model]
 
 
+async def _emit_event(on_event, event):
+    """Await a durable async journal before advancing to the next native RPC.
+
+    Existing synchronous collectors remain supported. DB-owning async callers
+    use a worker phase rather than blocking the native IPC event loop.
+    """
+    if on_event is not None:
+        result = on_event(event)
+        if inspect.isawaitable(result):
+            await result
+
+
 async def _call(ws, method: str, params: dict[str, Any], timeout: float = 30.0,
-                on_event: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+                on_event: Callable[[dict[str, Any]], None | Awaitable[None]] | None = None) -> dict[str, Any]:
     """Persist a request before sending and its exact matched reply before proceeding.
 
     A single deadline bounds unrelated IPC traffic as well as send/receive.
@@ -86,7 +99,7 @@ async def _call(ws, method: str, params: dict[str, Any], timeout: float = 30.0,
                "args": [{"type": "mcp-request", "hostId": HOST_ID,
                          "request": {"id": rpc_id, "method": method, "params": params}}]}
     if on_event:
-        on_event({"method": method, "phase": "request_prepared", "rpc_id": rpc_id,
+        await _emit_event(on_event, {"method": method, "phase": "request_prepared", "rpc_id": rpc_id,
                   "outer_id": outer, "params": params})
     deadline = time.monotonic() + timeout
     try:
@@ -101,7 +114,7 @@ async def _call(ws, method: str, params: dict[str, Any], timeout: float = 30.0,
                 continue
             if msg.get("requestId") == outer and msg.get("error"):
                 if on_event:
-                    on_event({"method":method,"phase":"response_received","response":msg})
+                    await _emit_event(on_event, {"method":method,"phase":"response_received","response":msg})
                 raise CodexWebDispatchError(f"IPC invoke error for {method}")
             if msg.get("type") != "ipc-main-event" or msg.get("channel") != CHANNEL_FOR_VIEW:
                 continue
@@ -112,7 +125,7 @@ async def _call(ws, method: str, params: dict[str, Any], timeout: float = 30.0,
                 if not isinstance(inner,dict) or inner.get("id") != rpc_id:
                     continue
                 if on_event:
-                    on_event({"method":method,"phase":"response_received","response":inner})
+                    await _emit_event(on_event, {"method":method,"phase":"response_received","response":inner})
                 if inner.get("error"):
                     raise CodexWebDispatchError(f"RPC error for {method}: {json.dumps(inner['error'],ensure_ascii=False)[:800]}")
                 result = inner.get("result")
@@ -172,7 +185,7 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
                          model: str | None = None,
                          token_budget: int | None = None,
                          continuation: dict | None = None,
-                         on_event: Callable[[dict[str, Any]], None] | None = None) -> DispatchResult:
+                         on_event: Callable[[dict[str, Any]], None | Awaitable[None]] | None = None) -> DispatchResult:
     """One attempt only: Luna ordinary or DeepSeek active-goal mode.
 
     The caller durably stores an attempt intent and each stage via on_event.
@@ -207,7 +220,7 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
             if not isinstance(thread_id, str) or not thread_id:
                 raise CodexWebDispatchError("thread/start missing thread.id; outcome unknown, readback required")
             collaboration_verification = _verify_start_effective(started, chosen_model, chosen_provider)
-            on_event({"method":"thread/start","phase":"effective_verified",
+            await _emit_event(on_event, {"method":"thread/start","phase":"effective_verified",
                       "start_effective_model":started["model"],
                       "start_effective_provider":started["modelProvider"],
                       "start_collaboration_verification":collaboration_verification,
@@ -242,7 +255,7 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
                     # turn/start; adopt its first turn and never send a second one.
                     if status_type not in {"active", "idle"} or any(not isinstance(t, dict) or not isinstance(t.get("id"), str) or not t["id"] for t in turns):
                         raise CodexWebDispatchError("target auto-start identity unknown; readback required")
-                    on_event({"method": "thread/read", "phase": "auto_start_adopted",
+                    await _emit_event(on_event, {"method": "thread/read", "phase": "auto_start_adopted",
                               "thread_id": thread_id, "turn_id": turns[0]["id"]})
                     return DispatchResult(thread_id=thread_id, turn_id=turns[0]["id"], model=chosen_model,
                         goal_status=goal_status, dispatch_mode=mode, start_effective_model=started["model"],
