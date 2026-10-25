@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     auth_login_max_failures_per_ip_user: int = Field(default=8, ge=1, le=1000)
     auth_login_max_failures_per_ip: int = Field(default=30, ge=1, le=5000)
     oauth_scope_capabilities: str = (
-        "read_papers,append_notes,propose_corrections,request_parse,"
+        "read_papers,write_rebuild,append_notes,propose_corrections,request_parse,"
         "review_corrections,review_dft,create_share_links,ai_verify_content"
     )
     ai_verification_min_confidence: float = Field(default=0.9, ge=0.0, le=1.0)

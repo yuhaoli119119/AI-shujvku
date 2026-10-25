@@ -33,6 +33,16 @@ from app.oauth import router as oauth_router
 from app.security.exports import enforce_export_boundary
 from app.security.share import enforce_share_protection
 from app.utils.active_database import get_active_database_info
+from app.mcp.auth import enforce_mcp_auth
+from app.mcp.v2_server import mcp_server
+
+# MCP SDK managers are single-lifespan objects. Route through the current
+# transport so repeated application lifespans never reuse a stopped manager.
+_mcp_transport = mcp_server.streamable_http_app()
+
+
+async def _serve_mcp(scope, receive, send):
+    await _mcp_transport(scope, receive, send)
 
 
 def _check_section_schema_readonly():
@@ -62,6 +72,7 @@ def _check_section_schema_readonly():
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    global _mcp_transport
     limiter = anyio.to_thread.current_default_thread_limiter()
     limiter.total_tokens = 200
 
@@ -81,6 +92,9 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     # Old workflow_jobs cleanup removed
     async with AsyncExitStack() as stack:
+        mcp_server._session_manager = None
+        _mcp_transport = mcp_server.streamable_http_app()
+        await stack.enter_async_context(mcp_server.session_manager.run())
         import asyncio
         from app.services.ordinary_parsing import monitor
         recovery_task = asyncio.create_task(monitor(settings))
@@ -100,6 +114,7 @@ app = FastAPI(
 
 app.middleware("http")(enforce_export_boundary)
 app.middleware("http")(enforce_share_protection)
+app.middleware("http")(enforce_mcp_auth)
 
 @app.middleware("http")
 async def no_cache_frontend_assets(request, call_next):
@@ -129,6 +144,7 @@ app.include_router(references_router, prefix="/api/papers", tags=["references"])
 app.include_router(settings_router, prefix="/api/settings", tags=["settings"])
 app.include_router(share_router, prefix="/api")
 app.include_router(oauth_router)
+app.mount("/mcp", _serve_mcp)
 
 frontend_dir = Path("/frontend")
 if not frontend_dir.exists():

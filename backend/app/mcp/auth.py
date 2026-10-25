@@ -18,6 +18,7 @@ from app.mcp.context import (
 ALL_MCP_CAPABILITIES = frozenset(
     {
         "read_papers",
+        "write_rebuild",
         "append_notes",
         "propose_corrections",
         "request_parse",
@@ -130,6 +131,9 @@ def _oauth_challenge_header() -> str:
 async def enforce_mcp_auth(request: Request, call_next):
     if not request.url.path.startswith("/mcp"):
         return await call_next(request)
+
+    if not get_settings().mcp_enabled:
+        return JSONResponse({"detail": "MCP is disabled"}, status_code=503)
 
     auth_header = request.headers.get("Authorization", "")
     detail = "Missing MCP API key"

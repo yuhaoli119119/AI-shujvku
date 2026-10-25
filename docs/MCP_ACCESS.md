@@ -1,42 +1,67 @@
-# MCP 外部接入现状
+# 网页 AI 接入新版文献工作台（MCP v2）
 
-> 本文只记录**当前可用**的接入事实（2026-09-22 核对）。MCP 工具面本身属于旧流程的一部分，
-> 目标流程落地后会收敛，届时另行更新。
+ChatGPT / Claude 通过远程 MCP 自己阅读与分析文献，再将结果保存到新版图表、数据和导读中。
+服务器不替网页 AI 调用模型，不启动 Codex 对话，不自动选择或续排下一篇。
 
-## 端点与鉴权
+## 连接
 
-- 端点：`https://dft.researchlife.top/mcp`（FastMCP，Streamable HTTP）
-- 鉴权头：`Authorization: Bearer <MCP_KEY>`
-- 不带 key → `401`（网关对 `/mcp` 关闭了会话校验，交给后端用 Bearer 鉴权）
-- key 与能力清单存在服务器 `/opt/literature-ai/.env` 的 `LITAI_MCP_API_KEYS`
-  （格式 `来源|显示名|key|能力`）。
-- **key 绝不写进任何会外传的文档、脚本、截图或对话**；泄露即在 `.env` 删除/更换该条并
-  `docker compose up -d --no-deps --force-recreate backend` 吊销。
+- Server URL：`https://dft.researchlife.top/mcp`（Streamable HTTP）。
+- 网页客户端使用 OAuth；客户端 ID 为 `chatgpt-literature-ai`，密钥和授权登录凭据沿用服务器私有配置，禁止贴入聊天或提交仓库。
+- 保留已有 OAuth 回调白名单。新连接若产生新回调，必须精确核对后追加，不能开放任意回调。
+- 内部客户端仍可使用既有 Bearer MCP key，但必须显式授予所需权限。
+- `read_papers` 只读；`write_rebuild` 才能建立本篇工作与保存新版成果。旧 `propose_corrections` / `request_parse` 权限不会自动获得新写权限。
+- 旧 OAuth token 不会凭空增加写权限；需在网页重新连接并授权新 scope。旧工具名不再兼容，客户端应刷新工具列表。
 
-外部 AI 的配置示例（key 用实际值替换）：
+ChatGPT 的具体入口随客户端版本可能显示为插件、应用或自定义 MCP；在创建连接时选择 OAuth。
+连接成功只代表协议可用；必须另验真实资料读取和工作台结果显示。
 
-```json
-{
-  "mcpServers": {
-    "literature-ai": {
-      "url": "https://dft.researchlife.top/mcp",
-      "headers": { "Authorization": "Bearer <MCP_KEY>" }
-    }
-  }
-}
-```
+## 工具（20 项）
 
-## 权限分层（不要越层给权限）
+| 工具 | 用途 |
+|---|---|
+| list_libraries_and_papers | 按库、标题、DOI 或编号查主文献，稳定 paper_id 与有界分页 |
+| get_paper_workspace | 新版已有成果、来源、修订、合同、缺项及自身外部工作状态 |
+| list_paper_files | 当前正文/SI、首选文件、历史与文件集修订 |
+| read_source_text | 带来源哈希的 PDF 页或 DOCX OOXML 段落/表格 |
+| view_source_page | 返回真实 PDF 物理页的 MCP 图片内容 |
+| view_figure_image | 返回本篇已有图表的 MCP 图片内容 |
+| list_data_rows | 本篇新版数据行、精度、来源、缺失及冲突 |
+| get_reading_context | 摘要与导读输入合同；全文另用分页读取工具 |
+| get_quality_report | 有界质量问题；不代表科学 accepted |
+| get_data_templates | 当前反应模板与字段 |
+| begin_paper_work | 人工核对后建立单篇工作和占用，备份旧成果，不派发模型 |
+| save_figure_assets | 保存图表、表格资料与解释 |
+| crop_figure | 按真实 PDF 区域生成不可变裁图 |
+| preview_data_rows | 在独立回滚事务中预检数据，无持久写入 |
+| save_data_rows | 逐行逐格保存带来源的数据，返回部分失败回执 |
+| save_sections | 可选的来源化章节解释 |
+| save_reading_assistance | 保存摘要翻译与中文导读 |
+| report_paper_work | 持久报告本次文件阶段、具体缺项和待核实情况 |
+| finish_paper_work | 根据读回结束为 completed/partial/failed |
+| get_write_receipt | 读取自身工作历史回执，不冒充当前结果 |
 
-| 层级 | 谁 | 能做什么 | 接入方式与凭据 |
-|---|---|---|---|
-| L1 代码/文档 | 任何 AI | 读改代码、读文档 | 服务器上的仓库目录（不经 MCP） |
-| L2 数据查询 | 外部 AI / IDE | 只读 + 受控写入文献数据 | MCP 端点 + 仅 MCP key（可吊销、能力受限） |
-| L3 服务器运维 | 服务器上的会话（如 Codex-web） | docker、备份、改 `.env`、重启 | SSH / 服务器本地权限；**绝不给外部 AI** |
+除无参数的 get_data_templates 外，各工具参数位于 `request` 对象中；以 tools/list 的 inputSchema 为准。
 
-## 与目标流程的关系
+## 每篇使用方法
 
-- 检索、读页、读图这类**只读**能力在目标流程里仍然需要；
-- 旧流程里围绕"审核对象、批量验收、多层门禁"的写入口，属于被重建替换的部分，
-  不要把它们的调用方式继续当作新流程的规范；
-- 目标流程的数据规则见 [`DATA_RULES.md`](DATA_RULES.md)。
+1. 查找论文，核对稳定 `paper_id`；阅读 workspace、当前正文/SI、已有结果和当前占用。
+2. 用户选定有限范围后，使用新的稳定 `request_id`、当前 `file_set_revision` 与明确 `file_ids` 调用 begin_paper_work；有未解决原生/外部写者或独审任务则拒绝。
+3. 工具返回 `work_id`、`work_revision`。所有保存、回报和结束均携带自身 work_id 和最新修订作为 expected_revision。每个新操作使用新 request_id；丢失响应时重放完全相同的原请求。
+4. 逐文件读取原文，必要时看真实原页，保存来源化图表和数据。每个非空值必须有证据；保留原精度、单位、材料与条件，估读标识和依据必填。看不清、未报告留空并写原因。
+5. 检查回执逐格 `errors/outcome/persisted` 并读回。HTTP/MCP 调用成功不等于全部保存；409 后重新读取核对，不盲换 ID 覆盖。
+6. 中文导读使用当前 reading context 的 input_revision 和摘要来源修订；必须把所有当前来源纳入本次工作，避免用未授权来源生成整篇导读。保留原文和其他已有导读命名空间。
+7. 读回后 finish。completed 需要每个文件的 read 完成，以及图表/数据成果；没有可提取内容的阶段用 not_applicable 并给出真实原因。部分结果可用 partial 结束，成功成果保留。结果不代表科学 accepted。
+
+外部工作无自动超时释放：断线保留占用，重连读取原 work_id 状态。来源替换、哈希变化、未知占用需受控核对，不能为继续而删除原任务或改借他人的工作 ID。
+
+## 备份、身份与边界
+
+begin 在允许新写者进入前，给本篇现有主记录、文件元数据、图表、数据、来源和章节创建不可变 JSON 备份，位于服务器项目 data 内的 `storage_root/mcp-v2-backups/<paper_id>/`。原 PDF、SI 和历史图片不删除；每次实际写入追加来源和事务审计。
+actor 来自服务器验证的 OAuth/key 身份，客户端不能自报账号；工作台 Cookie/CSRF 保持原规则，MCP 不伪造工作台会话。
+无任意 URL/SQL/文件路径工具，无删除或清库工具，无原生任务派发工具；外部 AI 不获得 SSH 或服务器凭据。
+
+## 建议首次提示词
+
+> 使用 Literature AI 查询《论文标题》。先核对 paper_id、正文/SI、已有成果、具体缺项和当前占用；先只读汇报。经我选定本篇范围后，由你阅读原文并通过新版工具保存结果，不启动其他 AI，不自动处理下一篇。缺失或看不清保留为空，保留来源与原始精度，最后读回并报告已保存和未完成范围。
+
+代码、GitHub 发布、真实域名 MCP 协议和网页版 ChatGPT/Claude 操作须分别验收；不能只凭源码或 OAuth discovery 声称已接通。

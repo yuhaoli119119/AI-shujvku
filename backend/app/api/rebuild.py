@@ -217,6 +217,30 @@ async def _require_work_package_session(request: Request) -> SessionState:
     return await require_session(request, settings=get_settings())
 
 
+def _guard_request_work(session, request, auth, body=None):
+    from app.db.models import RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset
+    from app.services.external_paper_work import guard_workbench_write
+    paper_id = request.path_params.get("paper_id") or (body.get("paper_id") if isinstance(body, dict) else None)
+    if not paper_id:
+        for key, model in (("row_id", RebuildDataRow), ("value_id", RebuildDataValue),
+                           ("source_id", RebuildValueSource), ("asset_id", RebuildVisualAsset)):
+            if request.path_params.get(key):
+                try:
+                    record = session.get(model, UUID(str(request.path_params[key])))
+                except ValueError:
+                    raise HTTPException(422, "invalid_target_id")
+                if record:
+                    paper_id = record.paper_id
+                break
+    if paper_id:
+        try:
+            guard_workbench_write(session, UUID(str(paper_id)), auth.username)
+        except RebuildWorkflowError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError:
+            raise HTTPException(422, "invalid_paper_id")
+
+
 @router.put("/papers/{paper_id}/processing-status")
 async def report_paper_processing_status(
     paper_id: UUID,
@@ -278,16 +302,19 @@ async def rebuild_paper(paper_id: UUID, session: Session = Depends(get_db_sessio
         raise _http_error(exc) from exc
 
 
-async def _require_section_write_session(request: Request) -> SessionState:
+async def _require_section_write_session(request: Request, session: Session = Depends(get_db_session)) -> SessionState:
     auth = await _require_work_package_session(request)
     if not origin_allowed(request, get_settings()):
         raise HTTPException(status_code=403, detail="cross_origin_request_blocked")
     if not csrf_token_valid(request, auth):
         raise HTTPException(status_code=403, detail="csrf_token_invalid")
     try:
-        json.dumps(await request.json(), allow_nan=False)
+        body = await request.json()
+        json.dumps(body, allow_nan=False)
     except (ValueError, TypeError, RecursionError) as exc:
         raise HTTPException(status_code=422, detail="section_body_must_be_finite_json") from exc
+    # Share the endpoint transaction: keep occupancy locked through the write.
+    _guard_request_work(session, request, auth, body)
     return auth
 
 
@@ -972,12 +999,13 @@ async def save_history_registration(paper_id: UUID, payload: HistoryRegistration
         raise
 
 
-async def _require_file_write_session(request: Request) -> SessionState:
+async def _require_file_write_session(request: Request, session: Session = Depends(get_db_session)) -> SessionState:
     auth = await _require_work_package_session(request)
     if not origin_allowed(request, get_settings()):
         raise HTTPException(403, "cross_origin_request_blocked")
     if not csrf_token_valid(request, auth):
         raise HTTPException(403, "csrf_token_invalid")
+    _guard_request_work(session, request, auth)
     return auth
 
 
@@ -1551,16 +1579,23 @@ def _import_rows(session, payload):
 
 
 
-async def _require_identity_correction_session(request: Request) -> SessionState:
+async def _require_identity_correction_session(request: Request, session: Session = Depends(get_db_session)) -> SessionState:
     # Adapt the helper's optional Settings argument explicitly. Exposing it
     # directly to Depends would make FastAPI treat Settings as a second body.
     auth = await require_session(request, settings=get_settings())
     # Python's JSON parser accepts NaN/Infinity. Reject them before FastAPI's
     # validation error handler tries to serialize a non-finite error input.
     try:
-        json.dumps(await request.json(), allow_nan=False)
+        body = await request.json()
+        json.dumps(body, allow_nan=False)
     except (ValueError, TypeError, RecursionError) as exc:
         raise HTTPException(status_code=422, detail="identity_body_must_be_finite_json") from exc
+    # Authenticate the mutation before holding the shared paper occupancy lock.
+    if not origin_allowed(request, get_settings()):
+        raise HTTPException(403, "cross_origin_request_blocked")
+    if not csrf_token_valid(request, auth):
+        raise HTTPException(403, "csrf_token_invalid")
+    _guard_request_work(session, request, auth, body)
     return auth
 
 
@@ -1698,9 +1733,9 @@ async def read_rebuild_value(value_id: UUID, session: Session = Depends(get_db_s
     return serialize_value(value, sources)
 
 
-async def _require_value_write_session(request: Request) -> SessionState:
+async def _require_value_write_session(request: Request, session: Session = Depends(get_db_session)) -> SessionState:
     try:
-        return await _require_section_write_session(request)
+        return await _require_section_write_session(request, session)
     except HTTPException as exc:
         # Keep the value endpoint's existing finite-JSON error contract.
         if exc.status_code == 422 and exc.detail == "section_body_must_be_finite_json":

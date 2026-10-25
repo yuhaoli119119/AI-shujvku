@@ -180,12 +180,17 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
 
 
 def save(session, paper_id, body, settings, actor):
+    from app.services.external_paper_work import guard_workbench_write, VERSION as MCP_VERSION
+    guard_workbench_write(session, paper_id, actor, body.job_id)
     from app.services.rebuild_queue import lock_scheduler
     lock_scheduler(session)
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==body.job_id).with_for_update())
-    if not job or job.type not in (TYPE,'ai_extract_rebuild') or job.payload.get('paper_id')!=str(paper_id):
+    external = bool(job and job.type == 'rebuild_external_extract' and
+                    job.payload.get('protocol') == MCP_VERSION and job.payload.get('actor') == actor and
+                    session.info.get(MCP_VERSION) == job.job_id)
+    if not job or (job.type not in (TYPE,'ai_extract_rebuild') and not external) or job.payload.get('paper_id')!=str(paper_id):
         raise ValueError('reading_job_not_owned')
     data=body.model_dump(mode='json')
     abstract_only=body.save_mode=='abstract_only'

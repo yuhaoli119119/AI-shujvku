@@ -109,6 +109,8 @@ def audit_ids(request, payload):
 
 
 def run_audited(session, *, paper_id, operation, payload, actor, request_id, task_id, mutate, receipt_serializer=safe_json):
+    from app.services.external_paper_work import guard_workbench_write
+    guard_workbench_write(session, paper_id, actor, task_id)
     if not actor or not actor.strip():
         raise RebuildWorkflowError("mutation_actor_required")
     if session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update()) is None:
