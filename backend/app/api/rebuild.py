@@ -986,7 +986,7 @@ async def preview_extraction_check(paper_id: UUID, payload: StageCheckRequest,
 
 
 @router.put("/papers/{paper_id}/extraction-checks")
-async def write_extraction_check(paper_id: UUID, payload: StageCheckRequest,
+def write_extraction_check(paper_id: UUID, payload: StageCheckRequest,
     session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
     from app.services.staged_extraction import save_check
     from app.services.rebuild_acceptance import _locked_paper
@@ -1150,14 +1150,14 @@ async def associate_rebuild_pdf(
             'original_filename': safe_name, 'sha256': digest.hexdigest(), 'file_size': size}
     fingerprint = _hash({'body': body, 'provided_fields': sorted(form.keys()),
                          'supersede_file_ids_raw': supersede_file_ids, 'operation': 'upload'})
-    try:
-        replay = locked_replay(session, paper_id, str(request_id), fingerprint, auth.username)
+    def persist(worker):
+        replay = locked_replay(worker, paper_id, str(request_id), fingerprint, auth.username)
         if replay is not None:
             return replay
-        before = validate_change(session, paper_id, body)
+        before = validate_change(worker, paper_id, body)
         # Validate CAS/ownership and duplicates before persisting any upload.
         from app.db.models import RebuildPaperFile
-        record = session.scalar(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id,
+        record = worker.scalar(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id,
             RebuildPaperFile.role == role, RebuildPaperFile.sha256 == digest.hexdigest()))
         created = record is None
         if record is not None:
@@ -1178,17 +1178,22 @@ async def associate_rebuild_pdf(
                     raise HTTPException(409, 'immutable_upload_content_mismatch')
             else:
                 with path.open('xb') as handle:
-                    while chunk := await file.read(1024 * 1024):
+                    while chunk := file.file.read(1024 * 1024):
                         handle.write(chunk)
             record = RebuildPaperFile(paper_id=paper_id, role=role, storage_path=relative,
                 original_filename=safe_name, sha256=digest.hexdigest(), file_size=size)
-            session.add(record); session.flush()
-        result = apply_change(session, paper_id, body, auth.username, fingerprint, record, before, created=created)
-        session.commit()
+            worker.add(record); worker.flush()
+        result = apply_change(worker, paper_id, body, auth.username, fingerprint, record, before, created=created)
         return result
-    except Exception:
-        session.rollback()
-        raise
+
+    # Upload I/O above is async. The completed spool is handed exclusively to
+    # this worker until run_phase finishes (also on cancellation); the request
+    # Session never enters the worker and no DB transaction crosses an await.
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    try:
+        return await run_phase(session, persist)
+    except LockConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/papers/{paper_id}/files")
@@ -1678,7 +1683,7 @@ async def _require_identity_correction_session(request: Request, session: Sessio
 
 
 @router.put("/rows/{row_id}/identity")
-async def correct_rebuild_row_identity(
+def correct_rebuild_row_identity(
     row_id: UUID,
     payload: RebuildRowIdentityCorrectionRequest,
     request: Request,
