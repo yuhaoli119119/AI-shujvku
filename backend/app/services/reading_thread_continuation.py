@@ -137,37 +137,61 @@ async def register(session, proof, settings):
     import json
     import websockets
     from app.db.models import Paper, AuditLog
-    from app.services.rebuild_queue import lock_scheduler, paper_busy
-    lock_scheduler(session)
+    from app.services.paper_db_phase import run_phase
+    from app.services.rebuild_queue import paper_busy
     pid = proof['paper_id']
-    paper = session.get(Paper, pid)
-    if not paper or paper.paper_code != proof['code']:
-        raise ValueError('same_thread_paper_identity_mismatch')
-    if paper_busy(session, pid):
-        raise ValueError('same_thread_paper_busy')
     tid = proof['thread_id']
     jid = 'paper-thread-' + hashlib.sha256(tid.encode()).hexdigest()[:32]
-    old = session.get(WorkflowJob, jid)
-    if old:
-        if old.payload.get('paper_id') != pid or old.payload.get('actor') != proof['actor']:
-            raise ValueError('same_thread_binding_identity_reused')
+
+    def snapshot(worker):
+        paper = worker.get(Paper, pid)
+        if not paper or paper.paper_code != proof['code']:
+            raise ValueError('same_thread_paper_identity_mismatch')
+        if paper_busy(worker, pid):
+            raise ValueError('same_thread_paper_busy')
+        old = worker.get(WorkflowJob, jid)
+        if old:
+            if old.payload.get('paper_id') != pid or old.payload.get('actor') != proof['actor']:
+                raise ValueError('same_thread_binding_identity_reused')
+            return {'existing': True, 'job_id': jid, 'paper': paper}
+        for other in worker.scalars(select(WorkflowJob).where(
+                WorkflowJob.progress.op('->>')('thread_id') == tid)):
+            if (other.payload or {}).get('paper_id') != pid:
+                raise ValueError('same_thread_cross_paper_binding')
+        return {'existing': False, 'job_id': jid, 'paper': paper}
+
+    checked = await run_phase(session, snapshot)
+    if checked['existing']:
         return jid
-    # One native thread may never be registered to a different paper.
-    for other in session.scalars(select(WorkflowJob).where(WorkflowJob.progress.op('->>')('thread_id') == tid)):
-        if (other.payload or {}).get('paper_id') != pid:
-            raise ValueError('same_thread_cross_paper_binding')
     timeout = settings.codex_web_dispatch_timeout_seconds
     events = []
+    # No transaction, row lock, or scheduler advisory lock exists during IPC.
     async with websockets.connect(settings.codex_web_ipc_uri, open_timeout=timeout, max_size=32*1024*1024) as ws:
         if proof.get('archived'):
             # Host verifier proved the archived rollout and its terminal audit turn.
             # Restore that original thread only; never create a replacement.
             await _call(ws, 'thread/unarchive', {'threadId':tid}, timeout, events.append)
         await prepare(ws, {**proof,'source_model':proof.get('model',MODEL)}, timeout, events.append)
-    session.add(WorkflowJob(job_id=jid, type=BINDING, status='completed', library_name=paper.library_name,
-        payload={'paper_id':pid, 'actor':proof['actor'], 'chosen_model':proof.get('model',MODEL), 'ownership_proof':proof},
-        progress={'thread_id':tid, 'turn_id':proof['turn_id'], 'native_terminal_verified':True, 'events':events}))
-    session.add(AuditLog(action='paper_thread_registered', source='host_coordinator_receipt', paper_id=pid,
-        target_type='workflow_job', target_id=jid, payload={'actor':proof['actor'], 'proof_sha256':hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest()}))
-    session.flush()
-    return jid
+    def apply(worker):
+        paper = worker.scalar(select(Paper).where(Paper.id == pid).with_for_update())
+        if not paper or paper.paper_code != proof['code']:
+            raise ValueError('same_thread_paper_identity_mismatch')
+        old = worker.scalar(select(WorkflowJob).where(WorkflowJob.job_id == jid).with_for_update())
+        if old:
+            if old.payload.get('paper_id') != pid or old.payload.get('actor') != proof['actor']:
+                raise ValueError('same_thread_binding_identity_reused')
+            return jid
+        if paper_busy(worker, pid):
+            raise ValueError('same_thread_paper_busy')
+        for other in worker.scalars(select(WorkflowJob).where(
+                WorkflowJob.progress.op('->>')('thread_id') == tid)):
+            if (other.payload or {}).get('paper_id') != pid:
+                raise ValueError('same_thread_cross_paper_binding')
+        worker.add(WorkflowJob(job_id=jid, type=BINDING, status='completed', library_name=paper.library_name,
+            payload={'paper_id':pid, 'actor':proof['actor'], 'chosen_model':proof.get('model',MODEL), 'ownership_proof':proof},
+            progress={'thread_id':tid, 'turn_id':proof['turn_id'], 'native_terminal_verified':True, 'events':events}))
+        worker.add(AuditLog(action='paper_thread_registered', source='host_coordinator_receipt', paper_id=pid,
+            target_type='workflow_job', target_id=jid, payload={'actor':proof['actor'], 'proof_sha256':hashlib.sha256(json.dumps(proof, sort_keys=True).encode()).hexdigest()}))
+        worker.flush()
+        return jid
+    return await run_phase(session, apply)

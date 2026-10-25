@@ -98,10 +98,19 @@ def test_unverified_fallback_or_changed_registered_source_is_rejected(reading_en
 
 def test_full_save_fallback_requires_explicit_source_revision(reading_env):
     e=reading_env;source_pdf(e);j=create(e);p=body(e,j['job_id']);ctx=e['client'].get(base(e)+'/context').json()
+    source=ctx['abstract_for_translation']['source']
     assert e['client'].post(base(e),json=p).status_code==409
     p['abstract_source_revision']=ctx['abstract_for_translation']['revision']
     r=e['client'].post(base(e),json=p);assert r.status_code==200,r.text
-    with e['factory']() as s:assert s.get(Paper,e['paper']).abstract is None
+    with e['factory']() as s:
+        paper=s.get(Paper,e['paper'])
+        assert paper.abstract is None
+        # B109: an empty metadata abstract must not replace the verified PDF
+        # abstract hash with SHA256("").
+        assert source['kind']=='main_text' and source['text_sha256']!=hashlib.sha256(b'').hexdigest()
+        assert paper.reading_guide['beginner_zh']['abstract_source_sha256']==source['text_sha256']
+        assert paper.reading_guide['abstract_translation']['original_text']==ctx['abstract_for_translation']['text']
+        assert paper.reading_guide['abstract_translation']['source']==source
 
 
 def test_metadata_priority_and_existing_chinese_is_preserved(reading_env):

@@ -49,10 +49,19 @@ logger = logging.getLogger(__name__)
 JOB_TYPE = "ai_extract_rebuild"
 RUNNING_STATUSES = {"queued", "dispatching", "running"}
 TERMINAL_STATUSES = {"completed", "failed"}
+_DISPATCH_TASKS: set[asyncio.Task] = set()
 
 
 class AiExtractError(Exception):
     """Business-level error for AI extract job operations."""
+
+
+def _arm_dispatches(dispatches: list[dict[str, Any]]) -> None:
+    """Arm each committed intent exactly once after its database phase."""
+    for kwargs in dispatches:
+        task = asyncio.create_task(_background_dispatch(**kwargs))
+        _DISPATCH_TASKS.add(task)
+        task.add_done_callback(_DISPATCH_TASKS.discard)
 
 
 def _utcnow() -> datetime:
@@ -243,14 +252,42 @@ async def create_ai_extract_job(
     source_job_id: str | None = None,
     actor: str | None = None,
 ) -> dict[str, Any]:
+    from functools import partial
+    from app.services.paper_db_phase import observe_and_apply
+    dispatches = []
+    try:
+        result = await observe_and_apply(session, partial(_create_ai_extract_phase,
+            paper_id=paper_id, settings=settings, model=model, request_id=request_id,
+            file_ids=file_ids, retry=retry, source_job_id=source_job_id, actor=actor,
+            dispatches=dispatches), after_commit=lambda _: _arm_dispatches(dispatches))
+    except ValueError as exc:
+        raise AiExtractError(str(exc)) from exc
+    return result
+
+
+def _create_ai_extract_phase(
+    session: Session,
+    paper_id: UUID,
+    settings: Settings,
+    *,
+    model: str | None = None,
+    request_id: str | None = None,
+    file_ids: list[str] | None = None,
+    retry: bool = False,
+    source_job_id: str | None = None,
+    actor: str | None = None,
+    observation, dispatches,
+) -> dict[str, Any]:
     """Create and dispatch an AI extract job for one paper.
 
     Returns the serialized job. If a running job exists, returns it instead
     of creating a duplicate.
     """
     # Same-paper requests serialize before checking or inserting any job intent.
-    from app.services.rebuild_queue import lock_scheduler, paper_busy, TYPE as PIPELINE_TYPE
-    lock_scheduler(session)
+    from app.services.rebuild_queue import paper_busy, TYPE as PIPELINE_TYPE
+    # The Paper row is the per-paper writer mutex. The global queue advisory lock
+    # is reserved for queue-wide control/claim operations so distinct papers do
+    # not wait on one another.
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise AiExtractError("paper_not_found")
@@ -281,9 +318,9 @@ async def create_ai_extract_job(
         return result
     chosen_model = model or settings.codex_web_default_model
     chosen_mode = dispatch_mode_for_model(chosen_model)
-    from app.services.reading_thread_continuation import confirmed_source
+    from app.services.paper_db_phase import require_source
     try:
-        continuation = await confirmed_source(session, paper_id, settings, source_job_id, actor)
+        continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
     except ValueError as exc:
         raise AiExtractError(str(exc)) from exc
     if continuation and model is None:
@@ -322,7 +359,7 @@ async def create_ai_extract_job(
                   "model_verification_status":"pending_start_ack"})
     session.add(job)
     session.commit()  # Durable intent precedes scheduling and every native request.
-    asyncio.create_task(_background_dispatch(job_id=job.job_id,database_url=settings.database_url,
+    dispatches.append(dict(job_id=job.job_id,database_url=settings.database_url,
         prompt=prompt,objective=objective,settings=settings,primary_model=chosen_model,
         attempt_token=attempt_token))
     return serialize_job(job, session)
@@ -415,36 +452,36 @@ def _paper_library_name(session: Session, paper_id: UUID) -> str:
     return paper.library_name if paper else "默认文献库"
 
 
-async def sync_job_status(
-    session: Session,
-    job: WorkflowJob,
-    settings: Settings,
-) -> WorkflowJob:
-    """Read-through: if the job is running, check Codex-web thread status.
+async def sync_job_status(session: Session, job: WorkflowJob, settings: Settings) -> WorkflowJob:
+    from app.services.paper_db_phase import observe_job
+    mode=(job.progress or {}).get('dispatch_mode') or (job.payload or {}).get('chosen_mode')
+    result = await observe_job(session, job, settings, _apply_job_status,
+                               include_goal=mode != 'codex_web_ordinary')
+    if ((result.progress or {}).get('needs_attention')
+            and getattr(settings, 'rebuild_native_stop_enabled', False)):
+        from app.services.rebuild_native_stop import protective_stop
+        jid = result.job_id
+        await protective_stop(settings.database_url, jid, settings=settings)
+        # The stop adapter owns its separate journal; do not merge stale state.
+        from app.services.paper_db_phase import run_phase
+        result = await run_phase(session, lambda s: s.scalar(
+            select(WorkflowJob).where(WorkflowJob.job_id == jid)))
+        return session.merge(result, load=False)
+    return result
 
-    Updates the job status in the database if the agent has completed or
-    failed. If the thread cannot be read, the job stays running (no false
-    failure).
-    """
-    if job.status not in RUNNING_STATUSES:
-        return job
+
+def _apply_job_status(session, job, settings, status):
+    from app.services.codex_web_dispatch import matches_owned_attempt
+    from app.services.ordinary_parsing import recover_auto_started_turn
+    if job.status not in RUNNING_STATUSES:return job
     progress = dict(job.progress or {})
-    ordinary = (job.payload or {}).get("parse_contract") == "ordinary_parse_v1"
-    if progress.get("needs_attention") and not ordinary:
-        return job  # Explicit reconciliation is required; no perpetual native reads.
-    thread_id = progress.get("thread_id")
+    ordinary = (job.payload or {}).get('parse_contract') == 'ordinary_parse_v1'
+    if progress.get('needs_attention') and not ordinary:return job
+    thread_id = progress.get('thread_id')
     if not thread_id:
-        # Missing identity after restart/unknown start cannot be recovered by creating.
-        session.refresh(job, with_for_update=True)
-        job.progress = {**(job.progress or {}),"phase":"needs_check","needs_check":True,
-                        "automatic_retry":False}
-        session.flush()
-        return job
-    from app.services.codex_web_dispatch import read_thread_status, matches_owned_attempt
-    mode = progress.get("dispatch_mode") or (job.payload or {}).get("chosen_mode")
-    status = await read_thread_status(thread_id,settings=settings,include_goal=mode != "codex_web_ordinary")
-    # Do not hold a DB lock while awaiting IPC; merge fresh progress after readback.
-    session.refresh(job, with_for_update=True)
+        job.progress = {**progress,'phase':'needs_check','needs_check':True,'automatic_retry':False}
+        session.flush();return job
+    mode=progress.get('dispatch_mode') or (job.payload or {}).get('chosen_mode')
     if job.status not in RUNNING_STATUSES:
         return job
     progress = dict(job.progress or {})
@@ -462,13 +499,6 @@ async def sync_job_status(
             job.progress = {**progress, "phase": "needs_attention", "needs_attention": True,
                             "needs_check": True, "automatic_retry": False}
             session.flush()
-            if getattr(settings, "rebuild_native_stop_enabled", False):
-                # This read-through path owns only job-status metadata. Release
-                # its row lock before the durable stop adapter journals RPCs.
-                session.commit()
-                from app.services.rebuild_native_stop import protective_stop
-                await protective_stop(settings.database_url, job.job_id, settings=settings)
-                session.refresh(job)
             return job
     if status is None:
         job.progress = {**progress, "phase": "needs_check", "needs_check": True, "automatic_retry": False}

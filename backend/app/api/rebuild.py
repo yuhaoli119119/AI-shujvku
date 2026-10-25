@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import logging
 import mimetypes
 import re
 from pathlib import Path
@@ -89,6 +90,7 @@ from app.schemas.rebuild import (ExtractionFreezeRequest, ExtractionReviewReques
 
 router = APIRouter(tags=["rebuild"])
 MAX_UPLOAD_BYTES = 30 * 1024 * 1024
+logger = logging.getLogger(__name__)
 
 
 def _http_error(exc: RebuildWorkflowError) -> HTTPException:
@@ -123,10 +125,8 @@ async def create_ai_extract_job_endpoint(
                                            file_ids=[str(fid) for fid in file_ids] if file_ids else None, retry=retry,
                                            source_job_id=source_job_id, actor=_auth.username)
     except AiExtractError as exc:
-        session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
-        session.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"ai_extract_job_failed: {type(exc).__name__}: {exc}",
@@ -144,7 +144,11 @@ async def get_latest_ai_extract_job_endpoint(
     If the job is still running, performs a read-through check of the
     Codex-web thread status and updates the job accordingly.
     """
-    job = get_latest_job(session, paper_id)
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    try:
+        job = await run_phase(session, lambda worker: get_latest_job(worker, paper_id))
+    except LockConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if job is None:
         return {
             "job_id": None,
@@ -157,11 +161,12 @@ async def get_latest_ai_extract_job_endpoint(
     # Read-through: sync status from Codex-web if running
     if job.status in ("queued", "dispatching", "running"):
         try:
-            job = await sync_job_status(session, job, settings)
-            session.commit()
+            with Session(bind=session.get_bind(), autoflush=False,
+                         expire_on_commit=False) as phase_session:
+                job = await sync_job_status(phase_session, job, settings)
         except Exception:
-            session.rollback()
-    return serialize_job(job, session)
+            pass
+    return await run_phase(session, lambda worker: serialize_job(job, worker))
 
 
 @router.get("/library-progress")
@@ -184,32 +189,54 @@ async def current_processing_statuses(
     from app.services.paper_processing_status import processing_statuses
     import asyncio
     from datetime import datetime
+    from app.services.paper_db_phase import LockConflictError, job_pin, run_phase
     query = select(Paper.id)
     if library_name is not None:
         query = query.where(readonly_library_clause(library_name))
-    ids = list(session.scalars(query))
-    # Read-through native tasks, even when the AI task page is closed. Fair order
-    # keeps an unreachable task from starving the others. External agents report
-    # their own lifecycle through the shared write endpoint below.
-    jobs = list(session.scalars(select(WorkflowJob).where(
-        WorkflowJob.type == JOB_TYPE, WorkflowJob.status.in_(['queued','dispatching','running']),
-        WorkflowJob.payload.op('->>')('paper_id').in_([str(pid) for pid in ids])
-    ).order_by(WorkflowJob.updated_at.asc()).limit(4))) if ids else []
+    def load(worker):
+        paper_ids = list(worker.scalars(query))
+        jobs = list(worker.scalars(select(WorkflowJob).where(
+            WorkflowJob.type == JOB_TYPE, WorkflowJob.status.in_(['queued','dispatching','running']),
+            WorkflowJob.payload.op('->>')('paper_id').in_([str(pid) for pid in paper_ids])
+        ).order_by(WorkflowJob.updated_at.asc()).limit(4))) if paper_ids else []
+        return paper_ids, jobs
+    try:
+        ids, jobs = await run_phase(session, load)
+    except LockConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     for job in jobs:
         job_id = job.job_id
+        pin = job_pin(job)
         old_read_at = ((job.progress or {}).get('readback') or {}).get('read_at')
         try:
-            job = await asyncio.wait_for(sync_job_status(session,job,settings),timeout=5)
-            if job.status in ('queued','dispatching','running') and ((job.progress or {}).get('readback') or {}).get('read_at') == old_read_at:
-                job.progress = {**(job.progress or {}),'needs_check':True,'phase':'needs_check','status_checked_at':datetime.utcnow().isoformat()}
-            session.commit()
+            with Session(bind=session.get_bind(), autoflush=False,
+                         expire_on_commit=False) as phase_session:
+                job = await asyncio.wait_for(sync_job_status(phase_session, job, settings), timeout=5)
+            if (job.status in ('queued','dispatching','running') and
+                    ((job.progress or {}).get('readback') or {}).get('read_at') == old_read_at):
+                def mark(worker):
+                    current = worker.scalar(select(WorkflowJob).where(
+                        WorkflowJob.job_id == job_id).with_for_update())
+                    if current and job_pin(current) == pin and current.status in ('queued','dispatching','running'):
+                        current.progress = {**(current.progress or {}), 'needs_check': True,
+                                            'phase': 'needs_check',
+                                            'status_checked_at': datetime.utcnow().isoformat()}
+                    return current
+                await run_phase(session, mark)
         except Exception:
-            session.rollback()
-            unknown = session.get(WorkflowJob,job_id)
-            if unknown and unknown.status in ('queued','dispatching','running'):
-                unknown.progress = {**(unknown.progress or {}),'needs_check':True,'phase':'needs_check','status_checked_at':datetime.utcnow().isoformat()}
-                session.commit()
-    statuses = processing_statuses(session,ids)
+            def mark_unknown(worker):
+                current = worker.scalar(select(WorkflowJob).where(
+                    WorkflowJob.job_id == job_id).with_for_update())
+                if current and current.status in ('queued','dispatching','running'):
+                    current.progress = {**(current.progress or {}), 'needs_check': True,
+                                        'phase': 'needs_check',
+                                        'status_checked_at': datetime.utcnow().isoformat()}
+                return current
+            try:
+                await run_phase(session, mark_unknown)
+            except Exception:
+                pass
+    statuses = await run_phase(session, lambda worker: processing_statuses(worker, ids))
     return {'items':[{'paper_id':str(pid),'processing_status':status} for pid,status in statuses.items()]}
 
 
@@ -217,7 +244,7 @@ async def _require_work_package_session(request: Request) -> SessionState:
     return await require_session(request, settings=get_settings())
 
 
-def _guard_request_work(session, request, auth, body=None):
+def _guard_request_work_phase(session, request, auth, body=None):
     from app.db.models import RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset
     from app.services.external_paper_work import guard_workbench_write
     paper_id = request.path_params.get("paper_id") or (body.get("paper_id") if isinstance(body, dict) else None)
@@ -241,6 +268,15 @@ def _guard_request_work(session, request, auth, body=None):
             raise HTTPException(422, "invalid_paper_id")
 
 
+async def _guard_request_work(session, request, auth, body=None):
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    try:
+        return await run_phase(session, lambda worker: _guard_request_work_phase(
+            worker, request, auth, body))
+    except LockConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.put("/papers/{paper_id}/processing-status")
 async def report_paper_processing_status(
     paper_id: UUID,
@@ -252,12 +288,12 @@ async def report_paper_processing_status(
     from app.services.rebuild_workflow_service import _required_paper
     if isinstance(payload, ProcessingStatusReportEnvelope):
         payload = payload.payload
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
-        result = report_processing(session,_required_paper(session,paper_id),payload)
-        session.commit()
+        result = await run_phase(session, lambda worker: report_processing(
+            worker, _required_paper(worker, paper_id), payload))
         return {'paper_id':str(paper_id),'processing_status':result}
-    except (ValueError, RebuildWorkflowError) as exc:
-        session.rollback()
+    except (ValueError, RebuildWorkflowError, LockConflictError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
@@ -313,8 +349,9 @@ async def _require_section_write_session(request: Request, session: Session = De
         json.dumps(body, allow_nan=False)
     except (ValueError, TypeError, RecursionError) as exc:
         raise HTTPException(status_code=422, detail="section_body_must_be_finite_json") from exc
-    # Share the endpoint transaction: keep occupancy locked through the write.
-    _guard_request_work(session, request, auth, body)
+    # Boundary guard runs in a short worker transaction. Audited/full writers
+    # recheck occupancy while holding the Paper row in their worker transaction.
+    await _guard_request_work(session, request, auth, body)
     return auth
 
 
@@ -322,10 +359,13 @@ async def _require_section_write_session(request: Request, session: Session = De
 async def ordinary_job(paper_id: UUID, job_id: str, session: Session = Depends(get_db_session),
                        _auth: SessionState = Depends(_require_work_package_session)):
     from app.db.models import WorkflowJob
-    job = session.get(WorkflowJob, job_id)
-    if not job or job.type != JOB_TYPE or (job.payload or {}).get("paper_id") != str(paper_id):
-        raise HTTPException(404, "parse_job_not_found")
-    return serialize_job(job, session)
+    from app.services.paper_db_phase import run_phase
+    def load(worker):
+        job = worker.get(WorkflowJob, job_id)
+        if not job or job.type != JOB_TYPE or (job.payload or {}).get("paper_id") != str(paper_id):
+            raise HTTPException(404, "parse_job_not_found")
+        return serialize_job(job, worker)
+    return await run_phase(session, load)
 
 
 @router.put("/papers/{paper_id}/ai-extract/jobs/{job_id}/checkpoints")
@@ -333,12 +373,11 @@ async def ordinary_checkpoint(paper_id: UUID, job_id: str, payload: ParseCheckpo
                               session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
                               _auth: SessionState = Depends(_require_section_write_session)):
     from app.services.ordinary_parsing import checkpoint
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
-        result = checkpoint(session, paper_id, job_id, payload.model_dump(mode="json"), settings)
-        session.commit()
-        return result
-    except (ValueError, RebuildWorkflowError) as exc:
-        session.rollback()
+        return await run_phase(session, lambda worker: checkpoint(
+            worker, paper_id, job_id, payload.model_dump(mode="json"), settings))
+    except (ValueError, RebuildWorkflowError, LockConflictError) as exc:
         raise HTTPException(409, str(exc)) from exc
 
 
@@ -348,8 +387,10 @@ async def ordinary_reading_text(paper_id: UUID, file_id: UUID, offset: int = Que
                                 session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
                                 _auth: SessionState = Depends(_require_work_package_session)):
     from app.services.ordinary_parsing import reading_text
+    from app.services.paper_db_phase import run_phase
     try:
-        return reading_text(session, paper_id, file_id, settings, offset, limit)
+        return await run_phase(session, lambda worker: reading_text(
+            worker, paper_id, file_id, settings, offset, limit))
     except (ValueError, RebuildWorkflowError) as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -385,14 +426,14 @@ async def rebuild_queue_snapshot(session: Session = Depends(get_db_session), set
 async def rebuild_queue_control(payload: RebuildQueueControlRequest, session: Session = Depends(get_db_session),
                                  settings: Settings = Depends(get_settings), auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_queue import set_control
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
-        result = set_control(session, paused=payload.paused, limits=payload.limits, actor=auth.username, settings=settings)
-        session.commit()
-        return result
-    except RebuildWorkflowError as exc:
-        session.rollback(); raise _queue_error(exc) from exc
+        return await run_phase(session, lambda worker: set_control(
+            worker, paused=payload.paused, limits=payload.limits, actor=auth.username, settings=settings))
+    except (RebuildWorkflowError, LockConflictError) as exc:
+        raise _queue_error(exc) from exc
     except Exception:
-        session.rollback(); raise
+        raise
 
 
 @router.post("/papers/{paper_id}/queue")
@@ -400,64 +441,67 @@ async def enqueue_rebuild_attempt(paper_id: UUID, payload: RebuildQueueEnqueueRe
                                  session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
                                  auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_queue import enqueue
+    from app.services.paper_db_phase import LockConflictError, run_phase
+    from app.services.external_paper_work import guard_workbench_write
+    def execute(worker):
+        guard_workbench_write(worker, paper_id, auth.username)
+        return enqueue(worker, paper_id, payload, actor=auth.username, settings=settings)
     try:
-        result = enqueue(session, paper_id, payload, actor=auth.username, settings=settings)
-        session.commit()
-        return result
-    except RebuildWorkflowError as exc:
-        session.rollback(); raise _queue_error(exc) from exc
+        return await run_phase(session, execute)
+    except (RebuildWorkflowError, LockConflictError) as exc:
+        raise _queue_error(exc) from exc
     except Exception:
-        session.rollback(); raise
+        raise
 
 
 @router.post("/queue/claim")
 async def claim_rebuild_attempt(payload: RebuildQueueClaimRequest, session: Session = Depends(get_db_session),
                                settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_queue import claim_next
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
-        result = claim_next(session, stage=payload.stage, worker_id=payload.worker_id, settings=settings)
-        session.commit()
-        return result
-    except RebuildWorkflowError as exc:
-        session.rollback(); raise _queue_error(exc) from exc
+        return await run_phase(session, lambda worker: claim_next(
+            worker, stage=payload.stage, worker_id=payload.worker_id, settings=settings))
+    except (RebuildWorkflowError, LockConflictError) as exc:
+        raise _queue_error(exc) from exc
     except Exception:
-        session.rollback(); raise
+        raise
 
 
 @router.post("/queue/{job_id}/dispatch-intent")
 async def prepare_rebuild_dispatch(job_id: str, payload: RebuildQueueAttemptRequest, session: Session = Depends(get_db_session),
                                    settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_queue import prepare_dispatch
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
-        result = prepare_dispatch(session, job_id, worker_id=payload.worker_id, attempt_token=str(payload.attempt_token), settings=settings)
-        session.commit()
-        return result
-    except RebuildWorkflowError as exc:
-        session.rollback(); raise _queue_error(exc) from exc
+        return await run_phase(session, lambda worker: prepare_dispatch(
+            worker, job_id, worker_id=payload.worker_id,
+            attempt_token=str(payload.attempt_token), settings=settings))
+    except (RebuildWorkflowError, LockConflictError) as exc:
+        raise _queue_error(exc) from exc
     except Exception:
-        session.rollback(); raise
+        raise
 
 
 @router.post("/queue/{job_id}/readback")
 async def readback_rebuild_attempt(job_id: str, payload: RebuildQueueAttemptRequest, session: Session = Depends(get_db_session),
                                    settings: Settings = Depends(get_settings), _auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_queue_native import reconcile_attempt
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
         result = await reconcile_attempt(session, job_id, attempt_token=str(payload.attempt_token), settings=settings,
                                          manual_recheck=payload.manual_recheck)
-        session.commit()
         if settings.rebuild_native_stop_enabled:
             from app.db.models import WorkflowJob
-            current = session.get(WorkflowJob, job_id)
+            current = await run_phase(session, lambda worker: worker.get(WorkflowJob, job_id))
             if current and current.status == "needs_attention":
-                session.rollback()
                 from app.services.rebuild_native_stop import protective_stop
                 result["native_stop"] = await protective_stop(settings.database_url, job_id, settings=settings)
         return result
-    except RebuildWorkflowError as exc:
-        session.rollback(); raise _queue_error(exc) from exc
+    except (RebuildWorkflowError, LockConflictError) as exc:
+        raise _queue_error(exc) from exc
     except Exception:
-        session.rollback(); raise
+        raise
 
 
 @router.post("/native-attempts/{job_id}/stop")
@@ -468,10 +512,10 @@ async def controlled_native_attempt_stop(
 ):
     from app.db.models import WorkflowJob
     from app.services.rebuild_native_stop import protective_stop
-    job = session.get(WorkflowJob, job_id)
+    from app.services.paper_db_phase import run_phase
+    job = await run_phase(session, lambda worker: worker.get(WorkflowJob, job_id))
     if job is None or (job.payload or {}).get("attempt_token") != str(payload.attempt_token):
         raise HTTPException(status_code=409, detail="native_stop_attempt_identity_mismatch")
-    session.rollback()
     try:
         return await protective_stop(settings.database_url, job_id, settings=settings)
     except RebuildWorkflowError as exc:
@@ -494,7 +538,7 @@ async def get_rebuild_acceptance(
 
 
 @router.post("/papers/{paper_id}/acceptance/freeze")
-async def freeze_rebuild_extraction(
+def freeze_rebuild_extraction(
     paper_id: UUID, payload: ExtractionFreezeRequest,
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
@@ -513,7 +557,7 @@ async def freeze_rebuild_extraction(
 
 
 @router.post("/papers/{paper_id}/acceptance/{freeze_id}/review-progress")
-async def report_independent_review_progress(
+def report_independent_review_progress(
     paper_id: UUID, freeze_id: str, payload: ReviewProgressRequest, request: Request,
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
@@ -533,7 +577,7 @@ async def report_independent_review_progress(
 
 
 @router.post("/papers/{paper_id}/acceptance/{freeze_id}/reviews")
-async def review_rebuild_extraction(
+def review_rebuild_extraction(
     paper_id: UUID, freeze_id: str, payload: ExtractionReviewRequest, request: Request,
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
@@ -553,7 +597,7 @@ async def review_rebuild_extraction(
 
 
 @router.post("/papers/{paper_id}/sections/import")
-async def import_rebuild_sections(
+def import_rebuild_sections(
     paper_id: UUID,
     payload: RebuildSectionsImportRequest,
     session: Session = Depends(get_db_session),
@@ -579,7 +623,7 @@ async def import_rebuild_sections(
 
 
 @router.post("/papers/{paper_id}/sections/order")
-async def declare_rebuild_section_order(paper_id: UUID, payload: RebuildSectionOrderRequest,
+def declare_rebuild_section_order(paper_id: UUID, payload: RebuildSectionOrderRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     from app.services.rebuild_sections import declare_section_order
@@ -599,7 +643,7 @@ async def declare_rebuild_section_order(paper_id: UUID, payload: RebuildSectionO
 
 
 @router.post("/papers/{paper_id}/sections/corrections")
-async def declare_rebuild_section_corrections(
+def declare_rebuild_section_corrections(
     paper_id: UUID,
     payload: RebuildSectionCorrectionsRequest,
     session: Session = Depends(get_db_session),
@@ -810,7 +854,7 @@ async def preview_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
 
 
 @router.put("/papers/{paper_id}/coverage-plan")
-async def write_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
+def write_coverage_plan(paper_id: UUID, payload: CoveragePlanRequest,
     session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
     from app.services.extraction_coverage import save_plan
     from app.services.rebuild_acceptance import current_snapshot, _locked_paper
@@ -980,7 +1024,7 @@ async def preview_history_registration(paper_id: UUID, payload: HistoryRegistrat
 
 
 @router.put("/papers/{paper_id}/history-reconciliation")
-async def save_history_registration(paper_id: UUID, payload: HistoryRegistration,
+def save_history_registration(paper_id: UUID, payload: HistoryRegistration,
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session)):
     from app.services.history_reconciliation import save
@@ -1005,7 +1049,7 @@ async def _require_file_write_session(request: Request, session: Session = Depen
         raise HTTPException(403, "cross_origin_request_blocked")
     if not csrf_token_valid(request, auth):
         raise HTTPException(403, "csrf_token_invalid")
-    _guard_request_work(session, request, auth)
+    await _guard_request_work(session, request, auth)
     return auth
 
 
@@ -1013,7 +1057,7 @@ from app.schemas.rebuild import RebuildFileLifecycleRequest
 
 
 @router.post("/papers/{paper_id}/files/lifecycle")
-async def select_rebuild_file(paper_id: UUID, payload: RebuildFileLifecycleRequest,
+def select_rebuild_file(paper_id: UUID, payload: RebuildFileLifecycleRequest,
     session: Session = Depends(get_db_session), auth: SessionState = Depends(_require_section_write_session)):
     from app.services.rebuild_file_lifecycle import _hash, locked_replay, validate_change, apply_change
     body = payload.model_dump(mode='json')
@@ -1261,20 +1305,22 @@ async def rebuild_assets(paper_id: UUID, session: Session = Depends(get_db_sessi
         raise _http_error(exc) from exc
 
 
-def _audited_response(session, request, payload, paper_id, operation, actor, mutate, *, receipt_serializer=None):
+async def _audited_response(session, request, payload, paper_id, operation, actor, mutate, *, receipt_serializer=None):
     from app.services.rebuild_mutation_audit import audit_ids, run_audited
+    from app.services.paper_db_phase import LockConflictError, run_phase
     try:
         request_id, task_id = audit_ids(request, payload)
-        result = run_audited(session, paper_id=paper_id, operation=operation, payload=payload,
-                             actor=actor, request_id=request_id, task_id=task_id, mutate=mutate,
-                             **({"receipt_serializer": receipt_serializer} if receipt_serializer else {}))
-        session.commit()
-        return result
+        def execute(worker):
+            return run_audited(worker, paper_id=paper_id, operation=operation, payload=payload,
+                               actor=actor, request_id=request_id, task_id=task_id,
+                               mutate=lambda: mutate(worker),
+                               **({"receipt_serializer": receipt_serializer} if receipt_serializer else {}))
+        return await run_phase(session, execute)
     except RebuildWorkflowError as exc:
-        session.rollback()
         raise _http_error(exc) from exc
+    except LockConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception:
-        session.rollback()
         raise
 
 
@@ -1284,8 +1330,8 @@ async def import_rebuild_assets(
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
-    return _audited_response(session, request, payload, paper_id, "assets.import", auth.username,
-                             lambda: _import_assets(session, paper_id, payload, settings))
+    return await _audited_response(session, request, payload, paper_id, "assets.import", auth.username,
+                                   lambda worker: _import_assets(worker, paper_id, payload, settings))
 
 
 def _import_assets(session, paper_id, payload, settings):
@@ -1332,12 +1378,12 @@ async def create_or_update_rebuild_asset(
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
-    def mutate():
-        asset, created = upsert_visual_asset(session, paper_id=paper_id, payload=payload, settings=settings)
+    def mutate(worker):
+        asset, created = upsert_visual_asset(worker, paper_id=paper_id, payload=payload, settings=settings)
         from app.services.rebuild_mutation_audit import capture_item
-        events = capture_item(session, index=None, entity_id=asset.id)
+        events = capture_item(worker, index=None, entity_id=asset.id)
         return {"asset": serialize_asset(asset), "created": created, "audit_event_ids": events}
-    return _audited_response(session, request, payload, paper_id, "assets.upsert", auth.username, mutate)
+    return await _audited_response(session, request, payload, paper_id, "assets.upsert", auth.username, mutate)
 
 
 @router.post("/papers/{paper_id}/assets/crop")
@@ -1346,8 +1392,8 @@ async def create_rebuild_asset_from_pdf_crop(
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
-    return _audited_response(session, request, payload, paper_id, "assets.crop", auth.username,
-                             lambda: _crop_asset(session, paper_id, payload, settings))
+    return await _audited_response(session, request, payload, paper_id, "assets.crop", auth.username,
+                                   lambda worker: _crop_asset(worker, paper_id, payload, settings))
 
 
 def _crop_asset(session, paper_id, payload, settings):
@@ -1492,8 +1538,8 @@ async def import_rebuild_rows(
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session),
 ) -> dict[str, Any]:
-    return _audited_response(session, request, payload, payload.paper_id, "rows.import", auth.username,
-                             lambda: _import_rows(session, payload))
+    return await _audited_response(session, request, payload, payload.paper_id, "rows.import", auth.username,
+                                   lambda worker: _import_rows(worker, payload))
 
 
 @router.post("/rows/import/preflight")
@@ -1595,7 +1641,7 @@ async def _require_identity_correction_session(request: Request, session: Sessio
         raise HTTPException(403, "cross_origin_request_blocked")
     if not csrf_token_valid(request, auth):
         raise HTTPException(403, "csrf_token_invalid")
-    _guard_request_work(session, request, auth, body)
+    await _guard_request_work(session, request, auth, body)
     return auth
 
 
@@ -1639,7 +1685,7 @@ async def correct_rebuild_row_identity(
 
 
 @router.post("/analysis")
-async def rebuild_analysis(
+def rebuild_analysis(
     payload: RebuildAnalysisRequest,
     session: Session = Depends(get_db_session),
 ) -> dict[str, Any]:
@@ -1668,7 +1714,7 @@ async def read_rebuild_source(source_id: UUID, session: Session = Depends(get_db
 
 
 @router.put("/sources/{source_id}")
-async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrectionRequest,
+def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrectionRequest,
     session: Session = Depends(get_db_session), settings: Settings = Depends(get_settings),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
@@ -1687,7 +1733,7 @@ async def correct_rebuild_source(source_id: UUID, payload: RebuildSourceCorrecti
 
 
 @router.post("/sources/{source_id}/asset-binding")
-async def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAssetBindingRequest,
+def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAssetBindingRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
@@ -1706,7 +1752,7 @@ async def bind_rebuild_source_asset(source_id: UUID, payload: RebuildSourceAsset
 
 
 @router.post("/sources/{source_id}/lifecycle")
-async def change_rebuild_source_lifecycle(source_id: UUID, payload: RebuildSourceLifecycleRequest,
+def change_rebuild_source_lifecycle(source_id: UUID, payload: RebuildSourceLifecycleRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
@@ -1744,7 +1790,7 @@ async def _require_value_write_session(request: Request, session: Session = Depe
 
 
 @router.put("/values/{value_id}")
-async def correct_rebuild_value(
+def correct_rebuild_value(
     value_id: UUID,
     payload: RebuildValueCorrectionRequest,
     session: Session = Depends(get_db_session),
@@ -1824,7 +1870,7 @@ async def preview_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupPrevi
 
 
 @router.post("/papers/{paper_id}/value-dedup/apply")
-async def apply_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupApplyRequest,
+def apply_rebuild_value_dedup(paper_id: UUID, payload: RebuildDedupApplyRequest,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)) -> dict[str, Any]:
     try:
@@ -1868,9 +1914,9 @@ async def correct_asset_metadata(paper_id: UUID, target_id: UUID,
     # NaN/unencodable strings could fail outside the metadata validation gate.
     if "material_mapping" in payload.changes.model_fields_set:
         validate_material_mapping(payload.changes.material_mapping)
-    return _audited_response(session, request, payload, paper_id,
+    return await _audited_response(session, request, payload, paper_id,
         f"assets.metadata.{target_id}", auth.username,
-        lambda: correct_metadata(session, paper_id, "assets", target_id, payload),
+        lambda worker: correct_metadata(worker, paper_id, "assets", target_id, payload),
         receipt_serializer=lambda value: value)
 
 
@@ -1879,9 +1925,9 @@ async def correct_section_metadata(paper_id: UUID, target_id: UUID,
     payload: RebuildSectionMetadataCorrection, request: Request,
     session: Session = Depends(get_db_session),
     auth: SessionState = Depends(_require_section_write_session)):
-    return _audited_response(session, request, payload, paper_id,
+    return await _audited_response(session, request, payload, paper_id,
         f"sections.metadata.{target_id}", auth.username,
-        lambda: correct_metadata(session, paper_id, "sections", target_id, payload),
+        lambda worker: correct_metadata(worker, paper_id, "sections", target_id, payload),
         receipt_serializer=lambda value: value)
 
 
@@ -1893,8 +1939,12 @@ async def resume_same_paper_extract(
 ):
     from app.services.paper_native_recovery import resume_job
     from app.services.ai_extract_service import serialize_job
+    from app.services.paper_db_phase import run_phase
     try:
         job=await resume_job(session,paper_id,job_id,settings,request_id=request_id,actor=auth.username,model=model,expected_type="ai_extract_rebuild")
-        return serialize_job(job,session)
+        return await run_phase(session, lambda worker: serialize_job(job, worker))
     except ValueError as exc:
-        session.rollback();raise HTTPException(409,str(exc)) from exc
+        raise HTTPException(409,str(exc)) from exc
+    except Exception:
+        logger.exception("Same-job extract resume failed for %s", job_id)
+        raise

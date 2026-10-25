@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from sqlalchemy import select
+
 from app.db.models import WorkflowJob
 from app.db.session import session_scope
 from app.services.codex_web_dispatch import dispatch_agent, read_thread_status, matches_owned_attempt
@@ -99,68 +101,80 @@ async def dispatch_once(*, database_url, job_id, worker_id, attempt_token, setti
 
 
 async def reconcile_attempt(session, job_id, *, attempt_token, settings, native_read=None, manual_recheck=False):
-    job = session.get(WorkflowJob, job_id)
-    if job is None or job.type != TYPE or job.payload["attempt_token"] != attempt_token:
-        raise RebuildWorkflowError("queue_attempt_identity_mismatch")
-    if (job.progress.get("evidence_guard") or {}).get("needs_attention") and not manual_recheck:
-        return {"reconciled": False, "reason": "needs_attention_requires_explicit_manual_readback"}
-    thread_id = job.progress.get("thread_id")
-    if not thread_id:
-        return {"reconciled": False, "reason": "unknown_thread_identity_no_redispatch"}
-    if job.status not in {"running", "unknown", "needs_attention", "dispatch_intent"}:
-        return {"reconciled": False, "reason": "attempt_is_not_awaiting_native_readback"}
-    # No scheduler/row lock while awaiting the existing thread read.
-    observed = await (native_read or read_thread_status)(thread_id, settings=settings,
-                                                        include_goal=job.payload["model"] != "gpt-6-luna")
-    lock_scheduler(session)
-    session.refresh(job, with_for_update=True)
-    if job.payload["attempt_token"] != attempt_token or job.progress.get("thread_id") != thread_id:
-        raise RebuildWorkflowError("queue_attempt_identity_changed_during_readback")
-    native = {key: getattr(observed, key, None) for key in ("thread_id", "turn_id", "turn_status", "goal_status", "item_count")}
-    guard = observe(job.progress.get("evidence_guard"), evidence_signature(session, UUID(job.payload["paper_id"]), role=job.payload["stage"], task_id=job.job_id), native)
-    job.progress = {**job.progress, "readback": {**native, "at": now().isoformat()}, "evidence_guard": guard}
-    if guard["needs_attention"]:
-        job.status = "needs_attention"
-    if not matches_owned_attempt(observed, thread_id, job.progress.get("turn_id"), allow_goal_continuations=True):
-        job.status = "needs_attention" if guard["needs_attention"] else "unknown"
-        return {"reconciled": False, "reason": "native_identity_or_outcome_unconfirmed"}
-    if type(observed.tokens_used) is int and observed.tokens_used >= 0:
-        previous_usage = job.progress.get("native_usage", {}).get("tokens_used")
-        if previous_usage is None or observed.tokens_used >= previous_usage:
-            job.progress = {**job.progress, "native_usage": {"tokens_used": observed.tokens_used,
-                            "source": "thread/goal/get", "thread_id": thread_id, "observed_at": now().isoformat()}}
-        if observed.tokens_used > job.payload["token_allowance"]:
+    from app.services.paper_db_phase import job_pin, run_phase
+
+    def snapshot(worker):
+        job = worker.get(WorkflowJob, job_id)
+        if job is None or job.type != TYPE or job.payload["attempt_token"] != attempt_token:
+            raise RebuildWorkflowError("queue_attempt_identity_mismatch")
+        if (job.progress.get("evidence_guard") or {}).get("needs_attention") and not manual_recheck:
+            return {"early": {"reconciled": False, "reason": "needs_attention_requires_explicit_manual_readback"}}
+        thread_id = job.progress.get("thread_id")
+        if not thread_id:
+            return {"early": {"reconciled": False, "reason": "unknown_thread_identity_no_redispatch"}}
+        if job.status not in {"running", "unknown", "needs_attention", "dispatch_intent"}:
+            return {"early": {"reconciled": False, "reason": "attempt_is_not_awaiting_native_readback"}}
+        return {"early": None, "pin": job_pin(job), "thread_id": thread_id,
+                "model": job.payload["model"]}
+
+    pinned = await run_phase(session, snapshot)
+    if pinned["early"] is not None:
+        return pinned["early"]
+    thread_id = pinned["thread_id"]
+    # The snapshot transaction is closed before this IPC read.
+    observed = await (native_read or read_thread_status)(
+        thread_id, settings=settings, include_goal=pinned["model"] != "gpt-6-luna")
+
+    def apply(worker):
+        job = worker.scalar(select(WorkflowJob).where(WorkflowJob.job_id == job_id).with_for_update())
+        if job is None or job_pin(job) != pinned["pin"]:
+            raise RebuildWorkflowError("queue_attempt_identity_changed_during_readback")
+        native = {key: getattr(observed, key, None) for key in ("thread_id", "turn_id", "turn_status", "goal_status", "item_count")}
+        guard = observe(job.progress.get("evidence_guard"), evidence_signature(
+            worker, UUID(job.payload["paper_id"]), role=job.payload["stage"], task_id=job.job_id), native)
+        job.progress = {**job.progress, "readback": {**native, "at": now().isoformat()}, "evidence_guard": guard}
+        if guard["needs_attention"]:
             job.status = "needs_attention"
-            job.progress = {**job.progress, "reason": "reported_native_usage_exceeded_reserved_allowance", "automatic_retry": False}
-            return {"reconciled": False, "reason": "native_token_allowance_exceeded"}
-    terminal = observed.turn_status in {"completed", "failed", "interrupted"} and (
-        job.payload["model"] == "gpt-6-luna" or observed.goal_status in {"complete", "completed", "paused", "blocked", "usageLimited", "budgetLimited"})
-    if not terminal:
-        if observed.turn_status in {"inProgress", "inprogress", "queued"} and not guard["needs_attention"]:
-            from datetime import timedelta
-            job.status = "running"
-            job.progress = {**job.progress, "lease_expires_at": (now() + timedelta(seconds=900)).isoformat(),
-                            "lease_renewal_source": "identity_matched_native_readback"}
-        return {"reconciled": False, "reason": "same_native_attempt_not_confirmed_terminal"}
-    paper_id = UUID(job.payload["paper_id"])
-    acceptance = acceptance_status(session, paper_id)
-    if observed.turn_status in {"failed", "interrupted"}:
-        job.status = "failed"
-    elif job.payload["stage"] == "reviewer":
-        # A native end alone is not a review. Match the explicit frozen receipt.
-        if (acceptance.get("job_id") != job.payload["freeze_id"] or acceptance.get("status") not in {"accepted", "needsfix", "partial", "review_incomplete"}
-                or not acceptance.get("review") or acceptance["review"].get("reviewer_task_id") != job_id):
+        if not matches_owned_attempt(observed, thread_id, job.progress.get("turn_id"), allow_goal_continuations=True):
+            job.status = "needs_attention" if guard["needs_attention"] else "unknown"
+            return {"reconciled": False, "reason": "native_identity_or_outcome_unconfirmed"}
+        if type(observed.tokens_used) is int and observed.tokens_used >= 0:
+            previous_usage = job.progress.get("native_usage", {}).get("tokens_used")
+            if previous_usage is None or observed.tokens_used >= previous_usage:
+                job.progress = {**job.progress, "native_usage": {"tokens_used": observed.tokens_used,
+                                "source": "thread/goal/get", "thread_id": thread_id, "observed_at": now().isoformat()}}
+            if observed.tokens_used > job.payload["token_allowance"]:
+                job.status = "needs_attention"
+                job.progress = {**job.progress, "reason": "reported_native_usage_exceeded_reserved_allowance", "automatic_retry": False}
+                return {"reconciled": False, "reason": "native_token_allowance_exceeded"}
+        terminal = observed.turn_status in {"completed", "failed", "interrupted"} and (
+            job.payload["model"] == "gpt-6-luna" or observed.goal_status in {"complete", "completed", "paused", "blocked", "usageLimited", "budgetLimited"})
+        if not terminal:
+            if observed.turn_status in {"inProgress", "inprogress", "queued"} and not guard["needs_attention"]:
+                from datetime import timedelta
+                job.status = "running"
+                job.progress = {**job.progress, "lease_expires_at": (now() + timedelta(seconds=900)).isoformat(),
+                                "lease_renewal_source": "identity_matched_native_readback"}
+            return {"reconciled": False, "reason": "same_native_attempt_not_confirmed_terminal"}
+        paper_id = UUID(job.payload["paper_id"])
+        acceptance = acceptance_status(worker, paper_id)
+        if observed.turn_status in {"failed", "interrupted"}:
+            job.status = "failed"
+        elif job.payload["stage"] == "reviewer":
+            if (acceptance.get("job_id") != job.payload["freeze_id"] or acceptance.get("status") not in {"accepted", "needsfix", "partial", "review_incomplete"}
+                    or not acceptance.get("review") or acceptance["review"].get("reviewer_task_id") != job_id):
+                job.status = "needs_attention"
+                return {"reconciled": False, "reason": "explicit_independent_review_receipt_missing"}
+            job.status = acceptance["status"]
+        elif not guard.get("business_advanced"):
             job.status = "needs_attention"
-            return {"reconciled": False, "reason": "explicit_independent_review_receipt_missing"}
-        job.status = acceptance["status"]
-    elif not guard.get("business_advanced"):
-        job.status = "needs_attention"
-        return {"reconciled": False, "reason": "no_new_business_evidence"}
-    else:
-        job.status = "extracted"
-    job.progress = {**job.progress, "lease_owner": None, "lease_expires_at": None,
-                    "native_terminal_verified": True, "automatic_retry": False}
-    job.result = {"execution_ended": True, "scientific_acceptance": acceptance["status"],
-                  "evidence_signature": guard["latest"], "terminal_turn_id": observed.turn_id}
-    session.flush()
-    return {"reconciled": True, "status": job.status}
+            return {"reconciled": False, "reason": "no_new_business_evidence"}
+        else:
+            job.status = "extracted"
+        job.progress = {**job.progress, "lease_owner": None, "lease_expires_at": None,
+                        "native_terminal_verified": True, "automatic_retry": False}
+        job.result = {"execution_ended": True, "scientific_acceptance": acceptance["status"],
+                      "evidence_signature": guard["latest"], "terminal_turn_id": observed.turn_id}
+        return {"reconciled": True, "status": job.status}
+
+    return await run_phase(session, apply)

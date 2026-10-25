@@ -1,5 +1,6 @@
 from uuid import UUID
 from typing import Literal
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.api.rebuild import _require_section_write_session, _require_work_packag
 from app.services import reading_assistance as service
 
 router=APIRouter(prefix='/api/rebuild/papers',tags=['reading-assistance'])
+logger = logging.getLogger(__name__)
 
 
 class GenerateRequest(BaseModel):
@@ -42,7 +44,7 @@ def read_context(paper_id:UUID,session:Session=Depends(get_db_session),settings:
 async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
     try:return await service.create(session,paper_id,settings,body.request_id,body.retry,body.scope,source_job_id=body.source_job_id,actor=auth.username,model=body.model)
     except ValueError as exc:
-        session.rollback();raise HTTPException(409,str(exc)) from exc
+        raise HTTPException(409,str(exc)) from exc
 
 
 @router.post('/{paper_id}/reading-assistance')
@@ -67,4 +69,7 @@ async def resume_reading(paper_id:UUID,job_id:str,body:ResumeRequest,session:Ses
         job=await resume_job(session,paper_id,job_id,settings,request_id=body.request_id,actor=auth.username,model=body.model,prepared_content=body.prepared_content,expected_type=service.TYPE)
         return service.serialize(job)
     except ValueError as exc:
-        session.rollback();raise HTTPException(409,str(exc)) from exc
+        raise HTTPException(409,str(exc)) from exc
+    except Exception:
+        logger.exception('Same-job reading resume failed for %s', job_id)
+        raise

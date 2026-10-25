@@ -140,9 +140,21 @@ def abstract_prompt(paper_id, jid):
 
 
 async def create(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None, model=None):
-    from app.services.rebuild_queue import lock_scheduler, paper_busy
-    from app.services.ai_extract_service import _background_dispatch
-    lock_scheduler(session)
+    from functools import partial
+    from app.services.paper_db_phase import observe_and_apply
+    from app.services.ai_extract_service import _arm_dispatches
+    dispatches = []
+    result = await observe_and_apply(session, partial(_create_phase, paper_id=paper_id,
+        settings=settings, request_id=request_id, retry=retry, scope=scope,
+        source_job_id=source_job_id, actor=actor, model=model, dispatches=dispatches),
+        after_commit=lambda _: _arm_dispatches(dispatches))
+    return result
+
+
+def _create_phase(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None, model=None, observation, dispatches):
+    from app.services.rebuild_queue import paper_busy
+    # Paper FOR UPDATE is the cross-route writer mutex. Do not serialize unrelated
+    # papers on the queue-wide advisory lock.
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     previous = session.scalar(select(WorkflowJob).where(WorkflowJob.type == TYPE,
@@ -159,8 +171,8 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
     if old and old.status == 'failed' and not (old.progress or {}).get('native_terminal_verified'):
         return serialize(old)
     if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
-    from app.services.reading_thread_continuation import confirmed_source
-    continuation = await confirmed_source(session, paper_id, settings, source_job_id, actor)
+    from app.services.paper_db_phase import require_source
+    continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
         if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
@@ -185,7 +197,7 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
                   'dispatch_started':False, 'events':[],
                   **({'thread_id':continuation['thread_id'], 'previous_turn_id':continuation['turn_id']} if continuation else {})})
     session.add(job);session.commit()
-    asyncio.create_task(_background_dispatch(job_id=jid, database_url=settings.database_url,
+    dispatches.append(dict(job_id=jid, database_url=settings.database_url,
         prompt=instruction, objective=instruction, settings=settings, primary_model=model, attempt_token=token))
     return serialize(job)
 
@@ -193,8 +205,6 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
 def save(session, paper_id, body, settings, actor):
     from app.services.external_paper_work import guard_workbench_write, VERSION as MCP_VERSION
     guard_workbench_write(session, paper_id, actor, body.job_id)
-    from app.services.rebuild_queue import lock_scheduler
-    lock_scheduler(session)
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==body.job_id).with_for_update())
@@ -253,10 +263,12 @@ def save(session, paper_id, body, settings, actor):
         for d in docs:
             if d.get('image_limit') and d['image_limit'] not in missing:missing.append(d['image_limit'])
             if d.get('reason') and d['reason'] not in missing:missing.append(d['reason'])
+        abstract_source_sha256 = ((source.get('source') or {}).get('text_sha256') or
+                                  hashlib.sha256((paper.abstract or '').encode()).hexdigest())
         guide={k:v for k,v in data.items() if k not in ('request_id','job_id','input_revision','abstract_zh','abstract_missing_reason','abstract_source_revision','save_mode')}
         guide.update(version=VERSION,updated_at=datetime.utcnow().isoformat(),missing=missing,
             source_files=[{k:d[k] for k in ('file_id','role','name','source_sha256','complete_text')} for d in docs],
-            abstract_source_sha256=hashlib.sha256((paper.abstract or '').encode()).hexdigest(),
+            abstract_source_sha256=abstract_source_sha256,
             input_revision=body.input_revision,scientific_acceptance='not_implied')
         paper.reading_guide={**(paper.reading_guide or {}),'beginner_zh':guide}
     if body.abstract_zh:
@@ -279,13 +291,15 @@ def save(session, paper_id, body, settings, actor):
 
 
 async def reconcile(session, job, settings):
-    from app.services.codex_web_dispatch import read_thread_status, matches_owned_attempt
+    from app.services.paper_db_phase import observe_job
+    return await observe_job(session, job, settings, _apply_readback)
+
+
+def _apply_readback(session, job, settings, status):
+    from app.services.codex_web_dispatch import matches_owned_attempt
     from app.services.ordinary_parsing import recover_auto_started_turn
-    if job.status not in RUNNING:return job
-    progress=dict(job.progress or {});tid=progress.get('thread_id')
+    tid=(job.progress or {}).get('thread_id')
     if not tid:return job
-    status=await read_thread_status(tid,settings)
-    session.refresh(job,with_for_update=True)
     if job.status not in RUNNING or status is None:return job
     progress=dict(job.progress or {})
     if not progress.get('turn_id') and (job.payload or {}).get('continuation'):
@@ -316,13 +330,22 @@ async def reconcile(session, job, settings):
 
 
 async def monitor_once(settings):
-    from app.db.session import session_scope
+    from app.db.session import get_engine, session_scope
     from app.services.ai_extract_service import _background_dispatch
+    from sqlalchemy.orm import Session
     with session_scope(settings.database_url) as s:
         ids=list(s.scalars(select(WorkflowJob.job_id).where(WorkflowJob.type==TYPE,WorkflowJob.status.in_(RUNNING)).order_by(WorkflowJob.updated_at).limit(5)))
+    engine = get_engine(settings.database_url)
     for jid in ids:
         with session_scope(settings.database_url) as s:
-            job=s.get(WorkflowJob,jid);p=job.payload
+            job=s.get(WorkflowJob,jid)
+            if job is None:
+                continue
+            p=dict(job.payload or {})
             unsent=not (job.progress or {}).get('dispatch_started')
-            if not unsent:await reconcile(s,job,settings)
+            s.expunge(job)
+            # No database transaction remains open while the native thread is read.
+        if not unsent:
+            with Session(bind=engine, autoflush=False, expire_on_commit=False) as phase_session:
+                await reconcile(phase_session, job, settings)
         if unsent:await _background_dispatch(job_id=jid,database_url=settings.database_url,prompt=p['dispatch_prompt'],objective=p['dispatch_objective'],settings=settings,primary_model=p['chosen_model'],attempt_token=p['attempt_token'])

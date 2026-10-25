@@ -167,8 +167,7 @@ def report_processing(session, paper, report):
     Completion reflects committed results, not a claim of scientific acceptance.
     """
     job_id = 'extparse-' + hashlib.sha256((str(paper.id)+'|'+report.run_id).encode()).hexdigest()[:32]
-    from app.services.rebuild_queue import lock_scheduler, paper_busy, TYPE as PIPELINE_TYPE
-    lock_scheduler(session)
+    from app.services.rebuild_queue import paper_busy, TYPE as PIPELINE_TYPE
     # Serialize same-paper reports so concurrent creation is idempotent.
     session.scalar(select(models.Paper).where(models.Paper.id==paper.id).with_for_update())
     job = session.get(models.WorkflowJob,job_id)

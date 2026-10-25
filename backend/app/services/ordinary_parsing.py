@@ -170,31 +170,49 @@ def reading_text(session, paper_id, file_id, settings, offset=0, limit=25):
 async def reconcile_once(settings):
     """Recover only durable ordinary intents; never infer a stop from elapsed time."""
     import asyncio
-    from app.db.session import session_scope
+    from app.db.session import get_engine, session_scope
     from app.services.ai_extract_service import _background_dispatch, sync_job_status
+    from sqlalchemy.orm import Session
     with session_scope(settings.database_url) as session:
         ids = list(session.scalars(select(WorkflowJob.job_id).where(
             WorkflowJob.type == 'ai_extract_rebuild',
             WorkflowJob.status.in_(['dispatching', 'running']),
             WorkflowJob.payload.op('->>')('parse_contract') == VERSION,
         ).order_by(WorkflowJob.updated_at).limit(4)))
+    engine = get_engine(settings.database_url)
     for jid in ids:
-        with session_scope(settings.database_url) as session:
-            job = session.get(WorkflowJob, jid)
+        # Close the snapshot transaction before any native IPC await. The empty
+        # Session is only an engine/bind carrier; sync_job_status creates its own
+        # short worker-owned Sessions around every SQL statement.
+        with session_scope(settings.database_url) as snapshot_session:
+            job = snapshot_session.get(WorkflowJob, jid)
             if job is None or job.status not in ('dispatching', 'running'):
                 continue
+            snapshot_session.expunge(job)
             intent, progress = dict(job.payload or {}), dict(job.progress or {})
             unsent = job.status == 'dispatching' and not progress.get('dispatch_started')
-            if not unsent:
+        if not unsent:
+            try:
+                with Session(bind=engine, autoflush=False, expire_on_commit=False) as phase_session:
+                    await asyncio.wait_for(sync_job_status(phase_session, job, settings), timeout=10)
+            except Exception:
+                # Preserve native identity. Best-effort uncertainty is persisted in
+                # a fresh short transaction, never through a stale open Session.
+                from app.services.paper_db_phase import run_phase
+                async def mark_unknown():
+                    def apply(s):
+                        current = s.get(WorkflowJob, jid, with_for_update=True)
+                        if current and current.status in ('dispatching', 'running'):
+                            current.progress = {**(current.progress or {}), 'phase': 'needs_check',
+                                                'needs_check': True,
+                                                'status_checked_at': datetime.utcnow().isoformat()}
+                        return current
+                    await run_phase(phase_session, apply)
                 try:
-                    await asyncio.wait_for(sync_job_status(session, job, settings), timeout=10)
+                    with Session(bind=engine, autoflush=False, expire_on_commit=False) as phase_session:
+                        await mark_unknown()
                 except Exception:
-                    # This observation is unknown, preserving the same native identity.
-                    session.rollback()
-                    job = session.get(WorkflowJob, jid)
-                    if job and job.status in ('dispatching', 'running'):
-                        job.progress = {**(job.progress or {}), 'phase': 'needs_check', 'needs_check': True,
-                                        'status_checked_at': datetime.utcnow().isoformat()}
+                    pass
         if unsent and intent.get('dispatch_prompt'):
             await _background_dispatch(job_id=jid, database_url=settings.database_url,
                 prompt=intent['dispatch_prompt'], objective=intent['dispatch_objective'],

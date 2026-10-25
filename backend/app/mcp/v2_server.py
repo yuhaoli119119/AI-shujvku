@@ -5,11 +5,13 @@ Authentication and database transactions are shared with the application.
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import io
 import json
 from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
 from uuid import UUID
 
@@ -19,6 +21,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ImageContent, TextContent, ToolAnnotations
 from PIL import Image
 from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -55,11 +58,23 @@ mcp_server = FastMCP(
 
 
 def _tool(*, read: bool, image: bool = False):
-    return mcp_server.tool(
-        annotations=ToolAnnotations(readOnlyHint=read, destructiveHint=False,
-                                    idempotentHint=read, openWorldHint=False),
-        structured_output=False if image else None,
-    )
+    def decorate(fn):
+        @wraps(fn)
+        async def thread_isolated(*args, **kwargs):
+            # FastMCP calls synchronous tools directly on its asyncio event loop.
+            # All current tools perform synchronous PostgreSQL/file I/O, so make
+            # the transport execute each tool in a context-preserving worker.
+            return await asyncio.to_thread(fn, *args, **kwargs)
+
+        mcp_server.tool(
+            annotations=ToolAnnotations(readOnlyHint=read, destructiveHint=False,
+                                        idempotentHint=read, openWorldHint=False),
+            structured_output=False if image else None,
+        )(thread_isolated)
+        # Keep the sync function callable by in-process integrations/tests while
+        # the FastMCP registry receives the worker-isolated coroutine wrapper.
+        return fn
+    return decorate
 
 
 def _actor(capability):
@@ -73,10 +88,18 @@ def _actor(capability):
 @contextmanager
 def _database(*, write=False):
     actor = _actor('write_rebuild' if write else 'read_papers')
-    with session_scope(get_settings().database_url) as session:
-        if not write:
-            session.execute(text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
-        yield session, actor
+    try:
+        with session_scope(get_settings().database_url) as session:
+            if not write:
+                session.execute(text('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'))
+            else:
+                session.execute(text("SET LOCAL lock_timeout = '1000ms'"))
+            yield session, actor
+    except OperationalError as exc:
+        from app.services.paper_db_phase import BUSY, is_lock_conflict
+        if is_lock_conflict(exc):
+            raise RebuildWorkflowError(BUSY) from exc
+        raise
 
 
 def _snapshot(session, paper_id, expected=None):

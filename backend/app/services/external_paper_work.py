@@ -12,14 +12,14 @@ import re
 from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.config import get_settings
 from app.db.models import AuditLog, Paper, WorkflowJob
 from app.services.rebuild_file_lifecycle import file_set
 from app.services.rebuild_file_preview import _checked_source
 from app.services.rebuild_mutation_audit import safe_json, run_audited
-from app.services.rebuild_queue import lock_scheduler, paper_busy
+from app.services.rebuild_queue import paper_busy
 from app.services.rebuild_workflow_service import RebuildWorkflowError, get_file
 
 VERSION = "mcp_rebuild_v2"
@@ -40,7 +40,9 @@ def _identity(actor, request_id):
 
 
 def _lock(session, paper_id):
-    lock_scheduler(session)
+    # The Paper row is the per-paper writer mutex. Global scheduler control is
+    # unrelated to an individual paper and must never serialize cross-paper AI.
+    session.execute(text("SET LOCAL lock_timeout = '1000ms'"))
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise RebuildWorkflowError("paper_not_found")

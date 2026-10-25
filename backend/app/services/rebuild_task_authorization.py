@@ -67,11 +67,7 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
         raise RebuildWorkflowError("review_authority_request_invalid")
     if writer_thread_id == reviewer_thread_id:
         raise RebuildWorkflowError("independent_reviewer_required")
-    frozen = session.get(WorkflowJob, freeze_id)
-    if frozen is None or frozen.type != "rebuild_acceptance" or frozen.payload["writer"] != owner:
-        raise RebuildWorkflowError("review_authority_freeze_owner_mismatch")
-    if reviewer_task_id == frozen.payload["writer_task_id"]:
-        raise RebuildWorkflowError("independent_reviewer_required")
+    from app.services.paper_db_phase import run_phase
     from app.utils.project_paths import PROJECT_ROOT
     evidence_root = Path(evidence_root).resolve()
     if not evidence_root.is_relative_to((PROJECT_ROOT / "outputs").resolve()):
@@ -80,11 +76,27 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
                "reviewer_thread_id": reviewer_thread_id, "writer_thread_id": writer_thread_id,
                "evidence_root": str(evidence_root)}
     grant_id = "reviewauth-" + hashlib.sha256((freeze_id + "|" + request_id).encode()).hexdigest()[:48]
-    existing = session.get(WorkflowJob, grant_id)
-    if existing:
-        if existing.payload["request"] != request or existing.status != "active" or not hmac.compare_digest(existing.payload["claims_mac"], _mac(key, existing.payload["claims"])):
-            raise RebuildWorkflowError("review_authority_request_id_reused")
-        return {"grant_id": grant_id, "authorization": _token(key, existing.payload["claims"]), "replayed": True}
+
+    def snapshot(worker):
+        frozen = worker.get(WorkflowJob, freeze_id)
+        if frozen is None or frozen.type != "rebuild_acceptance" or frozen.payload["writer"] != owner:
+            raise RebuildWorkflowError("review_authority_freeze_owner_mismatch")
+        if reviewer_task_id == frozen.payload["writer_task_id"]:
+            raise RebuildWorkflowError("independent_reviewer_required")
+        existing = worker.get(WorkflowJob, grant_id)
+        if existing:
+            if (existing.payload["request"] != request or existing.status != "active" or
+                    not hmac.compare_digest(existing.payload["claims_mac"], _mac(key, existing.payload["claims"]))):
+                raise RebuildWorkflowError("review_authority_request_id_reused")
+            return {"replay": {"grant_id": grant_id,
+                                "authorization": _token(key, existing.payload["claims"]),
+                                "replayed": True}}
+        return {"replay": None, "paper_id": frozen.payload["paper_id"],
+                "freeze_status": frozen.status, "freeze_payload": dict(frozen.payload)}
+
+    checked = await run_phase(session, snapshot)
+    if checked["replay"] is not None:
+        return checked["replay"]
     read = native_read or read_thread_status
     statuses = []
     for thread_id in (writer_thread_id, reviewer_thread_id):
@@ -92,37 +104,52 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
         if observed is None or observed.thread_id != thread_id or observed.cwd not in ALLOWED_CWDS or not observed.turn_id:
             raise RebuildWorkflowError("review_native_identity_unverified")
         statuses.append(observed)
-    from app.services.rebuild_acceptance import _locked_paper
-    from uuid import UUID
-    _locked_paper(session, UUID(frozen.payload["paper_id"]))
-    session.refresh(frozen, with_for_update=True)
-    existing = session.get(WorkflowJob, grant_id)
-    if existing:
-        if existing.payload["request"] != request or existing.status != "active" or not hmac.compare_digest(existing.payload["claims_mac"], _mac(key, existing.payload["claims"])):
-            raise RebuildWorkflowError("review_authority_request_id_reused")
-        return {"grant_id": grant_id, "authorization": _token(key, existing.payload["claims"]), "replayed": True}
-    # Queue-managed tasks additionally require their server-owned handle mapping.
-    reviewer = session.get(WorkflowJob, reviewer_task_id)
-    if reviewer is not None and reviewer.type == "rebuild_pipeline_attempt":
-        if reviewer.payload.get("stage") != "reviewer" or reviewer.payload.get("freeze_id") != freeze_id or reviewer.progress.get("thread_id") != reviewer_thread_id:
+    def apply(worker):
+        from app.services.rebuild_acceptance import _locked_paper
+        from uuid import UUID
+        _locked_paper(worker, UUID(checked["paper_id"]))
+        frozen = worker.scalar(select(WorkflowJob).where(
+            WorkflowJob.job_id == freeze_id).with_for_update())
+        if (frozen is None or frozen.status != checked["freeze_status"] or
+                frozen.payload != checked["freeze_payload"] or
+                frozen.payload.get("writer") != owner or
+                reviewer_task_id == frozen.payload.get("writer_task_id")):
+            raise RebuildWorkflowError("review_authority_freeze_changed_during_readback")
+        existing = worker.get(WorkflowJob, grant_id)
+        if existing:
+            if (existing.payload["request"] != request or existing.status != "active" or
+                    not hmac.compare_digest(existing.payload["claims_mac"], _mac(key, existing.payload["claims"]))):
+                raise RebuildWorkflowError("review_authority_request_id_reused")
+            return {"grant_id": grant_id, "authorization": _token(key, existing.payload["claims"]),
+                    "replayed": True}
+        reviewer = worker.get(WorkflowJob, reviewer_task_id)
+        if reviewer is not None and reviewer.type == "rebuild_pipeline_attempt":
+            if (reviewer.payload.get("stage") != "reviewer" or
+                    reviewer.payload.get("freeze_id") != freeze_id or
+                    reviewer.progress.get("thread_id") != reviewer_thread_id):
+                raise RebuildWorkflowError("review_native_task_binding_mismatch")
+        elif reviewer_task_id != reviewer_thread_id:
             raise RebuildWorkflowError("review_native_task_binding_mismatch")
-    elif reviewer_task_id != reviewer_thread_id:
-        raise RebuildWorkflowError("review_native_task_binding_mismatch")
-    claims = {**request, "grant_id": grant_id, "paper_id": frozen.payload["paper_id"],
-              "revision": frozen.payload["snapshot"]["revision"], "issued_at": datetime.utcnow().isoformat(),
-              "expires_at": (datetime.utcnow() + timedelta(seconds=ttl_seconds)).isoformat(),
-              "verified_writer_turn_id": statuses[0].turn_id, "verified_reviewer_turn_id": statuses[1].turn_id,
-              "authority": "separate_private_coordinator_key_and_native_readback"}
-    token = _token(key, claims)
-    grant = WorkflowJob(job_id=grant_id, type=TYPE, status="active", library_name=frozen.library_name,
-                        payload={"request": request, "claims": claims, "claims_mac": _mac(key, claims),
-                                 "token_sha256": hashlib.sha256(token.encode()).hexdigest()})
-    session.add(grant)
-    session.add(AuditLog(paper_id=frozen.payload["paper_id"], action="review_task_authorized", source="rebuild_authority_v1",
-                        target_type="workflow_jobs", target_id=grant_id, payload={"owner": owner, "request_id": request_id,
-                                                                                   "claims": claims, "claims_mac": _mac(key, claims)}))
-    session.flush()
-    return {"grant_id": grant_id, "authorization": token, "replayed": False}
+        issued_at = datetime.utcnow()
+        claims = {**request, "grant_id": grant_id, "paper_id": frozen.payload["paper_id"],
+                  "revision": frozen.payload["snapshot"]["revision"], "issued_at": issued_at.isoformat(),
+                  "expires_at": (issued_at + timedelta(seconds=ttl_seconds)).isoformat(),
+                  "verified_writer_turn_id": statuses[0].turn_id,
+                  "verified_reviewer_turn_id": statuses[1].turn_id,
+                  "authority": "separate_private_coordinator_key_and_native_readback"}
+        token = _token(key, claims)
+        worker.add(WorkflowJob(job_id=grant_id, type=TYPE, status="active", library_name=frozen.library_name,
+                               payload={"request": request, "claims": claims,
+                                        "claims_mac": _mac(key, claims),
+                                        "token_sha256": hashlib.sha256(token.encode()).hexdigest()}))
+        worker.add(AuditLog(paper_id=frozen.payload["paper_id"], action="review_task_authorized",
+                            source="rebuild_authority_v1", target_type="workflow_jobs",
+                            target_id=grant_id, payload={"owner": owner, "request_id": request_id,
+                            "claims": claims, "claims_mac": _mac(key, claims)}))
+        worker.flush()
+        return {"grant_id": grant_id, "authorization": token, "replayed": False}
+
+    return await run_phase(session, apply)
 
 
 def verify_reviewer_authorization(session, *, authorization, frozen, actor, reviewer_task_id, settings):
