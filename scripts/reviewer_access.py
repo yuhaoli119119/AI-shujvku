@@ -12,6 +12,34 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def workbench_opener(base, cookies, transport='direct'):
+    """Keep URL/TLS/session identity; optionally select the known relay TCP path."""
+    import http.client
+    import ssl
+    import urllib.request
+    handlers = [urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(cookies)]
+    if transport == 'aliyun-easytier':
+        if base != 'https://47.94.252.147:49004':
+            raise RuntimeError('trusted_relay_requires_known_https_workbench')
+        class RelayConnection(http.client.HTTPSConnection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                connect = self._create_connection
+                def selected(address, *a, **k):
+                    if address == ('47.94.252.147', 49004):
+                        address = ('10.144.144.11', 49004)
+                    return connect(address, *a, **k)
+                self._create_connection = selected
+        class RelayHandler(urllib.request.HTTPSHandler):
+            def https_open(self, request):
+                return self.do_open(RelayConnection, request, context=self._context,
+                                    check_hostname=self._check_hostname)
+        handlers.append(RelayHandler(context=ssl.create_default_context()))
+    elif transport != 'direct':
+        raise RuntimeError('unknown_workbench_transport')
+    return urllib.request.build_opener(*handlers)
+
+
 def private_write(path, data):
     raw = json.dumps(data, ensure_ascii=False, indent=2).encode() + b'\n'
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -110,6 +138,8 @@ def submit():
     parser.add_argument('--authorization-file', required=True, type=Path)
     parser.add_argument('--body', required=True, type=Path)
     parser.add_argument('--kind', choices=['review', 'progress'], default='review')
+    parser.add_argument('--transport', choices=['direct', 'aliyun-easytier'], default='direct',
+                        help='Known relay TCP path only; logical HTTPS URL and TLS validation stay unchanged')
     parser.add_argument('--readback-only', action='store_true', help='Recover an interrupted submission without repeating its POST')
     parser.add_argument('--recover-not-saved-evidence', type=Path,
                         help='Explicit one-time recovery after maintenance verified original request terminal and not saved')
@@ -187,8 +217,7 @@ def submit():
     # This server-side client talks to the explicitly configured workbench.
     # Do not inherit model/download proxy settings: those can interrupt a write
     # after it has been sent and leave its outcome unknown.
-    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
-                                         urllib.request.HTTPCookieProcessor(cookies))
+    opener = workbench_opener(base, cookies, args.transport)
     secrets = [credential['authorization'], config['password']]
     def redact(value):
         for secret in secrets:

@@ -53,3 +53,7 @@ python scripts/reviewer_access.py submit \
 ## 2026-10-27 持久证据路径修复
 
 服务兼容旧项目 outputs 根，并仅新增项目 data/reviewer-evidence 下的任务子目录；不能签发整个 data 根或整个 reviewer-evidence 根。新路径解析后仍须位于该固定目录内，符号链接不可扩大范围。原验签、唯一写者、revision及幂等门禁不变。该服务改动必须按固定Git提交正式部署；管理脚本不得通过临时软链或修改进程常量绕过。
+
+### 服务器保存传输选路
+
+公网入口的 TCP 链路不稳定时，维护人员验证组网中继可达后，可在原 submit 命令显式附加 `--transport aliyun-easytier`。该选项仅将已知 `https://47.94.252.147:49004` 的 TCP 连接目的地选为既有阿里云 EasyTier `10.144.144.11:49004`；HTTPS URL、证书校验及 TLS 逻辑主机、Host、Origin、Cookie 和 CSRF 身份均不变。默认仍为 `direct`。其他主机不映射；非已知 HTTPS 入口不得启用该选项，不关闭证书校验、不改 hosts/base_url/全局代理，也不添加自动重试。POST结果未知仍遵守原禁止重放与显式维护恢复规则；选路参数不构成重放授权。

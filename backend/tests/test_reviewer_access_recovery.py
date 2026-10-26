@@ -270,3 +270,52 @@ def test_unverified_recovery_evidence_rejected_before_network(client_case, monke
     monkeypatch.setattr(urllib.request, 'build_opener', lambda *args: pytest.fail('network not allowed'))
     with pytest.raises(RuntimeError, match='recovery_terminal_evidence'):
         host.submit()
+
+
+def test_relay_tcp_selection_keeps_logical_tls_host_and_required_verification(monkeypatch):
+    import http.client
+    import http.cookiejar
+    import ssl
+    path = Path(__file__).parents[2] / 'scripts/reviewer_access.py'
+    spec = importlib.util.spec_from_file_location('review_relay_client', path)
+    host = importlib.util.module_from_spec(spec); spec.loader.exec_module(host)
+    calls = []
+    class Socket:
+        def setsockopt(self, *args):
+            pass
+    monkeypatch.setattr(http.client.socket, 'create_connection',
+                        lambda address, *args, **kwargs: calls.append(address) or Socket())
+    opener = host.workbench_opener('https://47.94.252.147:49004', http.cookiejar.CookieJar(), 'aliyun-easytier')
+    handler = next(h for h in opener.handlers if isinstance(h, urllib.request.HTTPSHandler))
+    assert handler._context.verify_mode == ssl.CERT_REQUIRED
+    assert handler._context.check_hostname is True
+    tls_hosts = []
+    monkeypatch.setattr(handler._context, 'wrap_socket',
+                        lambda sock, server_hostname: tls_hosts.append(server_hostname) or sock)
+    connections = []
+    def do_open(factory, request, **kwargs):
+        connection = factory(request.host, **kwargs)
+        connections.append(connection)
+        connection.connect()
+        return connection
+    monkeypatch.setattr(handler, 'do_open', do_open)
+    req = urllib.request.Request('https://47.94.252.147:49004/api/health',
+                                 headers={'Origin': 'https://47.94.252.147:49004'})
+    handler.https_open(req)
+    assert calls == [('10.144.144.11', 49004)]
+    assert tls_hosts == ['47.94.252.147']
+    assert connections[0].host == '47.94.252.147'
+    assert req.full_url == 'https://47.94.252.147:49004/api/health'
+    assert req.get_header('Origin') == 'https://47.94.252.147:49004'
+    handler.https_open(urllib.request.Request('https://other.invalid/api/health'))
+    assert calls[-1] == ('other.invalid', 443)
+    assert tls_hosts[-1] == 'other.invalid'
+
+
+@pytest.mark.parametrize('base', ['http://47.94.252.147:49004', 'https://other.invalid',
+                                 'https://47.94.252.147:443'])
+def test_relay_option_rejects_unknown_or_plaintext_entry(client_case, base):
+    import http.cookiejar
+    host = client_case[0]
+    with pytest.raises(RuntimeError, match='known_https_workbench'):
+        host.workbench_opener(base, http.cookiejar.CookieJar(), 'aliyun-easytier')
