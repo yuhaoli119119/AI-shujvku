@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Request scoped review access. Captures secrets privately; never dispatches AI."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def private_write(path, data):
+    raw = json.dumps(data, ensure_ascii=False, indent=2).encode() + b'\n'
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'wb') as stream:
+        stream.write(raw)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def runtime(operation, request):
+    source = (ROOT / 'backend/scripts/prepare_reviewer_access.py').read_bytes()
+    result = subprocess.run(
+        ['docker', 'compose', 'exec', '-T', 'backend', 'python', '-', operation,
+         json.dumps(request, ensure_ascii=False)], input=source, capture_output=True,
+        cwd=ROOT, timeout=180, check=False)
+    if result.returncode:
+        # Never print request, token, traceback or environment on failure.
+        tail = result.stderr.decode(errors='replace').strip().splitlines()
+        detail = tail[-1].split(': ', 1)[-1] if tail else 'runtime_failed'
+        if not re.fullmatch(r'[A-Za-z0-9_,.:-]{1,300}', detail):
+            detail = 'runtime_failed_check_private_stderr'
+        raise RuntimeError(detail)
+    return json.loads(result.stdout)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--paper-id', required=True)
+    parser.add_argument('--coordinator-thread', required=True, help='current snapshot registrar, not historical author')
+    parser.add_argument('--reviewer-thread', required=True)
+    parser.add_argument('--request-id', required=True)
+    parser.add_argument('--coverage-file', type=Path, help='actual checked coverage array; omitted means ZERO checked pages')
+    args = parser.parse_args()
+    from uuid import UUID
+    for value in (args.paper_id, args.coordinator_thread, args.reviewer_thread):
+        UUID(value)
+    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,55}', args.request_id):
+        parser.error('invalid request-id')
+    if args.coordinator_thread == args.reviewer_thread:
+        parser.error('independent_reviewer_required')
+    owner = json.loads((ROOT / '.env.workbench-login.local').read_text())['username']
+    private = ROOT / 'outputs' / 'reviewer-access-private' / args.request_id
+    private.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if private.is_symlink() or private.resolve() != private.absolute():
+        raise RuntimeError('private_path_must_not_be_symlink')
+    os.chmod(private.parent, 0o700)
+    os.chmod(private, 0o700)
+    evidence = ROOT / 'outputs' / 'reviewer-access-evidence' / args.request_id
+    evidence.mkdir(parents=True, exist_ok=True)
+    if evidence.is_symlink() or evidence.resolve() != evidence.absolute():
+        raise RuntimeError('evidence_path_must_not_be_symlink')
+    request = {'paper_id': args.paper_id, 'owner': owner,
+               'coordinator_thread_id': args.coordinator_thread,
+               'reviewer_thread_id': args.reviewer_thread,
+               'request_id': args.request_id,
+               'coverage': json.loads(args.coverage_file.read_text()) if args.coverage_file else None,
+               'evidence_root': '/outputs/' + str(evidence.relative_to(ROOT / 'outputs'))}
+    request_path = private / 'request.json'
+    if request_path.exists():
+        old = json.loads(request_path.read_text())
+        if old != request:
+            raise RuntimeError('request_id_reused_with_different_identity_or_coverage')
+    else:
+        private_write(request_path, request)
+    # Durable backup precedes any formal freeze/grant write.
+    backup = private / 'before.json'
+    if not backup.exists():
+        private_write(backup, runtime('snapshot', request))
+    before = json.loads(backup.read_text())
+    result = runtime('prepare', {**request, 'expected_revision': before['snapshot']['revision']})
+    credential = private / 'authorization.json'
+    if credential.exists():
+        if json.loads(credential.read_text())['authorization'] != result['authorization']:
+            raise RuntimeError('credential_changed_use_new_request_id')
+    else:
+        private_write(credential, result)
+    print(json.dumps({'status': 'ready', 'paper_id': args.paper_id,
+                      'freeze_id': result['freeze']['job_id'],
+                      'revision': result['freeze']['revision'],
+                      'authorization_file': str(credential),
+                      'evidence_directory': str(evidence),
+                      'expires_at': result['verified']['expires_at'],
+                      'scientific_review_submitted': False}, ensure_ascii=False))
+
+
+def submit():
+    """Save one reviewer-authored payload; no content generation or dispatch."""
+    import http.cookiejar
+    import urllib.error
+    import urllib.request
+    import sys
+    parser = argparse.ArgumentParser(description='Submit one existing reviewer payload with scoped credentials')
+    parser.add_argument('--authorization-file', required=True, type=Path)
+    parser.add_argument('--body', required=True, type=Path)
+    parser.add_argument('--kind', choices=['review', 'progress'], default='review')
+    args = parser.parse_args(sys.argv[2:])
+    credential_path = args.authorization_file.resolve()
+    if not credential_path.is_relative_to(ROOT / 'outputs/reviewer-access-private'):
+        raise RuntimeError('authorization_file_outside_private_root')
+    credential = json.loads(credential_path.read_text())
+    body = json.loads(args.body.read_text())
+    if not re.fullmatch(r'[A-Za-z0-9_.:-]{1,64}', str(body.get('request_id', ''))):
+        raise RuntimeError('invalid_submit_request_id')
+    frozen = credential['freeze']
+    request = json.loads((credential_path.parent / 'request.json').read_text())
+    if (body.get('reviewer_task_id') != request['reviewer_thread_id'] or
+            body.get('expected_revision') != frozen['revision']):
+        raise RuntimeError('review_payload_identity_or_revision_mismatch')
+    config = json.loads((ROOT / '.env.workbench-login.local').read_text())
+    base = config['base_url'].rstrip('/')
+    cookies = http.cookiejar.CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+    def call(path, value=None, extra=None):
+        headers = {'Content-Type': 'application/json', 'Origin': base, **(extra or {})}
+        raw = json.dumps(value, ensure_ascii=False).encode() if value is not None else None
+        req = urllib.request.Request(base + path, data=raw, headers=headers)
+        try:
+            with opener.open(req, timeout=45) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            # API errors are saved privately, not echoed with request credentials.
+            raise RuntimeError('review_submit_http_' + str(error.code)) from None
+    login = call('/api/auth/login', {'username': config['username'], 'password': config['password']})
+    endpoint = f"/api/rebuild/papers/{request['paper_id']}/acceptance/{frozen['job_id']}"
+    result = call(endpoint + ('/reviews' if args.kind == 'review' else '/review-progress'), body,
+                  {'X-CSRF-Token': login['csrf_token'],
+                   'X-Reviewer-Authorization': credential['authorization']})
+    current = call(f"/api/rebuild/papers/{request['paper_id']}/acceptance")
+    output = credential_path.parent / ('submit-' + str(body.get('request_id', 'missing')) + '.json')
+    if output.parent != credential_path.parent:
+        raise RuntimeError('invalid_submit_request_id')
+    receipt = {'response': result, 'readback': current}
+    if output.exists():
+        output = output.with_name(output.stem + '-readback.json')
+    if not output.exists():
+        private_write(output, receipt)
+    print(json.dumps({'saved': True, 'receipt_file': str(output),
+                      'current_acceptance_status': current['acceptance']['status']}, ensure_ascii=False))
+
+
+if __name__ == '__main__':
+    try:
+        import sys
+        submit() if len(sys.argv) > 1 and sys.argv[1] == 'submit' else main()
+    except (RuntimeError, subprocess.TimeoutExpired) as error:
+        raise SystemExit(str(error) if isinstance(error, RuntimeError) else
+                         'runtime_timeout_result_unknown_retry_same_request_only')

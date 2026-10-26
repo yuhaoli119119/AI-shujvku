@@ -25,3 +25,9 @@ freeze/current-20261009 保留整理前冻结代码；当前服务器数据库�
 ## 独立验收授权部署配置（2026-10-26）
 
 同账号的独立窗口复核需要单独的协调者私有 authority。部署通过 `LITAI_REBUILD_REVIEW_AUTHORITY_KEY_FILE` 显式传递容器内路径，默认空保持关闭；不是工作台密码或会话密钥。经用户授权后，可将新建的独立随机密钥存于既有 `/data` 挂载内受限目录，目录700、文件600，仅实际应用用户和可信协调者可读；密钥不入Git、不进提示词或普通报告。不自动签发任务或恢复旧工作。部署后分别检查配置路径、权限、正式独立复核合同及真实页面，不以存在文件代替业务验收。
+
+## 验收管理工具的独立发布（2026-10-26）
+
+`backend/scripts/prepare_reviewer_access.py` 与 `scripts/reviewer_access.py` 只调用运行服务现有冻结/授权函数及正式HTTP，不修改服务端合同。此类管理工具发布：以当前生产commit为父提交仅收录本次脚本、测试和文档，推送后独立读回远端SHA，并比较实际执行文件与该commit的Git blob哈希；记录工具commit与应用commit。无需仅为脚本重启应用或持久服务，不把管理工具commit写成应用DEPLOYED_GITHUB_COMMIT。若改动app服务/schema/API则仍必须使用上文update.sh正式计划和发布流程。
+
+每次管理调用先在项目私有目录保存目标文献当前快照与现有控制回执，再通过现有服务追加冻结及任务级授权。脚本没有模型调用或任务派发。详情见 [REVIEWER_ACCESS.md](REVIEWER_ACCESS.md)。

@@ -237,7 +237,7 @@ row/value的匹配来源还必须同时属于该value、该row和该paper；不�
 
 `GET /api/rebuild/papers/{paper_id}/history-reconciliation?view=attempts|reports&limit=25` 正常会话、RR READ ONLY，不访问原生/WorkBuddy后端、不恢复或停止线程。原WorkflowJob及状态保留；稳定job_id/run_id/attempt_token/thread_id/turn_id分别显示，latest_recorded只指最新库内记录。旧running、超时、有结果、后来的completed/历史accepted均不证明当前执行或安全停止。原completed/failed只称ended_as_recorded；现存完整verified_stop回执匹配原身份/终态/goal和时间时只称stopped_as_observed（历史观测，本轮未回查）。缺字段、不可读或不曾回查保持当前未知。`can_unlock=false/occupancy_changed=false`固定，不影响原队列/锁/原生授权。
 
-报告候选来自服务端固定`settings.storage_root.parent/history_evidence/catalog.json`，缺失时明确catalog_unavailable_or_invalid，无自动扫描/导入台账。客户端不能给路径、上传报告或传可信/accepted/native状态。此目录/文件须由总指挥逐篇核准安排；当前代码任务不在生产创建该目录、不保存生产登记。目录及所有组件不能symlink；固定相对普通文件、无../绝对/隐藏/反斜杠路径、大小上限、完整FD/字节hash核验，API只返回白名单索引/范围/哈希，不返回任意原文件正文/绝对路径。
+报告候选来自服务端固定`settings.storage_root.parent/history_evidence/catalog.json`，缺失时明确catalog_unavailable_or_invalid，无自动扫描/导入台账。客户端不能给路径、上传报告或传可信/accepted/native状态。此目录/文件须由用户另行授权的证据登记任务逐篇核准，总指挥调度职责不含创建或修复该目录；当前代码任务不在生产创建该目录、不保存生产登记。目录及所有组件不能symlink；固定相对普通文件、无../绝对/隐藏/反斜杠路径、大小上限、完整FD/字节hash核验，API只返回白名单索引/范围/哈希，不返回任意原文件正文/绝对路径。
 
 catalog格式为`{format:"history_catalog_v1",entries:[{report_id,paper_id,evidence:{path,sha256}}]}`。每条evidence文件为`history_evidence_v1`结构化封套：paper_id、original:{path,sha256}真实原报告、historical_verdict、observed_output_revision|null、source_scope:[{file_id,role,source_sha256,reading_pdf_sha256,pages,locator}]、limitations、attempt_links。未知版本/范围不能由当前计数补齐；封套由服务端核准目录提供，不是客户端自报可信状态。结构化原报告若显式paper_id/verdict/observed_output_revision与封套冲突则拒绝；原文件实际存在及hash一致也只验证文件字节，不独立验证科学含义。
 
@@ -388,4 +388,4 @@ DOCX旧`rebuild_previews/{source_sha256}.pdf`继续作为既有阅读版本，�
 
 C候选扩展：`acceptance/freeze`新增只读返回对象版本索引，新review可选结构化`failed_items/resolved_items`，字段与保全/独立身份门禁见REBUILD_RELIABILITY.md“对象版本退修与独审复核”。交付summary增加`independent_issue_summary`，gaps按原独审审计记录呈现未关闭issue，新freeze/版本变化不会清空。旧review body缺新字段仍保留原指纹和回执读取，不迁移生产或自动补文献。
 
-C3进一步允许可信总指挥用独立私有key和原生读回，对精确历史修正事件签发归属见证，使同账号章节专用修正可受控独审；见REBUILD_RELIABILITY.md的C3合同。没有精确见证时仍拒绝，旧事件不补造task身份，生产authority不在本轮配置。
+C3进一步允许用户另行授权的可信签发操作者用独立私有key和原生读回（不属于总指挥调度职责），对精确历史修正事件签发归属见证，使同账号章节专用修正可受控独审；见REBUILD_RELIABILITY.md的C3合同。没有精确见证时仍拒绝，旧事件不补造task身份，生产密钥已配置；常规验收授权与保存入口见 REVIEWER_ACCESS.md，历史修正归属见证不属于总指挥日常职责。

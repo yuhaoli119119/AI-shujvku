@@ -4,10 +4,13 @@
 
 本目录只放**现行**文档。历史计划、审计、旧接口手册已移出，见文末"历史与备份"。
 
+职责唯一真源：`AGENTS.md` 第2节。总指挥启动入口为 [`COMMANDER_PROMPT.md`](COMMANDER_PROMPT.md)，其他技术文档不构成角色扩权授权。
+
 ## 现行文档
 
 | 文档 | 作用 |
 |---|---|
+| [`REVIEWER_ACCESS.md`](REVIEWER_ACCESS.md) | 单篇验收授权准备、实际覆盖冻结与正式保存；密钥留在服务器 |
 | [`CHINESE_READING.md`](CHINESE_READING.md) | 中文摘要、科研新人导读、依据范围与单独重试 |
 | [`ORDINARY_PARSING.md`](ORDINARY_PARSING.md) | 普通解析的一键启动、按文件断点、局部重试及后续精修边界 |
 | [`PIPELINE_TARGET.md`](PIPELINE_TARGET.md) | 目标流程：文献库 → AI 整理图表 → AI 按反应模板填表 → 汇总分析（**核心链路已实现，独立验收进行中**） |
@@ -17,8 +20,8 @@
 | [`AI_WORKBENCH_API.md`](AI_WORKBENCH_API.md) | 外部 AI 批量读取/写回图表解释与来源化数据的接口与提示词 |
 | [`REBUILD_EXECUTION_LOG.md`](REBUILD_EXECUTION_LOG.md) | 全项目改造执行日志：阶段、备份、实测进度与阻碍 |
 | [`REBUILD_ACCEPTANCE.md`](REBUILD_ACCEPTANCE.md) | 全项目改造验收报告：实测能力、A0019 闭环、测试摘要与回滚 |
-| [`BATCH_COORDINATION.md`](BATCH_COORDINATION.md) | 当前对话的固定清单、串行文献任务、持久恢复、结果核对与原生 heartbeat 操作；阶段二源码候选，未部署/未真实执行 |
-| [`CODEX_WEB_DISPATCH.md`](CODEX_WEB_DISPATCH.md) | 总指挥 → Codex-web 派发流程（目标模式）、脚本用法、安全与并发约束 |
+| [`BATCH_COORDINATION.md`](BATCH_COORDINATION.md) | 文献持续调度入口；职责只引用 AGENTS.md 第2节 |
+| [`CODEX_WEB_DISPATCH.md`](CODEX_WEB_DISPATCH.md) | 原生文献任务派发入口；旧脚本说明已删除 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 现行系统结构：运行位置、服务、数据资产、访问与鉴权 |
 | [`MCP_ACCESS.md`](MCP_ACCESS.md) | MCP 外部接入现状（端点、鉴权、能力分层、key 位置） |
 | [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md) | 工作台真实登录（2026-09-21 上线）；**现行且保持不动** |

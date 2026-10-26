@@ -28,7 +28,7 @@
 
 `accepted` 要求所有冻结文件完整覆盖、规则检查通过、没有未裁决来源冲突、输出和物理来源版本未变、独立 reviewer 的证据。writer 不能自 accept。同一工作台账号可提交不同原生任务的独立验收，但必须持有独立协调者预先签发的受控授权；普通登录不能通过自填 task_id 获得权限。`app.services.rebuild_task_authorization.issue_reviewer_authorization` 是服务端本地协调适配器，没有共享登录可调用的 HTTP 签发入口。协调者提供单独的私有 authority key（配置路径 `LITAI_REBUILD_REVIEW_AUTHORITY_KEY_FILE`，不使用工作台密码或会话签名密钥），核对 writer/reviewer 的不同原生 thread handle、项目 cwd、原生 turn，并将 owner、冻结 revision、task、证据目录和有效期签入授权。工作台只提交短期 `X-Reviewer-Authorization`；原权限密钥不交给 reviewer，也不进入报告。队列任务还要与服务端持久 handle 记录一致。不同认证主体仍可独立复核，不能复用 writer 的任务 ID。
 
-当前生产未配置/签发此 authority，不能假装已集成：真实同账号工作流须由总指挥批准配置并验证服务端本地签发适配器，**不要求用户另建工作台账号**。无有效授权返回明确门禁未集成/授权缺失；不能把旧 shared-account 任务自动通过。已通过回执不可覆盖；后续修正另冻结新版本。文件、关联 SI 或输出变化使当前投影回到 `review_incomplete`，历史回执保留。
+2026-10-26生产配置已核实：authority私钥已配置且可读，但每篇仍须取得绑定当前冻结版本及独立验收对话的短期授权。固定管理入口见 [REVIEWER_ACCESS.md](REVIEWER_ACCESS.md)，不要求另建账号。原生任务尚未创建时先通过原生工具创建；授权准备不派发任务、不裁决内容。配置存在不代表任何文献已获授权或通过。无有效授权仍拒绝正式同账号验收；已通过回执不可覆盖，成果变更后按新版本重新核验。
 
 ## 持久队列与无进展保护
 
@@ -44,7 +44,7 @@ writer 无进展按真实语义输出、经过验证的覆盖和回执变化判�
 
 版本号、重复 checkpoint、HTTP 200 和 turn completed 不是进展。空完成或停滞达到有限观察次数后转 `needs_attention`、保存诊断、停止应用侧自动回读；不会无限重派或换模型。A077 的空 completed 根因仍未确定。413 区分上下文分块/图片数量与渲染尺寸；只读 429 最多三次有限退避；未知写结果必须先核对回执。
 
-**跨项目边界**：复用现有 8214 原生 IPC，不新起 app-server、不 cron、不用 shell 轮询冒充 native。自动事件透传没有经过本项目验证，`automatic_event_execution=false`。fallback 是协调者自己的原生 heartbeat 显式调用同一任务的 claim/readback 适配器；本次不创建或恢复生产 heartbeat。另有 `LITAI_REBUILD_NATIVE_STOP_ENABLED=false` 控制实际原生停止，默认仅检测告警，界面明确提示“原生任务尚未确认停止，可能仍消耗额度”。启用后，`app.services.rebuild_native_stop.protective_stop` 先持久化唯一停止意图，以现有服务端保存的 owned thread/初始 turn 核对原生 readback；暂停同一 goal，再读回自动续轮并中断当前 owned turn，最终同时核对 goal 已暂停/完成及 turn 已停止才返回 verified_stop。`POST /api/rebuild/native-attempts/{job_id}/stop` 还验证同一 attempt token。丢失回执、并发请求和服务重启均只核对同一个停止意图，不盲重发或误停别人的 handle；未知保持需要人工核对。目标的 blocked/usageLimited 不冒充持久暂停。该 adapter 已做隔离协议/事务测试，真实上游行为仍需总指挥原生验收；本次不启用、不调用生产停止接口。旧文档引用的 `scripts/literature_batch.cjs` 不在当前基线工作树；保留 batch_id 接口，不复活旧目录或未知批次。
+**跨项目边界**：复用现有 8214 原生 IPC，不新起 app-server、不 cron、不用 shell 轮询冒充 native。自动事件透传没有经过本项目验证，`automatic_event_execution=false`。fallback 是协调者自己的原生 heartbeat 显式调用同一任务的 claim/readback 适配器；本次不创建或恢复生产 heartbeat。另有 `LITAI_REBUILD_NATIVE_STOP_ENABLED=false` 控制实际原生停止，默认仅检测告警，界面明确提示“原生任务尚未确认停止，可能仍消耗额度”。启用后，`app.services.rebuild_native_stop.protective_stop` 先持久化唯一停止意图，以现有服务端保存的 owned thread/初始 turn 核对原生 readback；暂停同一 goal，再读回自动续轮并中断当前 owned turn，最终同时核对 goal 已暂停/完成及 turn 已停止才返回 verified_stop。`POST /api/rebuild/native-attempts/{job_id}/stop` 还验证同一 attempt token。丢失回执、并发请求和服务重启均只核对同一个停止意图，不盲重发或误停别人的 handle；未知保持需要人工核对。目标的 blocked/usageLimited 不冒充持久暂停。该 adapter 已做隔离协议/事务测试，真实上游行为仍需用户另行授权的系统验收任务核验；本次不启用、不调用生产停止接口。旧文档引用的 `scripts/literature_batch.cjs` 不在当前基线工作树；保留 batch_id 接口，不复活旧目录或未知批次。
 
 ## 统一只读工具与缓存
 
@@ -103,15 +103,15 @@ review请求可选`failed_items`：`issue_id,kind,object_id,object_version,sourc
 
 `resolved_items`绑定`prior_freeze_id,issue_id,kind,object_id,prior_object_version,current_object_version,correction_event_id,note`，章节替换可额外给`current_object_id`。仅独立reviewer可记录：服务端核对原独审问题、原版本、正式修正before/after及其成功事务receipt、当前独立读取及新冻结版本。mutations用原before/after作写前保全；阅读复用beginner_zh_v1专用原before/after/保存receipt；来源化章节复用真实导入hash、section_boundary_corrected声明和专用correction receipt，明确新章节ID，保留旧章节字节，不拿新文本冒充覆盖旧记录。
 
-同账号review仍必须原服务端签发的独立原生授权，禁止修正者自闭合。阅读事件没有task_id时，服务端可用原保存receipt.job_id→已存WorkflowJob的paper/actor/thread与授权核实过的writer thread绑定；不从客户端补身份。旧阅读job缺actor/thread或来源章节专用事件缺原生身份时，默认同账号关闭保持fail-closed；只有下述私有总指挥对精确事件提供签名归属见证才可受控复核。独立不同认证主体仍可走专用证据链；相关真实生产闭环仍需独审。
+同账号review仍必须原服务端签发的独立原生授权，禁止修正者自闭合。阅读事件没有task_id时，服务端可用原保存receipt.job_id→已存WorkflowJob的paper/actor/thread与授权核实过的writer thread绑定；不从客户端补身份。旧阅读job缺actor/thread或来源章节专用事件缺原生身份时，默认同账号关闭保持fail-closed；只有下述另行授权的可信签发操作对精确事件提供签名归属见证才可受控复核。独立不同认证主体仍可走专用证据链；相关真实生产闭环仍需独审。
 
 历史结构化问题从immutable independent_review审计receipt投影，新的freeze不隐藏旧open问题；对象变化标需独立复核，不自动关闭。新accepted若遗漏任何未关闭问题则拒绝。交付包summary返回`independent_issue_summary`，gaps返回精确未关闭问题、原对象版本及当前新旧状态。旧review没有结构化项时保持unknown，不把旧message自动解析成问题或伪造closed状态。已解决对象再变化重新标记需核实，不自动继承通过。
 
 恢复继续复用原稳定request_id与持久receipt；未知ACK不重复create。隔离测试允许新进程/Session读回同一回执及同actor work身份，不派模型，不释放未知占用。本候选测试、独立快照、最终提交与生产/视觉证据各自报告，不将文档作为上线证明。
 
 
-C3候选受控归属见证：服务端本地`issue_reviewer_authorization`可选成对提供`correction_event_ids`、`writer_ownership_evidence`（受控evidence_root内的普通非symlink文件）及`writer_ownership_sha256`。不是HTTP输入，也不能用工作台会话密钥签发；必须总指挥持独立私有key调用，并沿用真实native readback核对writer/reviewer不同、项目与turn。
+C3候选受控归属见证：服务端本地`issue_reviewer_authorization`可选成对提供`correction_event_ids`、`writer_ownership_evidence`（受控evidence_root内的普通非symlink文件）及`writer_ownership_sha256`。不是HTTP输入，也不能用工作台会话密钥签发；必须由用户另行授权的可信签发操作者持独立私有key调用，总指挥日常调度无此授权，并沿用真实native readback核对writer/reviewer不同、项目与turn。
 
 证据JSON格式`coordinator_correction_witness_v1`，字段paper_id、writer_thread_id、events。每项严格为event_id、event_sha256、prior_freeze_id、issue_id。签发前后均核对原事件同paper/actor、原始完整存储内容hash（不二次脱敏掩盖科学键变化）、原问题→冻结时间区间和真实对应成功receipt；原问题及目标不得借用。claims签入精确事件集合、内容hash和证据artifact相对路径/hash；复核时再次验证原字节、事件与回执，不允许普通grant认领其它历史事件。
 
-签名结果明确标记`current_coordinator_witness_not_historical_event_identity`，是当前总指挥核实归属的见证，不回填旧事件task_id、不改旧文件/章节/审计。无见证、错误hash、证据变化、不同actor/篇、时间错位或原回执不符均拒绝。生产authority未在本轮配置，隔离fixture签发不代表生产授权已接入。
+签名结果明确标记`current_coordinator_witness_not_historical_event_identity`，是当前可信签发操作者核实归属的见证（字段名保留兼容，不授予总指挥该职责），不回填旧事件task_id、不改旧文件/章节/审计。无见证、错误hash、证据变化、不同actor/篇、时间错位或原回执不符均拒绝。生产密钥已配置；历史修正归属见证仍须用户另行明确授权，常规任务授权按 REVIEWER_ACCESS.md 办理，不把隔离fixture当生产验收。
