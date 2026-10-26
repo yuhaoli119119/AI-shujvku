@@ -18,7 +18,7 @@ from test_rebuild_mutation_audit import audit_env
 from test_rebuild_acceptance import base, freeze_body, review_body
 
 
-def grant(env, monkeypatch, *, same_handle=False, fake_owner=False):
+def grant(env, monkeypatch, *, same_handle=False, fake_owner=False, durable=False):
     key = env["settings"].storage_root.parent / "fixture-authority.key"
     key.write_bytes(b"separate-fixture-authority-key-32bytes-minimum")
     key.chmod(0o600)
@@ -30,7 +30,8 @@ def grant(env, monkeypatch, *, same_handle=False, fake_owner=False):
     # assumption about container mount names or the checkout being writable.
     fixture_project = settings.storage_root.parent / "review-fixture-project"
     monkeypatch.setattr(project_paths, "PROJECT_ROOT", fixture_project)
-    writable = fixture_project / "outputs" / "review-evidence"
+    writable = (fixture_project / "data" / "reviewer-evidence" / "paper-1" if durable else
+                fixture_project / "outputs" / "review-evidence")
     writable.mkdir(parents=True, exist_ok=True)
     async def native(thread_id, **kwargs):
         return ThreadStatus("completed", "active", None, None, turn_id=thread_id + "-turn", thread_id=thread_id, cwd="/opt/literature-ai")
@@ -42,8 +43,9 @@ def grant(env, monkeypatch, *, same_handle=False, fake_owner=False):
     return frozen, issued, settings, writable
 
 
-def test_same_workbench_account_separate_verified_native_tasks_can_accept(audit_env, monkeypatch):
-    env = audit_env; frozen, issued, settings, writable = grant(env, monkeypatch)
+@pytest.mark.parametrize("durable", [False, True])
+def test_same_workbench_account_separate_verified_native_tasks_can_accept(audit_env, monkeypatch, durable):
+    env = audit_env; frozen, issued, settings, writable = grant(env, monkeypatch, durable=durable)
     body = review_body(env, frozen); body["reviewer_task_id"] = "review-native"
     response = env["client"].post(base(env) + f'/{frozen["job_id"]}/reviews', json=body,
                                  headers={"X-Reviewer-Authorization": issued["authorization"]})
@@ -90,9 +92,10 @@ def test_authority_is_separate_from_shared_session_and_native_identity_must_veri
             asyncio.run(issue_reviewer_authorization(session, frozen["job_id"], issuer_key=key, **kwargs))
 
 
-def test_readonly_review_progress_is_verified_and_duplicate_checkpoint_does_not_advance(audit_env, monkeypatch):
+@pytest.mark.parametrize("durable", [False, True])
+def test_readonly_review_progress_is_verified_and_duplicate_checkpoint_does_not_advance(audit_env, monkeypatch, durable):
     from datetime import datetime, timedelta
-    env = audit_env; frozen, issued, settings, writable = grant(env, monkeypatch)
+    env = audit_env; frozen, issued, settings, writable = grant(env, monkeypatch, durable=durable)
     with env["factory"]() as session:
         baseline = evidence_signature(session, env["paper"], role="reviewer", task_id="review-native")
         scientific_before = session.scalar(select(func.count()).select_from(RebuildDataValue))

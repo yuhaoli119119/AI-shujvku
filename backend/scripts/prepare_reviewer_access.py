@@ -162,6 +162,17 @@ def main():
     from sqlalchemy.orm import Session
     operation, raw = sys.argv[1:]
     request = json.loads(raw)
+    if operation == 'check_evidence':
+        from pathlib import Path
+        from app.services.rebuild_task_authorization import review_evidence_root
+        root = review_evidence_root(request['evidence_root'])
+        if not root.is_dir():
+            raise RebuildWorkflowError('review_evidence_root_not_mounted')
+        # Read access is needed by progress/review validation; this check makes
+        # no database or evidence content changes.
+        next(root.iterdir(), None)
+        print(json.dumps({'evidence_root': str(root), 'readable': True}))
+        return
     settings = get_settings()
     with Session(get_engine(settings.database_url), expire_on_commit=False) as session:
         if operation == 'snapshot':

@@ -16,7 +16,7 @@ python scripts/reviewer_access.py \
   --request-id REVIEW_REQUEST_ID
 ```
 
-该命令仅登记**当前快照**与有限验收权限，不派发、解析或生成内容。coordinator 是当前快照登记任务，不冒充历史解析作者；原有作者、事件和未知历史身份保持原样。输出仅包含回执和私有凭据文件路径。凭据文件在项目 `outputs/reviewer-access-private/` 下，目录700、文件600；不得粘贴其内容到聊天。实际图表核验产物放输出的 evidence_directory，不能放凭据目录。
+该命令仅登记**当前快照**与有限验收权限，不派发、解析或生成内容。coordinator 是当前快照登记任务，不冒充历史解析作者；原有作者、事件和未知历史身份保持原样。输出仅包含回执和私有凭据文件路径。凭据文件在项目 `outputs/reviewer-access-private/` 下，目录700、文件600；不得粘贴其内容到聊天。实际图表核验产物放输出的 evidence_directory（宿主 data/reviewer-evidence/REQUEST_ID，对应容器 /data/reviewer-evidence/REQUEST_ID），不能放凭据目录。管理命令在冻结/签发前从生产后端检查该目录可见且可读；主机目录存在不代替容器检查。旧 outputs 证据和旧授权保持原样，但不存在生产挂载的旧 /outputs 路径不能继续提交；应保留证据，按实际覆盖以新 request-id 取得正确持久目录的授权，再由原验收员复制自己的证据并核对哈希。明确 HTTP 400 拒绝的旧请求不能通过删除本地状态重试。
 
 首次未提供覆盖文件时，冻结记录明确 covered_pages=[] 和“尚未核验”；不是科学通过，也不能用这份零覆盖快照提交 accepted。验收员应继续读取原文、检查页面及必要的普通定点修正，不必等待科学结论才能开始阅读。授权或原生读回失败才报告真实错误，不反复重建对话。
 
@@ -49,3 +49,7 @@ python scripts/reviewer_access.py submit \
 ## 范围与发布
 
 这两个脚本是管理工具，不是后台队列或任务派发脚本；没有thread/start、turn/start或模型调用。它们调用当前运行版本的既有服务，不替换应用代码，不需要重启六应用或持久服务。工具按已推送固定Git提交发布，应用 git_commit 可仍为原业务版本；工具发布不冒称应用已升级。较大补缺、系统硬错误和同篇写入交接仍按唯一职责规则。
+
+## 2026-10-27 持久证据路径修复
+
+服务兼容旧项目 outputs 根，并仅新增项目 data/reviewer-evidence 下的任务子目录；不能签发整个 data 根或整个 reviewer-evidence 根。新路径解析后仍须位于该固定目录内，符号链接不可扩大范围。原验签、唯一写者、revision及幂等门禁不变。该服务改动必须按固定Git提交正式部署；管理脚本不得通过临时软链或修改进程常量绕过。

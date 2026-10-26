@@ -59,7 +59,7 @@ def main():
         raise RuntimeError('private_path_must_not_be_symlink')
     os.chmod(private.parent, 0o700)
     os.chmod(private, 0o700)
-    evidence = ROOT / 'outputs' / 'reviewer-access-evidence' / args.request_id
+    evidence = ROOT / 'data' / 'reviewer-evidence' / args.request_id
     evidence.mkdir(parents=True, exist_ok=True)
     if evidence.is_symlink() or evidence.resolve() != evidence.absolute():
         raise RuntimeError('evidence_path_must_not_be_symlink')
@@ -68,7 +68,7 @@ def main():
                'reviewer_thread_id': args.reviewer_thread,
                'request_id': args.request_id,
                'coverage': json.loads(args.coverage_file.read_text()) if args.coverage_file else None,
-               'evidence_root': '/outputs/' + str(evidence.relative_to(ROOT / 'outputs'))}
+               'evidence_root': '/data/' + str(evidence.relative_to(ROOT / 'data'))}
     request_path = private / 'request.json'
     if request_path.exists():
         old = json.loads(request_path.read_text())
@@ -76,6 +76,9 @@ def main():
             raise RuntimeError('request_id_reused_with_different_identity_or_coverage')
     else:
         private_write(request_path, request)
+    # Verify the directory from inside the actual backend before registering a
+    # freeze or issuing a token. Host-side existence is insufficient in Docker.
+    runtime('check_evidence', request)
     # Durable backup precedes any formal freeze/grant write.
     backup = private / 'before.json'
     if not backup.exists():

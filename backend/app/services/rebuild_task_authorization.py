@@ -51,6 +51,21 @@ def _token(key, claims):
     return hmac.new(key, b"private-review-token:" + _canonical(claims), hashlib.sha256).hexdigest()
 
 
+def review_evidence_root(value):
+    """Keep legacy output grants valid; new grants use the durable data mount."""
+    from app.utils.project_paths import PROJECT_ROOT
+    root = Path(value).resolve()
+    legacy = (PROJECT_ROOT / "outputs").resolve()
+    # Resolve the data mount, not the evidence directory: an evidence symlink
+    # must not expand the allowed namespace outside that mount.
+    durable = (PROJECT_ROOT / "data").resolve() / "reviewer-evidence"
+    if root == legacy or root.is_relative_to(legacy):
+        return root
+    if root != durable and root.is_relative_to(durable):
+        return root
+    raise RebuildWorkflowError("review_evidence_root_outside_project_outputs")
+
+
 async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner, reviewer_task_id,
                                         reviewer_thread_id, writer_thread_id, evidence_root,
                                         issuer_key, settings, native_read=None, ttl_seconds=3600,
@@ -69,10 +84,7 @@ async def issue_reviewer_authorization(session, freeze_id, *, request_id, owner,
     if writer_thread_id == reviewer_thread_id:
         raise RebuildWorkflowError("independent_reviewer_required")
     from app.services.paper_db_phase import run_phase
-    from app.utils.project_paths import PROJECT_ROOT
-    evidence_root = Path(evidence_root).resolve()
-    if not evidence_root.is_relative_to((PROJECT_ROOT / "outputs").resolve()):
-        raise RebuildWorkflowError("review_evidence_root_outside_project_outputs")
+    evidence_root = review_evidence_root(evidence_root)
     request = {"freeze_id": freeze_id, "owner": owner, "reviewer_task_id": reviewer_task_id,
                "reviewer_thread_id": reviewer_thread_id, "writer_thread_id": writer_thread_id,
                "evidence_root": str(evidence_root)}
