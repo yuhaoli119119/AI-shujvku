@@ -108,6 +108,8 @@ def submit():
     parser.add_argument('--body', required=True, type=Path)
     parser.add_argument('--kind', choices=['review', 'progress'], default='review')
     parser.add_argument('--readback-only', action='store_true', help='Recover an interrupted submission without repeating its POST')
+    parser.add_argument('--recover-not-saved-evidence', type=Path,
+                        help='Explicit one-time recovery after maintenance verified original request terminal and not saved')
     args = parser.parse_args(sys.argv[2:])
     credential_path = args.authorization_file.resolve()
     if not credential_path.is_relative_to(ROOT / 'outputs/reviewer-access-private'):
@@ -143,13 +145,47 @@ def submit():
         finally:
             if os.path.exists(name):
                 os.unlink(name)
-    if (state.get('saved') is None or state.get('stage') in {'posting', 'unknown'}) and not args.readback_only:
+    recovery = None
+    if args.recover_not_saved_evidence:
+        import hashlib
+        from datetime import datetime, timezone
+        if args.readback_only or state.get('recovery_attempted') or state.get('saved') is not None:
+            raise RuntimeError('explicit_recovery_not_applicable_or_already_consumed')
+        evidence_path = args.recover_not_saved_evidence.resolve()
+        if not evidence_path.is_relative_to(ROOT / 'outputs'):
+            raise RuntimeError('recovery_evidence_outside_project_outputs')
+        evidence_raw = evidence_path.read_bytes()
+        evidence = json.loads(evidence_raw)
+        identity_sha = hashlib.sha256(json.dumps(identity, ensure_ascii=False, sort_keys=True,
+                                                   separators=(',', ':')).encode()).hexdigest()
+        required = {'version': 'review_submit_terminal_evidence_v1', 'identity_sha256': identity_sha,
+                    'paper_id': request['paper_id'], 'freeze_id': frozen['job_id'],
+                    'request_id': body['request_id'], 'kind': args.kind, 'outcome': 'not_saved',
+                    'original_process_terminal': True, 'original_turn_terminal': True,
+                    'audit_count': 0, 'active_transactions': 0, 'prepared_transactions': 0}
+        # Exact JSON type matching keeps false/bools from standing in for counts.
+        if any(type(evidence.get(k)) is not type(v) or evidence.get(k) != v for k, v in required.items()):
+            raise RuntimeError('recovery_terminal_evidence_identity_or_outcome_invalid')
+        try:
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(evidence['checked_at'])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            raise RuntimeError('recovery_terminal_evidence_time_invalid') from None
+        if not 0 <= age <= 900:
+            raise RuntimeError('recovery_terminal_evidence_expired')
+        recovery = {'evidence_file': str(evidence_path),
+                    'evidence_sha256': hashlib.sha256(evidence_raw).hexdigest(),
+                    'identity_sha256': identity_sha}
+    if (state.get('saved') is None or state.get('stage') in {'posting', 'unknown'}) and not args.readback_only and not recovery:
         raise RuntimeError('submit_result_unknown_use_readback_only_no_repost')
     persist()
     config = json.loads((ROOT / '.env.workbench-login.local').read_text())
     base = config['base_url'].rstrip('/')
     cookies = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+    # This server-side client talks to the explicitly configured workbench.
+    # Do not inherit model/download proxy settings: those can interrupt a write
+    # after it has been sent and leave its outcome unknown.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                         urllib.request.HTTPCookieProcessor(cookies))
     secrets = [credential['authorization'], config['password']]
     def redact(value):
         for secret in secrets:
@@ -173,9 +209,12 @@ def submit():
                 state['saved'] = None if error.code >= 500 else False
             persist()
             raise RuntimeError('review_submit_http_' + str(error.code)) from None
-        except (OSError, TimeoutError, ValueError):
+        except (OSError, TimeoutError, ValueError) as error:
             state['error'] = {'stage': state['stage'], 'path': path, 'method': req.get_method(),
-                              'code': 'transport_or_response_error'}
+                              'code': 'transport_or_response_error',
+                              'exception_type': type(error).__name__,
+                              'reason_type': type(getattr(error, 'reason', error)).__name__,
+                              'message': redact(str(error))[:1000]}
             if state['stage'] == 'posting':
                 state.update(stage='unknown', saved=None)
             persist()
@@ -186,6 +225,17 @@ def submit():
     if not state.get('saved') and not args.readback_only:
         if state['stage'] == 'rejected':
             raise RuntimeError('submit_previously_rejected_check_private_state_use_new_request_id')
+        if recovery:
+            # Consume before attempting the write. A second interruption never
+            # turns this explicit maintenance decision into a retry loop.
+            # Exclusive creation also fences two processes that both loaded
+            # the same old unknown state before either persisted its decision.
+            consumed = state_path.with_name(state_path.stem + '-recovery-consumed.json')
+            try:
+                private_write(consumed, recovery)
+            except FileExistsError:
+                raise RuntimeError('explicit_recovery_already_consumed') from None
+            state.update(recovery_attempted=True, recovery=recovery)
         state.update(stage='posting', saved=None)
         persist()
         result = call(endpoint + ('/reviews' if args.kind == 'review' else '/review-progress'), body,
