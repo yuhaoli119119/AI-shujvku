@@ -38,6 +38,10 @@ python scripts/reviewer_access.py submit \
 
 脚本仅完成正式登录、CSRF及短期授权请求头、一次保存与正式读回，回执私有落盘。不会自动重试未知写入。保存只读核验检查点时使用 `--kind progress`，body 遵循 ReviewProgressRequest，artifact须位于本次 evidence_directory。正文/SI全部核验及规则门槛仍由正式服务检查，未检查范围不能填通过。
 
+提交前私有保存本次 request-id、完整载荷与阶段，POST成功立即保存服务端响应，再读取当前验收状态；HTTP错误的状态码、接口和脱敏正文保存在同目录 `submit-REQUEST_ID-state.json`，不能只依据聊天中的状态码反复重试。
+
+若输出 `saved=true, readback_verified=false`，表示正式保存已获回执、读回复核尚未完成；以相同授权文件和body加 `--readback-only` 恢复，只登录和GET，不重复POST。进程断开或POST超时则为结果未知，原request-id禁止再次POST，也用该选项读取确认；只有读回包含同冻结、revision和完整review载荷才确认为已保存。当前正式GET不返回progress审计明细，因此progress的未知写入不能靠该GET自动确认，须报告并由维护人员核对原请求审计，不能重放来猜测。`saved` 与 `readback_verified` 必须分别汇报；收到GET不等于复核通过。
+
 ## 范围与发布
 
 这两个脚本是管理工具，不是后台队列或任务派发脚本；没有thread/start、turn/start或模型调用。它们调用当前运行版本的既有服务，不替换应用代码，不需要重启六应用或持久服务。工具按已推送固定Git提交发布，应用 git_commit 可仍为原业务版本；工具发布不冒称应用已升级。较大补缺、系统硬错误和同篇写入交接仍按唯一职责规则。

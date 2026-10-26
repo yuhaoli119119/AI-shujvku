@@ -107,6 +107,7 @@ def submit():
     parser.add_argument('--authorization-file', required=True, type=Path)
     parser.add_argument('--body', required=True, type=Path)
     parser.add_argument('--kind', choices=['review', 'progress'], default='review')
+    parser.add_argument('--readback-only', action='store_true', help='Recover an interrupted submission without repeating its POST')
     args = parser.parse_args(sys.argv[2:])
     credential_path = args.authorization_file.resolve()
     if not credential_path.is_relative_to(ROOT / 'outputs/reviewer-access-private'):
@@ -120,10 +121,41 @@ def submit():
     if (body.get('reviewer_task_id') != request['reviewer_thread_id'] or
             body.get('expected_revision') != frozen['revision']):
         raise RuntimeError('review_payload_identity_or_revision_mismatch')
+    output = credential_path.parent / ('submit-' + body['request_id'] + '.json')
+    state_path = credential_path.parent / ('submit-' + body['request_id'] + '-state.json')
+    identity = {'paper_id': request['paper_id'], 'freeze_id': frozen['job_id'],
+                'kind': args.kind, 'body': body}
+    state = {'identity': identity, 'stage': 'prepared', 'saved': False}
+    if state_path.exists():
+        state = json.loads(state_path.read_text())
+        if state['identity'] != identity:
+            raise RuntimeError('submit_request_id_reused_with_different_payload')
+    def persist():
+        # Replacement is atomic and private; a crash never destroys the last receipt.
+        import tempfile
+        fd, name = tempfile.mkstemp(prefix='.submit-', dir=credential_path.parent)
+        try:
+            with os.fdopen(fd, 'w') as stream:
+                json.dump(state, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, state_path)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
+    if (state.get('saved') is None or state.get('stage') in {'posting', 'unknown'}) and not args.readback_only:
+        raise RuntimeError('submit_result_unknown_use_readback_only_no_repost')
+    persist()
     config = json.loads((ROOT / '.env.workbench-login.local').read_text())
     base = config['base_url'].rstrip('/')
     cookies = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
+    secrets = [credential['authorization'], config['password']]
+    def redact(value):
+        for secret in secrets:
+            if secret:
+                value = value.replace(secret, '[REDACTED]')
+        return value
     def call(path, value=None, extra=None):
         headers = {'Content-Type': 'application/json', 'Origin': base, **(extra or {})}
         raw = json.dumps(value, ensure_ascii=False).encode() if value is not None else None
@@ -132,23 +164,68 @@ def submit():
             with opener.open(req, timeout=45) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
-            # API errors are saved privately, not echoed with request credentials.
+            state['error'] = {'stage': state['stage'], 'http_status': error.code,
+                              'path': path, 'method': req.get_method(),
+                              'body': redact(error.read(65536).decode(errors='replace'))}
+            # A failed POST is never automatically retried, including HTTP 5xx.
+            if state['stage'] == 'posting':
+                state['stage'] = 'unknown' if error.code >= 500 else 'rejected'
+                state['saved'] = None if error.code >= 500 else False
+            persist()
             raise RuntimeError('review_submit_http_' + str(error.code)) from None
+        except (OSError, TimeoutError, ValueError):
+            state['error'] = {'stage': state['stage'], 'path': path, 'method': req.get_method(),
+                              'code': 'transport_or_response_error'}
+            if state['stage'] == 'posting':
+                state.update(stage='unknown', saved=None)
+            persist()
+            raise RuntimeError('review_submit_transport_error_check_private_state') from None
     login = call('/api/auth/login', {'username': config['username'], 'password': config['password']})
+    secrets.append(login['csrf_token'])
     endpoint = f"/api/rebuild/papers/{request['paper_id']}/acceptance/{frozen['job_id']}"
-    result = call(endpoint + ('/reviews' if args.kind == 'review' else '/review-progress'), body,
-                  {'X-CSRF-Token': login['csrf_token'],
-                   'X-Reviewer-Authorization': credential['authorization']})
-    current = call(f"/api/rebuild/papers/{request['paper_id']}/acceptance")
-    output = credential_path.parent / ('submit-' + str(body.get('request_id', 'missing')) + '.json')
-    if output.parent != credential_path.parent:
-        raise RuntimeError('invalid_submit_request_id')
+    if not state.get('saved') and not args.readback_only:
+        if state['stage'] == 'rejected':
+            raise RuntimeError('submit_previously_rejected_check_private_state_use_new_request_id')
+        state.update(stage='posting', saved=None)
+        persist()
+        result = call(endpoint + ('/reviews' if args.kind == 'review' else '/review-progress'), body,
+                      {'X-CSRF-Token': login['csrf_token'],
+                       'X-Reviewer-Authorization': credential['authorization']})
+        state.update(stage='saved', saved=True, response=result)
+        persist()  # POST success must survive any subsequent readback failure.
+    state['stage'] = 'reading_back'
+    persist()
+    try:
+        current = call(f"/api/rebuild/papers/{request['paper_id']}/acceptance")
+    except RuntimeError:
+        # Preserve the successful POST and give an explicit recovery instruction.
+        if state.get('saved'):
+            print(json.dumps({'saved': True, 'readback_verified': False,
+                              'state_file': str(state_path), 'recovery': 'repeat with --readback-only'}))
+            return
+        raise
+    state['readback'] = current
+    observed = current.get('acceptance') or {}
+    matched = (args.kind == 'review'
+            and observed.get('job_id') == frozen['job_id']
+            and observed.get('revision') == frozen['revision']
+            and all((observed.get('review') or {}).get(k) == v for k, v in body.items()))
+    if not state.get('saved') and matched:
+        state.update(saved=True, response=observed)
+    state['readback_verified'] = matched
+    state['stage'] = 'readback_complete' if state.get('saved') else 'unknown'
+    persist()
+    if not state.get('saved'):
+        print(json.dumps({'saved': None, 'readback_verified': False, 'state_file': str(state_path),
+                          'recovery': 'result remains unknown; do not repeat POST'}))
+        return
+    result = state['response']
     receipt = {'response': result, 'readback': current}
     if output.exists():
         output = output.with_name(output.stem + '-readback.json')
     if not output.exists():
         private_write(output, receipt)
-    print(json.dumps({'saved': True, 'receipt_file': str(output),
+    print(json.dumps({'saved': True, 'readback_verified': matched, 'receipt_file': str(output),
                       'current_acceptance_status': current['acceptance']['status']}, ensure_ascii=False))
 
 

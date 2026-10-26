@@ -162,3 +162,46 @@ def test_submit_hides_bearer_and_persists_formal_readback(tmp_path, monkeypatch,
     assert receipt.stat().st_mode & 0o777 == 0o600
     assert json.loads(receipt.read_text())['readback']['acceptance']['status'] == 'review_incomplete'
     assert len(seen) == 3
+
+
+def test_same_reviewer_refreshes_coverage_after_formal_correction_and_saves(audit_env, monkeypatch):
+    """No production paper: initial scope, actual correction, refreshed grant, HTTP save/readback."""
+    from test_rebuild_mutation_audit import assets
+    env = audit_env
+    req, settings = setup(env, monkeypatch)
+    initial = run(env, req, settings)
+    assert all(x['covered_pages'] == [] for x in initial['freeze']['coverage'])
+    original = {'request_id': 'before-review', 'assets': [{'asset_key': 'checked-caption',
+        'asset_type': 'table', 'file_id': str(env['file']), 'caption': 'Before', 'context_text': 'Synthetic table'}]}
+    imported = env['client'].post(assets(env) + '/import', json=original)
+    assert imported.status_code == 200, imported.text
+    original['request_id'] = 'reviewer-caption-correction'
+    original['assets'][0]['caption'] = 'After independent source check'
+    corrected = env['client'].post(assets(env) + '/import', json=original)
+    assert corrected.status_code == 200, corrected.text
+    with env['factory']() as session:
+        new_revision = tool.snapshot(session, req)['snapshot']['revision']
+    assert new_revision != initial['freeze']['revision']
+    updated = {**req, 'request_id': 'checked-new-revision', 'expected_revision': new_revision,
+               'coverage': freeze_body(env)['coverage']}
+    refreshed = run(env, updated, settings)
+    assert refreshed['freeze']['revision'] == new_revision
+    assert refreshed['authorization'] != initial['authorization']
+    assert refreshed['freeze']['coverage'][0]['covered_pages'] == [1, 2]
+    review = review_body(env, refreshed['freeze'], 'partial')
+    review['reviewer_task_id'] = req['reviewer_thread_id']
+    endpoint = base(env) + '/' + refreshed['freeze']['job_id'] + '/reviews'
+    rejected = env['client'].post(endpoint, json=review,
+        headers={'X-Reviewer-Authorization': initial['authorization']})
+    assert rejected.status_code == 409
+    saved = env['client'].post(endpoint, json=review,
+        headers={'X-Reviewer-Authorization': refreshed['authorization']})
+    assert saved.status_code == 200, saved.text
+    current = env['client'].get(base(env)).json()['acceptance']
+    assert current['status'] == 'partial' and current['review']['request_id'] == review['request_id']
+    assert current['revision'] == new_revision
+    with env['factory']() as session:
+        from app.db.models import RebuildVisualAsset
+        asset = session.scalar(select(RebuildVisualAsset).where(RebuildVisualAsset.asset_key == 'checked-caption'))
+        assert asset.caption == 'After independent source check'
+        assert session.get(WorkflowJob, initial['freeze']['job_id']) is not None
