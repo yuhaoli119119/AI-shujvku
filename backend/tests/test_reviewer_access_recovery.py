@@ -319,3 +319,106 @@ def test_relay_option_rejects_unknown_or_plaintext_entry(client_case, base):
     host = client_case[0]
     with pytest.raises(RuntimeError, match='known_https_workbench'):
         host.workbench_opener(base, http.cookiejar.CookieJar(), 'aliyun-easytier')
+
+
+@pytest.fixture
+def artifact_case(client_case, monkeypatch):
+    host, private, body, argv, token = client_case
+    root = host.ROOT / 'data/reviewer-evidence/current'
+    root.mkdir(parents=True)
+    artifact = root / 'coverage.json'
+    artifact.write_bytes(b'{"observations":[]}')
+    request = {'evidence_root': '/data/reviewer-evidence/current'}
+    payload = {'artifact_path': 'coverage.json', 'artifact_sha256': hashlib.sha256(artifact.read_bytes()).hexdigest()}
+    seen = []
+    def runtime(operation, value):
+        assert operation == 'check_artifact'
+        seen.append(value)
+        return {'evidence_root': value['evidence_root'], 'artifact_sha256': value['artifact_sha256'],
+                'container_readable': True}
+    monkeypatch.setattr(host, 'runtime', runtime)
+    return host, root, artifact, request, payload, seen
+
+
+@pytest.mark.parametrize('absolute', [False, True])
+def test_progress_preflight_checks_host_then_container_same_bytes(artifact_case, absolute):
+    host, root, artifact, request, body, seen = artifact_case
+    if absolute:
+        body['artifact_path'] = request['evidence_root'] + '/coverage.json'
+    result = host.progress_artifact_preflight(request, body)
+    assert result['artifact_sha256'] == body['artifact_sha256']
+    assert seen[0]['artifact_path'] == 'coverage.json'
+    assert set(seen[0]) == {'evidence_root', 'artifact_path', 'artifact_sha256'}
+
+
+@pytest.mark.parametrize('path', ['/data/reviewer-evidence/old/coverage.json', '../old.json'])
+def test_progress_preflight_rejects_previous_grant_and_traversal_before_runtime(artifact_case, path):
+    host, root, artifact, request, body, seen = artifact_case
+    body['artifact_path'] = path
+    with pytest.raises(RuntimeError, match='outside_current_grant_root'):
+        host.progress_artifact_preflight(request, body)
+    assert seen == []
+
+
+@pytest.mark.parametrize('problem,code', [('missing', 'not_found'), ('hash', 'hash_mismatch'),
+                                        ('oversize', 'too_large'), ('symlink', 'outside_current_grant_root')])
+def test_progress_preflight_bad_file_stops_before_runtime(artifact_case, problem, code):
+    host, root, artifact, request, body, seen = artifact_case
+    if problem == 'missing': artifact.unlink()
+    elif problem == 'hash': body['artifact_sha256'] = '0' * 64
+    elif problem == 'oversize': artifact.write_bytes(b'x' * 2_000_001)
+    else:
+        outside = root.parent / 'outside.json'; outside.write_bytes(artifact.read_bytes())
+        artifact.unlink(); artifact.symlink_to(outside)
+    with pytest.raises(RuntimeError, match=code):
+        host.progress_artifact_preflight(request, body)
+    assert seen == []
+
+
+def test_progress_preflight_runtime_visibility_mismatch_is_not_success(artifact_case, monkeypatch):
+    host, root, artifact, request, body, seen = artifact_case
+    monkeypatch.setattr(host, 'runtime', lambda *args: {'artifact_sha256': 'wrong'})
+    with pytest.raises(RuntimeError, match='runtime_contract_mismatch'):
+        host.progress_artifact_preflight(request, body)
+
+
+def test_bad_progress_input_records_not_sent_before_login(client_case, monkeypatch):
+    host, private, body, argv, token = client_case
+    req_path = private / 'request.json'; request = json.loads(req_path.read_text())
+    request['evidence_root'] = '/data/reviewer-evidence/current'; req_path.write_text(json.dumps(request))
+    body.update(artifact_path='/data/reviewer-evidence/old/coverage.json', artifact_sha256='0' * 64)
+    Path(argv[-1]).write_text(json.dumps(body))
+    monkeypatch.setattr(sys, 'argv', argv + ['--kind', 'progress'])
+    monkeypatch.setattr(urllib.request, 'build_opener', lambda *args: pytest.fail('login must not start'))
+    with pytest.raises(RuntimeError, match='no POST sent'):
+        host.submit()
+    state = json.loads((private / 'submit-save-1-state.json').read_text())
+    assert state['saved'] is False
+    assert state['error']['stage'] == 'artifact_preflight'
+    assert state['error']['business_post_sent'] is False
+
+
+@pytest.mark.parametrize('error,code', [(PermissionError('private/path'), 'file_unreadable'),
+    (TimeoutError('private/path'), 'file_unreadable')])
+def test_preflight_filesystem_error_stays_not_sent(client_case, monkeypatch, error, code):
+    host, private, body, argv, token = client_case
+    def fail(*args): raise error
+    monkeypatch.setattr(host, 'progress_artifact_preflight', fail)
+    monkeypatch.setattr(sys, 'argv', argv + ['--kind', 'progress'])
+    monkeypatch.setattr(urllib.request, 'build_opener', lambda *args: pytest.fail('no login'))
+    with pytest.raises(RuntimeError, match=code): host.submit()
+    state = json.loads((private / 'submit-save-1-state.json').read_text())
+    assert state['saved'] is False and state['error']['business_post_sent'] is False
+    assert 'private/path' not in json.dumps(state['error'])
+
+
+@pytest.mark.parametrize('runtime_root', ['/outputs', '/outputs/legacy'])
+def test_progress_preflight_preserves_legacy_outputs_root_and_subdirectory(artifact_case, runtime_root):
+    host, root, artifact, request, body, seen = artifact_case
+    host_root = host.ROOT / runtime_root.lstrip('/')
+    host_root.mkdir(parents=True, exist_ok=True)
+    (host_root / 'coverage.json').write_bytes(artifact.read_bytes())
+    request['evidence_root'] = runtime_root
+    result = host.progress_artifact_preflight(request, body)
+    assert result['evidence_root'] == runtime_root
+    assert result['artifact_sha256'] == body['artifact_sha256']

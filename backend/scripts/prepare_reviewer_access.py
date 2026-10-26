@@ -162,7 +162,7 @@ def main():
     from sqlalchemy.orm import Session
     operation, raw = sys.argv[1:]
     request = json.loads(raw)
-    if operation == 'check_evidence':
+    if operation in {'check_evidence', 'check_artifact'}:
         from pathlib import Path
         from app.services.rebuild_task_authorization import review_evidence_root
         root = review_evidence_root(request['evidence_root'])
@@ -171,7 +171,19 @@ def main():
         # Read access is needed by progress/review validation; this check makes
         # no database or evidence content changes.
         next(root.iterdir(), None)
-        print(json.dumps({'evidence_root': str(root), 'readable': True}))
+        result = {'evidence_root': str(root), 'readable': True}
+        if operation == 'check_artifact':
+            import hashlib
+            path = (root / request['artifact_path']).resolve()
+            if not path.is_relative_to(root) or path == root:
+                raise RebuildWorkflowError('progress_preflight_container_artifact_outside_root')
+            if not path.is_file() or path.stat().st_size > 2_000_000:
+                raise RebuildWorkflowError('progress_preflight_container_artifact_unavailable')
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            if digest != request['artifact_sha256']:
+                raise RebuildWorkflowError('progress_preflight_container_artifact_hash_mismatch')
+            result.update(artifact_sha256=digest, container_readable=True, business_post_sent=False)
+        print(json.dumps(result))
         return
     settings = get_settings()
     with Session(get_engine(settings.database_url), expire_on_commit=False) as session:

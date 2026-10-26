@@ -65,6 +65,47 @@ def runtime(operation, request):
     return json.loads(result.stdout)
 
 
+def progress_artifact_preflight(request, body):
+    """Check existing reviewer evidence; never copy, rewrite or submit it."""
+    import hashlib
+    root = Path(request.get('evidence_root', ''))
+    if not root.is_absolute():
+        raise RuntimeError('progress_preflight_evidence_root_invalid')
+    # These are the explicit host/container contracts, not arbitrary /data paths.
+    if root.is_relative_to('/data/reviewer-evidence') and root != Path('/data/reviewer-evidence'):
+        host_root = ROOT / 'data' / root.relative_to('/data')
+    elif root.is_relative_to('/outputs'):
+        host_root = ROOT / root.relative_to('/')
+    else:
+        raise RuntimeError('progress_preflight_evidence_root_invalid')
+    if host_root.resolve() != host_root.absolute():
+        raise RuntimeError('progress_preflight_evidence_root_symlink')
+    raw_path = body.get('artifact_path')
+    if not isinstance(raw_path, str) or not raw_path:
+        raise RuntimeError('progress_preflight_artifact_path_missing')
+    artifact = Path(raw_path)
+    if artifact.is_absolute():
+        if not artifact.is_relative_to(root):
+            raise RuntimeError('progress_preflight_artifact_outside_current_grant_root')
+        artifact = artifact.relative_to(root)
+    path = host_root / artifact
+    if not path.resolve().is_relative_to(host_root.resolve()) or path.resolve() == host_root.resolve():
+        raise RuntimeError('progress_preflight_artifact_outside_current_grant_root')
+    if not path.is_file():
+        raise RuntimeError('progress_preflight_artifact_not_found_in_current_grant_root')
+    if path.stat().st_size > 2_000_000:
+        raise RuntimeError('progress_preflight_artifact_too_large')
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != body.get('artifact_sha256'):
+        raise RuntimeError('progress_preflight_artifact_hash_mismatch')
+    checked = runtime('check_artifact', {
+        'evidence_root': str(root),
+        'artifact_path': str(artifact), 'artifact_sha256': digest})
+    if checked.get('artifact_sha256') != digest or checked.get('evidence_root') != str(root):
+        raise RuntimeError('progress_preflight_runtime_contract_mismatch')
+    return checked
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--paper-id', required=True)
@@ -210,6 +251,18 @@ def submit():
                     'identity_sha256': identity_sha}
     if (state.get('saved') is None or state.get('stage') in {'posting', 'unknown'}) and not args.readback_only and not recovery:
         raise RuntimeError('submit_result_unknown_use_readback_only_no_repost')
+    if args.kind == 'progress' and not args.readback_only and not state.get('saved'):
+        try:
+            state['artifact_preflight'] = progress_artifact_preflight(request, body)
+        except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+            code = (str(error) if isinstance(error, RuntimeError) else
+                    'progress_preflight_runtime_check_timed_out' if isinstance(error, subprocess.TimeoutExpired)
+                    else 'progress_preflight_file_unreadable')
+            state['error'] = {'stage': 'artifact_preflight', 'code': code,
+                              'expected_evidence_root': request.get('evidence_root'),
+                              'artifact_path': body.get('artifact_path'), 'business_post_sent': False}
+            persist()
+            raise RuntimeError(code + '; check current grant evidence_directory; no POST sent') from None
     persist()
     config = json.loads((ROOT / '.env.workbench-login.local').read_text())
     base = config['base_url'].rstrip('/')

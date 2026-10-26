@@ -38,6 +38,8 @@ python scripts/reviewer_access.py submit \
 
 脚本仅完成正式登录、CSRF及短期授权请求头、一次保存与正式读回，回执私有落盘。不会自动重试未知写入。保存只读核验检查点时使用 `--kind progress`，body 遵循 ReviewProgressRequest，artifact须位于本次 evidence_directory。正文/SI全部核验及规则门槛仍由正式服务检查，未检查范围不能填通过。
 
+progress首次发送前检查输入：artifact必须在**当前授权**的 evidence_directory 内，不能在新授权body中沿用上一授权目录的绝对路径。客户端核对宿主文件存在、范围、2MB上限和SHA256，再从后端容器只读核对同相对路径文件可读、范围及SHA256一致；不访问数据库、签发或判断验收内容。失败在登录/业务POST前停止，私有state明确记录 artifact_preflight、预期根、实际路径和本次未发送，不自动复制文件或修改body；按提示由验收员保留原字节复制到正确目录、核对哈希。readback-only和已确认保存的读回跳过该输入检查。此检查不替代正式服务的授权、revision、幂等与科学证据校验。
+
 服务器保存客户端直连既有私有登录配置中的工作台入口，不继承模型/下载用途的 HTTP_PROXY、HTTPS_PROXY 或 ALL_PROXY；TLS 验证保持启用。传输或响应解码异常会在私有 state 文件记录脱敏后的异常类别、原因类别和消息，仍按结果未知处理，禁止自动重放 POST。
 
 提交前私有保存本次 request-id、完整载荷与阶段，POST成功立即保存服务端响应，再读取当前验收状态；HTTP错误的状态码、接口和脱敏正文保存在同目录 `submit-REQUEST_ID-state.json`，不能只依据聊天中的状态码反复重试。
