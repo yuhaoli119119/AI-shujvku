@@ -319,8 +319,16 @@ def _apply_readback(session, job, settings, status):
         recovered=recover_auto_started_turn(job.payload,progress,status,settings)
         if recovered:progress.update(turn_id=recovered['turn_id'],identity_recovery=recovered)
     if not matches_owned_attempt(status,tid,progress.get('turn_id'),allow_goal_continuations=True):return job
+    saved_terminal = bool(
+        progress.get('reading_saved')
+        and status.turn_status in ('completed', 'failed', 'interrupted')
+        and status.thread_id == tid
+        and status.turn_id == progress.get('turn_id')
+        and status.thread_status in ('idle', 'notLoaded')
+    )
     terminal=(status.goal_status in ('complete','completed','blocked','paused') or
-              status.goal_observed and status.goal_status is None and status.thread_status in ('idle','notLoaded'))
+              status.goal_observed and status.goal_status is None and status.thread_status in ('idle','notLoaded') or
+              saved_terminal)
     from app.services.paper_native_models import stage_fallback
     if (status.turn_id!=progress.get('turn_id') and status.goal_objective==(job.payload or {}).get('dispatch_objective')):
         progress.update(start_turn_id=progress.get('start_turn_id') or progress.get('turn_id'),turn_id=status.turn_id)
@@ -332,7 +340,10 @@ def _apply_readback(session, job, settings, status):
         native_error = getattr(status, 'native_error', None)
         progress['native_error'] = native_error
         job.error = None if progress.get('reading_saved') else job.error if job.error and 'fallback_exhausted' in job.error else ('模型服务暂时限流，请稍后重试；已有资料保留' if native_error and '429' in native_error else '本次未保存中文阅读内容，已有资料保留，可单独重试'+('：'+native_error[:500] if native_error else ''))
-        progress.update(native_terminal_verified=True,phase=job.status)
+        progress.update(native_terminal_verified=True,phase=job.status,
+                        completion_evidence=(progress.get('completion_evidence') or
+                                             ('reading_saved_terminal_turn_without_goal'
+                                              if saved_terminal else status.goal_status)))
     else:job.status='running';progress['phase']='running'
     job.progress=progress;session.flush();return job
 

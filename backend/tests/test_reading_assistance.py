@@ -97,6 +97,29 @@ def test_failed_generation_does_not_touch_scientific_or_stop_next_parse_and_retr
     assert e['client'].get(base(e)).json()['abstract_original']
 
 
+def test_saved_reading_completes_after_interrupted_turn_loses_goal(reading_env, monkeypatch):
+    e=reading_env;j=create(e);p=body(e,j['job_id']);assert e['client'].post(base(e),json=p).status_code==200
+    with e['factory']() as s:
+        job=s.get(WorkflowJob,j['job_id'])
+        job.progress={**job.progress,'thread_id':'owned','turn_id':'turn','dispatch_started':True}
+        s.commit()
+    async def interrupted(*a,**k):
+        return ThreadStatus('interrupted',None,None,None,thread_id='owned',turn_id='turn',
+                            turn_ids=('turn',),thread_status='notLoaded',goal_observed=False,
+                            model_provider='workbuddy',model='cn:deepseek-v4.1-flash')
+    monkeypatch.setattr('app.services.codex_web_dispatch.read_thread_status',interrupted)
+    with e['factory']() as s:
+        job=asyncio.run(service.reconcile(s,s.get(WorkflowJob,j['job_id']),e['settings']));s.commit()
+        assert job.status=='completed'
+        assert job.progress['reading_saved'] is True
+        assert job.progress['native_terminal_verified'] is True
+        assert job.progress['phase']=='completed'
+        assert job.progress['completion_evidence']=='reading_saved_terminal_turn_without_goal'
+        paper=s.get(Paper,e['paper'])
+        assert paper.comprehensive_analysis['abstract_zh']==p['abstract_zh']
+        assert paper.reading_guide['beginner_zh']['one_sentence']==p['one_sentence']
+
+
 def test_same_paper_writer_blocks_guide_without_restarting_unknown(reading_env):
     e=reading_env
     with e['factory']() as s:
