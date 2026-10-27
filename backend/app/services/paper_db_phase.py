@@ -142,8 +142,10 @@ async def observe_job(request_session, job, settings, apply, *, include_goal=Tru
     ordinary = (pin['payload'] or {}).get('parse_contract') == 'ordinary_parse_v1'
     stopped = bool((pin['progress'] or {}).get('needs_attention')) and not ordinary
     if tid and pin['status'] in ('queued', 'dispatching', 'running') and not stopped:
-        native = await asyncio.wait_for(read_thread_status(tid, settings=settings,
-                                                           include_goal=include_goal), timeout=10)
+        native = await asyncio.wait_for(
+            read_thread_status(tid, settings=settings, include_goal=include_goal),
+            timeout=max(10.0, float(settings.codex_web_dispatch_timeout_seconds)),
+        )
 
     def update(session):
         current = session.get(WorkflowJob, jid, with_for_update=True)
