@@ -93,6 +93,20 @@ def _resume_phase(
         if _known_receipt(job, request_id, model, prepared_hash):
             return {'job': job, 'reconcile': False, 'dispatches': dispatches}
         raise ValueError('same_job_changed_during_readback')
+    from app.services.ordinary_openai_recovery import applies, stage_resume
+    if applies(job):
+        if prepared_content is not None:
+            raise ValueError('ordinary_openai_prepared_reading_not_supported')
+        stage_resume(job, native, request_id, model)
+        job.progress = {**job.progress, 'recovery_receipts': [
+            *list((job.progress or {}).get('recovery_receipts') or []),
+            {'request_id': request_id, 'model': model, 'prepared_hash': prepared_hash}]}
+        payload = job.payload
+        dispatches.append(dict(job_id=job_id, database_url=settings.database_url,
+            prompt=payload['dispatch_prompt'], objective=payload['dispatch_objective'], settings=settings,
+            primary_model=payload['chosen_model'], attempt_token=payload['attempt_token']))
+        return {'job': job, 'reconcile': False, 'dispatches': dispatches}
+
     thread_id, turn_id, current_model = _verify_native(job, native)
 
     reconcile = False
