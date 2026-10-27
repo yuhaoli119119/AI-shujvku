@@ -60,6 +60,14 @@ def input_context(session, paper_id, settings):
                                     boxes = []
                                 if boxes:
                                     page_item['abstract_boxes'] = boxes
+                                if index + 1 < min(document.page_count, 5):
+                                    from app.services.reading_abstract_source import pdf_numbered_abstract
+                                    try:
+                                        sections = pdf_numbered_abstract(page, text, document[index + 1])
+                                    except (RuntimeError, ValueError):
+                                        sections = []
+                                    if sections:
+                                        page_item['numbered_abstract_sections'] = sections
                         item['pages'].append(page_item); remaining -= len(text)
                     if not any(p['text'].strip() for p in item['pages']):
                         item['complete_text'] = False; item['reason'] = '扫描页未提供可读文字'

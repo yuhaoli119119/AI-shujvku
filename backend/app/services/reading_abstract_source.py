@@ -76,8 +76,10 @@ def pdf_abstract_boxes(page, raw):
         size = max_size(block)
         if not (100 <= len(text) <= 15000 and len(text.split()) >= 50
                 and 6 <= size <= 14 and rect.height >= size * 3
-                and abs(rect.x0 - ib.x0) <= 5
-                and 0 < ib.y0 - rect.y1 <= 60
+                and ((abs(rect.x0 - ib.x0) <= 5 and 0 < ib.y0 - rect.y1 <= 60)
+                     or (0 < ib.x0 - rect.x1 <= 40
+                         and abs(rect.y0 - ib.y0) <= 25
+                         and abs(rect.y1 - bb.y1) <= 40))
                 and rect.width >= 1.15 * bb.width and rect.width <= .85 * width):
             continue
         # Notices/captions/headings are not scientific abstracts, even in boxes.
@@ -122,6 +124,76 @@ def pdf_abstract_boxes(page, raw):
             'start_marker': 'layout:unique_shaded_bold_paragraph',
             'end_marker': block_text(intro).strip()})
     return candidates
+
+
+def pdf_numbered_abstract(page, raw, following):
+    """A labelled, line-numbered abstract occupying a page before Introduction.
+
+    Read real geometry instead of removing arbitrary numbers or watermark text.
+    Each selected line retains its exact character span in the original text.
+    Unknown text in the body region or broken margin numbering rejects recovery.
+    """
+    import fitz
+
+    def lines(p):
+        if p.rotation or p.rect.width > 1600 or p.rect.height > 2400:
+            return []
+        return [(line, ''.join(s['text'] for s in line['spans']).strip())
+                for block in p.get_text('dict', flags=fitz.TEXTFLAGS_TEXT)['blocks']
+                if block['type'] == 0 for line in block['lines']
+                if tuple(line['dir']) == (1.0, 0.0)]
+
+    current = lines(page)
+    headings = [(line, text) for line, text in current if text.lower() == 'abstract']
+    if len(headings) != 1:
+        return []
+    heading = headings[0][0]; hb = fitz.Rect(heading['bbox'])
+    width, height = page.rect.width, page.rect.height
+    if not (.12 * width <= hb.x0 <= .25 * width and .07 * height <= hb.y0 <= .2 * height):
+        return []
+    # Introduction must be the next page's first non-numeric body line.
+    next_body = [(line, text) for line, text in lines(following)
+                 if text and not text.isdigit()
+                 and .07 * following.rect.height <= line['bbox'][1] <= .9 * following.rect.height
+                 and abs(line['bbox'][0] - hb.x0) <= 3
+                 and line['bbox'][2] <= .9 * following.rect.width]
+    next_body.sort(key=lambda item: item[0]['bbox'][1])
+    if not next_body or not re.fullmatch(r'(?:1[.\s]+)?introduction', next_body[0][1], re.I):
+        return []
+    body = [(line, text) for line, text in current if text and not text.isdigit()
+            and .07 * height <= line['bbox'][1] <= .9 * height
+            and line['bbox'][0] >= hb.x0 - 3 and line['bbox'][2] <= .9 * width]
+    body.sort(key=lambda item: item[0]['bbox'][1])
+    if not body or body[0][0] is not heading or len(body) < 5:
+        return []
+    numbers = [(line, int(text)) for line, text in current if text.isdigit()
+               and hb.x0 - 40 <= line['bbox'][0] and line['bbox'][2] < hb.x0 - 5]
+    observed = []; spans = []; text_lines = []; cursor = 0
+    for index, (line, text) in enumerate(body):
+        if abs(line['bbox'][0] - hb.x0) > 3:
+            return []
+        matches = [number for margin, number in numbers
+                   if abs(margin['spans'][0]['origin'][1] - line['spans'][0]['origin'][1]) <= 2]
+        if len(matches) != 1 or (observed and matches[0] != observed[-1] + 1):
+            return []
+        observed.append(matches[0])
+        if not index:
+            continue
+        if (publisher_notice(text) or re.match(r'(?:abstract|introduction|keywords|figure|table)\b', text, re.I)):
+            return []
+        start = raw.find(text, cursor)
+        if start < 0 or raw.find(text, start + 1) >= 0:
+            return []
+        spans.append({'start_char': start, 'end_char': start + len(text)})
+        cursor = start + len(text); text_lines.append(text)
+    selected = '\n'.join(text_lines)
+    if not (100 <= len(selected) <= 15000 and len(selected.split()) >= 50 and re.search(r'[.!?]$', selected)):
+        return []
+    return [{'text': selected, 'spans': spans,
+             'selection_method': 'numbered_abstract_page_v1',
+             'start_marker': 'Abstract', 'end_marker': next_body[0][1],
+             'layout_evidence': {'heading_bbox': list(hb), 'line_numbers': observed,
+                 'next_introduction_bbox': list(next_body[0][0]['bbox'])}}]
 
 
 def select_abstract(metadata, documents):
@@ -183,6 +255,24 @@ def select_abstract(metadata, documents):
                 source = {'kind': 'main_text', 'file_id': doc['file_id'],
                     'source_sha256': doc['source_sha256'], 'physical_page': page['page'],
                     **box, 'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
+                candidates.append({'text': text, 'source': source,
+                    'revision': revision({'text': text, 'source': source}), 'missing_reason': ''})
+    # Do not replace a previously accepted source or resolve competing headings.
+    if not candidates and len(mains) == 1 and len(starts) == 1:
+        i, _ = starts[0]
+        page = pages[i]
+        sections = page.get('numbered_abstract_sections', [])
+        if len(sections) == 1:
+            section = sections[0]
+            spans = [dict(span, physical_page=page['page']) for span in section['spans']]
+            text = '\n'.join(page['text'][span['start_char']:span['end_char']] for span in spans)
+            if text == section['text'] and not publisher_notice(text):
+                source = {'kind': 'main_text', 'file_id': mains[0]['file_id'],
+                    'source_sha256': mains[0]['source_sha256'], **spans[0], 'spans': spans,
+                    'selection_method': section['selection_method'],
+                    'layout_evidence': section['layout_evidence'],
+                    'start_marker': section['start_marker'], 'end_marker': section['end_marker'],
+                    'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
                 candidates.append({'text': text, 'source': source,
                     'revision': revision({'text': text, 'source': source}), 'missing_reason': ''})
     if len(candidates)==1:return candidates[0]

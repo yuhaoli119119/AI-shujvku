@@ -50,3 +50,12 @@ GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定req
 `abstract_for_translation.source` 仍为 `main_text`，附 `selection_method=shaded_abstract_box_v1`、真实 `file_id`、`source_sha256`、`physical_page`、`bbox`、`start_char/end_char`、`text_sha256` 和版面证据；revision 由服务器生成。坐标单位为 PDF point，原点在页面左上。原文保留 PDF 文字层的换行与连字符，字符范围可在 context 同页 text 中精确读回。
 
 不新增任务或保存入口：读取最新 context 后，沿现有同篇 job 的 `abstract_only` 合同提交返回的 `input_revision`、`abstract_source_revision` 和忠实译文。保存时再次核实真实源文件字节及来源版本；不能自造 revision。合法已有译文、英文元数据、导读和科学资料的保护保持不变。不匹配这种明确版式时仍需进一步人工核对，不表示支持任意无标题摘要。
+
+
+### 并排灰框与带行号独立摘要页（2026-10-27）
+
+在保留原有元数据、明确标题摘要与灰框来源结果的前提下，灰框回退另支持摘要左侧宽栏与右侧 Introduction 正文并排：框顶对齐、框底与正文栏近似对齐，仍要求唯一标题、灰底真实像素、粗体和宽栏。白底、错位或多候选继续拒绝。
+
+带行号的接受稿若 Abstract 独占一页、下一物理页第一个正文标题为 Introduction，可按真实文字层坐标提取正文行。每行必须与左边距连续行号一一对应；页眉、页脚、旋转水印不纳入摘要。来源标记 numbered_abstract_page_v1，spans 逐行给出同一物理页的精确字符起止；按 spans 连接才能复原全文，顶层起止仅表示首段。来源文件哈希、文本哈希、revision 和保存时重验规则不变。旧已识别来源不换版本；此改动不生成中文内容、不建立任务或更改完成状态。
+
+外部解析若已停止而 processing-status 仍 parsing，应先核对原生终态、原 run_id、最后保存读回和无其他写者。由原解析员通过原 PUT processing-status 以同 run_id 如实结束 partial，保留具体缺项；维护人员仅在用户明确安排、备份及终态证据齐全时受控恢复。不得将完成原生对话等同完整解析或验收通过。legacy extparse 不是阅读保存身份：正式 MCP v2 可在旧占用结束后建立同篇有限工作，纳入全部当前正文/SI，使用 save_reading_assistance 保存（reading.job_id=work_id、reading.request_id=外层 request_id），正式读回后 finish partial/completed。不通过阅读 jobs 另派模型、不把旧 extparse 冒充阅读 job；MCP actor 必须有 write_rebuild 权限。
