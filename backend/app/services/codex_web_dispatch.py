@@ -207,6 +207,9 @@ async def dispatch_agent(*, prompt: str, objective: str, settings: Settings | No
     try:
         async with websockets.connect(runtime.codex_web_ipc_uri, open_timeout=timeout, max_size=32 * 1024 * 1024) as ws:
             if continuation is not None:
+                if continuation.get('kind') == 'openai_ordinary_recovery_v1' and chosen_model == 'gpt-6-luna':
+                    from app.services.ordinary_openai_recovery import dispatch
+                    return await dispatch(ws, continuation, prompt, timeout, on_event)
                 if chosen_model not in PAPER_MODELS:
                     raise CodexWebDispatchError("same_thread_requires_deepseek")
                 from app.services.reading_thread_continuation import dispatch
@@ -303,6 +306,24 @@ class ThreadStatus:
     goal_objective: str | None = None
     model: str | None = None
     input_text: str | None = None
+    turn_evidence: tuple[dict, ...] | None = None
+    thread_active_flags: bool = False
+
+
+def _turn_evidence(turn):
+    items = turn.get('items') or []
+    messages = [item for item in items if isinstance(item, dict) and item.get('type') == 'agentMessage'
+                and isinstance(item.get('text'), str)]
+    finals = [item['text'] for item in messages if item.get('phase') == 'final_answer']
+    error = turn.get('error')
+    return {'id': turn.get('id'), 'status': turn.get('status'),
+        'input_text': '\n'.join(part.get('text', '') for item in items
+            if isinstance(item, dict) and item.get('type') == 'userMessage'
+            for part in item.get('content') or [] if isinstance(part, dict)),
+        'final_report': (finals[-1] if finals else messages[-1]['text'] if messages else None),
+        'latest_progress': messages[-1]['text'] if messages else None,
+        'native_error': ((str(error.get('message', '')) + ' ' + json.dumps(error.get('codexErrorInfo', ''), ensure_ascii=False))[:1500]
+                         if isinstance(error, dict) else None)}
 
 
 def matches_owned_attempt(status, thread_id, start_turn_id, *, allow_goal_continuations=False):
@@ -391,6 +412,8 @@ async def read_thread_status(
                 item_count=len(items) if isinstance(last_turn.get("items"), list) else None,
                 tokens_used=tokens_used,
                 turn_ids=tuple(turn["id"] for turn in turns if isinstance(turn, dict) and isinstance(turn.get("id"), str)),
+                turn_evidence=tuple(_turn_evidence(turn) for turn in turns if isinstance(turn, dict)),
+                thread_active_flags=bool((thread.get('status') or {}).get('activeFlags')) if isinstance(thread.get('status'), dict) else False,
                 cwd=thread.get("cwd") if isinstance(thread.get("cwd"), str) else None,
                 thread_status=(thread.get("status") or {}).get("type") if isinstance(thread.get("status"), dict) else thread.get("status"),
                 input_text='\n'.join(part.get('text','') for item in items if isinstance(item,dict) and item.get('type')=='userMessage'

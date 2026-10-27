@@ -219,6 +219,11 @@ def serialize_job(job: WorkflowJob, session: Session | None = None) -> dict[str,
                       native_terminal_verified=progress.get("native_terminal_verified", False),
                       can_retry=job.status in TERMINAL_STATUSES and bool(progress.get("native_terminal_verified")),
                       latest_progress=progress.get("latest_progress"))
+    from app.services.ordinary_openai_recovery import applies
+    if applies(job):
+        result.update(can_retry=False,
+            can_resume=job.status in TERMINAL_STATUSES and bool(progress.get('native_terminal_verified')),
+            resume_endpoint=f'/api/rebuild/papers/{paper_id_str}/ai-extract/jobs/{job.job_id}/resume')
     # Include result summary for completed jobs or when session is available.
     if job.status == "completed" and isinstance(job.result, dict):
         result["result"] = job.result
@@ -311,6 +316,9 @@ def _create_ai_extract_phase(
         raise AiExtractError("paper_has_unresolved_reading_attempt")
     existing = has_running_job(session, paper_id)
     if existing is not None and retry and existing.status == "failed" and (existing.progress or {}).get("native_terminal_verified"):
+        from app.services.ordinary_openai_recovery import applies
+        if applies(existing):
+            raise AiExtractError('ordinary_openai_use_same_job_resume')
         existing = None
     if existing is not None:
         result = serialize_job(existing, session)
@@ -503,7 +511,8 @@ async def sync_job_status(session: Session, job: WorkflowJob, settings: Settings
     from app.services.paper_db_phase import observe_job
     mode=(job.progress or {}).get('dispatch_mode') or (job.payload or {}).get('chosen_mode')
     result = await observe_job(session, job, settings, _apply_job_status,
-                               include_goal=mode != 'codex_web_ordinary')
+                               include_goal=(mode != 'codex_web_ordinary' or
+                                   (job.payload or {}).get('chosen_model') == 'gpt-6-luna'))
     if ((result.progress or {}).get('needs_attention')
             and getattr(settings, 'rebuild_native_stop_enabled', False)):
         from app.services.rebuild_native_stop import protective_stop
@@ -521,6 +530,9 @@ def _apply_job_status(session, job, settings, status):
     from app.services.codex_web_dispatch import matches_owned_attempt
     from app.services.ordinary_parsing import recover_auto_started_turn
     if job.status not in RUNNING_STATUSES:return job
+    from app.services.ordinary_openai_recovery import applies, apply_status
+    if applies(job):
+        return apply_status(session, job, settings, status)
     progress = dict(job.progress or {})
     ordinary = (job.payload or {}).get('parse_contract') == 'ordinary_parse_v1'
     if progress.get('needs_attention') and not ordinary:return job

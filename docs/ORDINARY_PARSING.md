@@ -24,3 +24,13 @@
 客户端 `--help` 列出 get/write/checkpoint；仅支持本篇图表与数据幂等导入，登录凭据只在本机读取，不写入请求日志。每篇无需新建临时导入脚本。
 
 目标任务由原生运行时自动启动时，系统从新建空任务和精确目标回执接认原 turn，不再发送第二个启动。历史派发中记录仅在派发日志与实时同一原生线程交叉匹配后恢复身份；大于1MB的原生记录使用有界32MB读取。普通解析六阶段均已处理、原生 idle 且目标明确为空时可记执行结束；目标读取失败与未知身份仍保留待核实。
+
+## GPT-6 Luna 原 job 的显式恢复候选（2026-10-27）
+
+普通解析的 OpenAI 同任务恢复与 WorkBuddy 目标模式分别核验，不跨提供商换模型。原生读取保留各 turn 的终态、原输入及最终报告；业务 job 只接认其记录的确切 turn，后来的人工转发轮次不冒充业务执行。只有线程无活动标记、全部已见轮次终态、原 turn 可读且确认没有 goal，才记录该原 turn 已结束。原 turn 已结束而文件阶段仍 pending/running 时，执行标为失败、内容为 partial，保留所有阶段和成果，不伪造阶段完成；历史 completed job 不回退。
+
+用户明确恢复时，沿现有 `POST /api/rebuild/papers/{paper_id}/ai-extract/jobs/{job_id}/resume` 使用新的稳定 `request_id`，可省略 model；仅接受原 gpt-6-luna/openai 普通解析 job、原账号及唯一写者，拒绝换模型、在途轮次、未知原生请求或没有剩余阶段。响应单列 can_resume 与原 job 的 resume_endpoint；旧创建接口的 retry 不再为该失败 OpenAI 普通任务创建替代 job，明确要求使用同任务 resume。恢复保持 job_id、初始 request_id、thread_id、来源和已完成检查点；在原生调用前持久保存新的有界尝试意图及原请求/turn/结果历史。同请求重放只读已有意图，不重复派发；不创建线程或 goal。
+
+实际续接先核对原线程完整已见 ID 列表，再以 thread/resume 显式设置并读回原模型/提供商、high、never/full access，确认无 goal 及无新增轮次后最多调用一次 turn/start。有效设置的回执和实际推理证明仍分开，开始 ACK 不把 actual_inference_verified 设为 true。原生响应未知时保留意图/占用，不重新发送；只在明确的历史前缀后恰好新增一个 turn、其完整输入与已持久 turn/start 原请求一致时，可只读接认该 turn。多轮、输入不符、来源/权限/提供商变化或原生读取失败均保持 needs_check；不得因超时换 ID 重发。
+
+上述是独立候选合同，是否上线以固定提交部署和独立验收回执为准；不能仅凭本文对生产调用恢复。部署前须确认确切原 job/thread/请求回执、无在途/未知写入和同篇唯一写者。未知业务 POST 仍按原请求审计处理，不用新模型重生成猜测保存结果。
