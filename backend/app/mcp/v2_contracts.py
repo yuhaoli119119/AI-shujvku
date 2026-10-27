@@ -82,9 +82,9 @@ class BeginWork(PaperRequest):
 
 
 class WorkMutation(PaperRequest):
-    work_id: WorkId
+    work_id: WorkId | None = None
     request_id: RequestId
-    expected_revision: Revision
+    expected_revision: Revision | None = None
 
 
 class ExternalAsset(RebuildVisualAssetRequest):
@@ -133,8 +133,8 @@ class SaveReading(WorkMutation):
 
     @model_validator(mode='after')
     def bound_identity(self):
-        if self.reading.job_id != self.work_id or self.reading.request_id != self.request_id:
-            raise ValueError('reading_work_and_request_identity_mismatch')
+        if self.reading.request_id != self.request_id:
+            raise ValueError('reading_request_identity_mismatch')
         return self
 
 
@@ -146,6 +146,7 @@ class FileStage(Contract):
 
 
 class ReportWork(WorkMutation):
+    work_id: WorkId
     status: Literal['running', 'needs_check'] = 'running'
     message: str = Field(min_length=1, max_length=8000)
     file_stages: list[FileStage] = Field(default_factory=list, max_length=120)
@@ -153,6 +154,7 @@ class ReportWork(WorkMutation):
 
 
 class FinishWork(WorkMutation):
+    work_id: WorkId
     status: Literal['completed', 'partial', 'failed']
     message: str = Field(min_length=1, max_length=8000)
     file_stages: list[FileStage] = Field(default_factory=list, max_length=120)
@@ -160,5 +162,5 @@ class FinishWork(WorkMutation):
 
 
 class WriteReceipt(PaperRequest):
-    work_id: WorkId
+    work_id: WorkId | None = None
     request_id: RequestId

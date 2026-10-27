@@ -97,12 +97,10 @@ def capture_before_item(session, entity_id):
 def audit_ids(request, payload):
     body_id = getattr(payload, "request_id", None)
     header_id = request.headers.get("X-Request-ID")
-    if body_id and header_id and str(body_id) != header_id:
-        raise RebuildWorkflowError("mutation_request_id_mismatch")
     request_id = str(body_id or header_id or uuid4())
     task_id = getattr(payload, "task_id", None) or request.headers.get("X-Task-ID")
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", request_id):
-        raise RebuildWorkflowError("mutation_request_id_invalid")
+        request_id = hashlib.sha256(request_id.encode()).hexdigest()
     if task_id is not None and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", task_id):
         raise RebuildWorkflowError("mutation_task_id_invalid")
     return request_id, task_id
@@ -122,10 +120,14 @@ def run_audited(session, *, paper_id, operation, payload, actor, request_id, tas
         AuditLog.paper_id == paper_id, AuditLog.action == RECEIPT,
         AuditLog.source == VERSION, AuditLog.target_type == operation, AuditLog.target_id == request_id))
     if previous:
-        if previous.payload["request_sha256"] != fingerprint or previous.payload["actor"] != actor:
-            raise RebuildWorkflowError("mutation_request_id_reused")
-        # Return the original result; it is a receipt, not a claim about current state.
-        return {**previous.payload["result"], "audit": {**previous.payload["result"]["audit"], "replayed": True}}
+        if previous.payload["request_sha256"] == fingerprint and previous.payload["actor"] == actor:
+            return {**previous.payload["result"], "audit": {**previous.payload["result"]["audit"], "replayed": True}}
+        request_id = hashlib.sha256((request_id + '|' + actor + '|' + fingerprint).encode()).hexdigest()
+        previous = session.scalar(select(AuditLog).where(
+            AuditLog.paper_id == paper_id, AuditLog.action == RECEIPT,
+            AuditLog.source == VERSION, AuditLog.target_type == operation, AuditLog.target_id == request_id))
+        if previous:
+            return {**previous.payload["result"], "audit": {**previous.payload["result"]["audit"], "replayed": True}}
     context = {"paper_id": paper_id, "operation": operation, "actor": actor, "request_id": request_id,
                "task_id": task_id, "item_events": [], "items_recorded": False}
     session.info[VERSION] = context

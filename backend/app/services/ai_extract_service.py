@@ -305,25 +305,14 @@ def _create_ai_extract_phase(
             if ((replay.payload or {}).get("request_scope") != {"model": model, "file_ids": file_ids, "retry": retry} or
                     (replay.payload or {}).get("requested_source_job_id") != source_job_id or
                     (replay.payload or {}).get("actor") is not None and replay.payload["actor"] != actor):
-                raise AiExtractError("parse_request_id_reused")
-            return serialize_job(replay, session)
-    occupied = paper_busy(session, paper_id)
-    if occupied is not None and occupied.type == PIPELINE_TYPE:
-        raise AiExtractError("paper_has_unresolved_pipeline_attempt")
-    if occupied is not None and occupied.type == "rebuild_external_extract":
-        raise AiExtractError("paper_has_unresolved_external_writer_attempt")
-    if occupied is not None and occupied.type == "paper_reading_assistance":
-        raise AiExtractError("paper_has_unresolved_reading_attempt")
-    existing = has_running_job(session, paper_id)
-    if existing is not None and retry and existing.status == "failed" and (existing.progress or {}).get("native_terminal_verified"):
-        from app.services.ordinary_openai_recovery import applies
-        if applies(existing):
-            raise AiExtractError('ordinary_openai_use_same_job_resume')
-        existing = None
-    if existing is not None:
-        result = serialize_job(existing, session)
-        session.commit()
-        return result
+                import hashlib, json
+                request_id = hashlib.sha256(json.dumps([request_id,model,file_ids,retry,source_job_id,actor],sort_keys=True).encode()).hexdigest()
+                replay = session.scalar(select(WorkflowJob).where(WorkflowJob.type == JOB_TYPE,
+                    WorkflowJob.payload.op("->>")("paper_id") == str(paper_id),
+                    WorkflowJob.payload.op("->>")("request_id") == request_id))
+                if replay:return serialize_job(replay, session)
+            else:
+                return serialize_job(replay, session)
     chosen_model = model or settings.codex_web_default_model
     chosen_mode = dispatch_mode_for_model(chosen_model)
     from app.services.paper_db_phase import require_source

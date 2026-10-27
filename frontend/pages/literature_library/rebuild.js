@@ -12,6 +12,7 @@ const state = {
   uploadIntent: null,
   parseSelection: null,
   parseRequest: null,
+  parseSubmitting: false,
 };
 
 const initialPaperId = new URLSearchParams(location.search).get("paper_id");
@@ -173,7 +174,7 @@ function parseFileSelectionMarkup() {
   const files = (state.files?.items || []).filter(f => f.preferred && f.lifecycle_status !== 'superseded');
   if (!files.length) return '<p>请先关联正文与补充材料。</p>';
   if (!state.parseSelection) state.parseSelection = new Set(files.map(f => f.id));
-  const busy = state.job && ['running','dispatching','queued'].includes(state.job.status);
+  const busy = state.parseSubmitting;
   return `<fieldset><legend>本次解析文件</legend>${files.map(f => `<label style="display:block"><input type="checkbox" data-parse-file="${esc(f.id)}" ${state.parseSelection.has(f.id) ? 'checked' : ''} ${busy ? 'disabled' : ''}> ${f.role === 'main' ? '正文' : 'SI'} · ${esc(f.original_filename)}</label>`).join('')}<p>自动保留已有成果；局部失败可继续。科学精修与独立审核可稍后进行。</p></fieldset>`;
 }
 
@@ -323,8 +324,7 @@ function renderJobArea() {
   const selector = $("aiExtractModel");
   const pending = state.job && ["queued", "dispatching", "running"].includes(state.job.status);
   if (selector) {
-    selector.disabled = !paper || Boolean(pending);
-    if (pending && ["gpt-6-luna", "cn:deepseek-v4.1-flash"].includes(state.job.model)) selector.value = state.job.model;
+    selector.disabled = !paper || state.parseSubmitting;
   }
 
   if (!paper) {
@@ -351,8 +351,10 @@ function renderJobArea() {
     btn.textContent = "保留成果并重试";
   } else {
     btn.disabled = false;
-    btn.textContent = "查看当前任务";
+    btn.textContent = "新建解析并保留已有成果";
   }
+  btn.disabled = state.parseSubmitting;
+  if (state.parseSubmitting) btn.textContent = "正在派发…";
 }
 
 function renderJobStatus() {
@@ -417,12 +419,9 @@ function renderJobStatus() {
 }
 
 async function startAiExtract() {
+  if (state.parseSubmitting) return;
   const paper = state.selected;
   if (!paper) { renderStatus("请先选择论文", "error"); return; }
-  if (state.job && (["running", "queued", "dispatching"].includes(state.job.status) || (state.job.status === "failed" && !state.job.can_retry))) {
-    await pollJobStatus(paper.id);
-    return;
-  }
 
   const selector = $("aiExtractModel");
   if (!selector) {
@@ -441,10 +440,11 @@ async function startAiExtract() {
     renderJobArea();
     return;
   }
+  state.parseSubmitting = true;
   selector.disabled = true;
 
   try {
-    const retry = Boolean(state.job && ['completed','failed'].includes(state.job.status));
+    const retry = Boolean(state.job && state.job.status !== 'not_started');
     const scope = JSON.stringify({model, file_ids:fileIds, retry});
     const key = 'ordinary-parse-request:' + paper.id;
     let intent;
@@ -452,7 +452,9 @@ async function startAiExtract() {
     if (!intent || intent.scope !== scope) intent = {scope, request_id:crypto.randomUUID()};
     sessionStorage.setItem(key, JSON.stringify(intent));
     const job = await api(`/api/rebuild/papers/${paper.id}/ai-extract/jobs`, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({model, file_ids:fileIds, retry, request_id:intent.request_id}) });
-    if (job.status === 'completed' || job.status === 'failed') sessionStorage.removeItem(key);
+    // Acknowledgement ends this click's intent. A later explicit click may
+    // start fresh even while the recorded native task is still running.
+    sessionStorage.removeItem(key);
     if (state.selectedId !== paper.id) return;
     state.job = job;
     if (job.processing_status && state.selected && state.selected.id === state.selectedId) {
@@ -476,6 +478,9 @@ async function startAiExtract() {
       dispatch_mode:model === "gpt-6-luna" ? "codex_web_ordinary" : "codex_web_target"};
     renderStatus(`派发响应未确认：${error.message}。请先查看当前任务。`, "error");
     renderJobStatus();
+    renderJobArea();
+  } finally {
+    state.parseSubmitting = false;
     renderJobArea();
   }
 }

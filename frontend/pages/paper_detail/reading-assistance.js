@@ -8,6 +8,7 @@ window.PaperReading = (() => {
   const scopes = {abstract:'仅依据摘要',main_text:'依据正文文字与已有图表资料',main_and_si:'依据正文与 SI 文字、已有图表资料',partial_text:'依据部分文字资料'};
   let timer = null, paperId = null, currentJob = null, options = null;
   let epoch = 0, polls = 0, failures = 0, stopped = false, checking = false, readNote = '', generationError = '';
+  let submitting = false;
   const MAX_POLLS = 40, MAX_FAILURES = 4;
   const isRunning = job => job && ['dispatching','running','queued'].includes(job.status);
   function stopTimer() { if(timer !== null) clearTimeout(timer); timer = null; }
@@ -56,11 +57,12 @@ window.PaperReading = (() => {
     const btn=document.getElementById('pdGenerateReading'); const status=document.getElementById('pdReadingJob');
     if(!btn) return;
     const running=isRunning(currentJob);
-    // Unknown readback is not proof that a generation task has finished.
-    btn.disabled=Boolean(running || checking || readNote);
+    // Job status is historical progress; only this click's in-flight request
+    // disables duplicate submission.
+    btn.disabled=submitting;
     const abstractOnly=Boolean(options?.paper.reading_guide?.beginner_zh && (!options?.paper.abstract_zh || invalidAbstract(options.paper)));
     const abstractTask=currentJob?.scope==='abstract_only';
-    btn.textContent=running?(currentJob.saved?(abstractTask?'摘要已保存，正在收尾…':'导读已保存，正在收尾…'):(abstractTask?'正在补充中文摘要…':'正在补充中文导读…')):currentJob?.can_retry?(abstractTask?'重试中文摘要':'重试中文导读'):abstractOnly?(invalidAbstract(options.paper)?'纠正中文摘要':'补充中文摘要'):'补充中文导读';
+    btn.textContent=submitting?'正在提交…':abstractOnly?(invalidAbstract(options.paper)?'纠正中文摘要':'补充中文摘要'):running?'新建中文导读任务':'补充中文导读';
     const message=currentJob?.status==='failed' ? (currentJob.error || '本次未生成，可重试，已有资料已保留。') : running ?
       (currentJob.saved ? (abstractTask?'中文摘要已保存，可以阅读；任务正在收尾，正在核对完成状态。':'中文导读已保存，可以阅读；任务正在收尾，正在核对完成状态。') : '生成中，离开或刷新页面不会重复启动；已有结果不受影响。') : currentJob?.saved ? (abstractTask?'中文摘要已保存。':'中文导读已保存。') : '';
     status.textContent=[message,readNote,generationError].filter(Boolean).join(' ');
@@ -105,25 +107,34 @@ window.PaperReading = (() => {
     return read();
   }
   async function generate() {
-    const key='reading-help:'+paperId;
+    if(submitting)return;
+    const id=paperId, generation=epoch;
+    const key='reading-help:'+id;
     let intent=sessionStorage.getItem(key);
     if(!intent){intent=crypto.randomUUID();sessionStorage.setItem(key,intent);}
-    const btn=document.getElementById('pdGenerateReading');btn.disabled=true;generationError='';
+    submitting=true;generationError='';renderJob();
     try {
       const me=await options.fetch('/api/auth/me');
-      currentJob=await options.fetch(`/api/rebuild/papers/${paperId}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob?.can_retry),scope:options.paper.reading_guide?.beginner_zh && (!options.paper.abstract_zh || invalidAbstract(options.paper))?'abstract_only':'full'})});
+      if(id!==paperId || generation!==epoch)return;
+      const job=await options.fetch(`/api/rebuild/papers/${id}/reading-assistance/jobs`,{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':me.csrf_token},body:JSON.stringify({request_id:intent,retry:Boolean(currentJob),scope:options.paper.reading_guide?.beginner_zh && (!options.paper.abstract_zh || invalidAbstract(options.paper))?'abstract_only':'full'})});
+      sessionStorage.removeItem(key);
+      if(id!==paperId || generation!==epoch)return;
+      currentJob=job;
       renderJob();await read();
     } catch(error) {
+      if(id!==paperId || generation!==epoch)return;
       if(error.status>=400 && error.status<500 && error.status!==429){
         generationError='暂未启动补充：'+(/[\u4e00-\u9fff]/.test(error.message)?error.message:'当前条件不满足，已有内容保留，请重新核对后再试。');
         renderJob();return;
       }
       readNote='本次生成请求尚未确认，正在核对原任务状态；已有内容保留。';
       schedule(6000);renderJob();
+    } finally {
+      if(id===paperId && generation===epoch){submitting=false;renderJob();}
     }
   }
   function mount(config) {
-    stopTimer();epoch+=1;polls=0;failures=0;stopped=false;checking=false;readNote='';generationError='';currentJob=null;
+    stopTimer();epoch+=1;polls=0;failures=0;stopped=false;checking=false;submitting=false;readNote='';generationError='';currentJob=null;
     options=config;paperId=String(config.paper.id || config.paper.paper_id);
     render(config.paper);
     document.getElementById('pdGenerateReading').onclick=generate;

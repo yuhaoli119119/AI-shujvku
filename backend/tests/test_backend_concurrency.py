@@ -284,7 +284,17 @@ def test_sixteen_cross_library_http_mcp_are_isolated_and_cancel_releases(
             assert str(locked) == paper_rows[0]["paper_id"]
             session.rollback()
 
-        # Client disconnect while the native read is slow cannot strand a commit.
+        # New requests no longer wait for an old native thread. Delay file-plan
+        # construction for this one fixture to exercise a genuine disconnect.
+        from app.services import ordinary_parsing
+        original_file_plan = ordinary_parsing.file_plan
+        def delayed_file_plan(session, paper_id, *args, **kwargs):
+            if str(paper_id) == paper_rows[17]['paper_id']:
+                time.sleep(0.45)
+            return original_file_plan(session, paper_id, *args, **kwargs)
+        monkeypatch.setattr(ordinary_parsing, 'file_plan', delayed_file_plan)
+
+        # Client disconnect during the database phase cannot strand a commit.
         async def cancel_request():
             limits = httpx.Limits(max_connections=8)
             async with httpx.AsyncClient(base_url=base_url, limits=limits, timeout=20) as client:

@@ -78,7 +78,9 @@ def observe(guard, signature, native, *, now=None):
             state["stalled_observations"] = state.get("stalled_observations", 0) + 1
     if due:
         state["last_counted_at"] = now.isoformat()
-    stopped = state.get("needs_attention", False) or state.get("empty_completed_observations", 0) >= MAX_EMPTY_COMPLETIONS or state.get("stalled_observations", 0) >= MAX_STALLED_OBSERVATIONS or len(seen) > 2048
+    # Observations remain useful diagnostics, but lack of new evidence must not
+    # stop parsing or prevent the next incremental save.
+    stopped = False
     # Once stopped, new evidence needs an explicit reconciliation; no auto restart.
     state.update(latest=signature, seen_evidence_hashes=seen[:2049], needs_attention=stopped,
                  last_observed_at=now.isoformat(), automatic_retry=False)

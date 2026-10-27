@@ -44,6 +44,10 @@ ChatGPT 的具体入口随客户端版本可能显示为插件、应用或自定
 
 ## 每篇使用方法
 
+### 2026-10-28 候选：直接保存
+
+持有 `write_rebuild` 的调用方可以省略 `work_id` 和 `expected_revision`，逐项将图表、数据、章节或阅读内容保存到同一篇文献。没有 SI 直接处理正文；历史任务和版本变化不阻挡继续。短数据库事务用于完整写入，重复内容通过原有身份合并。以下旧工作流程只供历史客户端参考；实际上线以部署回执和真实接口为准。
+
 1. 查找论文，核对稳定 `paper_id`；阅读 workspace、当前正文/SI、已有结果和当前占用。
 2. 用户选定有限范围后，使用新的稳定 `request_id`、当前 `file_set_revision` 与明确 `file_ids` 调用 begin_paper_work；有未解决原生/外部写者或独审任务则拒绝。
 3. 工具返回 `work_id`、`work_revision`。所有保存、回报和结束均携带自身 work_id 和最新修订作为 expected_revision。每个新操作使用新 request_id；丢失响应时重放完全相同的原请求。

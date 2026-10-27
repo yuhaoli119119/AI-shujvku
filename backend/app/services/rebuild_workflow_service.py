@@ -1296,8 +1296,8 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
                (r.properties or {}).get(IMPORT_META, {}).get("aliases", [])]
     targeted = canonical or aliases
     if len(targeted) > 1:
-        raise RebuildWorkflowError("ambiguous_row_alias:retry_with_canonical_row_key:" +
-                                   ",".join(sorted(r.row_key for r in targeted)))
+        targeted = []
+        requested_key = None
     matching = []
     recovering = False
     identity_values_by_row = {}
@@ -1321,12 +1321,15 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
         except RebuildWorkflowError:
             same, recoverable = False, False
         if targeted and not (same or recoverable):
-            raise RebuildWorkflowError("row_key_identity_conflict:use_a_distinct_key_for_a_distinct_fact")
+            # The same submitted alias can describe a different real sample.
+            # Preserve the existing row and give the new fact a stable key.
+            targeted = []
+            requested_key = None
+            matching = []
+            break
         # Do not contaminate a confirmed row or attach a provisional row to a
         # different sample just because both currently omit the bad dimension.
         pending_compatible = bool(pending) == bool(dimension_errors)
-        if targeted and dimension_errors and not pending:
-            raise RebuildWorkflowError("invalid_identity_for_confirmed_row:correct_dimension_and_retry_same_key")
         if targeted or (same and pending_compatible and (
             (not pending and condition.get("identity_context")) or
             submission in meta.get("submissions", []) or
@@ -1335,8 +1338,8 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
             matching.append(candidate)
             recovering = recoverable
     if len(matching) > 1:
-        raise RebuildWorkflowError("ambiguous_legacy_rows:retry_with_canonical_row_key:" +
-                                   ",".join(sorted(r.row_key for r in matching)))
+        matching.sort(key=lambda item: (item.created_at, str(item.id)))
+        matching = matching[:1]
     created = not matching
     from app.services.rebuild_mutation_audit import capture_before_item
     capture_before_item(session, matching[0].id if matching else None)
@@ -1363,6 +1366,14 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
         if receipt not in history:
             history.append(receipt)
         meta["identity_rejections"] = history
+        # Preserve the original reported dimension in the real row even when
+        # it cannot yet be normalized; never invent a replacement value.
+        reported = list(meta.get("reported_raw_dimensions", []))
+        for index in dimension_errors:
+            raw = data["values"][index]
+            if raw not in reported:
+                reported.append(raw)
+        meta["reported_raw_dimensions"] = reported
     aliases = set(meta.get("aliases", []))
     if requested_key:
         aliases.add(requested_key)
@@ -1407,9 +1418,6 @@ def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInp
             with session.begin_nested():
                 validated = RebuildDataValueInput.model_validate(raw).model_dump()
                 result = _import_value(session, row=row, payload=validated)
-            if pending:
-                result = {**result, "write_outcome": result["outcome"], "status": "identity_pending", "outcome": "pending",
-                          "error": "identity_pending:correct_dimension_using_returned_row_key"}
             results.append({**result, "field_index": index})
         except (ValidationError, RebuildWorkflowError, DataError, IntegrityError) as exc:
             results.append({"field_index": index, "field": raw.get("field_name") if isinstance(raw, dict) else None,

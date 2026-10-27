@@ -31,7 +31,8 @@ class ReadingAssistanceSave(BaseModel):
     save_mode: Literal['full'] = 'full'
     abstract_source_revision: str | None = Field(default=None, min_length=64, max_length=64)
     request_id: str = Field(min_length=1, max_length=128)
-    job_id: str = Field(min_length=1, max_length=100)
+    job_id: str | None = Field(default=None, min_length=1, max_length=100)
+    expected_reading_revision: str | None = Field(default=None, min_length=64, max_length=64)
     input_revision: str = Field(min_length=64, max_length=64)
     abstract_zh: str = Field(default='', max_length=15000)
     abstract_missing_reason: str = Field(default='', max_length=1000)
@@ -50,7 +51,8 @@ class AbstractTranslationSave(BaseModel):
     model_config = ConfigDict(extra='forbid')
     save_mode: Literal['abstract_only']
     request_id: str = Field(min_length=1, max_length=128)
-    job_id: str = Field(min_length=1, max_length=100)
+    job_id: str | None = Field(default=None, min_length=1, max_length=100)
+    expected_reading_revision: str | None = Field(default=None, min_length=64, max_length=64)
     input_revision: str = Field(min_length=64, max_length=64)
     abstract_source_revision: str = Field(min_length=64, max_length=64)
     abstract_zh: str = Field(min_length=1, max_length=15000)

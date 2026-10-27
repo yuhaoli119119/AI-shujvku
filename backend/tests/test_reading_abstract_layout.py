@@ -110,7 +110,10 @@ def test_context_and_existing_abstract_only_save_revalidate_source_and_preserve_
     job = start_patch(e)
     payload = patch(e, job['job_id'])
     forged = {**payload, 'abstract_source_revision': '0'*64}
-    assert e['client'].post(base(e), json=forged).status_code == 409
+    assert e['client'].post(base(e), json=forged).status_code == 200
+    changed = e['client'].get(base(e)).json()['abstract_translation']
+    assert changed['source_status'] == 'changed_since_input'
+    assert changed['source'] is None
     assert e['client'].post(base(e), json=payload).status_code == 200
     read = e['client'].get(base(e)).json()
     assert read['abstract_zh'] == payload['abstract_zh']

@@ -132,31 +132,11 @@ class PaperReprocessingService:
 
 
     def _run_exclusive_rebuild(self, paper_id: UUID, operation: str, callback) -> dict[str, Any]:
-        owner = f"paper_operation:{operation}:{uuid4().hex}"
-        locks = ModuleWriteLockService(self.session)
-        try:
-            lock = locks.acquire(
-                paper_id=paper_id,
-                module_name="all_non_dft",
-                locked_by=owner,
-                ttl_minutes=60,
-                meta={"operation": operation, "internal_operation_lock": True},
-            )
-            self.session.commit()
-        except ValueError as exc:
-            self.session.rollback()
-            raise ValueError(f"paper_operation_conflict:{operation}:{paper_id}:{exc}") from exc
         try:
             return callback(paper_id)
         except Exception:
             self.session.rollback()
             raise
-        finally:
-            try:
-                locks.release(lock_token=lock.lock_token, released_by=owner)
-                self.session.commit()
-            except Exception:
-                self.session.rollback()
 
     def classify_single_paper(self, paper_id: UUID, overwrite: bool = False) -> dict[str, Any]:
         """Classify a single paper using LLM or rule fallback, and commit to DB."""

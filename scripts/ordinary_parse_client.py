@@ -51,7 +51,8 @@ class WorkbenchClient:
                     return json.loads(response.read())
             except urllib.error.HTTPError as exc:
                 raw = exc.read().decode(errors='replace')
-                if exc.code not in (429, 502, 503, 504) or attempt == 3 or (body is not None and not idempotent):
+                retryable_lock = exc.code == 409 and 'paper_lock_busy_retry_same_request' in raw
+                if (exc.code not in (429, 502, 503, 504) and not retryable_lock) or attempt == 3 or (body is not None and not idempotent):
                     raise RuntimeError(f'HTTP {exc.code}: {raw[:1500]}') from exc
                 try:
                     delay = min(60, max(1, float(exc.headers.get('Retry-After', 5 * 2 ** attempt))))
@@ -88,28 +89,14 @@ def publish_json(path, value):
 
 
 def durable_write(client, directory, path, payload):
-    """Exact persisted body is reused after lost ACK or process restart."""
-    directory.mkdir(parents=True, exist_ok=True)
+    """Write the object to the live database through the formal API."""
     body = json.dumps(payload, sort_keys=True, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode()
-    key = hashlib.sha256(path.encode() + b'\0' + body).hexdigest()
-    request = directory / (key + '.request.json')
-    receipt = directory / (key + '.receipt.json')
-    envelope = {'path': path, 'body': body.decode()}
-    if not publish_json(request, envelope) and json.loads(request.read_text()) != envelope:
-        raise ValueError('journal_identity_mismatch')
-    if receipt.exists():
-        return json.loads(receipt.read_text())
-    if path == '/api/rebuild/rows/import':
-        preflight = client.request(path + '/preflight', body, idempotent=True)
-        (directory / (key + '.preflight.json')).write_text(json.dumps(preflight, ensure_ascii=False, indent=2))
-    result = client.request(path, body, method='PUT' if '/checkpoints' in path else 'POST', idempotent=True)
-    publish_json(receipt, result)
-    return result
+    return client.request(path, body, method='PUT' if '/checkpoints' in path else 'POST', idempotent=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--job', required=True)
+    parser.add_argument('--job', default='direct')
     parser.add_argument('--paper', required=True)
     parser.add_argument('--credentials', type=Path, default=ROOT / '.env.workbench-login.local')
     commands = parser.add_subparsers(dest='command', required=True)
@@ -117,7 +104,7 @@ def main():
     write = commands.add_parser('write'); write.add_argument('path'); write.add_argument('json_file', type=Path)
     cp = commands.add_parser('checkpoint'); cp.add_argument('file_id'); cp.add_argument('stage', choices=['read', 'assets', 'rows']); cp.add_argument('status', choices=['running', 'completed', 'partial', 'failed']); cp.add_argument('--reason')
     args = parser.parse_args()
-    if not args.job.startswith('aiext-') or any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' for c in args.job):
+    if any(c not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-' for c in args.job):
         parser.error('invalid job identity')
     credentials = json.loads(args.credentials.read_text())
     base = credentials.get('base_url') or credentials.get('url') or credentials.get('origin') or 'https://47.94.252.147:49004'

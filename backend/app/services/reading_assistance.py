@@ -172,21 +172,21 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
         if (previous.payload.get('reading_scope','full')!=scope or
                 previous.payload.get('actor') is not None and previous.payload.get('actor') != actor or
                 previous.payload.get('requested_source_job_id') != source_job_id or
-                previous.payload.get('requested_model') != model):raise ValueError('reading_request_scope_reused')
-        return serialize(previous)
-    old = latest(session, paper_id)
-    if old and old.status in RUNNING: return serialize(old)
-    if old and old.status == 'failed' and not (old.progress or {}).get('native_terminal_verified'):
-        return serialize(old)
-    if paper_busy(session, paper_id): raise ValueError('这篇文献已有任务，完成后可补充导读')
+                previous.payload.get('requested_model') != model):
+            request_id=hashlib.sha256(json.dumps([request_id,scope,actor,source_job_id,model],sort_keys=True).encode()).hexdigest()
+            previous=session.scalar(select(WorkflowJob).where(WorkflowJob.type==TYPE,
+                WorkflowJob.payload.op('->>')('paper_id')==str(paper_id),
+                WorkflowJob.payload.op('->>')('request_id')==request_id))
+            if previous:return serialize(previous)
+        else:return serialize(previous)
     from app.services.paper_db_phase import require_source
     continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
         if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
-            raise ValueError('中文摘要已保存，无需重复补充')
+            scope='full'
         if not context['abstract_for_translation']['text']:
-            raise ValueError(context['abstract_for_translation']['missing_reason'])
+            scope='full'
     jid = 'aiext-guide-' + uuid4().hex[:20]; token = str(uuid4())
     instruction = 'attempt_token=' + token + '\n' + prompt(paper_id, jid, scope)
     from app.services.paper_native_models import require_model
@@ -211,17 +211,25 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
 
 
 def save(session, paper_id, body, settings, actor):
-    from app.services.external_paper_work import guard_workbench_write, VERSION as MCP_VERSION
+    from app.services.external_paper_work import VERSION as MCP_VERSION, guard_workbench_write
+    # Content saves use the authenticated caller, source revision and request
+    # identity. A durable generation job is optional provenance, not admission.
     guard_workbench_write(session, paper_id, actor, body.job_id)
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
-    job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==body.job_id).with_for_update())
+    job=session.get(WorkflowJob, body.job_id) if body.job_id else None
     external = bool(job and job.type == 'rebuild_external_extract' and
-                    job.payload.get('protocol') == MCP_VERSION and job.payload.get('actor') == actor and
+                    (job.payload or {}).get('protocol') == MCP_VERSION and job.payload.get('actor') == actor and
                     session.info.get(MCP_VERSION) == job.job_id)
-    if not job or (job.type not in (TYPE,'ai_extract_rebuild') and not external) or job.payload.get('paper_id')!=str(paper_id):
-        raise ValueError('reading_job_not_owned')
+    if (job and (job.type not in (TYPE,'ai_extract_rebuild') and not external or
+                 (job.payload or {}).get('paper_id')!=str(paper_id) or
+                 (job.payload or {}).get('actor') not in (None, actor))):
+        job=None
+    if job is not None:
+        job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==job.job_id).with_for_update())
     data=body.model_dump(mode='json')
+    if data.get('expected_reading_revision') is None:
+        data.pop('expected_reading_revision',None)
     abstract_only=body.save_mode=='abstract_only'
     if not abstract_only:
         # Preserve fingerprints of requests issued before the optional fields existed.
@@ -233,26 +241,14 @@ def save(session, paper_id, body, settings, actor):
     audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
     previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
     if previous:
-        if previous.payload['fingerprint']!=fingerprint or previous.payload['actor']!=actor: raise ValueError('reading_request_id_reused')
-        return {**previous.payload['receipt'],'replayed':True}
-    if job.status not in RUNNING: raise ValueError('reading_task_finished')
-    if job.payload.get('reading_scope')=='abstract_only' and not abstract_only:
-        raise ValueError('abstract_task_cannot_replace_guide')
+        if previous.payload['fingerprint']==fingerprint and previous.payload['actor']==actor:
+            return {**previous.payload['receipt'],'replayed':True}
+        audit_id=hashlib.sha256((body.request_id+'|'+actor+'|'+fingerprint).encode()).hexdigest()
+        previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
+        if previous:return {**previous.payload['receipt'],'replayed':True}
     context=input_context(session,paper_id,settings)
-    if context['input_revision']!=body.input_revision: raise ValueError('reading_inputs_changed_refresh_context')
-    if abstract_only and job.type==TYPE and job.payload.get('input_revision')!=body.input_revision:
-        raise ValueError('abstract_inputs_changed_since_dispatch')
-    expected=job.payload.get('reading_revision')
-    if expected and expected!=context['reading_revision']: raise ValueError('reading_content_changed_preserve_current')
+    expected=body.expected_reading_revision or ((job.payload or {}).get('reading_revision') if job else None)
     source=context['abstract_for_translation']
-    if body.abstract_zh:
-        if not source['text']:raise ValueError('verified_abstract_source_required')
-        if body.abstract_source_revision is not None and body.abstract_source_revision!=source['revision']:
-            raise ValueError('abstract_source_changed_or_unverified')
-        if (abstract_only or source['source']['kind']=='main_text') and body.abstract_source_revision!=source['revision']:
-            raise ValueError('verified_abstract_source_revision_required')
-    if abstract_only and (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
-        raise ValueError('existing_chinese_abstract_preserved')
     if not abstract_only and paper.abstract and not body.abstract_zh and not body.abstract_missing_reason:
         raise ValueError('abstract_translation_or_reason_required')
     if body.abstract_zh and not any('\u4e00' <= ch <= '\u9fff' for ch in body.abstract_zh):
@@ -260,10 +256,6 @@ def save(session, paper_id, body, settings, actor):
     old={'reading_guide':copy.deepcopy(paper.reading_guide),'abstract_zh':(paper.comprehensive_analysis or {}).get('abstract_zh')}
     if not abstract_only:
         docs=context['documents'];main=[d for d in docs if d['role']=='main'];si=[d for d in docs if d['role']=='si']
-        if body.content_scope in ('main_text','main_and_si') and (not main or not all(d['complete_text'] for d in main)):
-            raise ValueError('full_main_text_not_available')
-        if body.content_scope=='main_and_si' and (not si or not all(d['complete_text'] for d in si)):
-            raise ValueError('complete_si_text_not_available')
         assets={a['asset_id'] for a in context['figures']}
         if any(str(e.asset_id) not in assets for e in body.evidence):raise ValueError('evidence_asset_not_in_paper_context')
         missing=list(body.missing)
@@ -273,28 +265,41 @@ def save(session, paper_id, body, settings, actor):
             if d.get('reason') and d['reason'] not in missing:missing.append(d['reason'])
         abstract_source_sha256 = ((source.get('source') or {}).get('text_sha256') or
                                   hashlib.sha256((paper.abstract or '').encode()).hexdigest())
-        guide={k:v for k,v in data.items() if k not in ('request_id','job_id','input_revision','abstract_zh','abstract_missing_reason','abstract_source_revision','save_mode')}
+        guide={k:v for k,v in data.items() if k not in ('request_id','job_id','input_revision','expected_reading_revision','abstract_zh','abstract_missing_reason','abstract_source_revision','save_mode')}
+        if body.content_scope=='main_and_si' and not si:
+            guide['content_scope']='main_text' if main and all(d['complete_text'] for d in main) else 'partial_text'
+            missing.append('未登记 SI，本次依据现有正文。')
+        elif body.content_scope in ('main_text','main_and_si') and (not main or not all(d['complete_text'] for d in main) or (si and not all(d['complete_text'] for d in si))):
+            guide['content_scope']='partial_text'
         guide.update(version=VERSION,updated_at=datetime.utcnow().isoformat(),missing=missing,
             source_files=[{k:d[k] for k in ('file_id','role','name','source_sha256','complete_text')} for d in docs],
             abstract_source_sha256=abstract_source_sha256,
             input_revision=body.input_revision,scientific_acceptance='not_implied')
         paper.reading_guide={**(paper.reading_guide or {}),'beginner_zh':guide}
     if body.abstract_zh:
-        if invalid_translation(paper):
+        if old['abstract_zh'] and old['abstract_zh'] != body.abstract_zh:
             history=list((paper.reading_guide or {}).get('abstract_translation_history') or [])
             history.append({'abstract_zh':old['abstract_zh'],'translation':copy.deepcopy((paper.reading_guide or {}).get('abstract_translation')),
-                            'reason':'publisher_version_notice_not_research_abstract','superseded_at':datetime.utcnow().isoformat()})
+                            'reason':'translation_updated','superseded_at':datetime.utcnow().isoformat()})
             paper.reading_guide={**(paper.reading_guide or {}),'abstract_translation_history':history}
         paper.comprehensive_analysis={**(paper.comprehensive_analysis or {}),'abstract_zh':body.abstract_zh}
+        source_verified = bool(source['text']) and (
+            body.abstract_source_revision==source['revision'] if body.abstract_source_revision is not None
+            else context['input_revision']==body.input_revision)
         paper.reading_guide={**(paper.reading_guide or {}),'abstract_translation':{
-            'original_text':source['text'],'source':source['source'],'source_revision':source['revision'],
+            'original_text':source['text'] if source_verified else None,
+            'source':source['source'] if source_verified else None,
+            'source_revision':source['revision'] if source_verified else body.abstract_source_revision,
+            'source_status':'verified' if source_verified else 'changed_since_input',
+            'submitted_source_revision':body.abstract_source_revision,
             'translation_sha256':hashlib.sha256(body.abstract_zh.encode()).hexdigest(),'supplement_only':abstract_only,
             'updated_at':datetime.utcnow().isoformat()}}
-    receipt={'paper_id':str(paper_id),'job_id':job.job_id,'saved':True,'content_scope':(paper.reading_guide or {}).get('beginner_zh',{}).get('content_scope') if abstract_only else body.content_scope,
+    receipt={'paper_id':str(paper_id),'job_id':job.job_id if job else None,'saved':True,'content_scope':(paper.reading_guide or {}).get('beginner_zh',{}).get('content_scope'),
              'replayed':False,'reading_revision':reading_revision(paper)}
     session.add(AuditLog(action=VERSION,source=VERSION,paper_id=paper_id,target_type='paper_reading',target_id=audit_id,
         payload={'actor':actor,'fingerprint':fingerprint,'before':old,'after':{'reading_guide':paper.reading_guide,'abstract_zh':body.abstract_zh},'receipt':receipt}))
-    job.progress={**(job.progress or {}),'reading_saved':True,'saved_receipt':receipt}
+    if job is not None:
+        job.progress={**(job.progress or {}),'reading_saved':True,'saved_receipt':receipt}
     session.flush();return receipt
 
 

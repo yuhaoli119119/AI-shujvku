@@ -98,23 +98,9 @@ async def observe_and_apply(request_session, operation, *, after_commit=None):
 
 
 def require_source(session, paper_id, settings, source_job_id, actor, observation):
-    from app.services.reading_thread_continuation import source_for
-    binding = source_for(session, paper_id, source_job_id, actor)
-    if observation is UNOBSERVED:
-        if binding:
-            raise NativeReadRequired({'thread_id': binding['thread_id'], 'settings': settings, 'pin': binding})
-        return None
-    pin, native = observation
-    if binding != pin:
-        raise ValueError('same_thread_source_changed_refresh')
-    if (native is None or native.thread_id != binding['thread_id']
-            or native.turn_id != binding['turn_id']
-            or native.turn_status not in ('completed', 'failed', 'interrupted')
-            or native.thread_status not in ('idle', 'notLoaded') or not native.goal_observed
-            or native.goal_status not in (None, 'complete', 'completed')
-            or native.model_provider != 'workbuddy'):
-        raise ValueError('same_thread_native_busy_or_unverified')
-    return binding
+    # A new parsing request starts independently. Old thread state is not an
+    # admission requirement and providers are never mixed in that thread.
+    return None
 
 
 def job_pin(job):

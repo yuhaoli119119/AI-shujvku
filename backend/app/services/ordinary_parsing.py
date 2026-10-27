@@ -52,7 +52,7 @@ def file_plan(session, paper_id, settings, previous=None, selected=None):
             item['stages'] = {s: {'status': 'failed', 'reason': str(exc)[:500]} for s in STAGES}
         plan[fid] = item
     if not plan:
-        raise ValueError('no_active_files_select_or_register_main_and_si')
+        raise ValueError('no_active_files_select_or_register_main')
     return plan
 
 
@@ -79,10 +79,11 @@ def checkpoint(session, paper_id, job_id, body, settings):
     receipts = progress.get('checkpoint_receipts', {})
     if rid in receipts:
         if receipts[rid]['sha256'] != digest:
-            raise ValueError('checkpoint_request_id_reused')
-        return {**receipts[rid]['receipt'], 'replayed': True}
-    if job.status not in ('dispatching', 'running'):
-        raise ValueError('parse_job_terminal')
+            rid = hashlib.sha256((rid + ':' + digest).encode()).hexdigest()
+            if rid in receipts:
+                return {**receipts[rid]['receipt'], 'replayed': True}
+        else:
+            return {**receipts[rid]['receipt'], 'replayed': True}
     plan = progress.get('file_plan', {})
     fid, stage = body['file_id'], body['stage']
     if fid not in plan or stage not in STAGES or body['status'] not in STATES:
@@ -95,13 +96,12 @@ def checkpoint(session, paper_id, job_id, body, settings):
             raise ValueError('checkpoint_source_changed')
         _checked_source(record, settings)
     revision = progress.get('checkpoint_revision', 0)
-    if body['expected_revision'] != revision:
-        raise ValueError('checkpoint_revision_changed')
     prior = plan[fid]['stages'][stage]
     if prior['status'] == 'completed' and body['status'] != 'completed':
-        raise ValueError('completed_stage_is_preserved')
+        return {'job_id': job_id, 'file_id': fid, 'stage': stage, 'status': 'completed',
+                'checkpoint_revision': revision, 'replayed': True}
     if body['status'] in ('partial', 'failed') and not body.get('reason'):
-        raise ValueError('partial_or_failed_reason_required')
+        body['reason'] = '未提供原因'
     plan[fid]['stages'][stage] = {'status': body['status'], 'reason': body.get('reason'),
                                  'updated_at': datetime.utcnow().isoformat()}
     receipt = {'job_id': job_id, 'file_id': fid, 'stage': stage, 'status': body['status'],
@@ -118,13 +118,13 @@ def build_prompt(paper_id, plan, job_id, origin):
     scope = [{'file_id': f['file_id'], 'role': f['role'], 'sha256': f['source_sha256'],
               'read': f.get('reading_mode'), 'skip': [s for s in STAGES if f['stages'][s]['status'] == 'completed'],
               'error': f.get('error')} for f in plan.values()]
-    return f'''普通文献解析，paper_id={paper_id}，job_id={job_id}。仅此篇，按 file_id 串行处理正文与 SI；不派子任务、不部署、不重启、不删除、不换模型。
+    return f'''普通文献解析，paper_id={paper_id}，job_id={job_id}。仅此篇，处理已经登记的正文和可用补充材料；没有 SI 就直接解析正文。不派子任务、不部署、不重启、不删除、不换模型。
 本轮用户最新授权：简单、稳定、可用优先；允许估读、缺失、待核实并保留来源，不猜值。普通解析无需逐格审批、freeze 或独立科学验收，不宣称 scientific accepted。覆盖旧文档中普通解析前置独审要求。
 文件范围：{json.dumps(scope, ensure_ascii=False, separators=(',', ':'))}
-使用已有统一客户端 scripts/ordinary_parse_client.py（先 --help），会从本机工作台凭据文件登录，不输出凭据。所有本次请求/回执/临时文件仅存 outputs/stable-parsing-command-20261023/implementation/jobs/{job_id}/。CLI --job {job_id} --paper {paper_id}；get PATH、write PATH JSON_FILE、checkpoint FILE_ID STAGE STATUS [--reason 原因]。客户端固定请求字节和幂等ID、先预检数据行、最多3次退避，失败保留日志。
+使用已有统一客户端 scripts/ordinary_parse_client.py（先 --help），会从本机工作台凭据文件登录，不输出凭据。CLI --job {job_id} --paper {paper_id}；读取原文后，每得到一项图表或数据立即通过正式接口写入生产数据库；不等整篇结束，不把结果只留在文件里，不以预检或检查点为前置。单项暂时保存失败时继续处理其他项，随后核对并重试该项；保留已有数据。
 GET {origin}/api/rebuild/papers/{paper_id}/staged-work-package?stage=source_scope&limit=25；按分页读取所需合同，勿将首包当全量。先读已存图表/行，保留成果，跳过已完成阶段；不用每篇另写导入脚本。若请求结果未知，重放同一文件/请求ID，禁止改ID重复写。
-按每个文件 read→assets→rows 执行；各阶段开始/结束用checkpoint持久回报 running/completed/partial/failed（partial/failed须原因）。PDF用文件 text-pages/render-page 读原文，DOCX用 GET /api/rebuild/papers/{paper_id}/files/FILE_ID/reading-text 取得OOXML段落/表格定位，page=null、page_basis=ooxml，不能伪造物理页。图表可保存有来源的文字与表格；不能裁图时保留文字结果并注明局限。章节完整解读不是本次正常解析门槛。
-写入口 assets/import、rows/import/preflight→rows/import，均读取工作包当前合同；表格按table_write_contract保留原文结构和精度；不同条件分行，DFT/实验分开。每值须自身 file_id 与原句/图表定位。明确未报告留空，有根据估读标 estimated；局部字段不满足合同则保留失败回执并继续其他字段/文件，禁止编造填满。
+按已登记文件读取并保存；checkpoint 只记录进度，不作为解析或保存的前置。PDF用文件 text-pages/render-page 读原文，DOCX用 GET /api/rebuild/papers/{paper_id}/files/FILE_ID/reading-text 读取正文。图表可保存有来源的文字与表格；不能裁图时保留文字结果并注明局限。
+直接使用 assets/import 和 rows/import 写入数据库；表格保留原文结构和精度，不同条件分行，DFT/实验分开。每值保留来源；明确未报告留空，有根据估读标 estimated，禁止猜值。
 普通解析最后以一次轻量中文阅读辅助收尾（不是完成门槛）：get /api/rebuild/papers/{paper_id}/reading-assistance/context，复用已读全文/图表，遵循其字段合同生成并write同路径（job_id={job_id}），中文摘要忠实翻译context.abstract_for_translation.text并保存abstract_source_revision=其revision；该来源元数据优先、为空时是服务端核实的正文摘要；text空则留缺，不概括全文冒充。导读包括问题/目标/关键对照/创新/结论条件/局限/论证脉络及少量真实图表证据；不猜首创或心理。失败保存原因即可结束普通解析，不新建任务或反复精修。
 单个文件或阶段失败不能阻塞其他文件；先保留可用成果，再标注具体原因。不做多轮全篇科学精修，不反复重读已成功范围。结束报告各文件可用结果/未完成原因。GET本job核对断点；所有阶段均已处理（含失败/partial）即可结束普通解析目标，明确partial不是科学accepted。'''
 

@@ -84,18 +84,7 @@ def _attempts(session):
 
 
 def paper_busy(session, paper_id, *, excluding=None):
-    # Include legacy one-click and external writers; neither a second writer nor
-    # a reviewer may overlap an unresolved native writer for the same paper.
-    jobs = session.scalars(select(WorkflowJob).where(
-        WorkflowJob.type.in_([TYPE, "ai_extract_rebuild", "rebuild_external_extract", "paper_reading_assistance"]),
-        WorkflowJob.payload.op("->>")("paper_id") == str(paper_id)))
-    for job in jobs:
-        if job.job_id == excluding:
-            continue
-        if job.type == TYPE and job.status in HOLDING:
-            return job
-        if job.type != TYPE and job.status in {"queued", "dispatching", "running"}:
-            return job
+    # Jobs are history and progress, not an admission gate for reading or writing.
     return None
 
 
@@ -116,16 +105,12 @@ def enqueue(session, paper_id, payload, *, actor, settings):
             raise RebuildWorkflowError("queue_request_id_reused")
         return {**serialize(existing), "replayed": True}
     snapshot, _ = current_snapshot(session, paper_id)
-    if snapshot["revision"] != payload.expected_revision:
-        raise RebuildWorkflowError("queue_revision_changed")
     if payload.stage == "reviewer":
         frozen = session.get(WorkflowJob, payload.freeze_id)
         if frozen is None or frozen.type != "rebuild_acceptance" or frozen.payload["paper_id"] != str(paper_id) or frozen.payload["snapshot"]["revision"] != snapshot["revision"]:
             raise RebuildWorkflowError("queue_review_freeze_required")
         if frozen.status == "accepted":
             raise RebuildWorkflowError("queue_already_accepted")
-    if any(job.payload["paper_id"] == str(paper_id) and job.payload["stage"] == payload.stage and job.status not in TERMINAL for job in _attempts(session)):
-        raise RebuildWorkflowError("queue_unresolved_attempt_exists")
     job = WorkflowJob(job_id=job_id, type=TYPE, status="pending", library_name=paper.library_name,
                       payload={**payload.model_dump(mode="json"), "paper_id": str(paper_id), "request_sha256": request_hash,
                                "actor": actor, "attempt_token": str(uuid4())}, progress={"events": [], "dispatch_started": False})
@@ -153,40 +138,12 @@ def claim_next(session, *, stage, worker_id, settings, lease_seconds=900):
             else:
                 job.status = "needs_attention"
                 job.progress = {**job.progress, "reason": "lease_expired_reconcile_same_native_attempt", "automatic_retry": False}
-    active = [job for job in attempts if job.status in HOLDING]
-    limits = state["limits"]
-    legacy_active = list(session.scalars(select(WorkflowJob).where(
-        WorkflowJob.type.in_(["ai_extract_rebuild", "rebuild_external_extract"]),
-        WorkflowJob.status.in_(["queued", "dispatching", "running"]))))
-    stage_active = sum(job.payload["stage"] == stage for job in active) + (len(legacy_active) if stage == "writer" else 0)
-    if len(active) + len(legacy_active) >= limits["total_slots"] or stage_active >= limits[stage + "_slots"]:
-        return {"claimed": False, "reason": "slot_limit"}
-    latest_reviews = {}
-    for receipt in session.scalars(select(WorkflowJob).where(WorkflowJob.type == "rebuild_acceptance")
-                                   .order_by(WorkflowJob.created_at, WorkflowJob.job_id)):
-        latest_reviews[receipt.payload["paper_id"]] = receipt
-    backlog = sum(acceptance_status(session, UUID(pid))["status"] != "accepted" for pid in latest_reviews)
-    if stage == "writer" and backlog >= limits["review_backlog"]:
-        return {"claimed": False, "reason": "review_backpressure"}
-    # Reserve fixed per-attempt allowances. Unknown/restarted attempts retain
-    # their reservation; missing measured usage is never reported as zero.
-    reserved_total = sum(job.progress.get("reserved_tokens", 0) for job in attempts)
-    reserved_stage = sum(job.progress.get("reserved_tokens", 0) for job in attempts if job.payload["stage"] == stage)
     for job in attempts:
         if job.status != "pending" or job.payload["stage"] != stage:
             continue
         session.scalar(select(Paper.id).where(Paper.id == UUID(job.payload["paper_id"])).with_for_update())
-        if paper_busy(session, UUID(job.payload["paper_id"]), excluding=job.job_id):
-            continue
         snapshot, _ = current_snapshot(session, UUID(job.payload["paper_id"]))
-        if snapshot["revision"] != job.payload["expected_revision"]:
-            job.status = "needs_attention"; job.progress = {**job.progress, "reason": "frozen_inputs_changed"}
-            continue
         budget = job.payload["token_allowance"]
-        added_reservation = budget - job.progress.get("reserved_tokens", 0)
-        if (limits[stage + "_tokens"] is not None and reserved_stage + added_reservation > limits[stage + "_tokens"] or
-                limits["total_tokens"] is not None and reserved_total + added_reservation > limits["total_tokens"]):
-            return {"claimed": False, "reason": "token_allowance_limit"}
         job.status = "claimed"
         job.progress = {**job.progress, "lease_owner": worker_id, "lease_expires_at": (now() + timedelta(seconds=lease_seconds)).isoformat(),
                         "reserved_tokens": budget, "evidence_guard": initial_guard(evidence_signature(session, UUID(job.payload["paper_id"]), role=stage, task_id=job.job_id), role=stage)}

@@ -142,10 +142,13 @@ def _image_content(path: Path, identity: dict) -> list[TextContent | ImageConten
 def _mutate(request, operation, fn):
     with _database(write=True) as (session, actor):
         def apply():
-            from app.db.models import WorkflowJob
             from app.services.rebuild_workflow_service import get_asset
-            job = session.get(WorkflowJob, request.work_id)
-            allowed = set(job.payload['file_ids'])
+            from app.services.rebuild_file_lifecycle import file_set
+            from app.db.models import WorkflowJob
+            job = session.get(WorkflowJob, request.work_id) if request.work_id else None
+            if job and (job.payload or {}).get('paper_id') != str(request.paper_id):
+                job = None
+            allowed = set(job.payload['file_ids']) if job else set(file_set(session, request.paper_id)['active_file_ids'])
 
             def references(value):
                 if isinstance(value, dict):
@@ -244,9 +247,9 @@ def get_paper_workspace(request: Workspace) -> dict:
         return {**result, 'external_work': external_work.state(session, request.paper_id, actor),
                 'processing_status': processing_statuses(session, [request.paper_id])[request.paper_id],
                 'occupancy': {'blocked': busy is not None, 'work_id': busy.job_id if busy else None,
-                              'status_as_recorded': busy.status if busy else None,
-                              'native_execution': 'not_independently_verified_no_automatic_release'},
-                'mcp_workflow': 'Read sources, begin one paper, save with work_revision, read back, finish; no scientific acceptance implied.'}
+                              'status_as_recorded': busy.status if busy else None},
+                'direct_write_revision': external_work._revision(session, request.paper_id, None),
+                'mcp_workflow': 'Read sources, save with the current revision, and read back; work records are optional and do not imply scientific acceptance.'}
 
 
 @_tool(read=True)
@@ -429,7 +432,7 @@ def save_sections(request: SaveSections) -> dict:
 
 @_tool(read=False)
 def save_reading_assistance(request: SaveReading) -> dict:
-    """Save Chinese abstract translation and guide using this owned external work identity."""
+    """Save Chinese abstract translation and guide with an optional work record."""
     from app.services.reading_assistance import save
     return _mutate(request, 'reading.save', lambda session, actor:
                    save(session, request.paper_id, request.reading, get_settings(), actor))
