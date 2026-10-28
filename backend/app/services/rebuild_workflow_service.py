@@ -785,6 +785,8 @@ def _validate_value_for_paper(session: Session, paper_id: UUID, payload: dict[st
 
 
 def _validate_source_for_paper(session, paper_id, source):
+    if source.get("source_kind") == "dataset":
+        raise RebuildWorkflowError("dataset_writes_temporarily_disabled")
     if not _source_is_sufficient(source):
         raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
     if source.get("source_kind") == "dataset":
@@ -1291,6 +1293,13 @@ def _same_submitted_facts(session: Session, row: RebuildDataRow, data: dict[str,
 
 
 def import_data_row(session: Session, paper_id: UUID, payload: RebuildDataRowInput) -> dict[str, Any]:
+    # Reject the entire affected row before any partial row or value can be saved.
+    for value in payload.values:
+        if isinstance(value, dict) and isinstance(value.get("sources"), list) and any(
+            isinstance(source, dict) and source.get("source_kind") == "dataset"
+            for source in value["sources"]
+        ):
+            raise RebuildWorkflowError("dataset_writes_temporarily_disabled")
     # Serialize imports per paper, including different caller keys for the same fact.
     if session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update()) is None:
         raise RebuildWorkflowError("paper_not_found")

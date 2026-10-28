@@ -80,6 +80,7 @@ def list_datasets(paper_id: UUID, _auth: SessionState = Depends(_session), sessi
 def register_dataset(paper_id: UUID, body: DatasetCreate, request: Request,
                      auth: SessionState = Depends(_session), session: Session = Depends(get_db_session)):
     _write_auth(request, auth)
+    raise HTTPException(503, 'dataset_writes_temporarily_disabled')
     try:
         session.execute(text("SET LOCAL lock_timeout = '3s'"))
         if session.get(Paper, paper_id) is None:
@@ -171,6 +172,7 @@ async def put_file(paper_id: UUID, dataset_id: UUID, sha256: str, request: Reque
                    filename: str, size_bytes: int, mime_type: str = 'application/octet-stream',
                    auth: SessionState = Depends(_session)):
     _write_auth(request, auth)
+    raise HTTPException(503, 'dataset_writes_temporarily_disabled')
     if not re.fullmatch(r'[0-9a-f]{64}', sha256) or size_bytes < 0 or size_bytes > MAX_FILE_SIZE:
         raise HTTPException(400, 'invalid digest or size')
     if not filename or len(filename) > 255 or Path(filename).name != filename or any(c in filename for c in ('\\', '\x00', '\r', '\n')):
