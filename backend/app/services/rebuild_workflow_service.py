@@ -785,6 +785,8 @@ def _validate_value_for_paper(session: Session, paper_id: UUID, payload: dict[st
 
 
 def _validate_source_for_paper(session, paper_id, source):
+    if source.get("source_kind") == "dataset":
+        raise RebuildWorkflowError("dataset_writes_temporarily_disabled")
     if not _source_is_sufficient(source):
         raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
     if source.get("source_kind") == "dataset":
