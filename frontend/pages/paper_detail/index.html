@@ -656,6 +656,7 @@
           </div>
 
           <div id="tab-summary" class="tab-pane active">
+            <details class="panel-card"><summary>数据集与原始文件</summary><button class="btn btn-ghost btn-sm" type="button" onclick="loadDatasets()">查看数据集</button><div id="pdDatasets" aria-live="polite"></div></details>
             <div class="panel-card" id="pdQuickReading" hidden></div>
             <div class="panel-card"><div class="pd-reading-head"><div><div class="panel-title">中文摘要</div><p id="pdAbstractNote" class="muted" style="font-size:12px"></p></div><button class="btn btn-ghost btn-sm" type="button" id="abstractLanguageBtn" hidden>查看英文原摘要</button></div><div id="paperAbstract" class="prewrap"></div><a id="pdAbstractSourceLink" class="muted" hidden target="_blank" rel="noopener">查看摘要来源</a></div>
             <div class="panel-card" id="pdReadingCard"><div class="pd-reading-head"><div><div class="panel-title">论文导读</div><p id="pdReadingScope" class="muted"></p></div><button class="btn btn-ghost btn-sm" type="button" id="pdGenerateReading">补充中文导读</button></div><p id="pdReadingJob" role="status" aria-live="polite"></p><button id="pdRefreshReadingState" class="btn btn-ghost btn-sm" type="button" hidden>重新核对状态</button><div id="pdBeginnerGuide"></div></div>
@@ -4158,6 +4159,70 @@
           <div class="mono">${csl}</div>
         </div>
       `;
+    }
+
+    async function loadDatasets() {
+      const target = document.getElementById("pdDatasets");
+      const paperId = state.paperId;
+      target.textContent = "正在读取数据集…";
+      try {
+        const datasets = await fetchJSON(`/api/papers/${encodeURIComponent(paperId)}/datasets`);
+        if (state.paperId !== paperId) return;
+        target.replaceChildren();
+        if (!datasets.length) { target.textContent = "尚未登记数据集。"; return; }
+        for (const dataset of datasets) {
+          const details = document.createElement("details");
+          const summary = document.createElement("summary");
+          summary.textContent = `${dataset.title} · ${dataset.version}`;
+          details.append(summary);
+          const metadata = dataset.metadata || {};
+          const labels = {
+            status: "状态", doi: "论文 DOI", dataset_doi: "数据集 DOI", record_url: "记录页",
+            repository: "代码仓库", sources: "来源", commit: "提交版本", repository_license: "仓库许可证",
+            dataset_license: "数据集许可证", access_restriction: "使用限制", caveat: "已知限制",
+            target: "目标量", target_interpretation: "目标量说明", unit_note: "单位说明",
+            all_rows: "完整构型数", paper_training_rows: "训练集数量",
+            paper_validation_last50_filtered_rows: "验证集数量", species_counts: "物种数量",
+            derivation: "计算方法", filter: "筛选规则", reported_assets: "已报告附件",
+            downloaded_at: "下载日期"
+          };
+          for (const [key, label] of Object.entries(labels)) {
+            if (!(key in metadata)) continue;
+            const line = document.createElement("p");
+            const value = metadata[key];
+            const statuses = {
+              public_machine_readable_data_obtained: "已取得公开机器可读数据",
+              public_machine_readable_data_obtained_with_caveat: "已取得数据，存在使用限制",
+              publisher_SI_machine_readable_tables_extracted: "已取得补充资料及表格",
+              publisher_SI_exists_but_blocked: "补充资料存在，下载受阻",
+              publisher_SI_exists_but_blocked_data_on_request: "补充资料存在，数据需向作者索取",
+              article_indicates_article_and_SI_but_assets_blocked: "正文提及补充资料，附件尚未取得",
+              no_independent_public_asset_found: "未找到独立公开数据文件"
+            };
+            const text = key === "status" && statuses[value] ? statuses[value] : value == null ? "未记录" : Array.isArray(value) ? value.join("；") :
+              typeof value === "object" ? Object.entries(value).map(([k,v]) => `${k}: ${v}`).join("；") : String(value);
+            line.textContent = `${label}：${text}`;
+            details.append(line);
+          }
+          const exportLink = document.createElement("a");
+          exportLink.href = `/api/papers/${encodeURIComponent(paperId)}/datasets/${encodeURIComponent(dataset.id)}/rows.csv`;
+          exportLink.textContent = "导出已保存的来源数据 CSV";
+          details.append(exportLink);
+          for (const file of dataset.files) {
+            const row = document.createElement("p");
+            const a = document.createElement("a");
+            a.href = `/api/papers/${encodeURIComponent(paperId)}/datasets/${encodeURIComponent(dataset.id)}/files/${encodeURIComponent(file.id)}`;
+            a.textContent = file.filename;
+            const fileNote = metadata.file_notes?.[file.filename];
+            const types = {source: '原始文件', derived: '整理或派生文件', experimental_or_derived_source_data: '实验或派生来源数据'};
+            row.append(a, document.createTextNode(` · ${file.size_bytes} 字节 · ${types[fileNote] || '文件'} · SHA-256 ${file.sha256}`));
+            details.append(row);
+          }
+          target.append(details);
+        }
+      } catch (_) {
+        if (state.paperId === paperId) target.textContent = "无法读取数据集，请检查登录状态或稍后重试。";
+      }
     }
 
     document.addEventListener("DOMContentLoaded", () => {

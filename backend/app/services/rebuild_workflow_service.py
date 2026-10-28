@@ -654,6 +654,8 @@ def _source_key(data: dict[str, Any]) -> str:
         "quote": data.get("quote"),
         "estimate_basis": data.get("estimate_basis"),
     }
+    if data.get("source_kind") == "dataset":
+        identity.update(dataset_file_id=str(data.get("dataset_file_id") or ""), dataset_locator=data.get("dataset_locator"))
     # Keep historical PDF/XML keys stable; derived page identities include both hashes.
     if data.get("page_basis") in {"derived_pdf", "ooxml"}:
         identity.update({key: data.get(key) for key in ("page_basis", "source_sha256", "reading_pdf_sha256")})
@@ -666,6 +668,9 @@ def _source_key(data: dict[str, Any]) -> str:
 
 def _source_is_sufficient(data: dict[str, Any]) -> bool:
     # Empty strings and an isolated table coordinate do not locate evidence.
+    if data.get("source_kind") == "dataset":
+        locator = data.get("dataset_locator") or {}
+        return bool(data.get("dataset_file_id") and locator.get("sha256") and locator.get("column") and (locator.get("row") is not None or locator.get("frame") is not None))
     located = bool(data.get("page_number") or data.get("asset_id") or
                    str(data.get("label") or "").strip() or str(data.get("quote") or "").strip() or data.get("ooxml_locator"))
     return located
@@ -782,6 +787,30 @@ def _validate_value_for_paper(session: Session, paper_id: UUID, payload: dict[st
 def _validate_source_for_paper(session, paper_id, source):
     if not _source_is_sufficient(source):
         raise RebuildWorkflowError("source_requires_page_label_quote_or_asset")
+    if source.get("source_kind") == "dataset":
+        from app.db.dataset_models import DatasetFile
+        locator = source.get("dataset_locator") or {}
+        dataset_file = session.get(DatasetFile, source.get("dataset_file_id"))
+        if dataset_file is None or dataset_file.paper_id != paper_id:
+            raise RebuildWorkflowError("dataset_file_belongs_to_other_paper_or_missing")
+        if source.get("file_id") or source.get("asset_id") or locator.get("sha256") != dataset_file.sha256:
+            raise RebuildWorkflowError("invalid_dataset_source")
+        column = locator.get("column")
+        if not isinstance(column, str) or not column.strip() or len(column) > 1000:
+            raise RebuildWorkflowError("invalid_dataset_column")
+        for name in ("row", "frame"):
+            coordinate = locator.get(name)
+            if coordinate is not None and (isinstance(coordinate, bool) or not isinstance(coordinate, int) or coordinate < 0):
+                raise RebuildWorkflowError("invalid_dataset_coordinate")
+        if locator.get("sheet") is not None and (not isinstance(locator["sheet"], str) or len(locator["sheet"]) > 1000):
+            raise RebuildWorkflowError("invalid_dataset_sheet")
+        if len(_canonical_json(locator).encode("utf-8")) > 65536:
+            raise RebuildWorkflowError("dataset_locator_too_large")
+        if any(source.get(k) is not None for k in ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator")):
+            raise RebuildWorkflowError("dataset_source_pdf_identity_not_allowed")
+        return
+    if source.get("dataset_file_id") or source.get("dataset_locator"):
+        raise RebuildWorkflowError("dataset_locator_requires_dataset_source")
     if source.get("file_id") is not None and get_file(session, source["file_id"]).paper_id != paper_id:
         raise RebuildWorkflowError("source_file_belongs_to_other_paper")
     asset = get_asset(session, source["asset_id"]) if source.get("asset_id") is not None else None
@@ -857,10 +886,16 @@ def _upsert_source(
         row_id=row.id,
         paper_id=row.paper_id,
         source_key=source_key,
-        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator", "merged_cell"}},
+        **{key: value for key, value in data.items() if key not in {"source_key", "page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator", "merged_cell", "dataset_file_id", "dataset_locator"}},
     )
     session.add(source)
     session.flush()
+    if data.get("source_kind") == "dataset":
+        from app.db.dataset_models import DatasetValueSource
+        binding = DatasetValueSource(source_id=source.id, paper_id=row.paper_id, dataset_file_id=data["dataset_file_id"], dataset_locator=data["dataset_locator"])
+        session.add(binding)
+        session.flush()
+        source.dataset_binding = binding
     from app.services.rebuild_file_preview import store_source_identity
     store_source_identity(value, source, data)
     from app.services.rebuild_merged_cell import store_merged_cell
@@ -1567,6 +1602,8 @@ def serialize_source(source: RebuildValueSource) -> dict[str, Any]:
         "id": str(source.id),
         "source_key": source.source_key,
         "source_kind": source.source_kind,
+        **({"dataset_file_id": str(source.dataset_binding.dataset_file_id), "dataset_locator": source.dataset_binding.dataset_locator}
+           if source.dataset_binding else {}),
         "file_id": str(source.file_id) if source.file_id else None,
         "asset_id": str(source.asset_id) if source.asset_id else None,
         "page_number": source.page_number,

@@ -154,7 +154,9 @@ class RebuildValueSourceInput(MergedCellSource):
     file_id: UUID | None = None
     asset_id: UUID | None = None
     source_key: str | None = Field(default=None, max_length=255)
-    source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure"]
+    dataset_file_id: UUID | None = None
+    dataset_locator: dict | None = None
+    source_kind: Literal["explicit", "estimated", "derived", "table", "text", "figure", "dataset"]
     page_number: int | None = Field(default=None, ge=1, strict=True)
     page_basis: Literal["source_pdf", "derived_pdf", "ooxml"] | None = None
     ooxml_locator: str | None = Field(default=None, min_length=1, max_length=4000)

@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 from app.config import DATABASE_V1_EMBEDDING_DIMENSION
 
@@ -1451,8 +1451,58 @@ class RebuildValueSource(Base):
     estimate_basis: Mapped[str | None] = mapped_column(sa.Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=False), default=utcnow)
 
+    dataset_binding: Mapped["DatasetValueSource | None"] = relationship(
+        "DatasetValueSource", primaryjoin="and_(RebuildValueSource.id == DatasetValueSource.source_id, RebuildValueSource.paper_id == DatasetValueSource.paper_id)",
+        foreign_keys="[DatasetValueSource.source_id, DatasetValueSource.paper_id]", uselist=False, lazy="selectin", viewonly=True)
+
     __table_args__ = (
         sa.UniqueConstraint("value_id", "source_key", name="uq_rebuild_value_source"),
+        sa.UniqueConstraint("id", "paper_id", name="uq_rebuild_source_id_paper"),
+    )
+
+
+class DatasetSource(Base):
+    __tablename__ = "dataset_sources"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.ForeignKey("papers.id", ondelete="RESTRICT"), nullable=False)
+    dataset_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    version: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    title: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    metadata_: Mapped[dict] = mapped_column("metadata", json_type(), nullable=False, default=dict)
+    revision: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    __table_args__ = (sa.UniqueConstraint("paper_id", "dataset_key", "version"), sa.UniqueConstraint("id", "paper_id"))
+
+
+class DatasetFile(Base):
+    __tablename__ = "dataset_files"
+    id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True, default=uuid.uuid4)
+    dataset_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    filename: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(sa.BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    object_key: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    metadata_: Mapped[dict] = mapped_column("metadata", json_type(), nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(sa.DateTime(timezone=True), server_default=sa.func.now())
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["dataset_id", "paper_id"], ["dataset_sources.id", "dataset_sources.paper_id"], ondelete="RESTRICT"),
+        sa.UniqueConstraint("dataset_id", "sha256"), sa.UniqueConstraint("id", "paper_id"),
+        sa.Index("ix_dataset_files_paper", "paper_id"),
+    )
+
+
+class DatasetValueSource(Base):
+    __tablename__ = "dataset_value_sources"
+    source_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, primary_key=True)
+    paper_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    dataset_file_id: Mapped[uuid.UUID] = mapped_column(sa.Uuid, nullable=False)
+    dataset_locator: Mapped[dict] = mapped_column(json_type(), nullable=False)
+    __table_args__ = (
+        sa.ForeignKeyConstraint(["source_id", "paper_id"], ["rebuild_value_sources.id", "rebuild_value_sources.paper_id"], ondelete="RESTRICT"),
+        sa.ForeignKeyConstraint(["dataset_file_id", "paper_id"], ["dataset_files.id", "dataset_files.paper_id"], ondelete="RESTRICT"),
+        sa.Index("ix_dataset_value_sources_paper", "paper_id", "source_id"),
     )
 
 

@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.analysis_readonly import router as analysis_readonly_router
+from app.api.datasets import router as datasets_router
 from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.api.website_jobs import router as website_jobs_router
@@ -131,6 +132,7 @@ app.include_router(analysis_readonly_router, prefix="/api", tags=["analysis-read
 app.include_router(health_router, prefix="/api")
 app.include_router(website_jobs_router, prefix="/api/jobs", tags=["jobs"])
 app.include_router(auth_router, prefix="/api")
+app.include_router(datasets_router)
 app.include_router(system_router, prefix="/api/system", tags=["system"])
 app.include_router(libraries_router, prefix="/api/libraries", tags=["libraries"])
 app.include_router(impact_metadata_router, prefix="/api/library/impact-metadata", tags=["impact-metadata"])

@@ -50,6 +50,14 @@ def _snapshot(session, paper_id, operation, *, entity_id=None):
             # All persisted columns, including full source pointers and conflicts.
             state = {column.key: getattr(record, column.key) for column in inspect(model).column_attrs}
             result[(model.__tablename__, str(record.id))] = safe_json(state)
+    if not operation.startswith("assets."):
+        from app.db.dataset_models import DatasetValueSource
+        bindings = session.scalars(select(DatasetValueSource).join(
+            RebuildValueSource, RebuildValueSource.id == DatasetValueSource.source_id
+        ).where(DatasetValueSource.paper_id == paper_id, RebuildValueSource.row_id == UUID(str(entity_id))))
+        for binding in bindings:
+            state = {column.key: getattr(binding, column.key) for column in inspect(DatasetValueSource).column_attrs}
+            result[(DatasetValueSource.__tablename__, str(binding.source_id))] = safe_json(state)
     return result
 
 

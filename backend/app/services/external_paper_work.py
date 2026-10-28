@@ -81,9 +81,10 @@ def _backup_before_work(session, paper_id, work_id):
     from sqlalchemy import inspect
     from app.db.models import (RebuildPaperFile, RebuildVisualAsset, RebuildDataRow,
                                RebuildDataValue, RebuildValueSource, PaperSection)
+    from app.db.dataset_models import DatasetSource, DatasetFile, DatasetValueSource
     content = {}
     for model in (Paper, RebuildPaperFile, RebuildVisualAsset, RebuildDataRow,
-                  RebuildDataValue, RebuildValueSource, PaperSection):
+                  RebuildDataValue, RebuildValueSource, DatasetSource, DatasetFile, DatasetValueSource, PaperSection):
         records = ([session.get(Paper, paper_id)] if model is Paper else
                    session.scalars(select(model).where(model.paper_id == paper_id)).all())
         content[model.__tablename__] = [{column.key: safe_json(getattr(record, column.key))

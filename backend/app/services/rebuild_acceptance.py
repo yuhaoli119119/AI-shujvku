@@ -74,8 +74,12 @@ def output_manifest(session, paper_id, *, force_physical=False, table_readings=N
         # sha256(bytea) is built into PostgreSQL; no pgcrypto migration needed.
         table = model.__tablename__
         image_column = ", t.image_path" if model is RebuildVisualAsset else ""
+        # The source table stays unchanged. Excluding these optional keys also
+        # supports pre-release fixtures created by the earlier draft migration.
+        row_json = ("to_jsonb(t) - 'dataset_file_id' - 'dataset_locator'"
+                    if model is RebuildValueSource else "to_jsonb(t)")
         rows = session.execute(text(
-            f"SELECT t.id, encode(sha256(convert_to((to_jsonb(t) - 'embedding')::text, 'UTF8')), 'hex') AS row_sha256"
+            f"SELECT t.id, encode(sha256(convert_to((({row_json}) - 'embedding')::text, 'UTF8')), 'hex') AS row_sha256"
             f"{image_column} FROM {table} AS t WHERE t.paper_id = :paper_id ORDER BY t.id"), {"paper_id": paper_id})
         for record in rows:
             state = {"persisted_row_sha256": record.row_sha256}
@@ -87,6 +91,13 @@ def output_manifest(session, paper_id, *, force_physical=False, table_readings=N
                 except (RebuildWorkflowError, OSError):
                     state["image_blob"] = {"status": "unavailable"}
             manifest.append({"kind": model.__tablename__, "id": str(record.id), "sha256": _digest(state)})
+    # New dataset bindings are a separate additive object, so old snapshots
+    # have exactly the same manifest while new locators remain revision-bound.
+    for binding in session.execute(text(
+        "SELECT source_id, encode(sha256(convert_to(to_jsonb(t)::text, 'UTF8')), 'hex') AS row_sha256 "
+        "FROM dataset_value_sources AS t WHERE paper_id = :paper_id ORDER BY source_id"), {"paper_id": paper_id}):
+        manifest.append({"kind": "dataset_value_sources", "id": str(binding.source_id),
+                         "sha256": _digest({"persisted_row_sha256": binding.row_sha256})})
     # The section reader consumes immutable import/correction source events,
     # not only PaperSection text. Freeze those dependencies, not live job logs.
     for record in session.scalars(select(AuditLog).where(AuditLog.paper_id == paper_id,

@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 from sqlalchemy import inspect, select, text
 
 from app.db.models import (AuditLog, Paper, PaperSection, WorkflowJob, RebuildDataRow,
-                           RebuildDataValue, RebuildValueSource, RebuildVisualAsset)
+                           RebuildDataValue, RebuildValueSource, RebuildVisualAsset, DatasetValueSource)
 from app.services.rebuild_acceptance import _digest, acceptance_status
 from app.services.rebuild_mutation_audit import EVENT, RECEIPT, VERSION, safe_json
 from app.services.rebuild_workflow_service import RebuildWorkflowError
@@ -105,7 +105,7 @@ def _source_binding(file_id, saved_pin, current_pin, snapshot, **location):
 def _checkpoints(session, paper_id, snapshot, events, receipts, entries=None):
     """Only a matching current entity image AND original receipt prove a save."""
     models = {model.__tablename__: model for model in
-              (RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset)}
+              (RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset, DatasetValueSource)}
     latest = {}
     saved_images = {}
     for event in events:
@@ -121,7 +121,7 @@ def _checkpoints(session, paper_id, snapshot, events, receipts, entries=None):
     wanted_values = selected[RebuildDataValue.__tablename__]
     related_sources = list(session.scalars(select(RebuildValueSource).where(
         RebuildValueSource.paper_id == paper_id,
-        (RebuildValueSource.id.in_(selected[RebuildValueSource.__tablename__])) |
+        (RebuildValueSource.id.in_(selected[RebuildValueSource.__tablename__] + selected[DatasetValueSource.__tablename__])) |
         (RebuildValueSource.row_id.in_(wanted_rows)) | (RebuildValueSource.value_id.in_(wanted_values)))))
     wanted_values = list(set(wanted_values + [s.value_id for s in related_sources]))
     related_values = list(session.scalars(select(RebuildDataValue).where(
@@ -132,6 +132,7 @@ def _checkpoints(session, paper_id, snapshot, events, receipts, entries=None):
         RebuildDataRow.__tablename__: {str(r.id): r for r in session.scalars(select(RebuildDataRow).where(RebuildDataRow.paper_id == paper_id, RebuildDataRow.id.in_(wanted_rows)))},
         RebuildDataValue.__tablename__: {str(r.id): r for r in related_values},
         RebuildValueSource.__tablename__: {str(r.id): r for r in related_sources},
+        DatasetValueSource.__tablename__: {str(r.dataset_binding.source_id): r.dataset_binding for r in related_sources if r.dataset_binding is not None},
         RebuildVisualAsset.__tablename__: {str(r.id): r for r in session.scalars(select(RebuildVisualAsset).where(RebuildVisualAsset.paper_id == paper_id, RebuildVisualAsset.id.in_(selected[RebuildVisualAsset.__tablename__])))},
     }
     values = current[RebuildDataValue.__tablename__]
@@ -156,10 +157,17 @@ def _checkpoints(session, paper_id, snapshot, events, receipts, entries=None):
                           source_bindings=[_source_binding(record.file_id, saved, (record.provenance or {}).get('page_identity'), snapshot,
                                                           pages=record.page_numbers)])
         else:
-            row_id = str(record.id if isinstance(record, RebuildDataRow) else record.row_id)
+            dataset_source = current[RebuildValueSource.__tablename__].get(str(record.source_id)) if isinstance(record, DatasetValueSource) else None
+            row_id = str(record.id if isinstance(record, RebuildDataRow) else dataset_source.row_id if dataset_source else record.row_id)
             row = current[RebuildDataRow.__tablename__].get(row_id)
             result.update(row_id=row_id, row_key=row.row_key if row else None)
-            if isinstance(record, RebuildValueSource):
+            if isinstance(record, DatasetValueSource):
+                linked = [dataset_source] if dataset_source else []
+                value = values.get(str(dataset_source.value_id)) if dataset_source else None
+                result.update(value_id=str(dataset_source.value_id) if dataset_source else None,
+                              field_name=value.field_name if value else None,
+                              object_read_endpoint=f'/api/rebuild/sources/{record.source_id}')
+            elif isinstance(record, RebuildValueSource):
                 linked = [record]
                 value = values.get(str(record.value_id))
                 result.update(value_id=str(record.value_id), field_name=value.field_name if value else None,
@@ -174,6 +182,14 @@ def _checkpoints(session, paper_id, snapshot, events, receipts, entries=None):
             bindings = []
             for source in linked:
                 value = values.get(str(source.value_id))
+                if source.dataset_binding is not None:
+                    bindings.append({'source_kind': 'dataset', 'source_id': str(source.id),
+                                     'value_id': str(source.value_id), 'field_name': value.field_name if value else None,
+                                     'dataset_file_id': str(source.dataset_binding.dataset_file_id),
+                                     'dataset_locator': source.dataset_binding.dataset_locator,
+                                     'source_readback_status': 'stored_locator_not_physical_hash_verified',
+                                     'source_read_endpoint': f'/api/rebuild/sources/{source.id}'})
+                    continue
                 pin = ((value.conflict or {}).get('source_page_identities') or {}).get(str(source.id)) if value else None
                 # A source pin belongs to the value JSON image saved by the SAME
                 # request/actor as this object's event, never a later value edit.
@@ -335,7 +351,7 @@ def delivery_package(session, paper_id, snapshot, settings, *, view='summary', o
                               'occupancy_endpoint': base + '/history-reconciliation?view=attempts&limit=25', 'can_unlock': False},
                 'rule': 'One current database projection. No counts imply complete source coverage; legacy content and original jobs remain unchanged.'}
     if view == 'checkpoints':
-        kinds = {m.__tablename__ for m in (RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset, PaperSection)}
+        kinds = {m.__tablename__ for m in (RebuildDataRow, RebuildDataValue, RebuildValueSource, DatasetValueSource, RebuildVisualAsset, PaperSection)}
         entries = [e for e in snapshot['output_manifest'] if e['kind'] in kinds]
         entries.extend([{'kind': 'reading_module', 'id': module} for module in ('abstract', 'guide')])
         selected_entries = entries[offset:offset + limit]
