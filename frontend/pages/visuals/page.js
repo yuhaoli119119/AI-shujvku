@@ -239,7 +239,7 @@
   function invalidateResponses() { responseCacheEpoch++; responseCache.clear(); }
   let correlationController, matrixController, pairController;
   let detailLimit = 50;
-  async function getJSON(url, signal, { fresh = false } = {}) {
+  async function getJSON(url, signal, { fresh = false, timeoutMs = 20000 } = {}) {
     const epoch = responseCacheEpoch;
     const cached = responseCache.get(url);
     if (!fresh && cached && Date.now() - cached.time < 300000) return cached.data;
@@ -247,7 +247,7 @@
     const onAbort = () => controller.abort();
     if (signal) { if (signal.aborted) controller.abort(); else signal.addEventListener("abort", onAbort, {once:true}); }
     let timedOut = false;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     try {
       const response = await fetch(url, { signal:controller.signal, cache: fresh ? "no-store" : "default", headers: { Accept: "application/json" } });
       if (!response.ok) {
@@ -1052,7 +1052,7 @@
     try {
       syncVisualUrl();
       const params = visualParams(new URLSearchParams({ x_field: xField, y_field: yField, min_n: String(minN) }));
-      const data = await getJSON("/api/visuals/catalyst-correlation?" + params.toString(), correlationController.signal);
+      const data = await getJSON("/api/visuals/catalyst-correlation?" + params.toString(), correlationController.signal, {timeoutMs: 120000});
       if (requestId !== state.requestId) return;
       state.lastCorrelation = data;
       const counts = data.analysis_row_counts || {};
@@ -1074,6 +1074,9 @@
       $("retryCorrelation").hidden = false;
       renderStatistics({});
       renderVerdict({ ready: false, points: [] });
+      $("verdictLabel").textContent = "关系数据读取失败";
+      $("verdictMeta").textContent = "无法判断有效配对数量，请重试";
+      $("verdictQuality").textContent = "读取失败";
       renderDiagnostics({});
       plot({ insufficient_reason: "关系数据读取失败，未绘制拟合线。" });
       renderDetails({ points: [] });

@@ -1,9 +1,12 @@
 """GET compatibility for the mature DFT/visuals pages, without old workflows."""
 from collections import Counter
+import gzip
+import json
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
+from fastapi.encoders import jsonable_encoder
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db_session
@@ -133,10 +136,26 @@ def data_revision(args=Depends(options),session: Session=Depends(get_db_session)
 
 
 @router.get('/visuals/catalyst-correlation')
-def correlation(x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
+def correlation(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
                 args=Depends(options),session: Session=Depends(get_db_session)):
     try:
-        return service(args,session).correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n)
+        result=service(args,session).correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n)
+        encodings = [item.strip().lower() for item in request.headers.get('accept-encoding','').split(',')]
+        def accepts_gzip(item):
+            parts = [part.strip() for part in item.split(';')]
+            if parts[0] != 'gzip':
+                return False
+            for part in parts[1:]:
+                if part.startswith('q='):
+                    try:
+                        return float(part[2:]) > 0
+                    except ValueError:
+                        return False
+            return True
+        if any(accepts_gzip(item) for item in encodings):
+            body=json.dumps(jsonable_encoder(result),ensure_ascii=False,separators=(',',':'),allow_nan=False).encode('utf-8')
+            return Response(gzip.compress(body,compresslevel=5),media_type='application/json',headers={'Content-Encoding':'gzip','Vary':'Accept-Encoding'})
+        return JSONResponse(content=jsonable_encoder(result),headers={'Vary':'Accept-Encoding'})
     except ValueError as exc:
         raise HTTPException(400,detail=str(exc)) from exc
 
