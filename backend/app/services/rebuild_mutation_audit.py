@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -102,11 +103,26 @@ def capture_before_item(session, entity_id):
                                   if entity_id is not None else {})
 
 
-def audit_ids(request, payload):
-    body_id = getattr(payload, "request_id", None)
-    header_id = request.headers.get("X-Request-ID")
-    request_id = str(body_id or header_id or uuid4())
-    task_id = getattr(payload, "task_id", None) or request.headers.get("X-Task-ID")
+def _field(payload, name):
+    if isinstance(payload, Mapping):
+        return payload.get(name)
+    return getattr(payload, name, None)
+
+
+def audit_ids(request, payload=None):
+    ids = [str(value) for value in (_field(payload, "request_id"), request.headers.get("X-Request-ID"))
+           if value not in (None, "")]
+    if len(set(ids)) > 1:
+        raise RebuildWorkflowError("mutation_request_id_mismatch")
+    request_id = ids[0] if ids else str(uuid4())
+    path_params = getattr(request, "path_params", {}) or {}
+    tasks = [str(value) for value in (
+        _field(payload, "task_id"), _field(payload, "job_id"), path_params.get("job_id"),
+        request.headers.get("X-Task-ID"),
+    ) if value not in (None, "")]
+    if len(set(tasks)) > 1:
+        raise RebuildWorkflowError("mutation_task_id_mismatch")
+    task_id = tasks[0] if tasks else None
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", request_id):
         request_id = hashlib.sha256(request_id.encode()).hexdigest()
     if task_id is not None and not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", task_id):
@@ -116,7 +132,6 @@ def audit_ids(request, payload):
 
 def run_audited(session, *, paper_id, operation, payload, actor, request_id, task_id, mutate, receipt_serializer=safe_json):
     from app.services.external_paper_work import guard_workbench_write
-    guard_workbench_write(session, paper_id, actor, task_id)
     if not actor or not actor.strip():
         raise RebuildWorkflowError("mutation_actor_required")
     if session.scalar(select(Paper.id).where(Paper.id == paper_id).with_for_update()) is None:
@@ -129,13 +144,19 @@ def run_audited(session, *, paper_id, operation, payload, actor, request_id, tas
         AuditLog.source == VERSION, AuditLog.target_type == operation, AuditLog.target_id == request_id))
     if previous:
         if previous.payload["request_sha256"] == fingerprint and previous.payload["actor"] == actor:
-            return {**previous.payload["result"], "audit": {**previous.payload["result"]["audit"], "replayed": True}}
-        request_id = hashlib.sha256((request_id + '|' + actor + '|' + fingerprint).encode()).hexdigest()
-        previous = session.scalar(select(AuditLog).where(
+            return {**previous.payload["result"], "audit": {
+                **previous.payload["result"]["audit"], "replayed": True,
+                "receipt_is_historical": True}}
+        legacy_id = hashlib.sha256((request_id + '|' + actor + '|' + fingerprint).encode()).hexdigest()
+        legacy = session.scalar(select(AuditLog).where(
             AuditLog.paper_id == paper_id, AuditLog.action == RECEIPT,
-            AuditLog.source == VERSION, AuditLog.target_type == operation, AuditLog.target_id == request_id))
-        if previous:
-            return {**previous.payload["result"], "audit": {**previous.payload["result"]["audit"], "replayed": True}}
+            AuditLog.source == VERSION, AuditLog.target_type == operation, AuditLog.target_id == legacy_id))
+        if legacy and legacy.payload.get("request_sha256") == fingerprint and legacy.payload.get("actor") == actor:
+            return {**legacy.payload["result"], "audit": {
+                **legacy.payload["result"]["audit"], "replayed": True,
+                "receipt_is_historical": True}}
+        raise RebuildWorkflowError("mutation_request_id_reused")
+    guard_workbench_write(session, paper_id, actor, task_id)
     context = {"paper_id": paper_id, "operation": operation, "actor": actor, "request_id": request_id,
                "task_id": task_id, "item_events": [], "items_recorded": False}
     session.info[VERSION] = context

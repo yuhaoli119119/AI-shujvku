@@ -164,6 +164,31 @@ def test_full_request_identity_saves_and_replays_with_legacy_audit_limit(reading
         assert s.get(Paper,e['paper']).reading_guide['research_background']=='old content'
 
 
+def test_header_task_identity_and_historical_replay_precede_new_writer(reading_env):
+    e=reading_env
+    j=create(e)
+    p=body(e,j['job_id'])
+    p.pop('job_id')
+    headers={'X-Task-ID':j['job_id']}
+    first=e['client'].post(base(e),json=p,headers=headers)
+    assert first.status_code==200,first.text
+    with e['factory']() as s:
+        job=s.get(WorkflowJob,j['job_id'])
+        job.status='completed'
+        job.progress={**(job.progress or {}),'native_terminal_verified':True}
+        s.add(WorkflowJob(job_id='new-other-writer',type='ai_extract_rebuild',status='running',
+                          payload={'paper_id':str(e['paper']),'actor':'other'}))
+        s.commit()
+    replay=e['client'].post(base(e),json=p,headers=headers)
+    assert replay.status_code==200,replay.text
+    assert replay.json()['replayed'] is True
+    changed=copy.deepcopy(p)
+    changed['one_sentence']='同请求标识不能覆盖已保存内容。'
+    conflict=e['client'].post(base(e),json=changed,headers=headers)
+    assert conflict.status_code==409,conflict.text
+    assert conflict.json()['detail']=='mutation_request_id_reused'
+
+
 def test_long_request_ids_with_same_prefix_are_distinct_not_truncated(reading_env):
     e=reading_env;j=create(e);p=body(e,j['job_id']);p['request_id']='x'*64+'first'
     assert e['client'].post(base(e),json=p).status_code==200

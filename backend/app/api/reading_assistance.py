@@ -1,7 +1,7 @@
 from uuid import UUID
 from typing import Literal
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, ConfigDict
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import OperationalError
@@ -10,7 +10,8 @@ from app.db.session import get_db_session
 from app.db.models import Paper
 from app.schemas.reading_assistance import ReadingAssistanceSave, AbstractTranslationSave
 from app.security.session_auth import SessionState
-from app.api.rebuild import _require_section_write_session, _require_work_package_session
+from app.api.rebuild import (_require_section_authenticated_session,
+                             _require_section_write_session, _require_work_package_session)
 from app.services import reading_assistance as service
 
 router=APIRouter(prefix='/api/rebuild/papers',tags=['reading-assistance'])
@@ -49,9 +50,11 @@ async def generate(paper_id:UUID,body:GenerateRequest,session:Session=Depends(ge
 
 
 @router.post('/{paper_id}/reading-assistance')
-def save_reading(paper_id:UUID,body:ReadingAssistanceSave | AbstractTranslationSave,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_write_session)):
+def save_reading(paper_id:UUID,body:ReadingAssistanceSave | AbstractTranslationSave,request:Request,session:Session=Depends(get_db_session),settings:Settings=Depends(get_settings),auth:SessionState=Depends(_require_section_authenticated_session)):
     try:
-        result=service.save(session,paper_id,body,settings,auth.username);session.commit();return result
+        from app.services.rebuild_mutation_audit import audit_ids
+        _,task_id=audit_ids(request,body)
+        result=service.save(session,paper_id,body,settings,auth.username,work_id=task_id);session.commit();return result
     except (ValueError, OperationalError) as exc:
         session.rollback()
         if isinstance(exc, OperationalError):

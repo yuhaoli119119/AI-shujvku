@@ -280,14 +280,40 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
     return serialize(job)
 
 
-def save(session, paper_id, body, settings, actor):
+def save(session, paper_id, body, settings, actor, *, work_id=None):
     from app.services.external_paper_work import VERSION as MCP_VERSION, guard_workbench_write
-    # Content saves use the authenticated caller, source revision and request
-    # identity. A durable generation job is optional provenance, not admission.
-    guard_workbench_write(session, paper_id, actor, body.job_id)
+    from app.services.rebuild_queue import writer_task
+    # Content saves use authenticated ownership, request identity and source
+    # revision. The top-level MCP work identity is authoritative; the nested
+    # reading job_id remains a legacy transport-compatible alias.
+    effective_work_id = work_id or body.job_id
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
-    job=session.get(WorkflowJob, body.job_id) if body.job_id else None
+    data=body.model_dump(mode='json')
+    if data.get('expected_reading_revision') is None:
+        data.pop('expected_reading_revision',None)
+    abstract_only=body.save_mode=='abstract_only'
+    if not abstract_only:
+        # Preserve fingerprints of requests issued before the optional fields existed.
+        data.pop('save_mode',None)
+        if data.get('abstract_source_revision') is None:data.pop('abstract_source_revision',None)
+    data['job_id'] = effective_work_id
+    fingerprint=digest(data)
+    # Request IDs may be 128 characters; legacy audit target_id is only 64.
+    # Keep existing short identities and use the complete long identity's digest.
+    audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
+    previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
+    if previous:
+        if previous.payload.get('fingerprint')==fingerprint and previous.payload.get('actor')==actor:
+            return {**previous.payload['receipt'],'replayed':True}
+        legacy_id=hashlib.sha256((body.request_id+'|'+actor+'|'+fingerprint).encode()).hexdigest()
+        legacy=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==legacy_id))
+        if legacy and legacy.payload.get('fingerprint')==fingerprint and legacy.payload.get('actor')==actor:
+            return {**legacy.payload['receipt'],'replayed':True}
+        raise ValueError('mutation_request_id_reused')
+    owner=writer_task(session, paper_id, actor, effective_work_id)
+    guard_workbench_write(session, paper_id, actor, effective_work_id)
+    job=owner
     external = bool(job and job.type == 'rebuild_external_extract' and
                     (job.payload or {}).get('protocol') == MCP_VERSION and job.payload.get('actor') == actor and
                     session.info.get(MCP_VERSION) == job.job_id)
@@ -297,25 +323,6 @@ def save(session, paper_id, body, settings, actor):
         job=None
     if job is not None:
         job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==job.job_id).with_for_update())
-    data=body.model_dump(mode='json')
-    if data.get('expected_reading_revision') is None:
-        data.pop('expected_reading_revision',None)
-    abstract_only=body.save_mode=='abstract_only'
-    if not abstract_only:
-        # Preserve fingerprints of requests issued before the optional fields existed.
-        data.pop('save_mode',None)
-        if data.get('abstract_source_revision') is None:data.pop('abstract_source_revision',None)
-    fingerprint=digest(data)
-    # Request IDs may be 128 characters; legacy audit target_id is only 64.
-    # Keep existing short identities and use the complete long identity's digest.
-    audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
-    previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
-    if previous:
-        if previous.payload['fingerprint']==fingerprint and previous.payload['actor']==actor:
-            return {**previous.payload['receipt'],'replayed':True}
-        audit_id=hashlib.sha256((body.request_id+'|'+actor+'|'+fingerprint).encode()).hexdigest()
-        previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
-        if previous:return {**previous.payload['receipt'],'replayed':True}
     context=input_context(session,paper_id,settings)
     expected=body.expected_reading_revision or ((job.payload or {}).get('reading_revision') if job else None)
     source=context['abstract_for_translation']

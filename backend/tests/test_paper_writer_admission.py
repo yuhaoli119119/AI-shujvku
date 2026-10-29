@@ -2,16 +2,18 @@
 from concurrent.futures import ThreadPoolExecutor
 import copy
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.db.models import RebuildDataRow, WorkflowJob
 from app.main import app
 from app.services.rebuild_file_lifecycle import file_set
-from app.services.rebuild_queue import paper_busy
+from app.services.rebuild_queue import paper_busy, writer_task
 from test_dataset_write_resume import dataset_row, existing_dataset
 from test_mcp_v2 import mcp_env
 from test_rebuild_mutation_audit import audit_env
+from test_rebuild_sections import body as section_body, chapter_env
 from test_sync_write_lock_contract import PaperLock
 
 
@@ -37,7 +39,45 @@ def test_paper_busy_only_reports_unresolved_job_and_honors_same_work(audit_env):
         assert paper_busy(session, env['paper'], excluding='unresolved') is None
         session.get(WorkflowJob, 'unresolved').status = 'failed'
         session.commit()
+        assert paper_busy(session, env['paper']).job_id == 'unresolved'
+        session.get(WorkflowJob, 'unresolved').progress = {'native_terminal_verified': True}
+        session.commit()
         assert paper_busy(session, env['paper']) is None
+
+
+@pytest.mark.parametrize('status', ['queued', 'dispatching', 'running', 'unknown', 'needs_attention'])
+@pytest.mark.parametrize('job_type', ['ai_extract_rebuild', 'rebuild_external_extract', 'paper_reading_assistance'])
+def test_legacy_unresolved_status_matrix_retains_occupancy(audit_env, status, job_type):
+    env = audit_env
+    with env['factory']() as session:
+        session.add(WorkflowJob(job_id='matrix', type=job_type, status=status,
+                                payload={'paper_id': str(env['paper']), 'actor': 'writer'}))
+        session.commit()
+        assert paper_busy(session, env['paper']).job_id == 'matrix'
+
+
+@pytest.mark.parametrize('status', [
+    'pending', 'claimed', 'dispatch_intent', 'running', 'unknown', 'needs_attention', 'failed',
+])
+def test_queue_attempt_status_matrix_retains_occupancy(audit_env, status):
+    env = audit_env
+    with env['factory']() as session:
+        session.add(WorkflowJob(
+            job_id='queue-matrix', type='rebuild_pipeline_attempt', status=status,
+            payload={'paper_id': str(env['paper']), 'actor': 'writer'},
+        ))
+        session.commit()
+        assert paper_busy(session, env['paper']).job_id == 'queue-matrix'
+        if status == 'pending':
+            assert writer_task(session, env['paper'], 'writer', 'queue-matrix') is None
+        else:
+            assert writer_task(session, env['paper'], 'writer', 'queue-matrix') is not None
+        session.get(WorkflowJob, 'queue-matrix').progress = {'native_terminal_verified': True}
+        session.commit()
+        if status == 'failed':
+            assert paper_busy(session, env['paper']) is None
+        else:
+            assert paper_busy(session, env['paper']).job_id == 'queue-matrix'
 
 
 def test_dual_authenticated_clients_get_409_for_real_preflight_and_import_lock(
@@ -90,7 +130,7 @@ def test_same_work_can_continue_and_replay_but_different_actor_cannot(audit_env)
     try:
         rejected = other.post('/api/rebuild/rows/import', json=continuation)
         assert rejected.status_code == 409
-        assert 'paper_has_other_unresolved_writer_or_reviewer' in rejected.text
+        assert rejected.json()['detail'] == 'mutation_request_id_reused'
     finally:
         other.close()
     no_owner = copy.deepcopy(continuation)
@@ -106,6 +146,96 @@ def test_same_work_can_continue_and_replay_but_different_actor_cannot(audit_env)
             RebuildDataRow.paper_id == env['paper'])))
         assert {'owned-row-one', 'owned-row-two'} <= keys
         assert 'must-not-write' not in keys
+
+
+def test_x_task_id_header_is_equivalent_to_body_work_token(audit_env):
+    env = audit_env
+    fixture = existing_dataset(env)
+    running_parser(env)
+    payload = dataset_row(env, fixture, row_key="header-owned-row")
+    payload.pop("task_id", None)
+    response = env["client"].post(
+        "/api/rebuild/rows/import", json=payload,
+        headers={"X-Task-ID": "owned-parser"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["audit"]["task_id"] == "owned-parser"
+    replay = env["client"].post(
+        "/api/rebuild/rows/import", json=payload,
+        headers={"X-Task-ID": "owned-parser"},
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["audit"]["replayed"] is True
+
+
+def test_conflicting_header_and_body_work_tokens_are_rejected_before_write(audit_env):
+    env = audit_env
+    fixture = existing_dataset(env)
+    running_parser(env)
+    payload = dataset_row(env, fixture, row_key="identity-conflict-row")
+    payload["task_id"] = "different-task"
+    response = env["client"].post(
+        "/api/rebuild/rows/import", json=payload,
+        headers={"X-Task-ID": "owned-parser"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "mutation_task_id_mismatch"
+    with env["factory"]() as session:
+        assert session.scalar(select(RebuildDataRow).where(
+            RebuildDataRow.row_key == "identity-conflict-row")) is None
+
+
+def test_header_owner_survives_secondary_service_guard(chapter_env):
+    env = chapter_env
+    with env["factory"]() as session:
+        session.add(WorkflowJob(
+            job_id="chapter-owner", type="ai_extract_rebuild", status="running",
+            payload={"paper_id": str(env["paper_id"]), "actor": "chapter_tester"},
+        ))
+        session.commit()
+    payload = section_body(env)
+    response = env["client"].post(
+        f'/api/rebuild/papers/{env["paper_id"]}/sections/import', json=payload,
+        headers={"X-Task-ID": "chapter-owner"},
+    )
+    assert response.status_code == 200, response.text
+
+
+def test_exact_historical_replay_precedes_new_writer_but_changed_body_conflicts(audit_env):
+    env = audit_env
+    fixture = existing_dataset(env)
+    running_parser(env, actor="writer")
+    payload = dataset_row(env, fixture, row_key="historical-replay-row")
+    payload["task_id"] = "owned-parser"
+    first = env["client"].post("/api/rebuild/rows/import", json=payload)
+    assert first.status_code == 200, first.text
+    with env["factory"]() as session:
+        original = session.get(WorkflowJob, "owned-parser")
+        original.status = "completed"
+        original.progress = {"native_terminal_verified": True}
+        session.add(WorkflowJob(
+            job_id="new-active-writer", type="ai_extract_rebuild", status="running",
+            payload={"paper_id": str(env["paper"]), "actor": "other"},
+        ))
+        session.commit()
+
+    replay = env["client"].post("/api/rebuild/rows/import", json=payload)
+    assert replay.status_code == 200, replay.text
+    assert replay.json()["audit"]["replayed"] is True
+    assert replay.json()["audit"]["receipt_is_historical"] is True
+
+    changed = copy.deepcopy(payload)
+    changed["rows"][0]["material"] = "changed-after-receipt"
+    conflict = env["client"].post("/api/rebuild/rows/import", json=changed)
+    assert conflict.status_code == 409, conflict.text
+    assert conflict.json()["detail"] == "mutation_request_id_reused"
+
+    other = env["client_for"]("other")
+    try:
+        stolen = other.post("/api/rebuild/rows/import", json=payload)
+        assert stolen.status_code == 409, stolen.text
+    finally:
+        other.close()
 
 
 def test_legacy_actorless_parser_can_continue_only_with_exact_work_token(audit_env):

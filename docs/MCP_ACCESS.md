@@ -46,17 +46,17 @@ ChatGPT 的具体入口随客户端版本可能显示为插件、应用或自定
 
 ### 2026-10-28 候选：直接保存
 
-持有 `write_rebuild` 的调用方在没有其他未结束同篇写者时可以省略 `work_id` 和 `expected_revision`，逐项将图表、数据、章节或阅读内容保存到同一篇文献。存在未结束写者时，只有同一 actor 和 `work_id` 的续写或原请求幂等重放放行；其他 actor 或无 work 令牌的写入返回 `paper_has_other_unresolved_writer_or_reviewer`。没有 SI 直接处理正文；短数据库事务用于完整写入，重复内容通过原有身份合并。以下旧工作流程只供历史客户端参考；实际上线以部署回执和真实接口为准。
+持有 `write_rebuild` 的调用方在没有其他未结束同篇写者时可以省略 `work_id` 和 `expected_revision`，逐项将图表、数据、章节或阅读内容保存到同一篇文献。存在未结束写者时，只有同一 actor 和 `work_id` 的续写放行；精确保留的原请求回执先于当前占用检查重放。其他 actor、无 work 令牌的并发新写或同 request_id 改内容返回明确错误，不新增成果。`save_reading_assistance` 推荐只在外层 `request.work_id` 提供工作身份；旧客户端的嵌套 `reading.job_id` 仍兼容，但两者同时出现且不同返回 `work_identity_mismatch`。没有 SI 直接处理正文；短数据库事务用于完整写入，重复内容通过原有身份合并。
 
 1. 查找论文，核对稳定 `paper_id`；阅读 workspace、当前正文/SI、已有结果和当前占用。
 2. 用户选定有限范围后，使用新的稳定 `request_id`、当前 `file_set_revision` 与明确 `file_ids` 调用 begin_paper_work；有未解决原生/外部写者或独审任务则拒绝。
-3. 工具返回 `work_id`、`work_revision`。所有保存、回报和结束均携带自身 work_id 和最新修订作为 expected_revision。每个新操作使用新 request_id；丢失响应时重放完全相同的原请求。
+3. 工具返回 `work_id`、`work_revision`。所有保存、回报和结束均携带自身 work_id 和最新修订作为 expected_revision；阅读保存优先使用外层 work_id。每个新操作使用新 request_id；丢失响应时只重放完全相同的原请求，原工作结束后仍可取得历史回执。
 4. 逐文件读取原文，必要时看真实原页，保存来源化图表和数据。每个非空值必须有证据；保留原精度、单位、材料与条件，估读标识和依据必填。看不清、未报告留空并写原因。
 5. 检查回执逐格 `errors/outcome/persisted` 并读回。HTTP/MCP 调用成功不等于全部保存；409 后重新读取核对，不盲换 ID 覆盖。
 6. 中文导读使用当前 reading context 的 input_revision 和摘要来源修订；必须把所有当前来源纳入本次工作，避免用未授权来源生成整篇导读。保留原文和其他已有导读命名空间。
 7. 读回后 finish。completed 需要每个文件的 read 完成，以及图表/数据成果；没有可提取内容的阶段用 not_applicable 并给出真实原因。部分结果可用 partial 结束，成功成果保留。结果不代表科学 accepted。
 
-外部工作无自动超时释放：断线保留占用，重连读取原 work_id 状态。来源替换、哈希变化、未知占用需受控核对，不能为继续而删除原任务或改借他人的工作 ID。
+外部工作无自动超时释放：断线、unknown、needs_attention 及没有原生终态证据的 failed 保留占用，重连读取原 work_id 状态。来源替换、哈希变化、未知占用需受控核对，不能为继续而删除原任务或改借他人的工作 ID。
 
 ## 备份、身份与边界
 

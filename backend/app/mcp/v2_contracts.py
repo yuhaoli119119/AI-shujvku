@@ -135,6 +135,8 @@ class SaveReading(WorkMutation):
     def bound_identity(self):
         if self.reading.request_id != self.request_id:
             raise ValueError('reading_request_identity_mismatch')
+        if self.work_id is not None and self.reading.job_id is not None and self.work_id != self.reading.job_id:
+            raise ValueError('work_identity_mismatch')
         return self
 
 

@@ -345,7 +345,7 @@ def test_backup_assets_crop_guide_and_completion_use_current_schema(mcp_env):
         image = server.view_figure_image(ViewFigureImage(paper_id=env["paper"], asset_id=cropped["asset"]["id"]))
         assert any(isinstance(item, ImageContent) for item in image)
         context = server.get_reading_context(PaperRequest(paper_id=env["paper"]))
-        reading = {"request_id": "guide", "job_id": begun["work_id"], "input_revision": context["input_revision"],
+        reading = {"request_id": "guide", "input_revision": context["input_revision"],
                    "abstract_zh": "合成催化剂改善硫转化。", "one_sentence": "合成文献比较催化剂对硫转化的作用。",
                    "guide": {"research_objective": "比较反应动力学"}, "content_scope": "partial_text", "missing": ["合成测试"]}
         guide = server.save_reading_assistance(SaveReading(**base, request_id="guide", expected_revision=cropped["work_revision"], reading=reading))
@@ -360,6 +360,70 @@ def test_backup_assets_crop_guide_and_completion_use_current_schema(mcp_env):
         assert paper.abstract.startswith("A synthetic")
         assert paper.reading_guide["legacy"] == "preserve"
         assert paper.comprehensive_analysis["retained"] == {"value": 42}
+
+
+def test_mcp_reading_accepts_top_level_or_legacy_nested_work_identity(mcp_env):
+    from app.mcp import v2_server as server
+    from app.mcp.context import mcp_auth_context
+    from app.mcp.v2_contracts import PaperRequest, SaveReading
+    from app.db.models import Paper, WorkflowJob
+    env = mcp_env
+    begun = begin_fixture(env)
+    with env["factory"]() as session:
+        paper = session.get(Paper, env["paper"])
+        paper.abstract = "A synthetic catalyst test abstract."
+        session.commit()
+
+    def reading(request_id, *, nested_work_id=None):
+        with env["factory"]() as session:
+            current = session.get(Paper, env["paper"])
+            current.reading_guide = {"legacy": "preserve"}
+            session.commit()
+        with mcp_auth_context("writer-fixture"):
+            context = server.get_reading_context(PaperRequest(paper_id=env["paper"]))
+            body = {
+                "request_id": request_id, "input_revision": context["input_revision"],
+                "abstract_zh": "合成摘要说明催化剂改善硫转化。",
+                "one_sentence": "合成文献比较了催化剂对硫转化的作用。",
+                "guide": {"research_objective": "比较反应表现"},
+                "content_scope": "partial_text", "missing": ["合成测试范围"],
+            }
+            if nested_work_id:
+                body["job_id"] = nested_work_id
+            return server.save_reading_assistance(SaveReading(
+                paper_id=env["paper"], work_id=begun["work_id"], request_id=request_id,
+                expected_revision=begun["work_revision"], reading=body,
+            ))
+
+    top = reading("top-level-reading")
+    assert top["work_id"] == begun["work_id"]
+    with env["factory"]() as session:
+        assert session.get(WorkflowJob, begun["work_id"]).progress["reading_saved"] is True
+
+    with mcp_auth_context("writer-fixture"):
+        context = server.get_reading_context(PaperRequest(paper_id=env["paper"]))
+        legacy = server.save_reading_assistance(SaveReading(
+            paper_id=env["paper"], request_id="nested-only-reading",
+            reading={
+                "request_id": "nested-only-reading", "job_id": begun["work_id"],
+                "input_revision": context["input_revision"],
+                "abstract_zh": "合成摘要说明催化剂改善硫转化。",
+                "one_sentence": "合成文献比较了催化剂对硫转化的作用。",
+                "guide": {"research_objective": "比较反应表现"},
+                "content_scope": "partial_text", "missing": ["合成测试范围"],
+            },
+        ))
+    assert legacy["work_id"] == begun["work_id"]
+    with pytest.raises(ValueError, match="work_identity_mismatch"):
+        SaveReading(
+            paper_id=env["paper"], work_id=begun["work_id"], request_id="mismatch",
+            reading={
+                "request_id": "mismatch", "job_id": "different-work",
+                "input_revision": "0" * 64, "abstract_zh": "中文摘要",
+                "one_sentence": "合成文献比较催化剂作用。",
+                "guide": {}, "content_scope": "partial_text",
+            },
+        )
 
 
 def test_completion_rejects_missing_stages_false_counts_and_empty_not_applicable_reason(mcp_env):

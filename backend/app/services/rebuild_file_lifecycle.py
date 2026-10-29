@@ -61,9 +61,8 @@ def active_files(session, paper_id):
     return [f for f in _records(session, paper_id) if str(f.id) in ids]
 
 
-def locked_replay(session, paper_id, request_id, fingerprint, actor):
+def locked_replay(session, paper_id, request_id, fingerprint, actor, task_id=None):
     from app.services.external_paper_work import guard_workbench_write
-    guard_workbench_write(session, paper_id, actor)
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if paper is None:
         raise HTTPException(404, 'paper_not_found')
@@ -76,6 +75,7 @@ def locked_replay(session, paper_id, request_id, fingerprint, actor):
         receipt = copy.deepcopy(previous.payload['receipt'])
         receipt['audit']['replayed'] = True
         return receipt
+    guard_workbench_write(session, paper_id, actor, task_id)
     return None
 
 

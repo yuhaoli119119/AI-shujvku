@@ -141,11 +141,16 @@ def _image_content(path: Path, identity: dict) -> list[TextContent | ImageConten
 
 def _mutate(request, operation, fn):
     with _database(write=True) as (session, actor):
+        effective_work_id = request.work_id
+        if operation == 'reading.save' and effective_work_id is None:
+            # The old MCP shape carried the work identity inside reading.job_id.
+            effective_work_id = request.reading.job_id
+
         def apply():
             from app.services.rebuild_workflow_service import get_asset
             from app.services.rebuild_file_lifecycle import file_set
             from app.db.models import WorkflowJob
-            job = session.get(WorkflowJob, request.work_id) if request.work_id else None
+            job = session.get(WorkflowJob, effective_work_id) if effective_work_id else None
             if job and (job.payload or {}).get('paper_id') != str(request.paper_id):
                 job = None
             allowed = set(job.payload['file_ids']) if job else set(file_set(session, request.paper_id)['active_file_ids'])
@@ -175,7 +180,7 @@ def _mutate(request, operation, fn):
             return fn(session, actor)
 
         return external_work.mutate(
-            session, request.paper_id, request.work_id, actor,
+            session, request.paper_id, effective_work_id, actor,
             request.request_id, request.expected_revision, operation,
             request, apply,
         )
@@ -435,7 +440,8 @@ def save_reading_assistance(request: SaveReading) -> dict:
     """Save Chinese abstract translation and guide with an optional work record."""
     from app.services.reading_assistance import save
     return _mutate(request, 'reading.save', lambda session, actor:
-                   save(session, request.paper_id, request.reading, get_settings(), actor))
+                   save(session, request.paper_id, request.reading, get_settings(), actor,
+                        work_id=request.work_id))
 
 
 @_tool(read=False)

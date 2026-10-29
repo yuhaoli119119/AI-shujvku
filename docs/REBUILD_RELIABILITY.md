@@ -12,11 +12,13 @@
 
 ## 写入与审计
 
-资产批导入、资产更新、裁图及数据行导入使用工作台会话和 CSRF，actor 来自认证会话。旧请求体仍可使用；建议发送稳定 `request_id` / `task_id` 或 `X-Request-ID` / `X-Task-ID`。任务 ID 是追踪信息，不能替代认证 actor。
+资产批导入、资产更新、裁图及数据行导入使用工作台会话和 CSRF，actor 来自认证会话。稳定 `request_id` 可放在请求体或 `X-Request-ID`；工作身份可放在请求体 `task_id`/`job_id`、路径 `job_id` 或 `X-Task-ID`。同一请求中的这些工作身份必须一致，header 与 body 各自给出不同值返回 400 `mutation_task_id_mismatch`；`request_id` 与 `X-Request-ID` 不同返回 400 `mutation_request_id_mismatch`。任务 ID 只证明服务端已登记的同篇工作身份，不能替代认证 actor。
 
-同文献串行锁定，实际数据与成功审计/回执同事务提交。`workflow_jobs` 中未结束的同篇解析、阅读或外部写者保留唯一写者准入：同一 `work_id` 且 actor、paper 完全一致的续写与幂等重放放行，其他 actor、无任务令牌或第二个未结束 task 拒绝。数据库 `Paper` 行仍是最终锁边界；HTTP 锁等待必须先映射为 409 `paper_lock_busy_retry_same_request`，不能落入参数格式错误。每个成功批项记录完整 before/after、变更字段和批项序号；同批多次改同一对象仍保留各步。失败项单独返回，成功项的审计 ID 可对应到结果。回滚不能留下成功回执。审计中的凭据字段脱敏；不追补虚构历史审计。
+同文献串行锁定，实际数据与成功审计/回执同事务提交。`workflow_jobs` 中 `queued`、`dispatching`、`running`、`unknown`、`needs_attention` 及没有 `native_terminal_verified=true` 证据的 `failed` 都保留占用；只有明确终态（含已验证失败）释放。同一 `work_id` 且 actor、paper 完全一致的当前工作续写放行，其他 actor、无合法任务令牌或第二个未结束 task 拒绝。队列 claim 也必须在同篇 `Paper` 行锁内复核：比候选更早的 pending、任何非 pending 活跃队列任务及 legacy writer/reviewer 都阻止取得第二个 claim。数据库 `Paper` 行仍是最终锁边界；HTTP 锁等待必须先映射为 409 `paper_lock_busy_retry_same_request`，不能落入参数格式错误。每个成功批项记录完整 before/after、变更字段和批项序号；同批多次改同一对象仍保留各步。失败项单独返回，成功项的审计 ID 可对应到结果。回滚不能留下成功回执。审计中的凭据字段脱敏；不追补虚构历史审计。
 
-同文献、同操作、同 request_id 和 actor 的相同请求重放原回执；内容或 actor 改变返回 409。回执描述原次操作，读取当前对象才能确认当前状态。无 request_id 的旧请求由服务端分配并返回 ID；未知结果应使用返回的 ID 或预先保存的 ID 核对，不盲目重发。裁图按 PNG 内容哈希另存，数据库回滚不覆盖旧图片；失败可能留下未引用文件，须另外列出清单并按删除门禁处理，代码不会自动清理。
+同文献、同操作、同 request_id 和 actor 的完全相同请求在取得 `Paper` 锁后先查历史回执，再检查当前占用；因此原工作已到明确终态、新写者后来占用该篇时，原请求仍可只读重放并返回 `replayed=true`、`receipt_is_historical=true`。相同 request_id 但内容或 actor 改变、或由新写者携带旧回执身份重放返回 409 `mutation_request_id_reused`，不新增实体、事件或回执。无历史回执的新写才检查当前占用；回执描述原次操作，读取当前对象才能确认当前状态。无 request_id 的旧请求由服务端分配并返回 ID；未知结果应使用返回的 ID 或预先保存的 ID 核对，不盲目重发。裁图按 PNG 内容哈希另存，数据库回滚不覆盖旧图片；失败可能留下未引用文件，须另外列出清单并按删除门禁处理，代码不会自动清理。
+
+历史任务对照/替代登记只追加审计声明，不修改科学行、来源或成果，也不改变占用或验收状态。该受认证和 CSRF 保护的元数据入口可在 unknown 占用保留期间记录证据绑定，但不能被当作终态验证或解锁命令。
 
 ## 完成门禁
 

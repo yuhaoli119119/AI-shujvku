@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, or_, select, text
+from sqlalchemy import select, text
 
 from app.db.models import AuditLog, Paper, WorkflowJob
 from app.services.rebuild_acceptance import _digest, current_snapshot, acceptance_status
@@ -18,11 +18,13 @@ from app.services.rebuild_progress_guard import evidence_signature, initial_guar
 
 TYPE = "rebuild_pipeline_attempt"
 CONTROL = "rebuild-pipeline-control-v1"
-HOLDING = {"claimed", "dispatch_intent", "running", "unknown", "needs_attention"}
-ACTIVE_LEGACY_STATUSES = {"queued", "dispatching", "running"}
+QUEUE_HOLDING = {"pending", "claimed", "dispatch_intent", "running", "unknown", "needs_attention"}
+QUEUE_TERMINAL = {"extracted", "accepted", "partial", "needsfix", "review_incomplete"}
+LEGACY_HOLDING = {"queued", "dispatching", "running", "unknown", "needs_attention"}
 LEGACY_WRITER_TYPES = ("ai_extract_rebuild", "rebuild_external_extract", "paper_reading_assistance")
 PAPER_WRITER_TYPES = (TYPE, *LEGACY_WRITER_TYPES)
-TERMINAL = {"extracted", "accepted", "partial", "needsfix", "review_incomplete", "failed"}
+LEGACY_TERMINAL = {"completed", "extracted", "accepted", "partial", "needsfix", "review_incomplete"}
+TERMINAL = {*LEGACY_TERMINAL, "failed"}
 DEFAULT_LIMITS = {"writer_slots": 1, "reviewer_slots": 1, "total_slots": 1, "review_backlog": 2,
                   "writer_tokens": None, "reviewer_tokens": None, "total_tokens": None}
 
@@ -86,17 +88,45 @@ def _attempts(session):
                                 .order_by(WorkflowJob.created_at, WorkflowJob.job_id)))
 
 
-def paper_busy(session, paper_id, *, excluding=None):
-    """Return one unresolved same-paper writer while allowing its own continuation."""
+def writer_occupies(job):
+    """Conservatively decide whether a writer/reviewer still owns the paper.
+
+    Unrecognised states retain occupancy. A failed attempt releases only when
+    its native outcome was explicitly verified with a JSON boolean ``true``.
+    """
+    progress = job.progress or {}
+    if job.type == TYPE:
+        if job.status == "failed":
+            return progress.get("native_terminal_verified") is not True
+        return job.status in QUEUE_HOLDING or job.status not in TERMINAL
+    if job.type not in LEGACY_WRITER_TYPES:
+        return False
+    if job.status in LEGACY_HOLDING:
+        return True
+    if job.status == "failed":
+        return progress.get("native_terminal_verified") is not True
+    return job.status not in LEGACY_TERMINAL
+
+
+def paper_busy(session, paper_id, *, excluding=None, pending_before=None):
+    """Return one unresolved same-paper writer while allowing its own continuation.
+
+    ``pending_before`` is used only by a queue claimant. The earliest pending
+    attempt for one paper may claim it; later pending siblings do not block that
+    winner. Every non-pending occupant always blocks a claim.
+    """
     jobs = session.scalars(select(WorkflowJob).where(
-        or_(and_(WorkflowJob.type == TYPE, WorkflowJob.status.in_(HOLDING)),
-            and_(WorkflowJob.type.in_(LEGACY_WRITER_TYPES),
-                 WorkflowJob.status.in_(ACTIVE_LEGACY_STATUSES))),
+        WorkflowJob.type.in_(PAPER_WRITER_TYPES),
         WorkflowJob.payload.op("->>")("paper_id") == str(paper_id),
     ).order_by(WorkflowJob.created_at, WorkflowJob.job_id))
     for job in jobs:
         if job.job_id == excluding:
             continue
+        if not writer_occupies(job):
+            continue
+        if pending_before is not None and job.type == TYPE and job.status == "pending":
+            if (job.created_at, job.job_id) > pending_before:
+                continue
         return job
     return None
 
@@ -107,6 +137,10 @@ def writer_task(session, paper_id, actor, task_id):
         return None
     job = session.get(WorkflowJob, task_id)
     if job is None or job.type not in PAPER_WRITER_TYPES or (job.payload or {}).get("paper_id") != str(paper_id):
+        return None
+    if job.type == TYPE and job.status == "pending":
+        return None
+    if not writer_occupies(job):
         return None
     recorded_actor = (job.payload or {}).get("actor")
     # Legacy parser jobs may predate durable actor fields. Their exact stable job
@@ -156,7 +190,7 @@ def claim_next(session, *, stage, worker_id, settings, lease_seconds=900):
     if state["paused"]:
         return {"claimed": False, "reason": "paused"}
     attempts = _attempts(session)
-    active = [job for job in attempts if job.status in HOLDING]
+    active = [job for job in attempts if writer_occupies(job) and job.status != "pending"]
     for job in active:
         lease = job.progress.get("lease_expires_at")
         if lease and datetime.fromisoformat(lease) <= now():
@@ -169,12 +203,18 @@ def claim_next(session, *, stage, worker_id, settings, lease_seconds=900):
     for job in attempts:
         if job.status != "pending" or job.payload["stage"] != stage:
             continue
-        session.scalar(select(Paper.id).where(Paper.id == UUID(job.payload["paper_id"])).with_for_update())
-        snapshot, _ = current_snapshot(session, UUID(job.payload["paper_id"]))
+        paper_id = UUID(job.payload["paper_id"])
+        paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
+        if paper is None:
+            continue
+        if paper_busy(session, paper_id, excluding=job.job_id,
+                      pending_before=(job.created_at, job.job_id)) is not None:
+            continue
+        snapshot, _ = current_snapshot(session, paper_id)
         budget = job.payload["token_allowance"]
         job.status = "claimed"
         job.progress = {**job.progress, "lease_owner": worker_id, "lease_expires_at": (now() + timedelta(seconds=lease_seconds)).isoformat(),
-                        "reserved_tokens": budget, "evidence_guard": initial_guard(evidence_signature(session, UUID(job.payload["paper_id"]), role=stage, task_id=job.job_id), role=stage)}
+                        "reserved_tokens": budget, "evidence_guard": initial_guard(evidence_signature(session, paper_id, role=stage, task_id=job.job_id), role=stage)}
         session.flush()
         return {"claimed": True, "job": serialize(job)}
     session.flush()

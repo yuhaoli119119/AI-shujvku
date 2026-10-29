@@ -143,16 +143,21 @@ def _receipt(session, paper_id, work_id, actor, request_id, operation=None, body
     if event is None:
         return None
     data = event.payload
-    if (data["actor"] != actor or data["work_id"] != work_id or
-            operation is not None and (data["operation"] != operation or data["fingerprint"] != _digest(body))):
+    matches = data.get("actor") == actor and data.get("work_id") == work_id
+    if operation is not None:
+        matches = matches and data.get("operation") == operation and data.get("fingerprint") == _digest(body)
+    if not matches:
         if operation is None:
             raise RebuildWorkflowError("receipt_not_found")
         alternate = _digest([request_id, actor, work_id, operation, body])
-        event = session.scalar(select(AuditLog).where(AuditLog.paper_id == paper_id,
+        legacy = session.scalar(select(AuditLog).where(AuditLog.paper_id == paper_id,
             AuditLog.action == EVENT, AuditLog.source == VERSION, AuditLog.target_id == alternate))
-        if event is None:
-            return None
-        data = event.payload
+        if legacy is None:
+            raise RebuildWorkflowError("request_id_reused")
+        data = legacy.payload
+        if (data.get("actor") != actor or data.get("work_id") != work_id or
+                data.get("operation") != operation or data.get("fingerprint") != _digest(body)):
+            raise RebuildWorkflowError("request_id_reused")
     return {**data["result"], "replayed": True, "receipt_is_historical": True}
 
 

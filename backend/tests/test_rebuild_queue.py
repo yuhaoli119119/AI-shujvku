@@ -202,6 +202,57 @@ def test_writer_and_reviewer_for_same_paper_cannot_overlap_even_with_two_slots(a
     assert not claim(env, settings, stage="reviewer")["claimed"]
 
 
+def test_concurrent_claims_for_same_paper_have_one_winner_even_with_two_slots(audit_env, monkeypatch):
+    env = audit_env; settings = config(env, monkeypatch)
+    first = enqueue_one(env, settings, request="first")
+    second = enqueue_one(env, settings, request="second")
+    resume(env, settings, {"writer_slots": 2, "total_slots": 2})
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(
+            lambda worker: claim(env, settings, worker=worker), ["one", "two"]
+        ))
+    assert sum(item["claimed"] for item in results) == 1, results
+    with env['factory']() as session:
+        statuses = {
+            first["job_id"]: session.get(WorkflowJob, first["job_id"]).status,
+            second["job_id"]: session.get(WorkflowJob, second["job_id"]).status,
+        }
+        assert sorted(statuses.values()) == ["claimed", "pending"]
+
+
+@pytest.mark.parametrize("status,progress", [
+    ("unknown", {}),
+    ("needs_attention", {}),
+    ("failed", {}),
+    ("failed", {"native_terminal_verified": False}),
+])
+def test_unresolved_legacy_state_blocks_queue_claim(audit_env, monkeypatch, status, progress):
+    env = audit_env; settings = config(env, monkeypatch)
+    enqueue_one(env, settings)
+    resume(env, settings)
+    with env['factory']() as session:
+        session.add(WorkflowJob(
+            job_id="legacy-blocker", type="ai_extract_rebuild", status=status,
+            payload={"paper_id": str(env['paper']), "actor": "writer"}, progress=progress,
+        ))
+        session.commit()
+    assert not claim(env, settings)["claimed"]
+
+
+def test_verified_legacy_failure_releases_queue_claim(audit_env, monkeypatch):
+    env = audit_env; settings = config(env, monkeypatch)
+    enqueue_one(env, settings)
+    resume(env, settings)
+    with env['factory']() as session:
+        session.add(WorkflowJob(
+            job_id="legacy-verified-failure", type="ai_extract_rebuild", status="failed",
+            payload={"paper_id": str(env['paper']), "actor": "writer"},
+            progress={"native_terminal_verified": True},
+        ))
+        session.commit()
+    assert claim(env, settings)["claimed"]
+
+
 def test_identity_matched_native_readback_renews_lease_and_records_reported_usage(audit_env, monkeypatch):
     env = audit_env; settings = config(env, monkeypatch); attempt = prepared(env, settings)
     async def dispatched(**kwargs):
