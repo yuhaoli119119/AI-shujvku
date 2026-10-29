@@ -1,17 +1,40 @@
 #!/usr/bin/env python3
 """Deploy an exact GitHub commit. Plan first; apply requires its reviewed digest."""
-import argparse,hashlib,json,os,re,subprocess
+import argparse,hashlib,json,os,re,subprocess,uuid
 from pathlib import Path
 
 REMOTE='https://github.com/yuhaoli119119/AI-shujvku.git'
 SERVICES=['backend','worker','worker-pdf','owner-gateway','share-gateway','public-gateway']
+RELEASE_MOUNTS={
+    'backend':{'/app':'backend','/frontend':'frontend','/prompts':'prompts'},
+    'worker':{'/app':'backend','/prompts':'prompts'},
+    'worker-pdf':{'/app':'backend','/prompts':'prompts'},
+    'owner-gateway':{'/etc/nginx/templates/default.conf.template':'deploy/nginx/owner.conf.template'},
+    'share-gateway':{'/etc/nginx/conf.d/default.conf':'deploy/nginx/share.conf'},
+    'public-gateway':{'/etc/nginx/conf.d/default.conf':'deploy/nginx/public.conf'},
+}
 def run(args,**kwargs):
     return subprocess.check_output(args,text=True,**kwargs).strip()
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
+def private_directory(path):
+    path.mkdir(parents=True,exist_ok=True)
+    os.chmod(path,0o700)
+    return path
 def write_private(path,data):
     path.parent.mkdir(parents=True,exist_ok=True)
-    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-    with os.fdopen(fd,'w') as f:f.write(data)
+    temporary=path.with_name(f'.{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp')
+    fd=os.open(temporary,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    try:
+        with os.fdopen(fd,'w') as f:
+            f.write(data);f.flush();os.fsync(f.fileno())
+        os.replace(temporary,path)
+        directory=os.open(path.parent,os.O_RDONLY)
+        try:os.fsync(directory)
+        finally:os.close(directory)
+    except Exception:
+        try:temporary.unlink()
+        except FileNotFoundError:pass
+        raise
 def application_root(checkout):
     # Support both the single-directory repository and older frozen commits.
     for app in (checkout,checkout/'literature-ai'):
@@ -59,19 +82,45 @@ def configuration(runtime,app,sha):
                 if not replacement.exists():raise RuntimeError('Missing GitHub-controlled mount: '+str(relative))
                 volume['source']=str(replacement);volume['read_only']=True
     return cfg
+def verify_release_mounts(name,info,app):
+    expected=RELEASE_MOUNTS[name]
+    mounts={mount.get('Destination'):mount for mount in info.get('Mounts',[])}
+    for destination,relative in expected.items():
+        mount=mounts.get(destination)
+        if mount is None:raise RuntimeError(f'Missing release mount: {name} {destination}')
+        source=str(app/relative)
+        actual=str(Path(mount.get('Source','')).resolve())
+        if mount.get('Type')!='bind' or actual!=str(Path(source).resolve()) or mount.get('RW'):
+            raise RuntimeError(f'Uncontrolled release mount: {name} {destination}')
 def verify(runtime,sha):
+    infos={}
     for name in SERVICES:
         info=json.loads(run(['docker','inspect',f'literature-ai-{name}-1']))[0]
+        infos[name]=info
         if not info['State'].get('Running') or info['State'].get('Restarting'):raise RuntimeError('Container is not running stably: '+name)
         if name in {'backend','worker','worker-pdf'} and info['State'].get('Health',{}).get('Status')!='healthy':raise RuntimeError('Service health check has not passed: '+name)
         if info['Config']['Labels'].get('org.opencontainers.image.revision')!=sha:raise RuntimeError('Container revision mismatch: '+name)
-        for mount in info['Mounts']:
-            if mount['Destination'] in {'/app','/frontend','/prompts'}:
-                expected=str(application_root(runtime/'releases'/sha))+'/'
-                if not mount['Source'].startswith(expected) or mount['RW']:raise RuntimeError('Uncontrolled source mount: '+name)
+
+    app=application_root(runtime/'releases'/sha)
+    for name,info in infos.items():
+        verify_release_mounts(name,info,app)
     result=json.loads(run(['docker','exec','literature-ai-backend-1','python','-c',"import json,urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').read().decode())"]))
     if result.get('git_commit')!=sha:raise RuntimeError('Backend health revision mismatch')
     return result
+def record_deployment(runtime,sha,plan_hash,verified,*,writer=write_private):
+    state=private_directory(runtime/'deploy-state'/sha)
+    receipt={'commit':sha,'remote':REMOTE,'plan_sha256':plan_hash,'verified_health':verified}
+    writer(state/'deployment-receipt.json',json.dumps(receipt,indent=2)+'\n')
+    writer(runtime/'DEPLOYED_GITHUB_COMMIT',sha+'\n')
+    return receipt
+def apply_release(runtime,sha,plan_hash,compose,*,runner=None,verifier=None,recorder=None):
+    runner=runner or subprocess.run
+    verifier=verifier or verify
+    recorder=recorder or record_deployment
+    runner([*compose,'build','backend','worker','worker-pdf'],check=True)
+    runner([*compose,'up','-d','--no-deps','--force-recreate','--wait','--wait-timeout','180',*SERVICES],check=True)
+    verified=verifier(runtime,sha)
+    return recorder(runtime,sha,plan_hash,verified)
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=['plan','apply','verify'])
@@ -84,7 +133,7 @@ def main():
     runtime=Path(args.runtime).resolve()
     if not str(runtime).startswith('/opt/'):parser.error('Server project path required')
     if args.action=='verify':print(json.dumps(verify(runtime,sha)));return
-    app=fetch(runtime,sha);state=runtime/'deploy-state'/sha;state.mkdir(parents=True,exist_ok=True)
+    app=fetch(runtime,sha);state=private_directory(runtime/'deploy-state'/sha)
     cfg=configuration(runtime,app,sha)
     raw=json.dumps(cfg,sort_keys=True,indent=2)+'\n'
     config_hash=hashlib.sha256(raw.encode()).hexdigest()
@@ -102,12 +151,6 @@ def main():
     if not args.plan_sha256 or not plan_file.exists() or digest(plan_file)!=args.plan_sha256 or args.plan_sha256!=plan_hash:raise RuntimeError('Exact reviewed plan digest required')
     if not config_file.exists() or digest(config_file)!=config_hash:raise RuntimeError('Compose configuration changed after review')
     compose=['docker','compose','-p','literature-ai','--project-directory',str(runtime),'-f',str(config_file)]
-    subprocess.run([*compose,'build','backend','worker','worker-pdf'],check=True)
-    subprocess.run([*compose,'up','-d','--no-deps','--force-recreate','--wait','--wait-timeout','180',*SERVICES],check=True)
-    verified=verify(runtime,sha)
-    receipt={'commit':sha,'remote':REMOTE,'plan_sha256':plan_hash,'verified_health':verified}
-    write_private(state/'deployment-receipt.json',json.dumps(receipt,indent=2)+'\n')
-    pointer=runtime/'DEPLOYED_GITHUB_COMMIT';temporary=runtime/'DEPLOYED_GITHUB_COMMIT.next'
-    write_private(temporary,sha+'\n');temporary.replace(pointer)
+    receipt=apply_release(runtime,sha,plan_hash,compose)
     print(json.dumps(receipt))
 if __name__=='__main__':main()

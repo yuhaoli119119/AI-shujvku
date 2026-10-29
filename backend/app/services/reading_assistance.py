@@ -228,8 +228,10 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
 
 def _create_phase(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None, model=None, observation, dispatches):
     from app.services.rebuild_queue import paper_busy, writer_task
+    from app.services.paper_db_phase import bound_lock_wait
     # Paper FOR UPDATE is the cross-route writer mutex. Do not serialize unrelated
     # papers on the queue-wide advisory lock.
+    bound_lock_wait(session)
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     previous = session.scalar(select(WorkflowJob).where(WorkflowJob.type == TYPE,
@@ -296,10 +298,12 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
 def save(session, paper_id, body, settings, actor, *, work_id=None):
     from app.services.external_paper_work import VERSION as MCP_VERSION, guard_workbench_write
     from app.services.rebuild_queue import writer_task
+    from app.services.paper_db_phase import bound_lock_wait
     # Content saves use authenticated ownership, request identity and source
     # revision. The top-level MCP work identity is authoritative; the nested
     # reading job_id remains a legacy transport-compatible alias.
     effective_work_id = work_id or body.job_id
+    bound_lock_wait(session)
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     data=body.model_dump(mode='json')

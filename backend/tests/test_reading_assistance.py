@@ -1,5 +1,7 @@
 import asyncio
 import copy
+import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -10,6 +12,7 @@ from app.schemas.reading_assistance import ReadingAssistanceSave
 from app.services import reading_assistance as service
 from app.services.codex_web_dispatch import ThreadStatus
 from test_rebuild_mutation_audit import audit_env
+from test_sync_write_lock_contract import PaperLock
 
 
 @pytest.fixture
@@ -114,6 +117,53 @@ def test_active_job_is_not_reused_for_a_different_scope(reading_env):
     })
     assert response.status_code==409,response.text
     assert response.json()['detail']=='paper_has_other_unresolved_writer_or_reviewer'
+
+
+def test_reading_create_and_save_use_bounded_lock_then_replay_idempotently(reading_env):
+    e=reading_env
+    with PaperLock(e['engine'],e['paper']):
+        started=time.perf_counter()
+        create_contention=e['client'].post(base(e)+'/jobs',json={'request_id':'bounded-create'})
+        elapsed=time.perf_counter()-started
+    assert create_contention.status_code==409,create_contention.text
+    assert create_contention.json()['detail']=='paper_lock_busy_retry_same_request'
+    assert elapsed<1.8,elapsed
+    created=e['client'].post(base(e)+'/jobs',json={'request_id':'bounded-create'})
+    assert created.status_code==200,created.text
+    job=created.json()
+    assert e['client'].post(base(e)+'/jobs',json={'request_id':'bounded-create'}).json()['job_id']==job['job_id']
+
+    payload=body(e,job['job_id'])
+    payload['request_id']='bounded-save'
+    with PaperLock(e['engine'],e['paper']):
+        started=time.perf_counter()
+        save_contention=e['client'].post(base(e),json=payload)
+        elapsed=time.perf_counter()-started
+    assert save_contention.status_code==409,save_contention.text
+    assert save_contention.json()['detail']=='paper_lock_busy_retry_same_request'
+    assert elapsed<1.8,elapsed
+    saved=e['client'].post(base(e),json=payload)
+    assert saved.status_code==200,saved.text
+    replay=e['client'].post(base(e),json=payload)
+    assert replay.status_code==200 and replay.json()['replayed'] is True
+
+
+def test_concurrent_identical_reading_save_commits_once_and_replays(reading_env):
+    e=reading_env
+    job=create(e,'concurrent-save-job')
+    payload=body(e,job['job_id'])
+    payload['request_id']='concurrent-save'
+    clients=[e['client_for']('writer'),e['client_for']('writer')]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            responses=list(pool.map(lambda client:client.post(base(e),json=payload),clients))
+        assert all(response.status_code==200 for response in responses),[r.text for r in responses]
+        assert sum(response.json()['replayed'] is True for response in responses)==1
+        with e['factory']() as session:
+            assert session.scalar(select(func.count()).select_from(AuditLog).where(
+                AuditLog.action==service.VERSION))==1
+    finally:
+        for client in clients:client.close()
 
 
 def test_bound_job_source_revision_ownership_and_csrf(reading_env):

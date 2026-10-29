@@ -1,4 +1,4 @@
-> 2026-10-09：代码版本和部署以 GitHub 的明确提交为准。新流程见 [GitHub 部署规范](GITHUB_DEPLOYMENT.md)；旧部署说明不再作为发布依据。
+> 2026-10-09：代码版本和部署以 GitHub 的明确提交为准。新流程见 [GitHub 部署规范](GITHUB_DEPLOYMENT.md)；旧部署说明不再作为发布依据。发布器强制验证候选 release 与 Nginx 只读挂载，并采用原子回执/指针、连续回滚、维护交接和静默备份合同。
 
 # Literature AI 文档索引（2026-09-22 清洗后）
 

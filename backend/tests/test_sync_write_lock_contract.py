@@ -70,7 +70,7 @@ def _override_section_auth():
         issued_at=0, expires_at=9999999999, ttl=3600,
     )
     app.dependency_overrides[
-        rebuild_api._require_section_write_session] = lambda: auth
+        rebuild_api._require_section_authenticated_session] = lambda: auth
 
 
 def test_sync_reading_save_maps_lock_timeout_to_409(setup_test_db):
@@ -78,7 +78,7 @@ def test_sync_reading_save_maps_lock_timeout_to_409(setup_test_db):
     from app.api import reading_assistance as route_module
     auth = SessionState(username="acceptance-user", sid="acceptance", csrf="acceptance",
                         remember=False, issued_at=0, expires_at=9999999999, ttl=3600)
-    app.dependency_overrides[route_module._require_section_write_session] = lambda: auth
+    app.dependency_overrides[route_module._require_section_authenticated_session] = lambda: auth
     body = {
         "save_mode": "abstract_only", "request_id": "sync-save-lock",
         "job_id": "acceptance-job", "input_revision": "0" * 64,
@@ -94,7 +94,7 @@ def test_sync_reading_save_maps_lock_timeout_to_409(setup_test_db):
         assert "paper_lock_busy_retry_same_request" in response.text
     finally:
         app.dependency_overrides.pop(
-            route_module._require_section_write_session, None)
+            route_module._require_section_authenticated_session, None)
 
 
 def test_history_write_uses_database_bounded_lock_timeout(setup_test_db):
@@ -128,7 +128,7 @@ def test_history_write_uses_database_bounded_lock_timeout(setup_test_db):
         if timer is not None:
             timer.cancel()
         app.dependency_overrides.pop(
-            rebuild_api._require_section_write_session, None)
+            rebuild_api._require_section_authenticated_session, None)
 
 
 def test_direct_locked_paper_has_database_bounded_timeout(setup_test_db):
