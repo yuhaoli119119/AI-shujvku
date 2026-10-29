@@ -34,13 +34,13 @@ def options(source: Literal['legacy','rebuild']='rebuild', library_name: str | N
             year_min: int | None=None, year_max: int | None=None,
             min_confidence: float | None=Query(None,ge=0,le=1),
             reaction: str | None=None, material_family: str | None=None,
-            paper_id: str | None=None, include_estimated: bool=False,
+            paper_id: str | None=None, include_estimated: bool=False, include_unlabelled: bool=False,
             data_type: Literal['dft','experimental']='dft'):
     if source == 'legacy':
         raise HTTPException(410, detail={'code':'legacy_extraction_retired',
             'message':'旧提取链路已停用；数据库、分析和导出只使用新 AI 提取数据。',
             'source':'rebuild'})
-    return dict(source=source,library_name=library_name,include_estimated=include_estimated,
+    return dict(source=source,library_name=library_name,include_estimated=include_estimated,include_unlabelled=include_unlabelled,
                 filters=dict(property_type=property_type,adsorbate=adsorbate,catalyst_name=catalyst_name,
                              catalyst_type=catalyst_type,year_min=year_min,year_max=year_max,
                              min_confidence=min_confidence,reaction=reaction,material_family=material_family,paper_id=paper_id,data_type=data_type))

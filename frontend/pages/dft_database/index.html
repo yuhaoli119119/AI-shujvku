@@ -1309,6 +1309,7 @@
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
       if (state.currentLibrary === "锂硫双原子") params.set("include_estimated", "true");
+      if (state.currentLibrary === "锂硫双原子") params.set("include_unlabelled", "true");
       params.set("source", "rebuild");
       params.set("export_mode", "exploratory");
       return params;
@@ -1394,7 +1395,7 @@
         const excluded = Math.max(0, Number(data.total_records || 0) - numeric);
         if (donutsContainer) donutsContainer.innerHTML = getTechDonutHTML(numeric, excluded);
         const reasons = data.excluded_reasons || {};
-        if (chipsContainer) chipsContainer.innerHTML = '<span class="quality-meta">审核状态未知' + (state.currentLibrary === "锂硫双原子" ? ' · 包含估读值' : '') + ' · ' + esc(data.total_records ?? "—") + ' 条记录</span>' + Object.entries(reasons).map(([reason,count]) => '<span class="reason-chip">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>').join("");
+        if (chipsContainer) chipsContainer.innerHTML = '<span class="quality-meta">审核状态未知' + (state.currentLibrary === "锂硫双原子" ? ' · 包含估读值和单位未标注数值' : '') + ' · ' + esc(data.total_records ?? "—") + ' 条记录</span>' + Object.entries(reasons).map(([reason,count]) => '<span class="reason-chip">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>').join("");
       } catch (error) {
         if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">数值质量概览加载失败：' + esc(error.message) + '</div>';
         if (chipsContainer) chipsContainer.innerHTML = "";
@@ -1795,7 +1796,7 @@
           <td data-label=""><span class="cell-primary catalyst-name ${catalystColorClass}" data-catalyst-name="${esc(catName)}" title="${esc(catalystHint)}">${esc(catName)}</span></td>
           <td data-label="吸附物"><span class="cell-primary">${esc(item.adsorbate || "-")}</span></td>
           <td data-label="能量类型"><span class="cell-primary" title="${esc(property.secondary)}">${esc(property.primary || "-")}</span></td>
-          <td data-label="数值" class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || "")}</span></td>
+          <td data-label="数值" class="num-col"><span class="cell-primary num-text">${item.value != null ? Number(item.value).toFixed(4) : "-"}</span><span class="val-unit">${esc(item.unit || (item.unit_unlabelled ? "单位未标注" : ""))}${item.estimated ? " · 估读" : ""}</span></td>
           <td data-label="章节 / 步骤"><span class="cell-primary">${esc(item.reaction_step || "-")}</span><div class="dft-table-muted">${esc(item.source_section || "-")}</div></td>
           <td data-label="状态 / 置信度"><span class="status-text ${validation === "validated" ? "" : "status-unknown"}">${esc(validationStatusLabel(validation))}</span><br><span class="confidence-badge ${cls}" title="${hasConfidence ? '解析阶段记录的提取置信度' : '当前记录未保存提取置信度；探索性导出不代表审核通过'}">${confidenceLabel}</span></td>
           <td data-label="证据"><button class="evidence-link" onclick="showEvidence(${idx})">证据</button></td>

@@ -107,7 +107,7 @@ def normalize_numeric(prop, value, unit):
 
 
 class AnalysisReadonlyService(CatalystAnalysisService):
-    def __init__(self, session: Session, *, source='rebuild', library_name=None, filters=None, include_estimated=False):
+    def __init__(self, session: Session, *, source='rebuild', library_name=None, filters=None, include_estimated=False, include_unlabelled=False):
         super().__init__(session)
         if source not in {'legacy', 'rebuild'}:
             raise ValueError('source must be legacy or rebuild; sources cannot be merged')
@@ -115,6 +115,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         self.library_name = library_name
         self.filters = filters or {}
         self.include_estimated = include_estimated
+        self.include_unlabelled = include_unlabelled
         self._loaded = None
         self.records = []
         self._candidate_cache = {}
@@ -162,7 +163,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         revision = _content_revision(self.session)
         key = (str(self.session.get_bind().url), revision,
                normalize_library_name(self.library_name) if self.library_name is not None else None,
-               json.dumps(self.filters, sort_keys=True, default=str), self.include_estimated)
+               json.dumps(self.filters, sort_keys=True, default=str), self.include_estimated, self.include_unlabelled)
         with _PROJECTION_LOCK:
             cached = _PROJECTIONS.get(key)
             if cached is not None:
@@ -245,6 +246,9 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             for row,paper,cat,extra in raw:
                 taxonomy = _taxonomy(row.property_type)
                 normalized_value, normalized_unit, reason = normalize_numeric(row.property_type,row.value,row.unit)
+                unit_unlabelled = reason == 'unknown_unit'
+                if unit_unlabelled and self.include_unlabelled:
+                    normalized_value, normalized_unit, reason = float(row.value), None, None
                 if extra.get('estimated') and not self.include_estimated:
                     reason = 'estimated_excluded'
                 elif unresolved_conflict(extra.get('conflict')):
@@ -256,6 +260,9 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 elif row.value_kind in {'range','interval','upper_bound','lower_bound'}:
                     reason = 'non_scalar_value'
                 record = {'record_id':str(row.id),'paper_id':str(paper.id),'paper_code':paper.paper_code,'title':paper.title,'doi':paper.doi,'journal':paper.journal,'year':paper.year,'library_name':normalize_library_name(paper.library_name),'property_type':row.property_type,'canonical_property_type':taxonomy.get('canonical_property_type') or row.property_type,'normalized_property_type':taxonomy.get('canonical_property_type') or row.property_type,'property_subtype':taxonomy.get('property_subtype'),'adsorbate':row.adsorbate,'reaction':row.reaction_type,'reaction_step':row.reaction_step,'value':row.value,'raw_value':extra.get('raw_value',row.value),'unit':row.unit,'raw_unit':row.unit,'confidence':row.confidence,'candidate_status':row.candidate_status,'assessment_status':'not_evaluated','review_status':'not_evaluated','validation_status':'not_evaluated','is_exportable':None,'is_ml_ready':None,'export_safety':{'eligible':None,'assessment_status':'not_evaluated'},'evidence_text':row.evidence_text,'evidence_payload':row.evidence_payload,'source_section':row.source_section,'source_figure':row.source_figure,'catalyst_name':extra['catalyst_name'],'display_catalyst_name':extra['catalyst_name'],'catalyst_type':cat.catalyst_type if cat else None,'catalysts':[{'id':str(cat.id),'name':cat.name,'type':cat.catalyst_type,'support':cat.support,'coordination':cat.coordination,'metal_centers':cat.metal_centers}] if cat else [],'material_binding_status':'bound' if row.catalyst_sample_id else 'stored_rebuild_identity' if self.source=='rebuild' else 'derived_from_evidence' if extra['catalyst_name'] else 'unbound','target':{'normalized_value':normalized_value,'normalized_unit':normalized_unit,'normalization_status':'normalized' if reason is None else reason},'exploratory_eligible':reason is None,'exclusion_reason':reason,'analysis_entity_id':analysis_entity_id(row),**extra}
+                record['unit_unlabelled'] = unit_unlabelled
+                if unit_unlabelled and reason is None:
+                    record['target']['normalization_status'] = 'unit_unlabelled'
                 if not self._matches(record):
                     continue
                 records.append(record)
@@ -296,6 +303,8 @@ class AnalysisReadonlyService(CatalystAnalysisService):
 
     def decorate(self,payload):
         payload.update(source=self.source,source_family=self.source,assessment_status='not_evaluated',export_mode='exploratory',selection_policy=POLICY)
+        if self.include_unlabelled:
+            payload['selection_policy'] = 'Exploratory observations include explicitly flagged values with unlabelled units; these values are not normalized and must not be pooled as physical measurements. Approval not evaluated.'
         referenced=set()
         def collect(obj):
             if isinstance(obj,dict):
@@ -470,7 +479,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
 
     def csv(self, *, limit=None,offset=0,dataset_profile=None):
         payload=self.observation_dataset(limit=limit,offset=offset,dataset_profile=dataset_profile)
-        columns=['source_family','assessment_status','record_id','paper_id','paper_code','doi','catalyst_name','property_type','adsorbate','raw_value','raw_unit','evidence_text','source_section','source_figure']
+        columns=['source_family','assessment_status','record_id','paper_id','paper_code','doi','catalyst_name','property_type','adsorbate','raw_value','raw_unit','estimated','unit_unlabelled','evidence_text','source_section','source_figure']
         stream=io.StringIO(newline='')
         writer=csv.DictWriter(stream,fieldnames=columns,lineterminator='\r\n'); writer.writeheader()
         for row in payload['records']:
