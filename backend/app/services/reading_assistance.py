@@ -240,23 +240,36 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
                 previous.payload.get('actor') is not None and previous.payload.get('actor') != actor or
                 previous.payload.get('requested_source_job_id') != source_job_id or
                 previous.payload.get('requested_model') != model):
-            request_id=hashlib.sha256(json.dumps([request_id,scope,actor,source_job_id,model],sort_keys=True).encode()).hexdigest()
-            previous=session.scalar(select(WorkflowJob).where(WorkflowJob.type==TYPE,
-                WorkflowJob.payload.op('->>')('paper_id')==str(paper_id),
-                WorkflowJob.payload.op('->>')('request_id')==request_id))
-            if previous:return serialize(previous)
-        else:return serialize(previous)
-    owner = writer_task(session, paper_id, actor, source_job_id)
-    if paper_busy(session, paper_id, excluding=owner.job_id if owner else None):
-        raise ValueError("paper_has_other_unresolved_writer_or_reviewer")
-    from app.services.paper_db_phase import require_source
-    continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
+            if previous.payload.get('reading_scope','full') != scope:
+                raise ValueError('reading_request_scope_reused')
+            raise ValueError('reading_request_id_reused')
+        return serialize(previous)
     context = input_context(session, paper_id, settings)
     if scope == 'abstract_only':
         if (paper.comprehensive_analysis or {}).get('abstract_zh') and not invalid_translation(paper):
-            scope='full'
+            raise ValueError('abstract_translation_already_current')
         if not context['abstract_for_translation']['text']:
             scope='full'
+    owner = writer_task(session, paper_id, actor, source_job_id)
+    busy = paper_busy(session, paper_id, excluding=owner.job_id if owner else None)
+    if busy:
+        # A repeated UI click for the same active reading work should return that
+        # job instead of creating or rejecting a second writer. Unknown/attention
+        # states and different work/model/source identities still require recovery.
+        same_active_job = (
+            not retry and busy.type == TYPE and busy.status in RUNNING and
+            (busy.payload or {}).get('actor') == actor and
+            (busy.payload or {}).get('reading_scope') == scope and
+            (busy.payload or {}).get('requested_source_job_id') == source_job_id and
+            (model is None or (busy.payload or {}).get('requested_model') == model)
+        )
+        if same_active_job:
+            result = serialize(busy)
+            result['reused_active_job'] = True
+            return result
+        raise ValueError("paper_has_other_unresolved_writer_or_reviewer")
+    from app.services.paper_db_phase import require_source
+    continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
     jid = 'aiext-guide-' + uuid4().hex[:20]; token = str(uuid4())
     instruction = 'attempt_token=' + token + '\n' + prompt(paper_id, jid, scope)
     from app.services.paper_native_models import require_model
@@ -290,6 +303,16 @@ def save(session, paper_id, body, settings, actor, *, work_id=None):
     paper=session.scalar(select(Paper).where(Paper.id==paper_id).with_for_update())
     if not paper: raise ValueError('paper_not_found')
     data=body.model_dump(mode='json')
+    legacy_fingerprints={digest({**data, 'job_id': effective_work_id})}
+    without_new_fields=copy.deepcopy(data)
+    without_new_fields.pop('save_mode',None)
+    without_new_fields.pop('abstract_source_revision',None)
+    without_new_fields['job_id']=effective_work_id
+    legacy_fingerprints.add(digest(without_new_fields))
+    without_optional_revision=copy.deepcopy(without_new_fields)
+    if without_optional_revision.get('expected_reading_revision') is None:
+        without_optional_revision.pop('expected_reading_revision',None)
+        legacy_fingerprints.add(digest(without_optional_revision))
     if data.get('expected_reading_revision') is None:
         data.pop('expected_reading_revision',None)
     abstract_only=body.save_mode=='abstract_only'
@@ -299,12 +322,14 @@ def save(session, paper_id, body, settings, actor, *, work_id=None):
         if data.get('abstract_source_revision') is None:data.pop('abstract_source_revision',None)
     data['job_id'] = effective_work_id
     fingerprint=digest(data)
+    legacy_fingerprints.add(fingerprint)
     # Request IDs may be 128 characters; legacy audit target_id is only 64.
     # Keep existing short identities and use the complete long identity's digest.
     audit_id=body.request_id if len(body.request_id)<=64 else hashlib.sha256(body.request_id.encode()).hexdigest()
     previous=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==audit_id))
     if previous:
-        if previous.payload.get('fingerprint')==fingerprint and previous.payload.get('actor')==actor:
+        if (previous.payload.get('fingerprint') in legacy_fingerprints and
+                previous.payload.get('actor')==actor):
             return {**previous.payload['receipt'],'replayed':True}
         legacy_id=hashlib.sha256((body.request_id+'|'+actor+'|'+fingerprint).encode()).hexdigest()
         legacy=session.scalar(select(AuditLog).where(AuditLog.action==VERSION,AuditLog.paper_id==paper_id,AuditLog.target_id==legacy_id))
@@ -325,7 +350,20 @@ def save(session, paper_id, body, settings, actor, *, work_id=None):
         job=session.scalar(select(WorkflowJob).where(WorkflowJob.job_id==job.job_id).with_for_update())
     context=input_context(session,paper_id,settings)
     expected=body.expected_reading_revision or ((job.payload or {}).get('reading_revision') if job else None)
+    dispatched_input=((job.payload or {}).get('input_revision')
+                      if job and job.type == TYPE else None)
     source=context['abstract_for_translation']
+    if expected is not None and expected != context['reading_revision']:
+        raise ValueError('reading_revision_conflict')
+    if body.input_revision != context['input_revision']:
+        raise ValueError('reading_input_revision_conflict')
+    if dispatched_input is not None and dispatched_input != context['input_revision']:
+        raise ValueError('reading_input_changed_since_dispatch')
+    if body.abstract_source_revision is not None and body.abstract_source_revision != source['revision']:
+        raise ValueError('abstract_source_revision_conflict')
+    if (not abstract_only and body.abstract_zh and source['text'] and body.abstract_source_revision is None and
+            (source.get('source') or {}).get('kind') != 'metadata'):
+        raise ValueError('abstract_source_revision_required')
     if not abstract_only and paper.abstract and not body.abstract_zh and not body.abstract_missing_reason:
         raise ValueError('abstract_translation_or_reason_required')
     if body.abstract_zh and not any('\u4e00' <= ch <= '\u9fff' for ch in body.abstract_zh):
@@ -333,6 +371,8 @@ def save(session, paper_id, body, settings, actor, *, work_id=None):
     old={'reading_guide':copy.deepcopy(paper.reading_guide),'abstract_zh':(paper.comprehensive_analysis or {}).get('abstract_zh')}
     if not abstract_only:
         docs=context['documents'];main=[d for d in docs if d['role']=='main'];si=[d for d in docs if d['role']=='si']
+        if body.content_scope == 'main_and_si' and not main:
+            raise ValueError('main_source_required')
         assets={a['asset_id'] for a in context['figures']}
         if any(str(e.asset_id) not in assets for e in body.evidence):raise ValueError('evidence_asset_not_in_paper_context')
         missing=list(body.missing)

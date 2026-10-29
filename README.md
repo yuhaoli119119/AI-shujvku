@@ -12,6 +12,9 @@
 - 修复：HTTP 的 `X-Task-ID`、请求体和路径工作身份统一校验；历史精确回执优先于新写者占用，同 request ID 改内容稳定返回 409。
 - 修复：`unknown`、`needs_attention` 和无原生终态证据的失败任务继续占用，队列 claim 在论文锁内再次核对同篇写者与验收者。
 - 修复：MCP 阅读保存正确使用外层 `work_id`，继续兼容旧嵌套 `reading.job_id`，不同身份组合明确拒绝。
+- 修复：阅读保存写前校验 input、reading 与摘要来源 revision；运行中同 actor 重复点击复用原 job，不同 scope/source 明确拒绝。
+- 修复：`main_and_si` 缺正文返回 409；仅有正文而无 SI 时兼容降级并记录缺少 SI。
+- 兼容：无可核实摘要来源的 `abstract_only` 请求仍降级为 `full`，已有有效摘要时不重复派发。
 
 [完整更新记录](docs/releases/release-notes.md)
 

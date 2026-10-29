@@ -115,7 +115,7 @@ def test_real_http_and_streamable_mcp_identity_replay_and_occupancy(live_server,
 
     with env["factory"]() as session:
         original = session.get(WorkflowJob, "transport-owned-parser")
-        original.status = "completed"
+        original.status = "failed"
         original.progress = {"native_terminal_verified": True}
         session.add(WorkflowJob(
             job_id="transport-new-http-writer", type="ai_extract_rebuild", status="running",

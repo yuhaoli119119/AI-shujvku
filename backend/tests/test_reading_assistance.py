@@ -4,7 +4,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select, func
-from app.db.models import Paper, WorkflowJob, RebuildDataValue, RebuildVisualAsset, AuditLog
+from app.db.models import (AuditLog, Paper, RebuildDataValue, RebuildPaperFile,
+                           RebuildVisualAsset, WorkflowJob)
 from app.schemas.reading_assistance import ReadingAssistanceSave
 from app.services import reading_assistance as service
 from app.services.codex_web_dispatch import ThreadStatus
@@ -58,17 +59,61 @@ def test_refresh_context_and_saved_reads_never_create_generation_and_retries_sam
         assert e['client'].get(base(e)).status_code==200
         assert e['client'].get(base(e)+'/context').status_code==200
     with e['factory']() as s:assert s.scalar(select(func.count()).select_from(WorkflowJob))==0
-    j=create(e);assert create(e)['job_id']==j['job_id'] and create(e,'new-click-while-running')['job_id']==j['job_id']
+    j=create(e);assert create(e)['job_id']==j['job_id']
+    reused=create(e,'new-click-while-running')
+    assert reused['job_id']==j['job_id'] and reused['reused_active_job'] is True
     assert len(service.prompt(e['paper'],j['job_id']))<4000
 
 
-def test_partial_abstract_missing_and_full_text_scope_guard(reading_env):
+def test_partial_abstract_missing_and_main_source_requirement(reading_env):
     e=reading_env;j=create(e);p=body(e,j['job_id']);p['content_scope']='main_and_si'
-    assert e['client'].post(base(e),json=p).status_code==409
+    missing_main=e['client'].post(base(e),json=p)
+    assert missing_main.status_code==409
+    assert missing_main.json()['detail']=='main_source_required'
     p['content_scope']='partial_text';p['abstract_zh']='';p['abstract_missing_reason']='摘要译文暂未生成'
     assert e['client'].post(base(e),json=p).status_code==200
     read=e['client'].get(base(e)).json();assert '摘要译文暂未生成' in read['guide']['missing']
     assert read['abstract_original'].startswith('A catalyst')
+
+
+def test_main_and_si_without_si_downgrades_to_main_text_with_reason(reading_env):
+    e=reading_env
+    with e['factory']() as session:
+        session.get(RebuildPaperFile, e['file']).role='main'
+        session.commit()
+    j=create(e)
+    p=body(e,j['job_id'])
+    p['content_scope']='main_and_si'
+    response=e['client'].post(base(e),json=p)
+    assert response.status_code==200,response.text
+    saved=e['client'].get(base(e)).json()
+    assert saved['guide']['content_scope']=='main_text'
+    assert '未登记 SI，本次依据现有正文。' in saved['guide']['missing']
+
+
+def test_stale_reading_context_cannot_overwrite_newer_source(reading_env):
+    e=reading_env;j=create(e);p=body(e,j['job_id'])
+    with e['factory']() as session:
+        paper=session.get(Paper,e['paper'])
+        paper.abstract='A newer abstract must invalidate the old reading context.'
+        session.commit()
+    response=e['client'].post(base(e),json=p)
+    assert response.status_code==409,response.text
+    assert response.json()['detail']=='reading_revision_conflict'
+    with e['factory']() as session:
+        paper=session.get(Paper,e['paper'])
+        assert paper.abstract=='A newer abstract must invalidate the old reading context.'
+        assert paper.comprehensive_analysis=={'retained_science':{'x':42}}
+
+
+def test_active_job_is_not_reused_for_a_different_scope(reading_env):
+    e=reading_env
+    create(e)
+    response=e['client'].post(base(e)+'/jobs',json={
+        'request_id':'different-scope', 'scope':'abstract_only',
+    })
+    assert response.status_code==409,response.text
+    assert response.json()['detail']=='paper_has_other_unresolved_writer_or_reviewer'
 
 
 def test_bound_job_source_revision_ownership_and_csrf(reading_env):
@@ -195,7 +240,11 @@ def test_long_request_ids_with_same_prefix_are_distinct_not_truncated(reading_en
     next_body=body(e,j['job_id']);next_body['request_id']='x'*64+'second'
     # Simulate the same ordinary task's next valid source revision, without creating a second task.
     with e['factory']() as s:
-        job=s.get(WorkflowJob,j['job_id']);job.payload={**job.payload,'reading_revision':service.reading_revision(s.get(Paper,e['paper']))};s.commit()
+        paper=s.get(Paper,e['paper'])
+        job=s.get(WorkflowJob,j['job_id'])
+        job.payload={**job.payload,'reading_revision':service.reading_revision(paper),
+                     'input_revision':next_body['input_revision']}
+        s.commit()
     result=e['client'].post(base(e),json=next_body);assert result.status_code==200,result.text
     with e['factory']() as s:
         audits=list(s.scalars(select(AuditLog).where(AuditLog.action==service.VERSION)))

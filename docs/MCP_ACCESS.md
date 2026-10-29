@@ -46,7 +46,7 @@ ChatGPT 的具体入口随客户端版本可能显示为插件、应用或自定
 
 ### 2026-10-28 候选：直接保存
 
-持有 `write_rebuild` 的调用方在没有其他未结束同篇写者时可以省略 `work_id` 和 `expected_revision`，逐项将图表、数据、章节或阅读内容保存到同一篇文献。存在未结束写者时，只有同一 actor 和 `work_id` 的续写放行；精确保留的原请求回执先于当前占用检查重放。其他 actor、无 work 令牌的并发新写或同 request_id 改内容返回明确错误，不新增成果。`save_reading_assistance` 推荐只在外层 `request.work_id` 提供工作身份；旧客户端的嵌套 `reading.job_id` 仍兼容，但两者同时出现且不同返回 `work_identity_mismatch`。没有 SI 直接处理正文；短数据库事务用于完整写入，重复内容通过原有身份合并。
+持有 `write_rebuild` 的调用方在没有其他未结束同篇写者时可以省略 `work_id` 和 `expected_revision`，逐项将图表、数据、章节或阅读内容保存到同一篇文献。存在未结束写者时，只有同一 actor 和 `work_id` 的续写放行；精确保留的原请求回执先于当前占用检查重放。其他 actor、无 work 令牌的并发新写或同 request_id 改内容返回明确错误，不新增成果。`save_reading_assistance` 推荐只在外层 `request.work_id` 提供工作身份；旧客户端的嵌套 `reading.job_id` 仍兼容，但两者同时出现且不同返回 `work_identity_mismatch`。阅读保存必须匹配当前 input/reading/abstract source revision；`main_and_si` 缺正文返回 `main_source_required`，仅有正文而无 SI 时兼容降级为 `main_text` 或 `partial_text` 并在 missing 记录原因。`abstract_only` 无明确摘要来源时保留原兼容合同，降级为 `full` 任务。短数据库事务用于完整写入，重复内容通过原有身份合并。
 
 1. 查找论文，核对稳定 `paper_id`；阅读 workspace、当前正文/SI、已有结果和当前占用。
 2. 用户选定有限范围后，使用新的稳定 `request_id`、当前 `file_set_revision` 与明确 `file_ids` 调用 begin_paper_work；有未解决原生/外部写者或独审任务则拒绝。

@@ -206,6 +206,8 @@ def begin(session, paper_id, actor, request_id, file_ids, file_set_revision):
 def require_work(session, paper_id, work_id, actor, expected_revision=None):
     _lock(session, paper_id)
     job = _job(session, paper_id, work_id, actor)
+    if job.status in {"completed", "failed"}:
+        raise RebuildWorkflowError("work_terminal")
     if paper_busy(session, paper_id, excluding=work_id):
         raise RebuildWorkflowError("paper_has_other_unresolved_writer_or_reviewer")
     if file_set(session, paper_id)["file_set_revision"] != job.payload["file_set_revision"]:
@@ -241,6 +243,8 @@ def mutate(session, paper_id, work_id, actor, request_id, expected_revision, ope
     replay = _receipt(session, paper_id, work_id, actor, request_id, operation, body)
     if replay is not None:
         return replay
+    if job is not None and job.status in {"completed", "failed"}:
+        raise RebuildWorkflowError("work_terminal")
     if paper_busy(session, paper_id, excluding=work_id):
         raise RebuildWorkflowError("paper_has_other_unresolved_writer_or_reviewer")
     allowed = set(job.payload["file_ids"]) if job else set(file_set(session, paper_id)["active_file_ids"])

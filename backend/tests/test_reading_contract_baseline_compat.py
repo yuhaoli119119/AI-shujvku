@@ -24,13 +24,15 @@ def test_actual_pre_upgrade_fingerprint_replays_without_new_write(reading_env):
     with e['factory']() as s:assert s.get(Paper,e['paper']).reading_guide==before
 
 
-def test_mismatched_source_is_recorded_unverified_not_attributed(reading_env):
+def test_mismatched_source_is_rejected_without_partial_attribution(reading_env):
     e=reading_env;source_pdf(e);job=start_patch(e);payload=patch(e,job['job_id'])
     payload['abstract_source_revision']='0'*64
-    r=e['client'].post(base(e),json=payload);assert r.status_code==200
-    item=e['client'].get(base(e)).json()['abstract_translation']
-    assert item['source_status']=='changed_since_input' and item['source'] is None and item['original_text'] is None
-    assert item['submitted_source_revision']=='0'*64
+    r=e['client'].post(base(e),json=payload)
+    assert r.status_code==409 and r.json()['detail']=='abstract_source_revision_conflict'
+    with e['factory']() as session:
+        paper=session.get(Paper,e['paper'])
+        assert paper.abstract is None
+        assert 'abstract_translation' not in paper.reading_guide
 
 
 def test_missing_source_uses_full_scope_without_claiming_an_abstract(reading_env):

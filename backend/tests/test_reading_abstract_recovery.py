@@ -75,11 +75,12 @@ def test_fallback_translation_saved_replayed_preserves_existing_guide_english_sc
 
 
 @pytest.mark.parametrize('has_abstract,has_end',[(False,True),(True,False)])
-def test_unclear_abstract_is_not_inferred_and_creates_no_task(reading_env,has_abstract,has_end):
+def test_unclear_abstract_is_not_inferred_and_falls_back_to_full_scope(reading_env,has_abstract,has_end):
     e=reading_env;source_pdf(e,has_abstract,has_end)
     candidate=e['client'].get(base(e)+'/context').json()['abstract_for_translation'];assert not candidate['text'] and candidate['missing_reason']
-    r=e['client'].post(base(e)+'/jobs',json={'request_id':'missing','scope':'abstract_only'});assert r.status_code==409
-    with e['factory']() as s:assert s.scalar(select(func.count()).select_from(WorkflowJob))==0
+    r=e['client'].post(base(e)+'/jobs',json={'request_id':'missing','scope':'abstract_only'});assert r.status_code==200,r.text
+    assert r.json()['scope']=='full'
+    with e['factory']() as s:assert s.scalar(select(func.count()).select_from(WorkflowJob))==1
 
 
 def test_unverified_fallback_or_changed_registered_source_is_rejected(reading_env):

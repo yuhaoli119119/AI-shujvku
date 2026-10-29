@@ -1,6 +1,6 @@
 # 中文摘要与论文导读
 
-> 2026-10-30 候选：摘要和导读直接保存到同一篇文献；没有同篇写入占用时 `job_id` 可省略。存在运行、未知、需人工核对或无原生终态证据的旧工作时必须先核对占用，不能绕过。MCP 阅读保存优先使用外层 `work_id`，嵌套 `reading.job_id` 仅保留兼容。来源变化时记录实际情况；实际部署以发布回执为准。
+> 2026-10-30 候选：摘要和导读直接保存到同一篇文献；没有同篇写入占用时 `job_id` 可省略。存在运行、未知、需人工核对或无原生终态证据的旧工作时必须先核对占用，不能绕过。MCP 阅读保存优先使用外层 `work_id`，嵌套 `reading.job_id` 仅保留兼容。新保存必须匹配当前 input、reading 和摘要来源 revision；旧上下文返回 409，只有完全相同 request_id 的原请求可读取历史回执。实际部署以发布回执为准。
 
 文献详情默认从概览阅读；显式tab和图表定位链接保持原位置。30秒读懂、中文摘要、论文导读逐步展开；标题区只保留元信息与主操作，原有检查与验收工具在“解析详情”中保留。
 
@@ -8,7 +8,11 @@
 
 普通解析的同一任务在末尾可轻量生成并保存中文阅读辅助，失败不阻塞已存图表/数据，也不阻塞普通解析结束。已有文献可在详情页点击“补充中文导读”，创建持久阅读 job；已有已核实同篇原生任务时续接原对话，仅在无可复用身份的首次任务路径创建对话，不重新提取科学数值。单篇独占，旧未知写者不释放。Web直接模型调用保持关闭，复用原生派发、自动启动接认、任务读回和有限HTTP退避。
 
-GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定request_id，同一请求返回原任务。未知派发不再创建；明确原生终态失败才可单独重试。保存以input_revision和阅读字段版本保护、来源绑定、稳定回执和before/after审计，保留旧数据。旧导读接口更新不会清除新命名空间。
+GET读取已存内容和状态，不派发；POST jobs需会话/CSRF与稳定request_id，同一请求返回原任务。同一 actor 在相同 scope、source 和 model 下重复点击时返回当前活动 job 并标记 `reused_active_job=true`；scope、source、model 不同或任务处于 unknown/needs_attention 时仍拒绝，避免误借工作。未知派发不再创建；明确原生终态失败才可单独重试。保存以 input_revision、reading_revision 和摘要 source revision 做提交前 CAS，来源绑定、稳定回执和 before/after 审计保留旧数据；旧导读接口更新不会清除新命名空间。
+
+旧上下文的新保存分别返回 `reading_revision_conflict`、`reading_input_revision_conflict`、`reading_input_changed_since_dispatch` 或 `abstract_source_revision_conflict`；完全相同的原 request_id 先读取历史回执，不触发当前 revision 检查。正文回退摘要用于 full 保存时还必须提交 `abstract_source_revision`，缺失返回 `abstract_source_revision_required`。已有有效中文摘要时再次请求 `abstract_only` 返回 `abstract_translation_already_current`，不派发重复任务。为保留既有兼容，`abstract_only` 请求找不到明确可核实摘要来源时降级为 `full` 导读任务；这不会生成或宣称一条不存在的摘要译文。
+
+`content_scope=main_and_si` 表示请求同时依据正文和 SI。没有正文时返回 409 `main_source_required`；没有已登记 SI 但正文可读时，按既有兼容合同降级为 `main_text`（正文不完整则 `partial_text`），并在 `missing` 明确记录未登记 SI，不伪造 SI 覆盖。
 
 导读内容含一句话、问题、主要发现、背景空白、目标、方案与关键对照、创新比较、结论及适用条件、局限、论证脉络、少量真实图表证据和术语。只根据当前实际文字和已有图注/解读；作者声称创新与对照支持的比较须区分，不能猜测心理或独立宣称世界首创。DOCX文字/表格可读不代表看过内嵌图片像素。
 
