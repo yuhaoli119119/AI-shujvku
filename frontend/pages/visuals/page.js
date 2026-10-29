@@ -265,6 +265,7 @@
 
   function visualParams(params) {
     if (state.libraryName) params.set("library_name", state.libraryName);
+    if (state.libraryName === "锂硫双原子") params.set("include_estimated", "true");
     params.set("source", "rebuild");
     params.set("export_mode", "exploratory");
     return params;

@@ -1308,6 +1308,7 @@
     }
     function applyLibraryParam(params) {
       if (state.currentLibrary) params.set("library_name", state.currentLibrary);
+      if (state.currentLibrary === "锂硫双原子") params.set("include_estimated", "true");
       params.set("source", "rebuild");
       params.set("export_mode", "exploratory");
       return params;
@@ -1393,7 +1394,7 @@
         const excluded = Math.max(0, Number(data.total_records || 0) - numeric);
         if (donutsContainer) donutsContainer.innerHTML = getTechDonutHTML(numeric, excluded);
         const reasons = data.excluded_reasons || {};
-        if (chipsContainer) chipsContainer.innerHTML = '<span class="quality-meta">审核状态未知 · ' + esc(data.total_records ?? "—") + ' 条记录</span>' + Object.entries(reasons).map(([reason,count]) => '<span class="reason-chip">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>').join("");
+        if (chipsContainer) chipsContainer.innerHTML = '<span class="quality-meta">审核状态未知' + (state.currentLibrary === "锂硫双原子" ? ' · 包含估读值' : '') + ' · ' + esc(data.total_records ?? "—") + ' 条记录</span>' + Object.entries(reasons).map(([reason,count]) => '<span class="reason-chip">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>').join("");
       } catch (error) {
         if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">数值质量概览加载失败：' + esc(error.message) + '</div>';
         if (chipsContainer) chipsContainer.innerHTML = "";
