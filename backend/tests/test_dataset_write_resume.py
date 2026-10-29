@@ -2,6 +2,7 @@
 import asyncio
 import copy
 import hashlib
+from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
@@ -105,12 +106,39 @@ def test_dataset_registration_upload_and_existing_reads_are_available(audit_env)
     assert 'dataset-read-row' in exported.text and fixture['digest'] in exported.text
 
 
+def test_dataset_registry_lock_scope_is_bounded_and_upload_can_use_existing_dataset(audit_env):
+    env = audit_env
+    fixture = existing_dataset(env)
+    base = f"/api/papers/{env['paper']}/datasets"
+    content = b'column,target\nsite-lock,3.5\n'
+    digest = hashlib.sha256(content).hexdigest()
+    with PaperLock(env['engine'], env['paper']):
+        register_body = {
+            'dataset_key': 'registry-lock-scope', 'version': 'v1',
+            'title': 'Registry lock scope', 'metadata': {}}
+        blocked = env['client'].post(base, json=register_body)
+        assert blocked.status_code == 409
+        assert blocked.json()['detail'] == 'dataset_lock_busy_retry_same_request'
+        uploaded = env['client'].put(
+            f"{base}/{fixture['dataset_id']}/files/{digest}", content=content,
+            params={'filename': 'lock-scope.csv', 'size_bytes': len(content),
+                    'mime_type': 'text/csv'})
+        assert uploaded.status_code == 200, uploaded.text
+    registered = env['client'].post(base, json=register_body)
+    assert registered.status_code == 201, registered.text
+    dataset_id = registered.json()['id']
+    with env['factory']() as session:
+        assert session.get(DatasetSource, UUID(dataset_id)) is not None
+        assert session.scalar(select(DatasetFile).where(DatasetFile.id == UUID(uploaded.json()['id']))) is not None
+
+
 def test_preflight_and_row_import_persist_dataset_source_during_active_parse(audit_env):
     env = audit_env
     fixture = existing_dataset(env)
     with env['factory']() as session:
         session.add(WorkflowJob(job_id='active-parser', type='ai_extract_rebuild',
-                                status='running', payload={'paper_id': str(env['paper'])}))
+                                status='running', payload={'paper_id': str(env['paper']),
+                                                           'actor': 'writer'}))
         session.commit()
     payload = row_body(env)
     normal = copy.deepcopy(payload['rows'][0])
@@ -118,6 +146,7 @@ def test_preflight_and_row_import_persist_dataset_source_during_active_parse(aud
     normal['material'] = 'normal-material'
     dataset = dataset_row(env, fixture)['rows'][0]
     payload['rows'] = [normal, dataset]
+    payload['task_id'] = 'active-parser'
     before = counts(env)
 
     preflight = env['client'].post('/api/rebuild/rows/import/preflight', json=payload)

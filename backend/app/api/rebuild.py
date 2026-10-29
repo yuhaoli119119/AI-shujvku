@@ -247,6 +247,8 @@ async def _require_work_package_session(request: Request) -> SessionState:
 def _guard_request_work_phase(session, request, auth, body=None):
     from app.db.models import RebuildDataRow, RebuildDataValue, RebuildValueSource, RebuildVisualAsset
     from app.services.external_paper_work import guard_workbench_write
+    from app.services.paper_db_phase import LockConflictError
+    from app.services.rebuild_queue import writer_task
     # Creation services check the existing request identity under the paper lock
     # before testing occupancy, so exact replays must reach those services.
     if request.method == 'POST' and request.url.path.endswith(('/reading-assistance/jobs', '/ai-extract/jobs')):
@@ -267,13 +269,11 @@ def _guard_request_work_phase(session, request, auth, body=None):
         try:
             task_id = (body.get('task_id') or body.get('job_id')) if isinstance(body, dict) else None
             task_id = task_id or request.path_params.get('job_id')
-            if task_id:
-                from app.db.models import WorkflowJob
-                task = session.get(WorkflowJob, task_id)
-                if (not task or (task.payload or {}).get('paper_id') != str(paper_id)
-                        or (task.payload or {}).get('actor') not in (None, auth.username)):
-                    task_id = None
+            task = writer_task(session, paper_id, auth.username, task_id)
+            task_id = task.job_id if task else None
             guard_workbench_write(session, UUID(str(paper_id)), auth.username, task_id)
+        except LockConflictError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except RebuildWorkflowError as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError:

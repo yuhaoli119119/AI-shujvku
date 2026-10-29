@@ -15,7 +15,7 @@
 - `GET /api/papers/{paper_id}/datasets/{dataset_id}/rows.csv`：导出已保存、来源指向该数据集的单元格、原始值、单位和定位信息；遵守既有 `LITAI_EXPORTS_ENABLED`，关闭时返回 403。
 - 现有 `POST /api/rebuild/rows/import` 接受 `source_kind=dataset`、`dataset_file_id` 和 `dataset_locator`；先验证同篇和 SHA-256，再保存。需要沿用现有正式写入与回执合同。
 
-数据集登记、文件上传和 dataset 来源行入库在完成来源与 hash 校验后恢复使用。行导入沿既有同篇 `Paper` 写锁与事务边界串行化，允许正在处理同篇文献的单一解析写者边解析边保存；并发第二写者仍按数据库锁冲突有界返回 409，不产生部分行、值或来源。列表、文件下载和 `rows.csv` 导出与写入并行，不持论文写锁。
+数据集登记、文件上传和 dataset 来源行入库在完成来源与 hash 校验后恢复使用。登记使用 3 秒有界事务并受同篇外键一致性约束，遇到活动论文写锁返回 409 `dataset_lock_busy_retry_same_request`，不创建记录；释放后可安全重试。已有数据集的文件上传使用内容寻址对象与独立文件登记，不修改论文数据行或来源。行导入属于科学写入，沿既有同篇 `Paper` 写锁与事务边界串行化，只接受与当前未结束任务 paper、actor 和 work_id 完全一致的续写/幂等重放；没有任务令牌或来自其他 actor 的并发写者返回 409，不产生部分行、值或来源。历史任务未记录 actor 时，只能以服务端生成且精确匹配的 work_id 作为兼容身份。列表、文件下载和 `rows.csv` 导出与写入并行，不持论文写锁。
 
 `dataset_locator` 的读取与写入共用同一结构合同：`column` 必须为非空字符串，`sheet` 可缺省或为字符串，两项最多 1000 字符；`row`、`frame` 可以缺省一项，但出现的每一项必须是非布尔、非负整数，且至少存在一项；canonical JSON UTF-8 总量最多 65536 字节。质量投影对该合同任一项失败都回退为 `source_dataset_locator_invalid`，不会因为另一坐标有效而放行。
 

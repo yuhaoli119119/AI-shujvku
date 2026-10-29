@@ -20,7 +20,7 @@ from app.db.models import AuditLog, Paper, WorkflowJob
 from app.services.rebuild_file_lifecycle import file_set
 from app.services.rebuild_file_preview import _checked_source
 from app.services.rebuild_mutation_audit import safe_json, run_audited
-from app.services.rebuild_queue import paper_busy
+from app.services.rebuild_queue import paper_busy, writer_task
 from app.services.rebuild_workflow_service import RebuildWorkflowError, get_file
 
 VERSION = "mcp_rebuild_v2"
@@ -330,3 +330,7 @@ def receipt(session, paper_id, work_id, actor, request_id):
 def guard_workbench_write(session, paper_id, actor, task_id=None):
     """Use a short database transaction; historical jobs do not gate saves."""
     _lock(session, paper_id)
+    owned = writer_task(session, paper_id, actor, task_id)
+    busy = paper_busy(session, paper_id, excluding=owned.job_id if owned else None)
+    if busy is not None:
+        raise RebuildWorkflowError("paper_has_other_unresolved_writer_or_reviewer")

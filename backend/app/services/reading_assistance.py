@@ -227,7 +227,7 @@ async def create(session, paper_id, settings, request_id, retry=False, scope='fu
 
 
 def _create_phase(session, paper_id, settings, request_id, retry=False, scope='full', *, source_job_id=None, actor=None, model=None, observation, dispatches):
-    from app.services.rebuild_queue import paper_busy
+    from app.services.rebuild_queue import paper_busy, writer_task
     # Paper FOR UPDATE is the cross-route writer mutex. Do not serialize unrelated
     # papers on the queue-wide advisory lock.
     paper = session.scalar(select(Paper).where(Paper.id == paper_id).with_for_update())
@@ -246,6 +246,9 @@ def _create_phase(session, paper_id, settings, request_id, retry=False, scope='f
                 WorkflowJob.payload.op('->>')('request_id')==request_id))
             if previous:return serialize(previous)
         else:return serialize(previous)
+    owner = writer_task(session, paper_id, actor, source_job_id)
+    if paper_busy(session, paper_id, excluding=owner.job_id if owner else None):
+        raise ValueError("paper_has_other_unresolved_writer_or_reviewer")
     from app.services.paper_db_phase import require_source
     continuation = require_source(session, paper_id, settings, source_job_id, actor, observation)
     context = input_context(session, paper_id, settings)

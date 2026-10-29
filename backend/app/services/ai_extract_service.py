@@ -289,7 +289,7 @@ def _create_ai_extract_phase(
     of creating a duplicate.
     """
     # Same-paper requests serialize before checking or inserting any job intent.
-    from app.services.rebuild_queue import paper_busy, TYPE as PIPELINE_TYPE
+    from app.services.rebuild_queue import paper_busy, writer_task
     # The Paper row is the per-paper writer mutex. The global queue advisory lock
     # is reserved for queue-wide control/claim operations so distinct papers do
     # not wait on one another.
@@ -313,6 +313,9 @@ def _create_ai_extract_phase(
                 if replay:return serialize_job(replay, session)
             else:
                 return serialize_job(replay, session)
+    owner = writer_task(session, paper_id, actor, source_job_id)
+    if paper_busy(session, paper_id, excluding=owner.job_id if owner else None):
+        raise AiExtractError("paper_has_other_unresolved_writer_or_reviewer")
     chosen_model = model or settings.codex_web_default_model
     chosen_mode = dispatch_mode_for_model(chosen_model)
     from app.services.paper_db_phase import require_source

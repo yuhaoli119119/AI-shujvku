@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 
 from app.db.models import AuditLog, Paper, WorkflowJob
 from app.services.rebuild_acceptance import _digest, current_snapshot, acceptance_status
@@ -19,6 +19,9 @@ from app.services.rebuild_progress_guard import evidence_signature, initial_guar
 TYPE = "rebuild_pipeline_attempt"
 CONTROL = "rebuild-pipeline-control-v1"
 HOLDING = {"claimed", "dispatch_intent", "running", "unknown", "needs_attention"}
+ACTIVE_LEGACY_STATUSES = {"queued", "dispatching", "running"}
+LEGACY_WRITER_TYPES = ("ai_extract_rebuild", "rebuild_external_extract", "paper_reading_assistance")
+PAPER_WRITER_TYPES = (TYPE, *LEGACY_WRITER_TYPES)
 TERMINAL = {"extracted", "accepted", "partial", "needsfix", "review_incomplete", "failed"}
 DEFAULT_LIMITS = {"writer_slots": 1, "reviewer_slots": 1, "total_slots": 1, "review_backlog": 2,
                   "writer_tokens": None, "reviewer_tokens": None, "total_tokens": None}
@@ -84,8 +87,33 @@ def _attempts(session):
 
 
 def paper_busy(session, paper_id, *, excluding=None):
-    # Jobs are history and progress, not an admission gate for reading or writing.
+    """Return one unresolved same-paper writer while allowing its own continuation."""
+    jobs = session.scalars(select(WorkflowJob).where(
+        or_(and_(WorkflowJob.type == TYPE, WorkflowJob.status.in_(HOLDING)),
+            and_(WorkflowJob.type.in_(LEGACY_WRITER_TYPES),
+                 WorkflowJob.status.in_(ACTIVE_LEGACY_STATUSES))),
+        WorkflowJob.payload.op("->>")("paper_id") == str(paper_id),
+    ).order_by(WorkflowJob.created_at, WorkflowJob.job_id))
+    for job in jobs:
+        if job.job_id == excluding:
+            continue
+        return job
     return None
+
+
+def writer_task(session, paper_id, actor, task_id):
+    """Resolve only an exact same-paper, same-actor writer token."""
+    if not task_id:
+        return None
+    job = session.get(WorkflowJob, task_id)
+    if job is None or job.type not in PAPER_WRITER_TYPES or (job.payload or {}).get("paper_id") != str(paper_id):
+        return None
+    recorded_actor = (job.payload or {}).get("actor")
+    # Legacy parser jobs may predate durable actor fields. Their exact stable job
+    # token remains the compatibility identity; jobs with a recorded actor must match.
+    if recorded_actor is not None and recorded_actor != actor:
+        return None
+    return job
 
 
 def enqueue(session, paper_id, payload, *, actor, settings):
