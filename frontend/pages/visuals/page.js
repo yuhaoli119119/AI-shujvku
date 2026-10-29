@@ -445,6 +445,8 @@
   }
 
   function setOverview(summary) {
+    $("headerCompactSummary").textContent = `${state.libraryName || "全部文献库"} · ${summary.total_dft_rows ?? "—"} 提取字段 · ${summary.distinct_exploratory_catalysts ?? "—"} 催化剂`;
+    if (summary.physical_numeric_records !== undefined) $("overviewStatus").textContent = `${summary.physical_numeric_records} 条物理量数值，按催化剂配对`;
     const values = [
       ["metricDftTotal", summary.total_dft_rows],
       ["metricExportEligible", summary.numeric_records ?? summary.source_numeric_rows],
@@ -1119,6 +1121,8 @@
 
       const data = await getJSON("/api/visuals/overview?" + params.toString(), controller.signal);
       if (ticket !== matrixRequest || library !== state.libraryName) return;
+      applyExportPolicy(data.export_policy);
+      setOverview(data.summary || {});
       state.matrixData = data.descriptor_correlation || {};
       renderMatrix();
     } catch (err) {
@@ -1805,8 +1809,10 @@
   }
 
   function startRevisionPolling() {
-    pollDataRevision();
-    setInterval(pollDataRevision, 30000);
+    // Stagger the background check after initial analysis instead of piling
+    // another projection onto the first paint.
+    setTimeout(pollDataRevision, 5000);
+    setInterval(pollDataRevision, 60000);
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) revisionController?.abort();
       else pollDataRevision();
@@ -1824,18 +1830,21 @@
     updateExportUI();
     initEvents();
     await resolveLibraryScope();
-    checkExportPolicy();
 
     try {
+      $("globalStatus").textContent = "正在读取分析字段，首次统计可能需要一些时间…";
       await loadFields();
+      $("globalStatus").textContent = "正在加载所选分析视图…";
       /* 先读 URL 填控件（此时字段下拉已就绪），再用同样的值发第一次查询（只发一次） */
       viewState = ViewState.bind({ paramMap: VIEW_PARAMS });
       state.matrixScope = $("matrixScopeSelect") && $("matrixScopeSelect").value ? $("matrixScopeSelect").value : "core";
       ViewState.bindDetailLinks("visuals");
       if (viewState.tab && viewState.tab !== "relations") await switchTab(viewState.tab);
       else await loadCorrelation();
+      $("globalStatus").textContent = "";
       startRevisionPolling();
     } catch (error) {
+      $("globalStatus").textContent = "分析加载失败：" + error.message;
       const statusEl = $("relationStatus");
       if (statusEl) statusEl.textContent = "可分析字段读取失败：" + error.message;
     }

@@ -71,12 +71,17 @@ def compare(status: str='exploratory',offset: int=Query(0,ge=0),limit: int=Query
 
 @router.get('/papers/analysis-summary')
 def summary(request: Request,args=Depends(options),session: Session=Depends(get_db_session)):
-    svc=service(args,session); result=svc.summary()
-    records=svc.records
-    result.update(export_policy=export_policy(request),catalyst_groups=dict(Counter(r['catalyst_name'] or '未绑定' for r in records)),
-                  property_types=dict(Counter(r['property_type'] or '未记录' for r in records)),
-                  adsorbates=dict(Counter(r['adsorbate'] or '未记录' for r in records)),
-                  total_dft_results=len(records),total_papers=len({r['paper_id'] for r in records}))
+    svc=service(args,session)
+    def build():
+        result=svc.summary()
+        records=svc.records
+        result.update(catalyst_groups=dict(Counter(r['catalyst_name'] or '未绑定' for r in records)),
+                      property_types=dict(Counter(r['property_type'] or '未记录' for r in records)),
+                      adsorbates=dict(Counter(r['adsorbate'] or '未记录' for r in records)),
+                      total_dft_results=len(records),total_papers=len({r['paper_id'] for r in records}))
+        return result
+    result=svc.cached_output('summary', {}, build)
+    result['export_policy']=export_policy(request)
     return result
 
 
@@ -126,7 +131,8 @@ def catalyst_csv(export_mode: str='exploratory',args=Depends(options),session: S
 
 @router.get('/visuals/analysis-fields')
 def fields(request: Request,args=Depends(options),session: Session=Depends(get_db_session)):
-    return {'schema_version':'dft_catalyst_analysis_fields_v1','fields':service(args,session).field_registry(),
+    svc=service(args,session)
+    return {'schema_version':'dft_catalyst_analysis_fields_v1','fields':svc.cached_output('fields', {}, svc.field_registry),
             'selection_policy':POLICY,'assessment_status':'not_evaluated','export_policy':export_policy(request)}
 
 
@@ -135,45 +141,51 @@ def data_revision(args=Depends(options),session: Session=Depends(get_db_session)
     return service(args,session).data_revision()
 
 
+def scientific_response(request, result):
+    encodings = [item.strip().lower() for item in request.headers.get('accept-encoding','').split(',')]
+    def accepts_gzip(item):
+        parts = [part.strip() for part in item.split(';')]
+        if parts[0] != 'gzip':
+            return False
+        for part in parts[1:]:
+            if part.startswith('q='):
+                try:
+                    return float(part[2:]) > 0
+                except ValueError:
+                    return False
+        return True
+    if any(accepts_gzip(item) for item in encodings):
+        body=json.dumps(jsonable_encoder(result),ensure_ascii=False,separators=(',',':'),allow_nan=False).encode('utf-8')
+        return Response(gzip.compress(body,compresslevel=5),media_type='application/json',headers={'Content-Encoding':'gzip','Vary':'Accept-Encoding'})
+    return JSONResponse(content=jsonable_encoder(result),headers={'Vary':'Accept-Encoding'})
+
+
 @router.get('/visuals/catalyst-correlation')
 def correlation(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
                 args=Depends(options),session: Session=Depends(get_db_session)):
     try:
-        result=service(args,session).correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n)
-        encodings = [item.strip().lower() for item in request.headers.get('accept-encoding','').split(',')]
-        def accepts_gzip(item):
-            parts = [part.strip() for part in item.split(';')]
-            if parts[0] != 'gzip':
-                return False
-            for part in parts[1:]:
-                if part.startswith('q='):
-                    try:
-                        return float(part[2:]) > 0
-                    except ValueError:
-                        return False
-            return True
-        if any(accepts_gzip(item) for item in encodings):
-            body=json.dumps(jsonable_encoder(result),ensure_ascii=False,separators=(',',':'),allow_nan=False).encode('utf-8')
-            return Response(gzip.compress(body,compresslevel=5),media_type='application/json',headers={'Content-Encoding':'gzip','Vary':'Accept-Encoding'})
-        return JSONResponse(content=jsonable_encoder(result),headers={'Vary':'Accept-Encoding'})
+        svc=service(args,session)
+        result=svc.cached_output('correlation', {'x':x_field,'y':y_field,'min_n':min_n}, lambda: svc.correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n))
+        return scientific_response(request, result)
     except ValueError as exc:
         raise HTTPException(400,detail=str(exc)) from exc
 
 
 @router.get('/visuals/correlation-pairs')
-def pairs(target_property: str,descriptor: str,min_n: int=Query(3,ge=3,le=50),allow_exploratory: bool=True,
+def pairs(request: Request,target_property: str,descriptor: str,min_n: int=Query(3,ge=3,le=50),allow_exploratory: bool=True,
           args=Depends(options),session: Session=Depends(get_db_session)):
     if not allow_exploratory:
         exploratory('approved')
     try:
-        payload=service(args,session).correlation(library_name=args['library_name'],x_field=descriptor,y_field=target_property,min_n=min_n)
+        svc=service(args,session)
+        payload=svc.cached_output('correlation', {'x':descriptor,'y':target_property,'min_n':min_n}, lambda: svc.correlation(library_name=args['library_name'],x_field=descriptor,y_field=target_property,min_n=min_n))
     except ValueError as exc:
         raise HTTPException(400,detail=str(exc)) from exc
     payload['n']=payload['n_catalysts']
     # Original matrix mini-plot expects scalar x/y; preserve their detailed
     # candidates and source ids under x_detail/y_detail.
     payload['points']=[{**p,'x_detail':p['x'],'y_detail':p['y'],'x':p['x']['value'],'y':p['y']['value']} for p in payload['points']]
-    return payload
+    return scientific_response(request, payload)
 
 
 @router.get('/visuals/overview')
@@ -188,16 +200,20 @@ def overview(request: Request,sections: str='overview,correlation',corr_min_n: i
     filters=dict(args['filters'])
     filters.update({k:v for k,v in {'reaction':corr_reaction,'adsorbate':corr_adsorbate,'material_family':corr_family}.items() if v})
     svc=service({**args,'filters':filters},session)
-    counts=svc.summary()
-    response={'source':args['source'],'library_name':args['library_name'],'included_sections':sorted(requested),
-              'assessment_status':'not_evaluated','summary':counts,'catalyst_analysis_meta':counts,'export_policy':export_policy(request)}
-    if 'overview' in requested:
-        response.update(years=[{'year':k,'count':v} for k,v in Counter(r['year'] for r in svc.records).items()],
-                        journals=[{'journal':k or '未记录期刊','count':v} for k,v in Counter(r['journal'] for r in svc.records).items()],
-                        dft_status=[{'status':k,'count':v} for k,v in Counter(r['candidate_status'] for r in svc.records).items()])
-    if 'correlation' in requested or 'matrix' in requested:
-        if not corr_allow_exploratory:
-            exploratory('approved')
-        response['descriptor_correlation']=svc.correlation_matrix(args['library_name'],min_n=corr_min_n)
-        response['descriptor_correlation'].update(source=args['source'],assessment_status='not_evaluated')
-    return response
+    def build():
+        counts=svc.summary()
+        response={'source':args['source'],'library_name':args['library_name'],'included_sections':sorted(requested),
+                  'assessment_status':'not_evaluated','summary':counts,'catalyst_analysis_meta':counts}
+        if 'overview' in requested:
+            response.update(years=[{'year':k,'count':v} for k,v in Counter(r['year'] for r in svc.records).items()],
+                            journals=[{'journal':k or '未记录期刊','count':v} for k,v in Counter(r['journal'] for r in svc.records).items()],
+                            dft_status=[{'status':k,'count':v} for k,v in Counter(r['candidate_status'] for r in svc.records).items()])
+        if 'correlation' in requested or 'matrix' in requested:
+            if not corr_allow_exploratory:
+                exploratory('approved')
+            response['descriptor_correlation']=svc.correlation_matrix(args['library_name'],min_n=corr_min_n)
+            response['descriptor_correlation'].update(source=args['source'],assessment_status='not_evaluated')
+        return response
+    response=svc.cached_output('overview', {'sections':sorted(requested),'min_n':corr_min_n,'allow_exploratory':corr_allow_exploratory}, build)
+    response['export_policy']=export_policy(request)
+    return scientific_response(request, response)

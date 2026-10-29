@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict, OrderedDict
 import pickle
 from functools import lru_cache
+from contextlib import contextmanager
 from threading import RLock
 import csv
 import io
@@ -18,7 +19,7 @@ import hashlib
 from types import SimpleNamespace
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import case, select, text
 from sqlalchemy.orm import Session
 
 from app.db import models as m
@@ -36,6 +37,31 @@ from app.utils.library_names import normalize_library_name
 # reuse is checked against the actual database content, not a TTL or row count.
 _PROJECTIONS = OrderedDict()
 _PROJECTION_LOCK = RLock()
+_PROJECTION_BUILDS = {}
+_REVISION_RESULTS = OrderedDict()
+_COMPARE_RESULTS = OrderedDict()
+_ANALYSIS_OUTPUTS = OrderedDict()
+_ANALYSIS_OUTPUT_BYTES = 32 * 1024 * 1024
+_COMPARE_CACHE_BYTES = 128 * 1024 * 1024
+
+
+
+@contextmanager
+def _projection_build(key):
+    # Only identical cold requests wait on each other. Unrelated scopes never
+    # hold the cache mutex during database reads or projection work.
+    with _PROJECTION_LOCK:
+        entry = _PROJECTION_BUILDS.setdefault(key, [RLock(), 0])
+        entry[1] += 1
+    try:
+        with entry[0]:
+            yield
+    finally:
+        with _PROJECTION_LOCK:
+            entry[1] -= 1
+            if not entry[1]:
+                del _PROJECTION_BUILDS[key]
+
 
 
 @lru_cache(maxsize=512)
@@ -44,16 +70,15 @@ def _taxonomy(prop):
 
 
 def _content_revision(session):
-    # A single SQL statement provides one MVCC snapshot. Include all stored
-    # cells/evidence (including same-count corrections), and displayed paper
-    # metadata. These identifiers are fixed application tables, never input.
-    selections = [
-        'SELECT id, library_name, paper_code, title, doi, journal, year FROM papers',
-        'SELECT * FROM rebuild_data_rows',
-        'SELECT * FROM rebuild_data_values',
-        'SELECT * FROM rebuild_value_sources',
-    ]
-    parts = ["(SELECT md5(COALESCE(string_agg(md5(row_to_json(r)::text), '' ORDER BY r.id), '')) FROM (" + query + ") r)" for query in selections]
+    # One MVCC snapshot of visible row versions detects inserts, deletes and
+    # same-count corrections without detoasting/serializing all source quotes.
+    # xmin changes on every UPDATE; ctid also detects multiple updates within a
+    # transaction. Include table incarnation for truncate/rewrite. Paper fields
+    # retain their content hash so unrelated processing-status writes do not
+    # evict scientific projections. No statistics estimates or TTL are used.
+    parts = ["(SELECT md5(COALESCE(string_agg(md5(row_to_json(r)::text), '' ORDER BY r.id), '')) FROM (SELECT id, library_name, paper_code, title, doi, journal, year FROM papers) r)"]
+    for table in ('rebuild_data_rows', 'rebuild_data_values', 'rebuild_value_sources'):
+        parts.append("(SELECT md5(COALESCE(string_agg(id::text || ':' || xmin::text || ':' || ctid::text, ',' ORDER BY id), '')) || ':' || pg_relation_filenode('" + table + "'::regclass)::text FROM " + table + ")")
     return tuple(session.execute(text('SELECT ' + ', '.join(parts))).one())
 
 
@@ -121,6 +146,31 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         self._candidate_cache = {}
         self._matrix_mode = False
 
+    def cached_output(self, name, parameters, build):
+        """Cache detached scientific output only; never authentication/policy."""
+        if self.source != 'rebuild' or self.session.get_bind().dialect.name != 'postgresql':
+            return build()
+        key = (str(self.session.get_bind().url), _content_revision(self.session), name,
+               self.library_name, json.dumps(self.filters, sort_keys=True, default=str),
+               self.include_estimated, self.include_unlabelled,
+               json.dumps(parameters, sort_keys=True, default=str))
+        with _projection_build(('output', key)):
+            with _PROJECTION_LOCK:
+                cached = _ANALYSIS_OUTPUTS.get(key)
+                if cached is not None:
+                    _ANALYSIS_OUTPUTS.move_to_end(key)
+            if cached is not None:
+                return pickle.loads(cached)
+            result = build()
+            if key[1] == _content_revision(self.session):
+                detached = pickle.dumps(result, protocol=pickle.HIGHEST_PROTOCOL)
+                if len(detached) <= _ANALYSIS_OUTPUT_BYTES:
+                    with _PROJECTION_LOCK:
+                        _ANALYSIS_OUTPUTS[key] = detached
+                        while len(_ANALYSIS_OUTPUTS) > 32 or sum(map(len, _ANALYSIS_OUTPUTS.values())) > _ANALYSIS_OUTPUT_BYTES:
+                            _ANALYSIS_OUTPUTS.popitem(last=False)
+            return result
+
     def _papers(self):
         columns = [getattr(m.Paper, k) for k in ('id','library_name','paper_code','title','doi','journal','year')]
         # Normalize the stored name without migrations or registry side effects.
@@ -131,7 +181,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             papers = [SimpleNamespace(**r) for r in self.session.execute(query).mappings()]
         if self.library_name is not None:
             papers = [p for p in papers if normalize_library_name(p.library_name) == normalize_library_name(self.library_name)]
-        return {p.id: p for p in papers if (self.filters.get('year_min') is None or p.year is not None and p.year >= self.filters['year_min']) and (self.filters.get('year_max') is None or p.year is not None and p.year <= self.filters['year_max'])}
+        return {p.id: p for p in papers if (not self.filters.get('paper_id') or str(p.id) == str(self.filters['paper_id'])) and (self.filters.get('year_min') is None or p.year is not None and p.year >= self.filters['year_min']) and (self.filters.get('year_max') is None or p.year is not None and p.year <= self.filters['year_max'])}
 
     def _matches(self, record):
         f = self.filters
@@ -173,22 +223,25 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             return self._loaded
         # Serialize cold builds so simultaneous fields/matrix/revision requests
         # share one projection. Each caller receives an independent object graph.
-        with _PROJECTION_LOCK:
-            cached = _PROJECTIONS.get(key)
-            if cached is not None:
-                _PROJECTIONS.move_to_end(key)
-            else:
+        with _projection_build(key):
+            with _PROJECTION_LOCK:
+                cached = _PROJECTIONS.get(key)
+                if cached is not None:
+                    _PROJECTIONS.move_to_end(key)
+            if cached is None:
                 loaded = self._read_rows()
                 # Never publish a concurrent, mixed readback under an old token.
                 if revision == _content_revision(self.session):
-                    _PROJECTIONS[key] = pickle.dumps((self.records, loaded), protocol=pickle.HIGHEST_PROTOCOL)
-                    while len(_PROJECTIONS) > 2:
-                        _PROJECTIONS.popitem(last=False)
+                    detached = pickle.dumps((self.records, loaded), protocol=pickle.HIGHEST_PROTOCOL)
+                    with _PROJECTION_LOCK:
+                        _PROJECTIONS[key] = detached
+                        while len(_PROJECTIONS) > 2:
+                            _PROJECTIONS.popitem(last=False)
                 return loaded
         self.records, self._loaded = pickle.loads(cached)
         return self._loaded
 
-    def _read_rows(self):
+    def _read_rows(self, *, index_only=False, value_ids=None):
         with self.session.no_autoflush:
             papers = self._papers()
             ids = list(papers)
@@ -212,10 +265,34 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                     display_name = cat.name if cat else payload.get('material_identity') or context.get('material_identity') or payload.get('material')
                     raw.append((row, papers[row.paper_id], cat, {'source_family': 'legacy', 'sources': by_target[str(row.id)], 'catalyst_name': display_name, 'estimated': bool(payload.get('is_estimated') or payload.get('estimated') or row.value_kind in {'estimated', 'digitized'}), 'conflict': payload.get('conflict'), 'analysis_context': {'source_family':'legacy', 'reaction_type': row.reaction_type}}))
             elif self.source == 'rebuild' and ids:
-                rows = [SimpleNamespace(**r) for r in self.session.execute(select(m.RebuildDataRow.__table__).where(m.RebuildDataRow.paper_id.in_(ids))).mappings()]
+                row_query = select(m.RebuildDataRow.__table__).where(m.RebuildDataRow.paper_id.in_(ids))
+                # Apply the exact row-level predicate before fetching cells and
+                # evidence. Keep adsorbate/alias filters in the existing mapper.
+                if self.filters.get('data_type'):
+                    row_query = row_query.where(m.RebuildDataRow.data_type == self.filters['data_type'])
+                if value_ids is not None:
+                    row_query = row_query.where(m.RebuildDataRow.id.in_(select(m.RebuildDataValue.row_id).where(m.RebuildDataValue.id.in_(value_ids))))
+                rows = [SimpleNamespace(**r) for r in self.session.execute(row_query).mappings()]
                 by_row = {r.id: r for r in rows}
-                values = [SimpleNamespace(**r) for r in self.session.execute(select(m.RebuildDataValue.__table__).where(m.RebuildDataValue.row_id.in_(by_row)).order_by(m.RebuildDataValue.id)).mappings()] if by_row else []
-                sources = [dict(r) for r in self.session.execute(select(m.RebuildValueSource.__table__).where(m.RebuildValueSource.row_id.in_(by_row))).mappings()] if by_row else []
+                value_columns = [m.RebuildDataValue.__table__]
+                if index_only:
+                    v = m.RebuildDataValue
+                    value_columns = [v.id, v.row_id, v.field_name, v.numeric_value,
+                                     case((v.field_name == 'adsorbate', v.raw_value)).label('raw_value'),
+                                     case((v.field_name == 'adsorbate', v.conflict)).label('conflict'), v.is_estimated]
+                value_query = select(*value_columns).where(m.RebuildDataValue.row_id.in_(by_row)).order_by(m.RebuildDataValue.id)
+                if value_ids is not None:
+                    value_query = value_query.where((m.RebuildDataValue.id.in_(value_ids)) | (m.RebuildDataValue.field_name == 'adsorbate'))
+                values = [SimpleNamespace(**r) for r in self.session.execute(value_query).mappings()] if by_row else []
+                source_columns = [m.RebuildValueSource.id, m.RebuildValueSource.value_id] if index_only else [m.RebuildValueSource.__table__]
+                source_query = select(*source_columns).where(m.RebuildValueSource.row_id.in_(by_row))
+                if index_only:
+                    # Sorting/filtering needs only verified adsorbate cells, not
+                    # the source quotes of every measurement in the library.
+                    source_query = source_query.where(m.RebuildValueSource.value_id.in_([v.id for v in values if v.field_name == 'adsorbate']))
+                elif value_ids is not None:
+                    source_query = source_query.where(m.RebuildValueSource.value_id.in_([v.id for v in values]))
+                sources = [dict(r) for r in self.session.execute(source_query).mappings()] if by_row else []
                 from app.services.rebuild_source_lifecycle import source_is_current
                 value_map = {v.id: v for v in values}
                 by_value = defaultdict(list)
@@ -226,7 +303,10 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                     by_value[item['value_id']].append({**{k: v for k, v in item.items() if k != 'created_at'}, **identity,
                         'page_identity_status': 'verified' if identity else 'legacy_unverified'})
                 adsorbate_cells = {v.row_id: v.raw_value for v in values if v.field_name == 'adsorbate' and isinstance(v.raw_value, str) and v.raw_value and by_value[v.id] and not unresolved_conflict(v.conflict) and not v.is_estimated}
+                index_records = []
                 for value in values:
+                    if value_ids is not None and str(value.id) not in value_ids:
+                        continue
                     r = by_row[value.row_id]
                     # These are transient projections, never ORM changes. Known
                     # rebuild identity remains within its own paper and row.
@@ -238,10 +318,23 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                         prop = 'adsorption_energy'
                     elif prop == 'li2s_bader_charge_transfer':
                         prop = 'bader_charge_transfer'
+                    if index_only:
+                        record = {'record_id':str(value.id),'paper_id':str(r.paper_id),
+                                  'property_type':prop,'canonical_property_type':_taxonomy(prop).get('canonical_property_type') or prop,
+                                  'value':value.numeric_value,'adsorbate':ads,'catalyst_name':r.material,
+                                  'catalyst_type':r.active_site_type,'reaction':r.reaction,
+                                  'material_family':r.material_family,'data_type':r.data_type,'confidence':None}
+                        if self._matches(record):
+                            index_records.append(record)
+                        continue
                     identity = {'subject': {'property_context': {'configuration':r.configuration}, 'canonical_atom_pair': 'Li1-S' if value.field_name == 'li1_s_bond_length' else 'Li2-S' if value.field_name == 'li2_s_bond_length' else None}}
                     row = SimpleNamespace(id=value.id, paper_id=r.paper_id, catalyst_sample_id=None, adsorbate=ads, property_type=prop, value=value.numeric_value, unit=value.unit, reaction_step=(r.properties or {}).get('reaction_step'), reaction_type=r.reaction, source_section=None, source_figure=None, evidence_text='\n'.join(s.get('quote') or '' for s in by_value[value.id]), confidence=None, candidate_status='stored_rebuild', evidence_payload={'analysis_entity_id':str(r.id)}, identity_payload=identity, identity_version=2, value_kind=value.value_type)
                     cat = SimpleNamespace(id='rebuild:' + str(r.id), paper_id=r.paper_id, name=r.material, catalyst_type=r.active_site_type, metal_centers=[], coordination=r.active_site, support=r.support)
                     raw.append((row,papers[r.paper_id],cat,{'source_family':'rebuild','sources':by_value[value.id], 'catalyst_name':r.material,'active_site':r.active_site,'support':r.support,'configuration':r.configuration,'material_family':r.material_family,'estimated':value.is_estimated,'conflict':value.conflict,'missing_reason':value.missing_reason,'identity_pending':bool((r.properties or {}).get('_rebuild_import', {}).get('pending_identity_fields')),'raw_value':value.raw_value,'rebuild_row_id':str(r.id),'analysis_context':{'source_family':'rebuild','reaction_type':r.reaction,'data_type':r.data_type,'configuration':r.configuration,'condition_key':json.dumps(r.condition or {},sort_keys=True,ensure_ascii=False)}, 'field_name':value.field_name,'data_type':r.data_type}))
+                if index_only:
+                    return index_records
+            if index_only:
+                return []
             ready, exclusions, records = [], Counter(), []
             for row,paper,cat,extra in raw:
                 taxonomy = _taxonomy(row.property_type)
@@ -273,7 +366,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 explicit = (row.identity_payload or {}).get('dft_setting_id') or (row.evidence_payload or {}).get('dft_setting_id')
                 chosen = next((s for s in possible if str(s.id)==str(explicit)), None) if explicit else possible[0] if len(possible)==1 else None
                 record['linked_dft_setting'] = {'dft_setting_id':str(chosen.id),'functional':chosen.functional,'dispersion_correction':chosen.dispersion_correction} if chosen else {}
-                ready.append(_ReadyRow(row,paper,record,cat, analysis_entity_id=analysis_entity_id(row)))
+                ready.append(_ReadyRow(row,paper,record,cat, analysis_entity_id=record['analysis_entity_id']))
             self.records = records
             counts = {'total_dft_rows':len(records),'numeric_records':sum(isinstance(r['value'],(int,float)) and math.isfinite(r['value']) for r in records),'exploratory_numeric_records':len(ready),'pair_analysis_ready_numeric_rows':len(ready),'distinct_exploratory_catalysts':len({catalyst_entity_id(r.record) if self.source=='rebuild' else str(r.catalyst.id) if r.catalyst else r.analysis_entity_id for r in ready}),'distinct_exportable_catalysts':None,'exportable_dft_rows':None,'v2_row_ready_numeric_rows':None,'contributing_papers':len({str(r.paper.id) for r in ready}),'legacy_pair_analysis_rows':sum(r.row.identity_version!=2 for r in ready),'assessment_status':'not_evaluated','source':self.source}
             self._loaded = ready,exclusions,counts
@@ -293,13 +386,29 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         Every new request validates database content before reusing a detached
         projection. Corrections that leave record counts unchanged are included.
         """
+        cache_key = None
+        if self.source == 'rebuild' and self.session.get_bind().dialect.name == 'postgresql':
+            cache_key = (str(self.session.get_bind().url), _content_revision(self.session),
+                         self.library_name, json.dumps(self.filters, sort_keys=True, default=str),
+                         self.include_estimated, self.include_unlabelled)
+            with _PROJECTION_LOCK:
+                cached = _REVISION_RESULTS.get(cache_key)
+                if cached is not None:
+                    _REVISION_RESULTS.move_to_end(cache_key)
+                    return dict(cached)
         self._load_rows()
         keys=('record_id','paper_id','field_name','catalyst_name','active_site','support',
               'configuration','reaction','adsorbate','raw_value','raw_unit','target',
               'exclusion_reason','analysis_context','sources')
         snapshot=[{k:r.get(k) for k in keys} for r in sorted(self.records,key=lambda r:r['record_id'])]
         digest=hashlib.sha256(json.dumps(snapshot,sort_keys=True,ensure_ascii=False,default=str).encode()).hexdigest()
-        return {'source':self.source,'revision':digest,'record_count':len(snapshot)}
+        result = {'source':self.source,'revision':digest,'record_count':len(snapshot)}
+        if cache_key is not None and cache_key[1] == _content_revision(self.session):
+            with _PROJECTION_LOCK:
+                _REVISION_RESULTS[cache_key] = result
+                while len(_REVISION_RESULTS) > 16:
+                    _REVISION_RESULTS.popitem(last=False)
+        return dict(result)
 
     def decorate(self,payload):
         payload.update(source=self.source,source_family=self.source,assessment_status='not_evaluated',export_mode='exploratory',selection_policy=POLICY)
@@ -468,14 +577,51 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         rows=rows[offset:offset+limit] if limit is not None else rows[offset:]
         return self.decorate({'schema_version':'stored_dft_exploratory_v1','records':rows,'metadata':{'total_records':len(self.records),'exploratory_numeric_records':before,'approved_count':None,'assessment_status':'not_evaluated','safety_gate':'not_evaluated_exploratory_only','dataset_profile':dataset_profile,'profile_included_count_before_limit':included,'profile_excluded_count':before-included,'exported_count_after_limit':len(rows),'offset':offset,'limit':limit}})
 
-    def compare(self, *, offset=0,limit=25,sort='catalyst_group'):
-        self._load_rows()
-        rows=list(self.records)
-        if sort=='value':
+    @staticmethod
+    def _sort_compare(rows, sort):
+        if sort == 'value':
             rows.sort(key=lambda r:(r['value'] is None,r['value'] or 0,r['record_id']))
         else:
             rows.sort(key=lambda r:(str(r['catalyst_name'] or '').casefold(),r['paper_id'],r['property_type'] or '',r['adsorbate'] or '',r['record_id']))
-        return {'source':self.source,'assessment_status':'not_evaluated','items':rows[offset:offset+limit],'total':len(rows),'has_more':offset+limit<len(rows),'offset':offset,'limit':limit,'stats':{'count':len(rows)},'selection_policy':POLICY}
+
+    def compare(self, *, offset=0,limit=25,sort='catalyst_group'):
+        if self.source == 'rebuild' and self.session.get_bind().dialect.name == 'postgresql':
+            key = (str(self.session.get_bind().url), _content_revision(self.session),
+                   self.library_name, json.dumps(self.filters, sort_keys=True, default=str),
+                   self.include_estimated, self.include_unlabelled, sort)
+            with _PROJECTION_LOCK:
+                ordered_ids = _COMPARE_RESULTS.get(key)
+                if ordered_ids is not None:
+                    _COMPARE_RESULTS.move_to_end(key)
+            if ordered_ids is None:
+                with _projection_build(('compare', key)):
+                    with _PROJECTION_LOCK:
+                        ordered_ids = _COMPARE_RESULTS.get(key)
+                    if ordered_ids is None:
+                        index = self._read_rows(index_only=True)
+                        self._sort_compare(index, sort)
+                        ordered_ids = tuple(r['record_id'] for r in index)
+                        if key[1] == _content_revision(self.session):
+                            with _PROJECTION_LOCK:
+                                _COMPARE_RESULTS[key] = ordered_ids
+                                while len(_COMPARE_RESULTS) > 8 or sum(len(v) * 80 for v in _COMPARE_RESULTS.values()) > _COMPARE_CACHE_BYTES:
+                                    _COMPARE_RESULTS.popitem(last=False)
+            page_ids = ordered_ids[offset:offset+limit]
+            if not page_ids:
+                return self._compare_response([], len(ordered_ids), offset, limit)
+            # Exact original projection, including all sources/legacy fields,
+            # but only for the selected page. Reads never change stored data.
+            self._read_rows(value_ids=set(page_ids))
+            by_id = {r['record_id']:r for r in self.records}
+            items = [by_id[rid] for rid in page_ids if rid in by_id]
+            return self._compare_response(items, len(ordered_ids), offset, limit)
+        self._load_rows()
+        rows = list(self.records)
+        self._sort_compare(rows, sort)
+        return self._compare_response(rows[offset:offset+limit], len(rows), offset, limit)
+
+    def _compare_response(self, items, total, offset, limit):
+        return {'source':self.source,'assessment_status':'not_evaluated','items':items,'total':total,'has_more':offset+limit<total,'offset':offset,'limit':limit,'stats':{'count':total},'selection_policy':POLICY}
 
     def csv(self, *, limit=None,offset=0,dataset_profile=None):
         payload=self.observation_dataset(limit=limit,offset=offset,dataset_profile=dataset_profile)

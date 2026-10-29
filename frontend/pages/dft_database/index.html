@@ -675,11 +675,37 @@
       .filter-field select { text-overflow: ellipsis; }
       .dft-export-panel { justify-content: flex-start; gap: 6px; }
     }
+    /* Readable, consistent controls and a stable loading surface. */
+    .dft-page-heading { display:flex; align-items:baseline; gap:16px; padding:18px 2px 12px; flex-shrink:0; }
+    .dft-page-heading h1 { margin:0; font-size:22px; letter-spacing:-.02em; }
+    .dft-page-heading p { margin:0; color:var(--color-text-secondary); font-size:12px; }
+    .dft-toolbar { border-radius:12px; box-shadow:none; padding:16px; gap:16px; }
+    .dft-filter-grid { gap:12px 16px; }
+    .filter-field select,.filter-field input { min-height:36px; border-radius:7px; }
+    .data-panel { border-radius:12px; }
+    #dftTable td { padding-top:10px; padding-bottom:10px; }
+    #dftTable .num-text { font-variant-numeric:tabular-nums; }
+    #dftTable tbody tr:hover { background:var(--color-surface-alt); }
+    #dftList[aria-busy="true"] .empty-state { padding:48px 16px; }
+    .loading-state::before { content:""; display:inline-block; width:12px; height:12px; margin-right:10px; border:2px solid var(--color-border); border-top-color:var(--color-primary); border-radius:50%; animation:dft-spin .8s linear infinite; vertical-align:-2px; }
+    @media(min-width:901px) {
+      .dashboard-toolbar.dft-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; padding:12px; gap:12px 18px; }
+      .dft-filter-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px 14px; overflow:visible; }
+      .dft-filter-grid .filter-field { min-width:0; display:flex; flex-direction:column; align-items:stretch; gap:4px; }
+      .dft-filter-grid .filter-field select,.dft-filter-grid .filter-field input { width:100%; min-width:0; max-width:100%; }
+      .dft-filter-grid .filter-field label { font-size:11px; }
+      .dft-export-panel { display:flex; flex-direction:column; align-items:stretch; margin:0; gap:8px; }
+      #dftTable td { padding-top:7px; padding-bottom:7px; }
+    }
+    @keyframes dft-spin { to { transform:rotate(360deg); } }
+    @media(prefers-reduced-motion:reduce) { .loading-state::before { animation:none; } }
+    @media(max-width:700px) { .dft-page-heading { display:block; padding-top:14px; } .dft-page-heading p { margin-top:6px; } #dftTable td { padding-top:5px; padding-bottom:5px; } }
   </style>
 </head>
 <body>
   <div id="topnav-mount"></div>
   <main class="shell">
+    <header class="dft-page-heading"><h1>DFT 数据库</h1><p>筛选计算数据 · 查看原始证据 · 追溯文献来源</p></header>
     <section class="dashboard-panel" id="exportSafetyPanel">
       
       <div class="dashboard-body" id="dashboardBody">
@@ -1008,7 +1034,16 @@
       populateCatalystFilter();
     }
     function showToast(msg) { const t = document.getElementById("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(() => t.style.display = "none", 2600); }
-    async function fetchJSON(url, options) {
+    const pendingReads = new Map();
+    function fetchJSON(url, options) {
+      // Share only simultaneous uncancelled reads, never a stale timed cache.
+      if (options?.signal) return requestJSON(url, options);
+      if (pendingReads.has(url)) return pendingReads.get(url);
+      const pending = requestJSON(url, options).finally(() => pendingReads.delete(url));
+      pendingReads.set(url, pending);
+      return pending;
+    }
+    async function requestJSON(url, options) {
       const controller = new AbortController();
       const incoming = options && options.signal;
       const onAbort = () => controller.abort();
@@ -1100,7 +1135,9 @@
       const select = document.getElementById("catalystName");
       if (!select) return;
       const current = select.value || "";
-      const options = Array.isArray(state.catalystOptions) ? state.catalystOptions : [];
+      const options = [...(Array.isArray(state.catalystOptions) ? state.catalystOptions : [])];
+      // A refresh must never silently widen a bookmarked/selected filter.
+      if (current && !options.includes(current)) options.unshift(current);
       select.innerHTML = '<option value="">全部</option>' + options.map(name =>
         '<option value="' + esc(name) + '">' + esc(name) + '</option>'
       ).join("");
@@ -1108,12 +1145,16 @@
         select.value = current;
       }
     }
+    let catalystRequest = 0, overviewRequest = 0;
     async function loadCatalystFilterOptions() {
+      const ticket = ++catalystRequest;
       await ensureCurrentLibraryName();
+      const library = state.currentLibrary;
       const params = applyLibraryParam(new URLSearchParams());
       const url = `/api/papers/analysis-summary${params.toString() ? "?" + params.toString() : ""}`;
       try {
         const data = await fetchJSON(url);
+        if (ticket !== catalystRequest || library !== state.currentLibrary) return;
         applyDftExportPolicy(data.export_policy);
         const names = new Set();
         const groups = data && data.catalyst_groups && typeof data.catalyst_groups === "object"
@@ -1140,7 +1181,8 @@
         });
         state.catalystOptions = Array.from(names).sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
       } catch (_) {
-        state.catalystOptions = [];
+        if (ticket !== catalystRequest || library !== state.currentLibrary) return;
+        return; // Keep the selected filter when the auxiliary summary fails.
       }
       populateCatalystFilter();
     }
@@ -1151,8 +1193,10 @@
     }
     function handleLibraryChange() {
       setCurrentLibraryFromSelect();
+      ++overviewRequest; ++catalystRequest;
       resetDftPagination();
       state.catalystOptions = [];
+      document.getElementById("catalystName").value = "";
       populateCatalystFilter();
       loadCatalystFilterOptions();
       scheduleQueryDFT({ immediate: true });
@@ -1242,6 +1286,7 @@
       }, 180);
     }
     function scheduleExportSafetyOverview() {
+      ++overviewRequest;
       if (state.overviewTimer) {
         window.clearTimeout(state.overviewTimer);
         state.overviewTimer = null;
@@ -1375,7 +1420,9 @@
       `;
     }
     async function loadExportSafetyOverview() {
+      const ticket = ++overviewRequest;
       await ensureCurrentLibraryName();
+      const library = state.currentLibrary;
       const donutsContainer = document.getElementById("qualityDonuts");
       const chipsContainer = document.getElementById("qualityReasonChips");
       if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">正在加载数值质量概览...</div>';
@@ -1390,6 +1437,7 @@
         const minConf = document.getElementById("minConfidence").value.trim();
         if (minConf !== "") params.set("min_confidence", minConf);
         const data = await fetchJSON(`/api/papers/analysis-summary?${params.toString()}`);
+        if (ticket !== overviewRequest || library !== state.currentLibrary) return;
         applyDftExportPolicy(data.export_policy);
         const numeric = Number(data.exploratory_numeric_records || 0);
         const excluded = Math.max(0, Number(data.total_records || 0) - numeric);
@@ -1397,6 +1445,7 @@
         const reasons = data.excluded_reasons || {};
         if (chipsContainer) chipsContainer.innerHTML = '<span class="quality-meta">审核状态未知' + (state.currentLibrary === "锂硫双原子" ? ' · 包含估读值和单位未标注数值' : '') + ' · ' + esc(data.total_records ?? "—") + ' 条记录</span>' + Object.entries(reasons).map(([reason,count]) => '<span class="reason-chip">' + esc(reasonLabel(reason)) + '<span class="chip-count">' + esc(count) + '</span></span>').join("");
       } catch (error) {
+        if (ticket !== overviewRequest || library !== state.currentLibrary) return;
         if (donutsContainer) donutsContainer.innerHTML = '<div class="empty-state">数值质量概览加载失败：' + esc(error.message) + '</div>';
         if (chipsContainer) chipsContainer.innerHTML = "";
       }
@@ -1425,7 +1474,9 @@
       if (catalyst) params.set("catalyst_name", catalyst);
       const url = `${API_BASE}/compare?${params.toString()}`;
       const list = document.getElementById("dftList");
-      list.innerHTML = '<tr><td colspan="8" class="empty-state">正在查询探索性 DFT 数据...</td></tr>';
+      document.getElementById("resultSummary").textContent = "正在读取 DFT 数据…";
+      list.setAttribute("aria-busy", "true");
+      list.innerHTML = '<tr><td colspan="8" class="empty-state loading-state">正在读取当前页，筛选条件仍可调整…</td></tr>';
       cancelInFlightDftQuery();
       const controller = typeof AbortController === "function" ? new AbortController() : null;
       const requestSeq = state.querySeq + 1;
@@ -1451,11 +1502,14 @@
         state.items = [];
         state.queryTotal = 0;
         state.queryHasMore = false;
-        renderResultSummary(0, 0, 0, 0);
+        document.getElementById("resultSummary").textContent = "DFT 数据读取失败";
         renderDftPagination(0, 0, 0);
         list.innerHTML = `<tr><td colspan="8" class="empty-state">查询失败：${esc(error.message)}</td></tr>`;
       } finally {
-        if (state.queryController === controller) state.queryController = null;
+        if (state.queryController === controller) {
+          state.queryController = null;
+          list.setAttribute("aria-busy", "false");
+        }
       }
     }
     function firstLocator(row) {
@@ -2026,10 +2080,15 @@
       document.addEventListener("keydown", event => {
         if (event.key === "Escape") closeEvidenceModal();
       });
-      loadLibraries().finally(() => loadCatalystFilterOptions()).finally(() => {
+      loadLibraries().finally(() => {
+        // Restore bookmarked catalyst before its options arrive, so the first
+        // table request uses the correct filters without waiting for statistics.
+        const catalyst = new URLSearchParams(location.search).get("catalyst");
+        if (catalyst) { state.catalystOptions = [catalyst]; populateCatalystFilter(); }
         initDftViewState();
         ViewState.bindDetailLinks("dft_database");
         queryDFT();
+        loadCatalystFilterOptions();
         scheduleExportSafetyOverview();
       });
     });
