@@ -30,6 +30,59 @@ def reading_revision(paper):
                    'abstract_zh': (paper.comprehensive_analysis or {}).get('abstract_zh')})
 
 
+def _saved_abstract_fallback(paper, documents, selected):
+    """Recover a verified saved new-layout source when older parsing cannot.
+
+    The source must still resolve to the same checked main file and exact text;
+    a historic assertion, changed PDF, or unverified translation is insufficient.
+    """
+    if selected.get('text'):
+        return selected
+    from app.services.reading_abstract_source import revision, publisher_notice
+    saved = (paper.reading_guide or {}).get('abstract_translation') or {}
+    if not isinstance(saved, dict):
+        return selected
+    source = saved.get('source') or {}
+    text = saved.get('original_text')
+    translated = (paper.comprehensive_analysis or {}).get('abstract_zh') or ''
+    if (not isinstance(source, dict) or not isinstance(text, str) or not text or
+            saved.get('source_status') != 'verified' or source.get('kind') != 'main_text' or
+            (source.get('selection_method') not in ('spaced_abstract_heading_v1', 'unlabelled_front_abstract_v1')
+             and not isinstance(source.get('heading_location'), dict)) or
+            not translated or saved.get('translation_sha256') != hashlib.sha256(translated.encode()).hexdigest() or
+            source.get('text_sha256') != hashlib.sha256(text.encode()).hexdigest() or
+            saved.get('source_revision') != revision({'text': text, 'source': source}) or publisher_notice(text)):
+        return selected
+    mains = [doc for doc in documents if doc.get('role') == 'main']
+    if len(mains) != 1 or mains[0].get('file_id') != source.get('file_id') or \
+            mains[0].get('source_sha256') != source.get('source_sha256'):
+        return selected
+    pages = {page.get('page'): page.get('text') for page in mains[0].get('pages', [])}
+    if source.get('selection_method') not in ('spaced_abstract_heading_v1', 'unlabelled_front_abstract_v1'):
+        heading = source['heading_location']
+        heading_page = pages.get(heading.get('physical_page'))
+        first, last = heading.get('start_char'), heading.get('end_char')
+        if (not isinstance(heading_page, str) or type(first) is not int or type(last) is not int or
+                not 0 <= first < last <= len(heading_page) or
+                heading_page[first:last].strip().lower() != 'abstract'):
+            return selected
+    spans = source.get('spans') or [source]
+    if not isinstance(spans, list) or not 1 <= len(spans) <= 100:
+        return selected
+    parts = []
+    for span in spans:
+        if not isinstance(span, dict):
+            return selected
+        page = pages.get(span.get('physical_page')); start = span.get('start_char'); end = span.get('end_char')
+        if (not isinstance(page, str) or type(start) is not int or type(end) is not int or
+                not 0 <= start < end <= len(page)):
+            return selected
+        parts.append(page[start:end])
+    if '\n'.join(parts) != text:
+        return selected
+    return {'text': text, 'source': source, 'revision': saved['source_revision'], 'missing_reason': ''}
+
+
 def input_context(session, paper_id, settings):
     """Source text, with explicit bounded coverage; no model or mutation on GET."""
     paper = session.get(Paper, paper_id)
@@ -60,6 +113,14 @@ def input_context(session, paper_id, settings):
                                     boxes = []
                                 if boxes:
                                     page_item['abstract_boxes'] = boxes
+                                if index == 0:
+                                    from app.services.reading_abstract_source import pdf_spaced_front_abstract
+                                    try:
+                                        front = pdf_spaced_front_abstract(page, text)
+                                    except (RuntimeError, ValueError):
+                                        front = []
+                                    if front:
+                                        page_item['spaced_front_abstracts'] = front
                                 if index + 1 < min(document.page_count, 5):
                                     from app.services.reading_abstract_source import pdf_numbered_abstract
                                     try:
@@ -101,6 +162,12 @@ def input_context(session, paper_id, settings):
               'instruction': '正文提供文字证据；未直接看图像，图表判断需说明依据是已有图注/解读。翻译原摘要，不扩写为全文总结。'}
     from app.services.reading_abstract_source import select_abstract
     result['abstract_for_translation'] = select_abstract(paper.abstract, documents)
+    result['abstract_for_translation'] = _saved_abstract_fallback(paper, documents, result['abstract_for_translation'])
+    # Internal geometry is already captured in the selected source. Do not add
+    # an auxiliary field to old contexts or change their saved input revision.
+    for document in documents:
+        for page in document.get('pages', []):
+            page.pop('spaced_front_abstracts', None)
     result['input_revision'] = digest(result)
     from app.schemas.reading_assistance import ReadingAssistanceSave, AbstractTranslationSave
     result['save_contract'] = ReadingAssistanceSave.model_json_schema()

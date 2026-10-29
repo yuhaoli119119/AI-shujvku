@@ -176,6 +176,31 @@ def _canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
 
 
+DATASET_LOCATOR_TEXT_MAX = 1000
+DATASET_LOCATOR_JSON_MAX_BYTES = 65_536
+
+
+def validate_dataset_locator(locator: Any) -> None:
+    """Apply the same persisted dataset-locator grammar to writes and reads."""
+    if not isinstance(locator, dict):
+        raise RebuildWorkflowError("invalid_dataset_source")
+    column = locator.get("column")
+    if not isinstance(column, str) or not column.strip() or len(column) > DATASET_LOCATOR_TEXT_MAX:
+        raise RebuildWorkflowError("invalid_dataset_column")
+    row, frame = locator.get("row"), locator.get("frame")
+    for coordinate in (row, frame):
+        if coordinate is not None and (
+                isinstance(coordinate, bool) or not isinstance(coordinate, int) or coordinate < 0):
+            raise RebuildWorkflowError("invalid_dataset_coordinate")
+    if row is None and frame is None:
+        raise RebuildWorkflowError("invalid_dataset_coordinate")
+    sheet = locator.get("sheet")
+    if sheet is not None and (not isinstance(sheet, str) or len(sheet) > DATASET_LOCATOR_TEXT_MAX):
+        raise RebuildWorkflowError("invalid_dataset_sheet")
+    if len(_canonical_json(locator).encode("utf-8")) > DATASET_LOCATOR_JSON_MAX_BYTES:
+        raise RebuildWorkflowError("dataset_locator_too_large")
+
+
 def _stable_hash(prefix: str, value: Any) -> str:
     digest = hashlib.sha256(f"{prefix}|{_canonical_json(value)}".encode("utf-8")).hexdigest()[:32]
     return f"{prefix}_{digest}"
@@ -670,7 +695,9 @@ def _source_is_sufficient(data: dict[str, Any]) -> bool:
     # Empty strings and an isolated table coordinate do not locate evidence.
     if data.get("source_kind") == "dataset":
         locator = data.get("dataset_locator") or {}
-        return bool(data.get("dataset_file_id") and locator.get("sha256") and locator.get("column") and (locator.get("row") is not None or locator.get("frame") is not None))
+        return bool(isinstance(locator, dict) and data.get("dataset_file_id") and
+                    locator.get("sha256") and locator.get("column") and
+                    (locator.get("row") is not None or locator.get("frame") is not None))
     located = bool(data.get("page_number") or data.get("asset_id") or
                    str(data.get("label") or "").strip() or str(data.get("quote") or "").strip() or data.get("ooxml_locator"))
     return located
@@ -797,17 +824,7 @@ def _validate_source_for_paper(session, paper_id, source):
             raise RebuildWorkflowError("dataset_file_belongs_to_other_paper_or_missing")
         if source.get("file_id") or source.get("asset_id") or locator.get("sha256") != dataset_file.sha256:
             raise RebuildWorkflowError("invalid_dataset_source")
-        column = locator.get("column")
-        if not isinstance(column, str) or not column.strip() or len(column) > 1000:
-            raise RebuildWorkflowError("invalid_dataset_column")
-        for name in ("row", "frame"):
-            coordinate = locator.get(name)
-            if coordinate is not None and (isinstance(coordinate, bool) or not isinstance(coordinate, int) or coordinate < 0):
-                raise RebuildWorkflowError("invalid_dataset_coordinate")
-        if locator.get("sheet") is not None and (not isinstance(locator["sheet"], str) or len(locator["sheet"]) > 1000):
-            raise RebuildWorkflowError("invalid_dataset_sheet")
-        if len(_canonical_json(locator).encode("utf-8")) > 65536:
-            raise RebuildWorkflowError("dataset_locator_too_large")
+        validate_dataset_locator(locator)
         if any(source.get(k) is not None for k in ("page_basis", "source_sha256", "reading_pdf_sha256", "ooxml_locator")):
             raise RebuildWorkflowError("dataset_source_pdf_identity_not_allowed")
         return

@@ -36,6 +36,14 @@ def _bounds(raw, first, last):
     return first, last
 
 
+def _spaced_front_boundary(text):
+    """Detect a line that terminates a spaced-heading abstract candidate."""
+    return bool(re.match(
+        r'(?:©|copyright\b|all rights reserved\b|key[ -]?words\b|'
+        r'fig(?:ure)?\b|table\b|(?:1[.\s]+)?introduction\b)',
+        (text or '').strip(), re.I))
+
+
 def pdf_abstract_boxes(page, raw):
     """Read-only evidence for a narrow unlabelled, shaded abstract layout.
 
@@ -196,6 +204,69 @@ def pdf_numbered_abstract(page, raw, following):
                  'next_introduction_bbox': list(next_body[0][0]['bbox'])}}]
 
 
+def pdf_spaced_front_abstract(page, raw):
+    """Recover a bounded first-page abstract below a spaced A B S T R A C T label."""
+    import fitz
+    if page.number != 0 or page.rotation:
+        return []
+    width, height = page.rect.width, page.rect.height
+    labels = [(fitz.Rect(block[:4]), block[4].strip()) for block in page.get_text('blocks')
+              if block[6] == 0 and re.fullmatch(
+                  r'a\s+b\s+s\s+t\s+r\s+a\s+c\s+t', block[4].strip(), re.I)]
+    if len(labels) != 1:
+        return []
+    heading, _ = labels[0]
+    lines = []
+    for block in page.get_text('dict', flags=fitz.TEXTFLAGS_TEXT)['blocks']:
+        if block['type'] != 0:
+            continue
+        for line in block['lines']:
+            if tuple(line['dir']) != (1.0, 0.0):
+                continue
+            text = ''.join(span['text'] for span in line['spans']).strip()
+            rect = fitz.Rect(line['bbox'])
+            if text and rect.y0 > heading.y1 and abs(rect.x0 - heading.x0) < 5 and rect.x1 <= .96 * width and rect.y0 < .75 * height:
+                lines.append((rect, text))
+    lines.sort(key=lambda item: item[0].y0)
+    if not lines or not 0 < lines[0][0].y0 - heading.y1 < 20:
+        return []
+    # Copyright, keywords and body headings are hard source boundaries.
+    selected = []
+    for rect, text in lines:
+        if selected and rect.y0 - selected[-1][0].y1 > 16:
+            break
+        if _spaced_front_boundary(text):
+            break
+        selected.append((rect, text))
+    if not selected:
+        return []
+    first, last = selected[0][1], selected[-1][1]
+    start = raw.find(first)
+    finish_start = raw.find(last, max(0, start))
+    if (start < 0 or finish_start < 0 or raw.find(first, start + 1) >= 0 or
+            raw.find(last, finish_start + 1) >= 0):
+        return []
+    finish = finish_start + len(last)
+    text = raw[start:finish]
+    if not (100 <= len(text) <= 15000 and len(text.split()) >= 50 and re.search(r'[.!?]$', text)):
+        return []
+    if publisher_notice(text) or any(_spaced_front_boundary(line) for line in text.splitlines()):
+        return []
+    cursor = 0
+    for _, line in selected:
+        found = text.find(line, cursor)
+        if found < 0:
+            return []
+        cursor = found + len(line)
+    return [{'start_char': start, 'end_char': finish,
+             'selection_method': 'spaced_abstract_heading_v1',
+             'start_marker': 'layout:spaced_abstract_heading_v1',
+             'end_marker': 'layout:bounded_paragraph',
+             'layout_evidence': {'heading_bbox': list(heading),
+                                 'first_line_bbox': list(selected[0][0]),
+                                 'last_line_bbox': list(selected[-1][0])}}]
+
+
 def select_abstract(metadata, documents):
     rejected = publisher_notice(metadata)
     if (metadata or '').strip() and not rejected:
@@ -275,6 +346,27 @@ def select_abstract(metadata, documents):
                     'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
                 candidates.append({'text': text, 'source': source,
                     'revision': revision({'text': text, 'source': source}), 'missing_reason': ''})
+    # A spaced heading is accepted only on page one and only when its unique
+    # geometry has an exact, bounded character span. Regular labelled abstracts
+    # retain priority, and any competing heading keeps the result pending.
+    if not candidates and len(mains) == 1 and not starts:
+        spaced_starts = [(index, match) for index, page in enumerate(pages[:5]) for match in re.finditer(
+            r'(?im)^[ \t]*a[ \t]+b[ \t]+s[ \t]+t[ \t]+r[ \t]+a[ \t]+c[ \t]+t[ \t]*$', page['text'])]
+        front = [(page, item) for page in pages[:1] for item in page.get('spaced_front_abstracts', [])]
+        if (len(spaced_starts) == 1 and spaced_starts[0][0] == 0 and len(front) == 1 and
+                front[0][1].get('selection_method') == 'spaced_abstract_heading_v1'):
+            page, item = front[0]
+            start, finish = item.get('start_char'), item.get('end_char')
+            if type(start) is int and type(finish) is int and 0 <= start < finish <= len(page['text']):
+                text = page['text'][start:finish]
+                if (100 <= len(text) <= 15000 and len(text.split()) >= 50 and
+                        re.search(r'[.!?]$', text) and not publisher_notice(text)):
+                    source = {'kind': 'main_text', 'file_id': mains[0]['file_id'],
+                              'source_sha256': mains[0]['source_sha256'],
+                              'physical_page': page['page'], **item,
+                              'text_sha256': hashlib.sha256(text.encode()).hexdigest()}
+                    candidates.append({'text': text, 'source': source,
+                        'revision': revision({'text': text, 'source': source}), 'missing_reason': ''})
     if len(candidates)==1:return candidates[0]
     return {'text':'','source':None,'revision':None,'missing_reason':
             ('元数据是出版社版本说明，不能作为科研摘要；' if rejected else '原摘要元数据为空；')+

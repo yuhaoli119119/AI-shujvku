@@ -15,6 +15,16 @@
 - `GET /api/papers/{paper_id}/datasets/{dataset_id}/rows.csv`：导出已保存、来源指向该数据集的单元格、原始值、单位和定位信息；遵守既有 `LITAI_EXPORTS_ENABLED`，关闭时返回 403。
 - 现有 `POST /api/rebuild/rows/import` 接受 `source_kind=dataset`、`dataset_file_id` 和 `dataset_locator`；先验证同篇和 SHA-256，再保存。需要沿用现有正式写入与回执合同。
 
+故障回退窗口内，`POST /datasets` 与文件 `PUT` 通过认证和 CSRF 后返回 503 `dataset_writes_temporarily_disabled`；正式行导入、预检和来源校验对 dataset 写入整体拒绝受影响行，保留同一批次中不含 dataset 来源的其他行。列表、文件下载和 `rows.csv` 导出继续只读运行，不因暂停改变已保存内容。
+
+`dataset_locator` 的读取与写入共用同一结构合同：`column` 必须为非空字符串，`sheet` 可缺省或为字符串，两项最多 1000 字符；`row`、`frame` 可以缺省一项，但出现的每一项必须是非布尔、非负整数，且至少存在一项；canonical JSON UTF-8 总量最多 65536 字节。质量投影对该合同任一项失败都回退为 `source_dataset_locator_invalid`，不会因为另一坐标有效而放行。
+
+## 质量投影
+
+`GET /api/rebuild/papers/{paper_id}/quality` 的只读完整性检查按来源自身类型投影：`source_kind=dataset` 必须存在同篇 `dataset_value_sources` 绑定和已登记 `dataset_files` 记录，定位 SHA-256 必须与文件记录一致，内容寻址对象必须位于存储根目录、大小一致且实际 SHA-256 可复核。满足这些条件时使用数据集文件身份，不要求伪填正文 PDF、图表或物理页。
+
+绑定缺失、文件跨篇、哈希不一致、PDF 身份混用、对象缺失或损坏分别返回具体问题，不能降级为 `source_file_unknown` 后显示泛化“来源未知”。旧 PDF/表格/图表来源的生命周期和物理页检查保持不变；不迁移、不改写历史来源。质量检查通过仅表示已存来源身份与字节一致，不表示科学验收通过。
+
 ## 迁移和运行
 
 `backend/app/migrations/dataset_sources_v1.sql` 是显式事务迁移，不在启动时自动运行。正式执行需事先备份、明确发布窗口并由独立验收，测试最终发布代码；迁移支持重入，但在已存在同名结构不兼容的数据库上不能仅凭 `IF NOT EXISTS` 推断兼容。生产执行前必须检查现有结构。

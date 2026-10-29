@@ -16,7 +16,8 @@ from app.db.models import (RebuildDataRow, RebuildDataValue, RebuildValueSource,
                            RebuildVisualAsset, RebuildPaperFile, PaperSection, AuditLog)
 from app.services.rebuild_acceptance import hash_bound_file
 from app.services.rebuild_file_preview import _format, preview_cache_path
-from app.services.rebuild_workflow_service import RebuildWorkflowError, resolve_file_path, resolve_asset_image_path
+from app.services.rebuild_workflow_service import (RebuildWorkflowError, resolve_file_path,
+                                                   resolve_asset_image_path, validate_dataset_locator)
 
 VERSION = "stored_output_quality_v1"
 
@@ -208,6 +209,63 @@ def file_inventory(files, settings, *, force=False):
     return result
 
 
+def _dataset_file_inventory(files, settings, *, force=False):
+    """Verify the content-addressed bytes behind persisted dataset sources."""
+    result = {}
+    root = (settings.storage_root / "datasets").resolve()
+    for file in files:
+        item = {"file_id": str(file.id), "paper_id": str(file.paper_id),
+                "filename": file.filename, "source_sha256": file.sha256,
+                "size_bytes": file.size_bytes, "status": "unknown"}
+        try:
+            path = (root / file.object_key).resolve()
+            if not path.is_relative_to(root):
+                raise RebuildWorkflowError("dataset_file_outside_storage_root")
+            current = path.stat()
+            if not stat_mode.S_ISREG(current.st_mode):
+                raise RebuildWorkflowError("dataset_file_unavailable")
+            if current.st_size != file.size_bytes:
+                raise RebuildWorkflowError("dataset_file_size_mismatch")
+            if hash_bound_file(path, force=force) != file.sha256:
+                raise RebuildWorkflowError("dataset_file_sha256_mismatch")
+            item["status"] = "verified"
+        except RebuildWorkflowError as exc:
+            item["reason"] = str(exc)
+        except (OSError, ValueError, TypeError, RuntimeError):
+            item["reason"] = "dataset_file_unavailable"
+        result[file.id] = item
+    return result
+
+
+def _dataset_source_identity(source, dataset_files, dataset_physical):
+    """Return verified dataset identity or a specific integrity failure."""
+    binding = getattr(source, "dataset_binding", None)
+    if source.source_kind != "dataset":
+        return None, ("error", "source_dataset_binding_conflict") if binding is not None else (None, None)
+    if binding is None:
+        return None, ("error", "source_dataset_binding_missing")
+    if source.file_id or source.asset_id or source.page_number is not None:
+        return None, ("error", "source_dataset_pdf_identity_conflict")
+    file = dataset_files.get(binding.dataset_file_id)
+    if file is None or file.paper_id != source.paper_id:
+        return None, ("error", "source_dataset_file_identity_mismatch")
+    locator = binding.dataset_locator
+    if not isinstance(locator, dict):
+        return None, ("error", "source_dataset_locator_invalid")
+    try:
+        validate_dataset_locator(locator)
+    except RebuildWorkflowError:
+        return None, ("error", "source_dataset_locator_invalid")
+    if locator.get("sha256") != file.sha256:
+        return None, ("error", "source_dataset_hash_mismatch")
+    physical = dataset_physical.get(file.id, {})
+    if physical.get("status") != "verified":
+        reason = physical.get("reason", "dataset_file_unavailable")
+        severity = "error" if reason in {"dataset_file_size_mismatch", "dataset_file_sha256_mismatch"} else "unknown"
+        return None, (severity, reason)
+    return file, (None, None)
+
+
 def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_states=None,
                      include_asset_mechanics=False, asset_offset=0, asset_limit=32):
     """Batch graph reads. Missing source knowledge stays unknown, not invented.
@@ -229,6 +287,12 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
     files = list(session.scalars(select(RebuildPaperFile).where(RebuildPaperFile.paper_id == paper_id).order_by(RebuildPaperFile.id)))
     row_map, value_map, asset_map = ({row.id: row for row in rows}, {value.id: value for value in values}, {asset.id: asset for asset in assets})
     file_map = {file.id: file for file in files}
+    from app.db.dataset_models import DatasetFile
+    dataset_file_ids = {getattr(source, "dataset_binding").dataset_file_id for source in sources
+                        if source.source_kind == "dataset" and getattr(source, "dataset_binding", None) is not None}
+    dataset_files = list(session.scalars(select(DatasetFile).where(DatasetFile.id.in_(dataset_file_ids)).order_by(DatasetFile.id))) if dataset_file_ids else []
+    dataset_file_map = {file.id: file for file in dataset_files}
+    dataset_physical = _dataset_file_inventory(dataset_files, settings)
     from app.services.rebuild_file_lifecycle import file_set, active_files
     lifecycle = file_set(session, paper_id)
     current_files = sorted(active_files(session, paper_id), key=lambda file: str(file.id))
@@ -312,16 +376,23 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
         if asset and source.file_id and asset.file_id != source.file_id:
             issue("error", "source_asset_file_mismatch", "source", source.id, "Verify which PDF owns the asset; source and asset must agree.")
         file_id = source.file_id or (asset.file_id if asset else None)
+        dataset_file, (dataset_severity, dataset_code) = _dataset_source_identity(
+            source, dataset_file_map, dataset_physical)
+        if dataset_code:
+            issue(dataset_severity, dataset_code, "source", source.id,
+                  "Verify this source's same-paper dataset file, locator SHA-256 and stored content-addressed bytes; never borrow a PDF identity or rewrite the historical source automatically.",
+                  dataset_file_id=str(source.dataset_binding.dataset_file_id) if getattr(source, "dataset_binding", None) else None)
         binding_check(file_id, "source", source.id)
         if source.page_number is not None:
             page_check(file_id, source.page_number, "source", source.id)
             if asset and isinstance(asset.page_numbers, list) and asset.page_numbers and source.page_number not in asset.page_numbers:
                 issue("warning", "source_page_outside_asset_pages", "source", source.id, "Check caption/body cross-page locators against the original PDF; do not rewrite automatically.")
-        if not file_id:
+        if not file_id and source.source_kind != "dataset":
             issue("unknown", "source_file_unknown", "source", source.id, "Locate the original registered file; a quote alone does not establish file identity.")
         from app.services.rebuild_file_preview import stored_source_identity
-        is_ooxml = ooxml_check(file_id, stored_source_identity(source), "source", source.id, page_number=source.page_number)
-        if source.page_number is None and not source.asset_id and not is_ooxml:
+        is_ooxml = (False if source.source_kind == "dataset" else
+                    ooxml_check(file_id, stored_source_identity(source), "source", source.id, page_number=source.page_number))
+        if source.source_kind != "dataset" and source.page_number is None and not source.asset_id and not is_ooxml:
             issue("unknown", "source_physical_page_unknown", "source", source.id, "Record an actual physical page once verified.")
     for value in values:
         if value.row_id not in row_map or value.paper_id != paper_id:
@@ -401,7 +472,8 @@ def integrity_report(session, paper_id, settings, *, offset=0, limit=100, file_s
             "counts": counts, "issues_total": len(issues), "issues": issues if limit is None else issues[offset:offset + limit], "offset": offset, "limit": limit,
             "has_more": limit is not None and offset + limit < len(issues), "next_offset": offset + limit if limit is not None and offset + limit < len(issues) else None,
             "stored_counts": {"rows": len(rows), "values": len(values), "sources": len(sources), "assets": len(assets)},
-            "files": list(physical.values()), "file_lifecycle": lifecycle,
+            "files": list(physical.values()), "dataset_files": list(dataset_physical.values()),
+            "file_lifecycle": lifecycle,
             "file_history": [item for item in lifecycle["items"] if item["id"] not in {str(fid) for fid in active_ids}],
             "asset_mechanics": _asset_mechanics(assets, settings,
                 requested=include_asset_mechanics, offset=asset_offset, limit=asset_limit),
@@ -477,6 +549,16 @@ def quality_report(session, paper_id, settings, snapshot, *, offset=0, limit=100
                                         '请核对原文中本对象及材料条件，仅补所列缺项；原文未报告、未知与不适用须分别注明依据，图像或表格缺项不能用章节文字抵消。')})
     actions = {"physical_page_out_of_range": "核对该文件的真实物理页数，按原始证据修正对应来源页；不要自动换到邻页。",
                "source_asset_file_mismatch": "核对图表实际所属 PDF，来源与图表应绑定同一文件；保留冲突，不能借用另一文件。",
+               "source_dataset_binding_missing": "保留现有数据行和来源，核对并恢复同篇数据集文件绑定；不能改用 PDF 来源或猜测文件身份。",
+               "source_dataset_binding_conflict": "数据集绑定只能属于 dataset 来源；保留冲突，按正式修正合同核对后处理。",
+               "source_dataset_file_identity_mismatch": "核对来源绑定的数据集文件确实属于同一篇文献；不能借用其他论文或数据集的文件身份。",
+               "source_dataset_hash_mismatch": "核对来源定位记录的 SHA-256 与已登记数据集文件；保留原值和冲突，不能静默改写历史来源。",
+               "source_dataset_locator_invalid": "数据集来源必须保留有效列名以及行或帧位置；保留原值与冲突，通过正式修正合同处理。",
+               "source_dataset_pdf_identity_conflict": "数据集来源不能同时声明 PDF、图表或物理页身份；核对原请求并按正式接口定点修正。",
+               "dataset_file_unavailable": "核对内容寻址数据集文件仍在存储根目录内；保留数据库来源和历史，不自动替换文件。",
+               "dataset_file_outside_storage_root": "数据集文件路径越出存储根目录；保留现场并核对登记数据，不跟随该路径读取。",
+               "dataset_file_size_mismatch": "核对数据集文件实际大小与登记值；保留原值和来源，不自动覆盖。",
+               "dataset_file_sha256_mismatch": "核对数据集文件实际 SHA-256 与登记值；保留原值和来源，不自动覆盖。",
                "missing_value_reason_or_payload_invalid": "原文未报告项保持 missing，并填写真实 missing_reason；不要补造数值。",
                "subfigure_parent_missing_or_ambiguous": "单独裁出的子图允许保存；若要关联整图，请核对同文件的表号/组标识。本项仅提示，不要求每个子图都新增独立父记录。",
                "section_source_or_record_changed": "核对现有章节原文、每页原句/位置及对应阅读 PDF 哈希。保留成熟原文和冲突，不覆盖或补造历史。"}
