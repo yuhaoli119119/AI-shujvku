@@ -1,10 +1,12 @@
 """Focused regression coverage for spaced front-page ABSTRACT sources."""
+import copy
 import hashlib
 
 import fitz
 import pytest
+from sqlalchemy import func, select
 
-from app.db.models import Paper, RebuildPaperFile
+from app.db.models import AuditLog, Paper, RebuildPaperFile, WorkflowJob
 from app.services.reading_abstract_source import (pdf_spaced_front_abstract,
                                                   select_abstract)
 from test_reading_assistance import base, reading_env
@@ -154,11 +156,22 @@ def test_context_and_formal_save_accept_only_server_verified_spaced_source(readi
         'abstract_zh': '该研究在受控电化学条件下比较过渡金属位点，并保留证据与适用限制。',
     }
     invalid = {**payload, 'abstract_source_revision': '0' * 64}
+    with env['factory']() as session:
+        paper_state = copy.deepcopy((session.get(Paper, env['paper']).reading_guide,
+                                    session.get(Paper, env['paper']).comprehensive_analysis))
+        job_state = copy.deepcopy((session.get(WorkflowJob, job['job_id']).status,
+                                  session.get(WorkflowJob, job['job_id']).progress))
+        audit_count = session.scalar(select(func.count()).select_from(AuditLog))
     unverified = env['client'].post(base(env), json=invalid)
-    assert unverified.status_code == 200
-    unverified_read = env['client'].get(base(env)).json()['abstract_translation']
-    assert unverified_read['source_status'] == 'changed_since_input'
-    assert unverified_read['source'] is None
+    assert unverified.status_code == 409, unverified.text
+    assert unverified.json()['detail'] == 'abstract_source_revision_conflict'
+    with env['factory']() as session:
+        paper = session.get(Paper, env['paper'])
+        current_job = session.get(WorkflowJob, job['job_id'])
+        assert (paper.reading_guide, paper.comprehensive_analysis) == paper_state
+        assert (current_job.status, current_job.progress) == job_state
+        assert session.scalar(select(func.count()).select_from(AuditLog)) == audit_count
+        assert 'abstract_translation' not in paper.reading_guide
     payload['request_id'] = 'spaced-abstract-save-verified'
     saved = env['client'].post(base(env), json=payload)
     assert saved.status_code == 200, saved.text
