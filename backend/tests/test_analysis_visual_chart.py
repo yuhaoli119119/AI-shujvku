@@ -185,3 +185,59 @@ def test_static_svg_http_contract_and_etag_revalidation(monkeypatch, tmp_path):
     )
     assert cached.status_code == 304
     assert cached.body == b""
+
+
+def test_static_svg_revision_change_retries_with_fresh_service(monkeypatch, tmp_path):
+    stale = _payload()
+    stale["points"][0]["catalyst_name"] = "Stale projection"
+    fresh = _payload()
+    fresh["points"][0]["catalyst_name"] = "Fresh projection"
+    instances = []
+
+    class FakeService:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def cached_output(self, name, key, build):
+            return self.payload
+
+        def correlation(self, **kwargs):
+            return self.payload
+
+    def fake_service(args, session):
+        payload = stale if not instances else fresh
+        service = FakeService(payload)
+        instances.append(service)
+        return service
+
+    class Bind:
+        dialect = SimpleNamespace(name="postgresql")
+
+    class Session:
+        def get_bind(self):
+            return Bind()
+
+    revisions = iter((("revision-1",), ("revision-2",), ("revision-2",)))
+    monkeypatch.setattr(api, "service", fake_service)
+    monkeypatch.setattr(api, "_content_revision", lambda session: next(revisions))
+    monkeypatch.setattr(api, "get_settings", lambda: SimpleNamespace(storage_root=tmp_path))
+    response = api.correlation_svg(
+        request=SimpleNamespace(headers={}),
+        x_field="li2s_adsorption_energy",
+        y_field="li2s_dissociation_barrier",
+        min_n=3,
+        args={
+            "source": "rebuild",
+            "library_name": "锂硫双原子",
+            "filters": {"data_type": "dft"},
+            "include_estimated": True,
+            "include_unlabelled": True,
+        },
+        session=Session(),
+    )
+    assert response.status_code == 200
+    assert b"Fresh projection" in response.body
+    assert b"Stale projection" not in response.body
+    assert len(instances) == 2
+    assert instances[0] is not instances[1]
+    assert len(list((tmp_path / ".visual-render-cache").glob("*.svg"))) == 1

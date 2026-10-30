@@ -174,7 +174,6 @@ def correlation_svg(request: Request,x_field: str,y_field: str,min_n: int=Query(
     try:
         x_field=x_field.strip().lower()
         y_field=y_field.strip().lower()
-        svc=service(args,session)
         cache_enabled=args['source']=='rebuild' and session.get_bind().dialect.name=='postgresql'
         revision=_content_revision(session) if cache_enabled else None
         cache_key=chart_cache_key({'source':args['source'],'library_name':args['library_name'],'filters':args['filters'],
@@ -185,6 +184,10 @@ def correlation_svg(request: Request,x_field: str,y_field: str,min_n: int=Query(
         if svg is None:
             revision_stable=not cache_enabled
             for _attempt in range(3):
+                # A service instance retains its first successful projection.
+                # After a revision change, retry from a fresh object so the new
+                # revision cannot be paired with stale in-memory rows.
+                svc=service(args,session)
                 payload=svc.cached_output('correlation', {'x':x_field,'y':y_field,'min_n':min_n},
                                           lambda: svc.correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n))
                 if not cache_enabled:
@@ -223,7 +226,9 @@ def correlation(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge
         result=svc.cached_output('correlation', {'x':x_field,'y':y_field,'min_n':min_n}, lambda: svc.correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n))
         if view=='compact':
             result=compact_correlation_payload(result)
-        return scientific_response(request, result)
+        response=scientific_response(request, result)
+        response.headers['Cache-Control']='private, no-cache'
+        return response
     except ValueError as exc:
         raise HTTPException(400,detail=str(exc)) from exc
 
