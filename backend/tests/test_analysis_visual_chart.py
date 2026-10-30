@@ -185,6 +185,15 @@ def test_static_svg_http_contract_and_etag_revalidation(monkeypatch, tmp_path):
     )
     assert cached.status_code == 304
     assert cached.body == b""
+    weak = api.correlation_svg(
+        request=SimpleNamespace(headers={"if-none-match": "W/" + response.headers["etag"]}),
+        x_field="li2s_adsorption_energy",
+        y_field="li2s_dissociation_barrier",
+        min_n=3,
+        args=args,
+        session=Session(),
+    )
+    assert weak.status_code == 304
 
 
 def test_static_svg_revision_change_retries_with_fresh_service(monkeypatch, tmp_path):

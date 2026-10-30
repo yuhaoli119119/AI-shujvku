@@ -168,6 +168,15 @@ def scientific_response(request, result):
     return JSONResponse(content=jsonable_encoder(result),headers={'Vary':'Accept-Encoding'})
 
 
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    """Accept strong and proxy-weakened validators, including list syntax."""
+    if not if_none_match:
+        return False
+    weak_etag = etag if etag.startswith('W/') else 'W/' + etag
+    candidates = {item.strip() for item in if_none_match.split(',')}
+    return '*' in candidates or etag in candidates or weak_etag in candidates
+
+
 @router.get('/visuals/catalyst-correlation/render.svg')
 def correlation_svg(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
                     args=Depends(options),session: Session=Depends(get_db_session)):
@@ -210,7 +219,7 @@ def correlation_svg(request: Request,x_field: str,y_field: str,min_n: int=Query(
                  'X-Correlation-Render':'static-svg','X-Analysis-Mode':'exploratory',
                  'X-Content-Type-Options':'nosniff',
                  'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"}
-        if request.headers.get('if-none-match')==etag:
+        if _etag_matches(request.headers.get('if-none-match'),etag):
             return Response(status_code=304,headers=headers)
         return Response(content=svg,media_type='image/svg+xml; charset=utf-8',headers=headers)
     except ValueError as exc:
