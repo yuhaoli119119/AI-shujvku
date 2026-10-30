@@ -582,6 +582,21 @@ details[open] .diag-chevron {
   overflow: visible;
 }
 
+.static-scatter-image {
+  display: block;
+  object-fit: contain;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.scatter-plot[hidden] {
+  display: none !important;
+}
+
+.plot-wrap.is-static-preview #scatterPlot {
+  display: none !important;
+}
+
 .plot-grid {
   stroke: var(--color-border);
   stroke-width: 1;

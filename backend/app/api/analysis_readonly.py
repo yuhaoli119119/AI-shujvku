@@ -1,6 +1,7 @@
 """GET compatibility for the mature DFT/visuals pages, without old workflows."""
 from collections import Counter
 import gzip
+import hashlib
 import json
 from typing import Literal
 
@@ -12,8 +13,15 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db_session
 from app.config import get_settings
 from app.security.owner import require_owner_request
-from app.services.analysis_readonly import AnalysisReadonlyService, POLICY
+from app.services.analysis_readonly import AnalysisReadonlyService, POLICY, _content_revision
 from app.services.catalyst_analysis_service import CatalystAnalysisService
+from app.services.analysis_visual_chart import (
+    chart_cache_key,
+    compact_correlation_payload,
+    read_cached_svg,
+    render_correlation_svg,
+    write_cached_svg,
+)
 
 router = APIRouter()
 
@@ -160,12 +168,61 @@ def scientific_response(request, result):
     return JSONResponse(content=jsonable_encoder(result),headers={'Vary':'Accept-Encoding'})
 
 
+@router.get('/visuals/catalyst-correlation/render.svg')
+def correlation_svg(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
+                    args=Depends(options),session: Session=Depends(get_db_session)):
+    try:
+        x_field=x_field.strip().lower()
+        y_field=y_field.strip().lower()
+        svc=service(args,session)
+        cache_enabled=args['source']=='rebuild' and session.get_bind().dialect.name=='postgresql'
+        revision=_content_revision(session) if cache_enabled else None
+        cache_key=chart_cache_key({'source':args['source'],'library_name':args['library_name'],'filters':args['filters'],
+                                   'include_estimated':args['include_estimated'],'include_unlabelled':args['include_unlabelled'],
+                                   'x_field':x_field,'y_field':y_field,'min_n':min_n,'revision':revision}) if cache_enabled else None
+        cache_dir=get_settings().storage_root / '.visual-render-cache'
+        svg=read_cached_svg(cache_dir,cache_key) if cache_key else None
+        if svg is None:
+            revision_stable=not cache_enabled
+            for _attempt in range(3):
+                payload=svc.cached_output('correlation', {'x':x_field,'y':y_field,'min_n':min_n},
+                                          lambda: svc.correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n))
+                if not cache_enabled:
+                    break
+                current_revision=_content_revision(session)
+                if current_revision==revision:
+                    revision_stable=True
+                    break
+                revision=current_revision
+                cache_key=chart_cache_key({'source':args['source'],'library_name':args['library_name'],'filters':args['filters'],
+                                           'include_estimated':args['include_estimated'],'include_unlabelled':args['include_unlabelled'],
+                                           'x_field':x_field,'y_field':y_field,'min_n':min_n,'revision':revision})
+            if not revision_stable:
+                raise HTTPException(409,detail='analysis_data_changed_during_render')
+            svg=render_correlation_svg(payload,x_field=x_field,y_field=y_field)
+            if cache_key:
+                write_cached_svg(cache_dir,cache_key,svg)
+        etag='"'+hashlib.sha256(svg.encode('utf-8')).hexdigest()+'"'
+        headers={'ETag':etag,'Cache-Control':'private, no-cache, max-age=0, must-revalidate',
+                 'X-Correlation-Render':'static-svg','X-Analysis-Mode':'exploratory',
+                 'X-Content-Type-Options':'nosniff',
+                 'Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"}
+        if request.headers.get('if-none-match')==etag:
+            return Response(status_code=304,headers=headers)
+        return Response(content=svg,media_type='image/svg+xml; charset=utf-8',headers=headers)
+    except ValueError as exc:
+        raise HTTPException(400,detail=str(exc)) from exc
+
+
 @router.get('/visuals/catalyst-correlation')
 def correlation(request: Request,x_field: str,y_field: str,min_n: int=Query(3,ge=3,le=50),
+                view: Literal['full','compact']='full',
                 args=Depends(options),session: Session=Depends(get_db_session)):
     try:
         svc=service(args,session)
         result=svc.cached_output('correlation', {'x':x_field,'y':y_field,'min_n':min_n}, lambda: svc.correlation(library_name=args['library_name'],x_field=x_field,y_field=y_field,min_n=min_n))
+        if view=='compact':
+            result=compact_correlation_payload(result)
         return scientific_response(request, result)
     except ValueError as exc:
         raise HTTPException(400,detail=str(exc)) from exc

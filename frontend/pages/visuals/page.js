@@ -859,8 +859,8 @@
       empty.style.display = "none";
       const rows = data.analysis_row_counts || {};
       const excluded = data.excluded_details || [];
-      const nx = excluded.filter(p => p.x_candidates?.length).length;
-      const ny = excluded.filter(p => p.y_candidates?.length).length;
+      const nx = data.candidate_counts?.x ?? excluded.filter(p => p.x_candidates?.length).length;
+      const ny = data.candidate_counts?.y ?? excluded.filter(p => p.y_candidates?.length).length;
       const isError = !data.analysis_row_counts;
       $("plotEmptySummary").innerHTML = '<h3>' + (isError ? esc(data.insufficient_reason || "等待分析数据") : "当前字段尚未形成有效配对") + '</h3>'
         + (isError ? '' : '<div class="availability-strip"><span>X 有候选值<b>' + nx + '</b></span><span>Y 有候选值<b>' + ny + '</b></span><span>有效配对<b>0</b></span></div><p>库中仍有 ' + esc(rows.total_dft_rows ?? "—") + ' 条提取字段，' + esc(rows.physical_numeric_records ?? rows.pair_analysis_ready_numeric_rows ?? "—") + ' 条可探索数值。字段记录数不等于有效配对点数。<br>所选字段可能缺少合格数值或可比计算条件，展开下方数据说明查看原因。</p>');
@@ -1042,6 +1042,7 @@
     $("relationStatus").textContent = "正在读取同一催化剂样本的关系数据…";
     $("retryCorrelation").hidden = true;
     const plotWrap = document.querySelector(".plot-wrap") || document.querySelector(".plot-container");
+    if (plotWrap) plotWrap.classList.remove("is-static-preview");
     if (plotWrap) { plotWrap.classList.add("is-loading"); plotWrap.setAttribute("aria-busy", "true"); }
     $("plotEmpty").textContent = "正在加载…";
     $("plotEmpty").style.display = "";
@@ -1054,8 +1055,29 @@
     try {
       syncVisualUrl();
       const params = visualParams(new URLSearchParams({ x_field: xField, y_field: yField, min_n: String(minN) }));
+      const staticImage = $("staticScatterImage");
+      const livePlot = $("scatterPlot");
+      let interactiveReady = false;
+      if (livePlot) livePlot.hidden = false;
+      if (staticImage) {
+        staticImage.alt = `${xMeta.labelZh}与${yMeta.labelZh}静态散点图，交互数据加载中`;
+        staticImage.hidden = true;
+        staticImage.onload = () => {
+          if (requestId !== state.requestId || interactiveReady) return;
+          staticImage.hidden = false;
+          if (livePlot) livePlot.hidden = true;
+          if (plotWrap) plotWrap.classList.add("is-static-preview");
+        };
+        staticImage.onerror = () => { if (requestId === state.requestId) staticImage.hidden = true; };
+        staticImage.src = "/api/visuals/catalyst-correlation/render.svg?" + params.toString();
+      }
+      params.set("view", "compact");
       const data = await getJSON("/api/visuals/catalyst-correlation?" + params.toString(), correlationController.signal, {timeoutMs: 120000});
       if (requestId !== state.requestId) return;
+      interactiveReady = true;
+      if (staticImage) { staticImage.onload = null; staticImage.onerror = null; staticImage.hidden = true; }
+      if (livePlot) livePlot.hidden = false;
+      if (plotWrap) plotWrap.classList.remove("is-static-preview");
       state.lastCorrelation = data;
       const counts = data.analysis_row_counts || {};
       $("headerCompactSummary").textContent = `${state.libraryName || "当前文献库"} · ${counts.total_dft_rows ?? "—"} 提取字段 · ${counts.distinct_exploratory_catalysts ?? "—"} 催化剂`;
@@ -1080,7 +1102,17 @@
       $("verdictMeta").textContent = "无法判断有效配对数量，请重试";
       $("verdictQuality").textContent = "读取失败";
       renderDiagnostics({});
-      plot({ insufficient_reason: "关系数据读取失败，未绘制拟合线。" });
+      const staticImage = $("staticScatterImage");
+      const livePlot = $("scatterPlot");
+      if (staticImage?.complete && staticImage.naturalWidth > 0) {
+        staticImage.hidden = false;
+        if (livePlot) livePlot.hidden = true;
+        if (plotWrap) plotWrap.classList.add("is-static-preview");
+      } else {
+        if (livePlot) livePlot.hidden = false;
+        if (plotWrap) plotWrap.classList.remove("is-static-preview");
+        plot({ insufficient_reason: "关系数据读取失败，未绘制拟合线。" });
+      }
       renderDetails({ points: [] });
     } finally {
       if (requestId === state.requestId && plotWrap) { plotWrap.classList.remove("is-loading"); plotWrap.setAttribute("aria-busy", "false"); }
@@ -1687,7 +1719,18 @@
 
     // 3. Tab 1 事件绑定
     let correlationDebounceTimer = null;
+    function invalidatePendingCorrelation() {
+      ++state.requestId;
+      correlationController?.abort();
+      invalidateResponses();
+      const image = $("staticScatterImage");
+      if (image) { image.onload = null; image.onerror = null; image.hidden = true; }
+      const plot = $("scatterPlot");
+      if (plot) plot.hidden = false;
+      document.querySelector(".plot-wrap")?.classList.remove("is-static-preview");
+    }
     function debouncedLoadCorrelation() {
+      invalidatePendingCorrelation();
       clearTimeout(correlationDebounceTimer);
       correlationDebounceTimer = setTimeout(loadCorrelation, 100);
     }

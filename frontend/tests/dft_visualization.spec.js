@@ -94,12 +94,98 @@ async function installVisualMocks(page, correlationRequests) {
     contentType: "application/json",
     body: JSON.stringify(fields),
   }));
+  await page.route("**/api/visuals/catalyst-correlation/render.svg*", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560"><text x="20" y="40">Static preview</text></svg>',
+  }));
   await page.route("**/api/visuals/catalyst-correlation?*", (route) => {
     const url = new URL(route.request().url());
     correlationRequests.push(url);
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(correlationPayload(url)) });
   });
 }
+
+test("shows the server-rendered plot while compact interaction data is loading", async ({ page }) => {
+  let releaseCorrelation;
+  const correlationGate = new Promise((resolve) => { releaseCorrelation = resolve; });
+  const correlationRequests = [];
+  const staticRequests = [];
+  await page.route("**/api/libraries", (route) => route.fulfill({ json: [{ name: "Active Library", is_active: true }] }));
+  await page.route("**/api/visuals/overview*", (route) => route.fulfill({ json: { summary: {} } }));
+  await page.route("**/api/visuals/analysis-fields*", (route) => route.fulfill({ json: fields }));
+  await page.route("**/api/visuals/catalyst-correlation/render.svg*", (route) => {
+    staticRequests.push(new URL(route.request().url()));
+    return route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560"><rect width="960" height="560" fill="white"/><text x="20" y="40">Static preview</text></svg>',
+    });
+  });
+  await page.route("**/api/visuals/catalyst-correlation?*", async (route) => {
+    const url = new URL(route.request().url());
+    correlationRequests.push(url);
+    await correlationGate;
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(correlationPayload(url)) });
+  });
+
+  await page.goto(BASE_URL + "/pages/visuals/index.html");
+  await expect.poll(() => staticRequests.length).toBe(1);
+  await expect(page.locator("#staticScatterImage")).toBeVisible();
+  await expect(page.locator("#scatterPlot")).toBeHidden();
+  expect(correlationRequests[0].searchParams.get("view")).toBe("compact");
+
+  releaseCorrelation();
+  await expect(page.locator("#scatterPlot")).toBeVisible();
+  await expect(page.locator("#staticScatterImage")).toBeHidden();
+  await expect(page.locator(".plot-point")).toHaveCount(3);
+});
+
+test("a late static preview cannot replace the interactive plot", async ({ page }) => {
+  let releaseStatic;
+  const staticGate = new Promise((resolve) => { releaseStatic = resolve; });
+  await page.route("**/api/libraries", (route) => route.fulfill({ json: [{ name: "Active Library", is_active: true }] }));
+  await page.route("**/api/visuals/overview*", (route) => route.fulfill({ json: { summary: {} } }));
+  await page.route("**/api/visuals/analysis-fields*", (route) => route.fulfill({ json: fields }));
+  await page.route("**/api/visuals/catalyst-correlation/render.svg*", async (route) => {
+    await staticGate;
+    return route.fulfill({
+      contentType: "image/svg+xml",
+      body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560"><text x="20" y="40">Late static preview</text></svg>',
+    });
+  });
+  await page.route("**/api/visuals/catalyst-correlation?*", (route) => {
+    const url = new URL(route.request().url());
+    return route.fulfill({ contentType: "application/json", body: JSON.stringify(correlationPayload(url)) });
+  });
+
+  await page.goto(BASE_URL + "/pages/visuals/index.html");
+  await expect(page.locator(".plot-point")).toHaveCount(3);
+  releaseStatic();
+  await page.waitForTimeout(250);
+  await expect(page.locator("#scatterPlot")).toBeVisible();
+  await expect(page.locator(".plot-point")).toHaveCount(3);
+  await expect(page.locator("#staticScatterImage")).toBeHidden();
+});
+
+test("keeps the static preview when interactive details fail", async ({ page }) => {
+  await page.route("**/api/libraries", (route) => route.fulfill({ json: [{ name: "Active Library", is_active: true }] }));
+  await page.route("**/api/visuals/overview*", (route) => route.fulfill({ json: { summary: {} } }));
+  await page.route("**/api/visuals/analysis-fields*", (route) => route.fulfill({ json: fields }));
+  await page.route("**/api/visuals/catalyst-correlation/render.svg*", (route) => route.fulfill({
+    contentType: "image/svg+xml",
+    body: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 640"><text x="20" y="40">Static fallback</text></svg>',
+  }));
+  await page.route("**/api/visuals/catalyst-correlation?*", (route) => route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ detail: "temporary" }),
+  }));
+
+  await page.goto(BASE_URL + "/pages/visuals/index.html");
+  await expect(page.locator("#staticScatterImage")).toBeVisible();
+  await expect(page.locator("#scatterPlot")).toBeHidden();
+  await expect(page.locator("#retryCorrelation")).toBeVisible();
+  await expect(page.locator("#relationStatus")).toContainText("关系数据读取失败");
+});
 
 test.describe("DFT 数据可视化迁移", () => {
   test("uses backend-defined nested same-catalyst data and forwards library_name", async ({ page }) => {
