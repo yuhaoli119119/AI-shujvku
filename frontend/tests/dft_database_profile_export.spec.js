@@ -30,12 +30,37 @@ test.describe('DFT Database Profile Export Interaction', () => {
           }),
         });
       }
+      if (pathname === '/api/papers/analysis-summary') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            total_records: 0,
+            exploratory_numeric_records: 0,
+            catalyst_groups: {},
+            export_policy: { effective_exports_enabled: true },
+          }),
+        });
+      }
       if (pathname === '/api/papers/compare') {
         compareCount++;
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify({ items: [], total: 0, papers: [] }),
+          body: JSON.stringify({
+            items: [{
+              record_id: 'record-1',
+              paper_id: 'paper-1',
+              catalyst_name: 'Fe-N4',
+              property_type: 'li2s2_binding_energy_ev',
+              value: -1.98,
+              unit: 'eV',
+              evidence_text: 'Li2S2 binding energy is -1.98 eV.',
+              sources: [{ page_number: 7, page_identity_status: 'verified' }],
+            }],
+            total: 1,
+            papers: [],
+          }),
         });
       }
       if (pathname === '/api/papers/dft-catalyst-options') {
@@ -107,7 +132,10 @@ test.describe('DFT Database Profile Export Interaction', () => {
     // 1. Check label and title
     const label = page.locator('label[for="datasetProfile"]');
     await expect(label).toHaveText('导出数据范围');
-    await expect(label).toHaveAttribute('title', '仅影响导出文件，不影响当前表格查询');
+    await expect(page.locator('#datasetProfile')).toHaveAttribute('title', '仅影响导出文件，不影响当前表格查询');
+    await page.locator('.evidence-link').click();
+    await expect(page.locator('#evidenceDetail')).toContainText('PDF 第 7 页');
+    await page.keyboard.press('Escape');
 
     // 2. Select dac_lis_ml: verify no /api/papers/compare or table reload occurs
     await page.selectOption('#datasetProfile', 'dac_lis_ml');
@@ -129,7 +157,7 @@ test.describe('DFT Database Profile Export Interaction', () => {
     await expect(exportStatus).toContainText('dac_lis_ml');
 
     // 4. Test ML Dataset Export with dac_lis_ml
-    const mlButton = page.locator('button:has-text("导出 ML 数据集")');
+    const mlButton = page.locator('button:has-text("导出探索 JSON")');
     await mlButton.click();
     await page.waitForTimeout(300);
 
@@ -140,12 +168,13 @@ test.describe('DFT Database Profile Export Interaction', () => {
     const mlStatusText = await exportStatus.textContent();
     expect(mlStatusText).toContain('实际导出 0 条');
     expect(mlStatusText).toContain('范围排除 5 条');
-    expect(mlStatusText).toContain('基础合格 5 条');
+    expect(mlStatusText).toContain('基础候选 5 条');
     expect(mlStatusText).not.toContain('可导出 5 条');
 
     // 5. Select sac_lis_ml: verify parameter changes to sac_lis_ml and no compare triggered
     await page.selectOption('#datasetProfile', 'sac_lis_ml');
     expect(compareCount).toBe(initialCompareCount);
+    await expect(exportStatus).toContainText('筛选条件已变化');
 
     await csvButton.click();
     await page.waitForTimeout(300);

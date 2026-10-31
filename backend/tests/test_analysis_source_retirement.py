@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from app.api import analysis_readonly as api
 from app.db.session import get_db_session
-from app.services.analysis_readonly import AnalysisReadonlyService
+from app.services.analysis_readonly import AnalysisReadonlyService, dataset_profile_matches, property_filter_matches
 
 pytestmark = pytest.mark.no_test_database
 
@@ -55,6 +55,48 @@ def test_experimental_rows_do_not_enter_default_dft_projection():
     assert svc.source == 'rebuild'
     assert svc._matches({'data_type': 'dft'})
     assert not svc._matches({'data_type': 'experimental'})
+
+
+def test_binding_energy_filter_includes_species_specific_fields():
+    svc = AnalysisReadonlyService(MagicMock(), filters={'property_type': 'binding_energy'})
+    assert svc._matches({
+        'property_type': 'li2s2_binding_energy_ev',
+        'canonical_property_type': 'li2s2_binding_energy_ev',
+    })
+    assert svc._matches({
+        'property_type': 'li2s8_binding_energy_ev',
+        'canonical_property_type': 'li2s8_binding_energy_ev',
+    })
+    assert not svc._matches({
+        'property_type': 'adsorption_energy_ev',
+        'canonical_property_type': 'adsorption_energy_ev',
+    })
+    assert property_filter_matches({'property_type': 'metal_support_binding_energy_eb'}, 'binding_energy') is False
+
+
+@pytest.mark.parametrize('profile,catalyst_type,included', [
+    ('dac_lis_ml', 'dual_atom', True),
+    ('dac_lis_ml', 'single_atom', False),
+    ('sac_lis_ml', 'single_atom', True),
+])
+def test_lis_dataset_profile_uses_catalyst_type_and_library_scope(profile, catalyst_type, included):
+    record = {'catalyst_type': catalyst_type, 'library_name': '锂硫双原子', 'reaction': 'SRR'}
+    wanted = 'dual_atom' if profile == 'dac_lis_ml' else 'single_atom'
+    assert dataset_profile_matches(record, wanted) is included
+    svc = AnalysisReadonlyService(MagicMock())
+    svc.records = [{
+        'record_id': 'record-1',
+        'paper_id': 'paper-1',
+        'sources': [],
+        'library_name': '锂硫双原子',
+        'catalyst_type': catalyst_type,
+        'reaction': 'SRR',
+        'exploratory_eligible': True,
+    }]
+    svc._loaded = ([], {}, {})
+    payload = svc.observation_dataset(dataset_profile=profile)
+    assert payload['metadata']['profile_included_count_before_limit'] == int(included)
+    assert len(payload['records']) == int(included)
 
 
 def correlation_fixture(contexts):

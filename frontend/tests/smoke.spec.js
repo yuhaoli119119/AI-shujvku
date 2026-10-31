@@ -690,6 +690,15 @@ async function mockApi(route) {
     });
   }
 
+  if (pathname === '/api/papers/analysis-summary') {
+    return jsonResponse(route, {
+      total_records: 0,
+      exploratory_numeric_records: 0,
+      catalyst_groups: {},
+      export_policy: { exports_enabled: true, effective_exports_enabled: true },
+    });
+  }
+
   if (pathname === '/api/papers/compare') {
     return jsonResponse(route, {
       items: [
@@ -2533,16 +2542,18 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
 
   test('business flow: DFT ML dataset export keeps safety summary', async ({ page }) => {
     await page.goto(`${BASE_URL}/pages/dft_database/index.html`);
-    await page.waitForTimeout(500);
-    await expect(page.locator('button[onclick="exportMLDataset()"]')).toContainText('导出 ML 数据集');
+    const exportButton = page.locator('button[onclick="exportMLDataset()"]');
+    await expect(exportButton).toContainText('导出探索 JSON');
+    await expect(exportButton).toBeEnabled();
 
     const downloadPromise = page.waitForEvent('download');
-    await page.click('button[onclick="exportMLDataset()"]');
+    await exportButton.click();
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('已确认 + 必要证据 + 准确定位');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('可导出 1 条');
-    await expect(page.locator('#exportSafetyStatus')).toContainText('待完成 2 条');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('ML 导出规则');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('基础候选 1 条');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('实际导出 1 条');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('待处理 2 条');
   });
 
   test('business flow: DFT export safety overview refreshes when library changes', async ({ page }) => {

@@ -131,6 +131,27 @@ def normalize_numeric(prop, value, unit):
     return value, str(unit).strip(), None
 
 
+def property_filter_matches(record, needle):
+    """Match coarse UI energy categories without conflating raw fields."""
+    raw = str(record.get('property_type') or '').strip().casefold()
+    canonical = str(record.get('canonical_property_type') or '').strip().casefold()
+    wanted = str(_taxonomy(needle).get('canonical_property_type') or needle).strip().casefold()
+    if canonical == wanted or raw == str(needle).strip().casefold():
+        return True
+    if wanted == 'binding_energy':
+        return raw in {'binding_energy_ev', 'binding_energy'} or raw.endswith('_binding_energy_ev')
+    return False
+
+
+def dataset_profile_matches(record, catalyst_type):
+    """Select Li-S catalyst profiles without merging other library scopes."""
+    if record.get('catalyst_type') != catalyst_type:
+        return False
+    library = normalize_library_name(record.get('library_name'))
+    reaction = str(record.get('reaction') or '').strip().casefold()
+    return library == '锂硫双原子' or reaction in {'li-s', 'lis', 'li_s', 'lithium_sulfur'}
+
+
 class AnalysisReadonlyService(CatalystAnalysisService):
     def __init__(self, session: Session, *, source='rebuild', library_name=None, filters=None, include_estimated=False, include_unlabelled=False):
         super().__init__(session)
@@ -190,8 +211,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             if not needle:
                 continue
             if key == 'property_type':
-                wanted = _taxonomy(needle).get('canonical_property_type') or needle
-                if str(record['canonical_property_type']).casefold() != str(wanted).casefold() and str(record['property_type']).casefold() != str(needle).casefold():
+                if not property_filter_matches(record, needle):
                     return False
             elif key == 'data_type' and needle != record.get('data_type'):
                 return False
@@ -572,7 +592,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
                 raise ValueError('unsupported dataset_profile')
             wanted=profiles[dataset_profile]
             allowed={'dual_atom','DAC','dac'} if wanted=='dual_atom' else {'single_atom','SAC','sac'}
-            rows=[r for r in rows if r['catalyst_type'] in allowed and str(r['reaction'] or '').lower() in {'li-s','lis','li_s','lithium_sulfur'}]
+            rows=[r for r in rows if r['catalyst_type'] in allowed and dataset_profile_matches(r, wanted)]
         included=len(rows)
         rows=rows[offset:offset+limit] if limit is not None else rows[offset:]
         return self.decorate({'schema_version':'stored_dft_exploratory_v1','records':rows,'metadata':{'total_records':len(self.records),'exploratory_numeric_records':before,'approved_count':None,'assessment_status':'not_evaluated','safety_gate':'not_evaluated_exploratory_only','dataset_profile':dataset_profile,'profile_included_count_before_limit':included,'profile_excluded_count':before-included,'exported_count_after_limit':len(rows),'offset':offset,'limit':limit}})

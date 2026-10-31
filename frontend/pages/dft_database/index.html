@@ -717,7 +717,7 @@
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
             <div class="filter-field"><label for="catalystName" style="white-space: nowrap;">催化剂</label><select id="catalystName" onchange="handleDftFilterChange()"><option value="">all</option></select></div>
             <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="默认不限；填写门槛后只保留有记录且达到门槛的置信度">最低置信度</label><input id="minConfidence" type="number" value="" placeholder="不限" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
-            <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子/双金属 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双金属 (bimetallic_lis_ml)</option></select></div>
+            <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" onchange="markDftExportStale()" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子/双金属 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双金属 (bimetallic_lis_ml)</option></select></div>
           </div>
           <div class="export-panel dft-export-panel">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
@@ -1049,9 +1049,12 @@
       const onAbort = () => controller.abort();
       if (incoming) { if (incoming.aborted) controller.abort(); else incoming.addEventListener("abort", onAbort, {once:true}); }
       let timedOut = false;
-      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 20000);
+      const requestOptions = {...(options || {})};
+      const timeoutMs = Math.max(1000, Number(requestOptions.timeoutMs) || 20000);
+      delete requestOptions.timeoutMs;
+      const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       try {
-        const resp = await fetch(url, {...(options || {}), signal:controller.signal});
+        const resp = await fetch(url, {...requestOptions, signal:controller.signal});
         const text = await resp.text();
         let data = null; try { data = text ? JSON.parse(text) : null; } catch (_) {}
         if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
@@ -1193,6 +1196,7 @@
     }
     function handleLibraryChange() {
       setCurrentLibraryFromSelect();
+      markDftExportStale();
       ++overviewRequest; ++catalystRequest;
       resetDftPagination();
       state.catalystOptions = [];
@@ -1233,6 +1237,7 @@
       return Math.max(1, Math.ceil(totalItems / getDftPageSize()));
     }
     function handleDftFilterChange() {
+      markDftExportStale();
       resetDftPagination();
       scheduleQueryDFT();
     }
@@ -1436,7 +1441,7 @@
         if (catalyst) params.set("catalyst_name", catalyst);
         const minConf = document.getElementById("minConfidence").value.trim();
         if (minConf !== "") params.set("min_confidence", minConf);
-        const data = await fetchJSON(`/api/papers/analysis-summary?${params.toString()}`);
+        const data = await fetchJSON(`/api/papers/analysis-summary?${params.toString()}`, {timeoutMs:60000});
         if (ticket !== overviewRequest || library !== state.currentLibrary) return;
         applyDftExportPolicy(data.export_policy);
         const numeric = Number(data.exploratory_numeric_records || 0);
@@ -1625,8 +1630,13 @@
     }
     function renderFragmentLocationRows(row) {
       const fragment = evidenceFragmentPayload(row);
+      const sourcePages = [...new Set((Array.isArray(row && row.sources) ? row.sources : [])
+        .map(source => Number(source && (source.page_number ?? source.page)))
+        .filter(page => Number.isFinite(page) && page > 0))];
+      const pageLabel = sourcePages.length ? sourcePages.map(page => 'PDF 第 ' + page + ' 页').join(' / ') : (row && row.evidence_page ? 'PDF 第 ' + row.evidence_page + ' 页' : '-');
       return '<div class="quality-status-grid">' +
           '<div class="readable-field"><div class="k">来源文献</div><div class="v">' + esc(fragment.paper || "文献") + (fragment.doi ? '<br><span class="muted">' + esc(fragment.doi) + '</span>' : "") + '</div></div>' +
+          '<div class="readable-field"><div class="k">PDF 页码</div><div class="v">' + esc(pageLabel) + '</div></div>' +
           '<div class="readable-field"><div class="k">来源章节</div><div class="v">' + esc(fragment.section || "-") + '</div></div>' +
           '<div class="readable-field"><div class="k">图表 / 步骤</div><div class="v">' + esc([fragment.table, fragment.figure, row && row.reaction_step].filter(Boolean).join(" / ") || "-") + '</div></div>' +
           '<div class="readable-field"><div class="k">片段定位状态</div><div class="v">' + esc(fragmentStatusLabel(row)) + '</div></div>' +
@@ -1890,6 +1900,9 @@
       const el = document.getElementById("exportSafetyStatus");
       if (el) el.textContent = message;
     }
+    function markDftExportStale() {
+      setExportSafetyStatus("筛选条件已变化；请重新导出以获取当前范围结果。");
+    }
     async function exportCSV() {
       await ensureCurrentLibraryName();
       const prop = document.getElementById("propertyType").value;
@@ -1979,8 +1992,9 @@
       const button = document.createElement("button");
       button.className = "btn btn-outline";
       button.type = "button";
-      button.textContent = "导出 ML 数据集";
+      button.textContent = "导出探索 JSON（非训练集）";
       button.setAttribute("onclick", "exportMLDataset()");
+      button.title = "逐值探索导出；审核状态未知，不是已完成目标、分组、去重和拆分的训练集";
       if (csvButton) {
         csvButton.insertAdjacentElement("afterend", button);
       } else {
@@ -2057,7 +2071,7 @@
         const downloadUrl = URL.createObjectURL(blob);
         const link = document.createElement("a");
         link.href = downloadUrl;
-        link.download = "dft_ml_dataset.json";
+        link.download = "dft_exploratory.json";
         document.body.appendChild(link);
         link.click();
         link.remove();
