@@ -840,6 +840,8 @@
       queryDebounceTimer: null,
       overviewTimer: null,
       catalystOptions: [],
+      exportRequestSerial: 0,
+      exportController: null,
     };
     function esc(value) { return String(value == null ? "" : value).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
     /* 文献标题里带 <sub>4</sub> 这类下标标记（库里有若干条）。
@@ -1166,7 +1168,7 @@
       const params = applyLibraryParam(new URLSearchParams());
       const url = `/api/papers/analysis-summary${params.toString() ? "?" + params.toString() : ""}`;
       try {
-        const data = await fetchJSON(url);
+        const data = await fetchJSON(url, {timeoutMs:60000});
         if (ticket !== catalystRequest || library !== state.currentLibrary) return;
         applyDftExportPolicy(data.export_policy);
         const names = new Set();
@@ -1641,10 +1643,21 @@
     }
     function renderFragmentLocationRows(row) {
       const fragment = evidenceFragmentPayload(row);
-      const sourcePages = [...new Set((Array.isArray(row && row.sources) ? row.sources : [])
-        .map(source => Number(source && (source.page_number ?? source.page)))
+      const sourcePages = Array.isArray(row && row.sources) ? row.sources : [];
+      const verifiedPages = [...new Set(sourcePages
+        .filter(source => source && source.page_identity_status === 'verified')
+        .map(source => Number(source.page_number ?? source.page))
         .filter(page => Number.isFinite(page) && page > 0))];
-      const pageLabel = sourcePages.length ? sourcePages.map(page => 'PDF 第 ' + page + ' 页').join(' / ') : (row && row.evidence_page ? 'PDF 第 ' + row.evidence_page + ' 页' : '-');
+      const unverifiedPages = [...new Set(sourcePages
+        .filter(source => source && source.page_identity_status !== 'verified')
+        .map(source => Number(source.page_number ?? source.page))
+        .filter(page => Number.isFinite(page) && page > 0))];
+      const pageLabels = [
+        ...verifiedPages.map(page => 'PDF 第 ' + page + ' 页'),
+        ...unverifiedPages.map(page => '候选页码 ' + page + '（来源身份未核验）'),
+      ];
+      if (!pageLabels.length && row && row.evidence_page) pageLabels.push('候选页码 ' + row.evidence_page + '（来源身份未核验）');
+      const pageLabel = pageLabels.length ? pageLabels.join(' / ') : '-';
       return '<div class="quality-status-grid">' +
           '<div class="readable-field"><div class="k">来源文献</div><div class="v">' + esc(fragment.paper || "文献") + (fragment.doi ? '<br><span class="muted">' + esc(fragment.doi) + '</span>' : "") + '</div></div>' +
           '<div class="readable-field"><div class="k">PDF 页码</div><div class="v">' + esc(pageLabel) + '</div></div>' +
@@ -1912,7 +1925,19 @@
       if (el) el.textContent = message;
     }
     function markDftExportStale() {
+      state.exportRequestSerial += 1;
+      if (state.exportController) {
+        state.exportController.abort();
+        state.exportController = null;
+      }
       setExportSafetyStatus("筛选条件已变化；请重新导出以获取当前范围结果。");
+    }
+    function beginExportRequest() {
+      if (state.exportController) state.exportController.abort();
+      state.exportRequestSerial += 1;
+      const controller = new AbortController();
+      state.exportController = controller;
+      return {serial:state.exportRequestSerial, controller};
     }
     async function exportCSV() {
       await ensureCurrentLibraryName();
@@ -1931,9 +1956,10 @@
       applyLibraryParam(params);
       let url = `/api/papers/export/csv?${params.toString()}`;
       const headers = {};
+      const request = beginExportRequest();
       setExportSafetyStatus("正在读取导出安全结果...");
       try {
-        const resp = await fetch(url, { headers });
+        const resp = await fetch(url, { headers, signal:request.controller.signal });
         const text = await resp.text();
         if (!resp.ok) {
           let detail = text;
@@ -1943,6 +1969,7 @@
           } catch (_) {}
           throw new Error(detail || "HTTP " + resp.status);
         }
+        if (request.serial !== state.exportRequestSerial) return;
         const gate = resp.headers.get("X-D3-Export-Safety-Gate") || "";
         const exported = parseInt(resp.headers.get("X-Exploratory-Row-Count") || resp.headers.get("X-D3-Export-Count") || "0", 10);
         const blocked = parseInt(resp.headers.get("X-D3-Block-Count") || "0", 10);
@@ -1992,8 +2019,11 @@
         URL.revokeObjectURL(downloadUrl);
         showToast(toastMessage);
       } catch (error) {
+        if (error.name === 'AbortError' || request.serial !== state.exportRequestSerial) return;
         setExportSafetyStatus("导出失败：" + error.message);
         showToast("CSV 导出失败：" + error.message);
+      } finally {
+        if (state.exportController === request.controller) state.exportController = null;
       }
     }
     function ensureMLExportButton() {
@@ -2029,13 +2059,15 @@
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
+      const request = beginExportRequest();
       setExportSafetyStatus("正在生成探索 JSON...");
       try {
-        const resp = await fetch(url, { headers });
+        const resp = await fetch(url, { headers, signal:request.controller.signal });
         const text = await resp.text();
         let data = null;
         try { data = text ? JSON.parse(text) : null; } catch (_) {}
         if (!resp.ok) throw new Error(data && data.detail ? data.detail : "HTTP " + resp.status);
+        if (request.serial !== state.exportRequestSerial) return;
         const metadata = data && data.metadata ? data.metadata : {};
         const baseEligible = Number(metadata.exploratory_numeric_records ?? metadata.base_eligible_count ?? metadata.eligible_count ?? 0);
         const respProfile = String(metadata.dataset_profile || "").trim();
@@ -2089,8 +2121,11 @@
         URL.revokeObjectURL(downloadUrl);
         showToast(toastMessage);
       } catch (error) {
+        if (error.name === 'AbortError' || request.serial !== state.exportRequestSerial) return;
         setExportSafetyStatus("探索 JSON 导出失败：" + error.message);
         showToast("探索 JSON 导出失败：" + error.message);
+      } finally {
+        if (state.exportController === request.controller) state.exportController = null;
       }
     }
     document.addEventListener("DOMContentLoaded", () => {
