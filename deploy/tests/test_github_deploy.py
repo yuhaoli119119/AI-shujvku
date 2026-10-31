@@ -1,4 +1,4 @@
-import importlib.util,json,tempfile,unittest
+import importlib.util,hashlib,json,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -6,6 +6,24 @@ spec=importlib.util.spec_from_file_location('github_deploy',Path(__file__).paren
 deploy=importlib.util.module_from_spec(spec);spec.loader.exec_module(deploy)
 
 class DeploymentBoundaryTests(unittest.TestCase):
+    def _ml_assets(self,runtime,asset_sha=None):
+        scope={'libraryName':'锂硫双原子','libraryScopeKey':'lithium-sulfur-dual-atom',
+               'domains':['LITHIUM_SULFUR_MODEL'],'unitCount':177948,'exactMaterialContexts':5775}
+        allow={'domains':['LITHIUM_SULFUR_MODEL'],'models':['random_forest','dummy_median']}
+        payload={'schemaVersion':'ml-explorer-candidate.v2','manifest':{
+            'libraryName':scope['libraryName'],'libraryScopeKey':scope['libraryScopeKey'],
+            'dataDomains':scope['domains'],'allow':allow}}
+        bundle=(json.dumps(payload)+'\n').encode()
+        bundle_sha=hashlib.sha256(bundle).hexdigest()
+        source=runtime/'data/ml-explorer-releases'/(asset_sha or bundle_sha)
+        source.mkdir(parents=True)
+        (source/'app_data.json').write_bytes(bundle)
+        manifest={'schemaVersion':'ml-explorer-runtime.v2','adapterEntry':'data/app_data.json',
+                  'bundle':{'sha256':bundle_sha,'bytes':len(bundle),'payloadSchemaVersion':'ml-explorer-candidate.v2'},
+                  'scope':scope,'allow':allow}
+        (source/'manifest.json').write_text(json.dumps(manifest)+'\n')
+        return source
+
     def _complete_infos(self,runtime,sha):
         app=runtime/'releases'/sha
         infos={}
@@ -61,6 +79,147 @@ class DeploymentBoundaryTests(unittest.TestCase):
         mount=result['services']['owner-gateway']['volumes'][0]
         self.assertEqual(mount['source'],str(app/'deploy/nginx/owner.conf.template'))
         self.assertTrue(mount['read_only'])
+
+    def test_ml_explorer_private_asset_mount_is_validated_and_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='b'*40;app=runtime/'releases'/sha
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            source=self._ml_assets(runtime)
+            cfg={'services':{'backend':{'volumes':[
+                {'type':'bind','source':str(source),'target':deploy.ML_EXPLORER_MOUNT,'read_only':True}]}}}
+            with patch.object(deploy,'run',return_value=json.dumps(cfg)):
+                result=deploy.configuration(runtime,app,sha)
+            assets=result.pop('_litai_private_assets')
+            self.assertEqual(assets['source'],str(source.resolve()))
+            self.assertEqual(assets['bundle_sha256'],hashlib.sha256((source/'app_data.json').read_bytes()).hexdigest())
+            self.assertTrue(assets['read_only'])
+
+    def test_ml_explorer_requires_private_asset_mount_when_page_is_embedded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='b'*40;app=runtime/'releases'/sha
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            cfg={'services':{'backend':{'volumes':[]}}}
+            with patch.object(deploy,'run',return_value=json.dumps(cfg)):
+                with self.assertRaisesRegex(RuntimeError,'must mount ML Explorer assets exactly once'):
+                    deploy.configuration(runtime,app,sha)
+
+    def test_ml_explorer_writable_asset_mount_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='b'*40;app=runtime/'releases'/sha
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            source=self._ml_assets(runtime)
+            cfg={'services':{'backend':{'volumes':[
+                {'type':'bind','source':str(source),'target':deploy.ML_EXPLORER_MOUNT,'read_only':False}]}}}
+            with patch.object(deploy,'run',return_value=json.dumps(cfg)):
+                with self.assertRaisesRegex(RuntimeError,'must be read-only bind'):
+                    deploy.configuration(runtime,app,sha)
+
+    def test_ml_explorer_asset_hash_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);source=self._ml_assets(runtime)
+            manifest=json.loads((source/'manifest.json').read_text())
+            manifest['bundle']['sha256']='0'*64
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(RuntimeError,'hash/bytes mismatch'):
+                deploy.validate_ml_explorer_assets(runtime,source)
+
+    def test_ml_explorer_asset_directory_must_match_bundle_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);source=self._ml_assets(runtime,'a'*64)
+            with self.assertRaisesRegex(RuntimeError,'directory name must equal bundle SHA-256'):
+                deploy.validate_ml_explorer_assets(runtime,source)
+
+    def test_ml_explorer_runtime_scope_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);source=self._ml_assets(runtime)
+            manifest=json.loads((source/'manifest.json').read_text())
+            manifest['scope']['domains']=['OTHER_DOMAIN']
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(RuntimeError,'runtime scope mismatch'):
+                deploy.validate_ml_explorer_assets(runtime,source)
+
+    def test_ml_explorer_scope_count_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);source=self._ml_assets(runtime)
+            manifest=json.loads((source/'manifest.json').read_text())
+            manifest['scope']['unitCount']=1
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(RuntimeError,'runtime scope mismatch'):
+                deploy.validate_ml_explorer_assets(runtime,source)
+
+    def test_ml_explorer_allowlist_mismatch_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);source=self._ml_assets(runtime)
+            manifest=json.loads((source/'manifest.json').read_text())
+            manifest['allow']['domains']=['OTHER_DOMAIN']
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            with self.assertRaisesRegex(RuntimeError,'allowlist mismatch'):
+                deploy.validate_ml_explorer_assets(runtime,source)
+
+    def test_ml_explorer_asset_source_outside_release_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory)
+            with self.assertRaisesRegex(RuntimeError,'must come from'):
+                deploy.validate_ml_explorer_assets(runtime,runtime/'data/other')
+
+    def test_verify_accepts_exact_ml_explorer_mount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='a'*40
+            app,infos=self._complete_infos(runtime,sha)
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            source=self._ml_assets(runtime)
+            infos['backend']['Mounts'].append({'Type':'bind','Source':str(source),
+                                               'Destination':deploy.ML_EXPLORER_MOUNT,'RW':False})
+            outputs=[json.dumps([infos[name]]) for name in deploy.SERVICES]
+            outputs.append(json.dumps({'status':'ok','git_commit':sha}))
+            with patch.object(deploy,'application_root',return_value=app),patch.object(deploy,'run',side_effect=outputs):
+                self.assertEqual(deploy.verify(runtime,sha)['git_commit'],sha)
+
+    def test_verify_rejects_missing_ml_explorer_mount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='a'*40
+            app,infos=self._complete_infos(runtime,sha)
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            outputs=[json.dumps([infos[name]]) for name in deploy.SERVICES]
+            with patch.object(deploy,'application_root',return_value=app),patch.object(deploy,'run',side_effect=outputs):
+                with self.assertRaisesRegex(RuntimeError,'Missing or duplicate ML Explorer asset mount'):
+                    deploy.verify(runtime,sha)
+
+    def test_verify_rejects_duplicate_ml_explorer_mount(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='a'*40
+            app,infos=self._complete_infos(runtime,sha)
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            source=self._ml_assets(runtime)
+            mount={'Type':'bind','Source':str(source),'Destination':deploy.ML_EXPLORER_MOUNT,'RW':False}
+            infos['backend']['Mounts'].extend([mount,dict(mount)])
+            outputs=[json.dumps([infos[name]]) for name in deploy.SERVICES]
+            with patch.object(deploy,'application_root',return_value=app),patch.object(deploy,'run',side_effect=outputs):
+                with self.assertRaisesRegex(RuntimeError,'Missing or duplicate ML Explorer asset mount'):
+                    deploy.verify(runtime,sha)
+
+    def test_verify_rejects_ml_explorer_scope_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);sha='a'*40
+            app,infos=self._complete_infos(runtime,sha)
+            (app/'frontend/pages/ml_explorer').mkdir(parents=True)
+            (app/'frontend/pages/ml_explorer/index.html').write_text('ok')
+            source=self._ml_assets(runtime)
+            manifest=json.loads((source/'manifest.json').read_text())
+            manifest['scope']['libraryName']='wrong-library'
+            (source/'manifest.json').write_text(json.dumps(manifest))
+            infos['backend']['Mounts'].append({'Type':'bind','Source':str(source),
+                                               'Destination':deploy.ML_EXPLORER_MOUNT,'RW':False})
+            outputs=[json.dumps([infos[name]]) for name in deploy.SERVICES]
+            with patch.object(deploy,'application_root',return_value=app),patch.object(deploy,'run',side_effect=outputs):
+                with self.assertRaisesRegex(RuntimeError,'runtime scope mismatch'):
+                    deploy.verify(runtime,sha)
 
     def test_private_state_write_atomically_replaces_existing_file(self):
         with tempfile.TemporaryDirectory() as directory:

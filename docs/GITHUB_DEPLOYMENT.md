@@ -59,3 +59,13 @@ docker exec literature-ai-postgres-1 psql -X -U literature_ai -d literature_ai -
 `backend/scripts/prepare_reviewer_access.py` 与 `scripts/reviewer_access.py` 只调用运行服务现有冻结/授权函数及正式HTTP，不修改服务端合同。此类管理工具发布：以当前生产commit为父提交仅收录本次脚本、测试和文档，推送后独立读回远端SHA，并比较实际执行文件与该commit的Git blob哈希；记录工具commit与应用commit。无需仅为脚本重启应用或持久服务，不把管理工具commit写成应用DEPLOYED_GITHUB_COMMIT。若改动app服务/schema/API则仍必须使用上文update.sh正式计划和发布流程。
 
 每次管理调用先在项目私有目录保存目标文献当前快照与现有控制回执，再通过现有服务追加冻结及任务级授权。脚本没有模型调用或任务派发。详情见 [REVIEWER_ACCESS.md](REVIEWER_ACCESS.md)。
+
+## ML Explorer 私有数据资产（2026-10-31）
+
+`frontend/pages/ml_explorer/` 的页面代码进入 GitHub；`app_data.json` 与 `manifest.json` 位于 `**/data/` 忽略范围，不得提交。发布时把两份文件放在项目持久 `data/ml-explorer-releases/<bundle-sha>/`，由 `LITAI_ML_EXPLORER_ASSET_DIR` 指向该目录，并按 `docker-compose.yml` 的只读 bind mount 提供给 backend 的 `/frontend/pages/ml_explorer/data`。
+
+`LITAI_ML_EXPLORER_ASSET_DIR` 对包含 ML Explorer 的提交是必需变量，没有可用的默认目录。变量缺失时 `docker compose config` 会失败；变量已设置但目录不存在、目录名不等于 bundle SHA-256、文件集合、hash/bytes、scope 或 allowlist 不符时，部署 plan 会在任何容器重建前拒绝。这样避免部署出无数据或越界数据页面。回退到旧提交后旧 compose 不引用该变量，变量残留不影响回退。
+
+发布计划必须核对私有 mount 为只读、manifest 内 bundle hash/bytes 与宿主文件一致；未登录 owner 页面和数据请求仍须走 `/login`，公开只读站继续返回 404。不得用 `git add -f` 绕过忽略规则，也不得把 JSON 复制进 `releases/<commit>` 形成 dirty checkout。
+
+首次 plan/apply 必须从包含本次部署校验的候选 checkout 执行 `update.sh`，或先单独发布并核实增强部署辅助脚本；旧生产工作树中的部署器不会因页面提交上线而自动获得这些新增校验。

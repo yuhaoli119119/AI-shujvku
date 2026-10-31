@@ -13,6 +13,11 @@ RELEASE_MOUNTS={
     'share-gateway':{'/etc/nginx/conf.d/default.conf':'deploy/nginx/share.conf'},
     'public-gateway':{'/etc/nginx/conf.d/default.conf':'deploy/nginx/public.conf'},
 }
+ML_EXPLORER_MOUNT='/frontend/pages/ml_explorer/data'
+ML_EXPLORER_BUNDLE_FILES={'app_data.json','manifest.json'}
+ML_EXPLORER_SCOPE={'libraryName':'锂硫双原子','libraryScopeKey':'lithium-sulfur-dual-atom',
+                   'domains':['LITHIUM_SULFUR_MODEL'],'unitCount':177948,
+                   'exactMaterialContexts':5775}
 def run(args,**kwargs):
     return subprocess.check_output(args,text=True,**kwargs).strip()
 def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -41,6 +46,53 @@ def application_root(checkout):
         if (app/'docker-compose.yml').is_file() and (app/'backend/app/main.py').is_file():
             return app
     raise RuntimeError('GitHub commit does not contain a Literature AI application')
+def ml_explorer_enabled(app):
+    return (app/'frontend/pages/ml_explorer/index.html').is_file()
+def validate_ml_explorer_assets(runtime,source):
+    root=(runtime/'data/ml-explorer-releases').resolve()
+    resolved=Path(source).resolve()
+    if resolved.parent!=root or not re.fullmatch('[0-9a-f]{64}',resolved.name):
+        raise RuntimeError('ML Explorer assets must come from data/ml-explorer-releases/<64 lowercase hex>')
+    if not resolved.is_dir():raise RuntimeError('Missing ML Explorer asset directory')
+    entries={path.name for path in resolved.iterdir()}
+    if entries!=ML_EXPLORER_BUNDLE_FILES:
+        raise RuntimeError('ML Explorer asset directory must contain exactly app_data.json and manifest.json')
+    bundle_path=resolved/'app_data.json';manifest_path=resolved/'manifest.json'
+    try:manifest=json.loads(manifest_path.read_text())
+    except Exception as exc:raise RuntimeError('Invalid ML Explorer manifest') from exc
+    if manifest.get('schemaVersion')!='ml-explorer-runtime.v2' or manifest.get('adapterEntry')!='data/app_data.json':
+        raise RuntimeError('ML Explorer runtime manifest contract mismatch')
+    bundle=manifest.get('bundle') or {}
+    if bundle.get('sha256')!=digest(bundle_path) or bundle.get('bytes')!=bundle_path.stat().st_size:
+        raise RuntimeError('ML Explorer bundle hash/bytes mismatch')
+    if resolved.name!=bundle['sha256']:
+        raise RuntimeError('ML Explorer asset directory name must equal bundle SHA-256')
+    try:payload=json.loads(bundle_path.read_text())
+    except Exception as exc:raise RuntimeError('Invalid ML Explorer payload') from exc
+    if bundle.get('payloadSchemaVersion')!=payload.get('schemaVersion'):
+        raise RuntimeError('ML Explorer payload schema mismatch')
+    payload_manifest=payload.get('manifest') or {}
+    if manifest.get('scope')!=ML_EXPLORER_SCOPE:
+        raise RuntimeError('ML Explorer runtime scope mismatch')
+    if payload_manifest.get('libraryName')!=ML_EXPLORER_SCOPE['libraryName'] or \
+       payload_manifest.get('libraryScopeKey')!=ML_EXPLORER_SCOPE['libraryScopeKey'] or \
+       payload_manifest.get('dataDomains')!=ML_EXPLORER_SCOPE['domains']:
+        raise RuntimeError('ML Explorer payload scope mismatch')
+    runtime_allow=manifest.get('allow') or {}
+    payload_allow=payload_manifest.get('allow') or {}
+    if not isinstance(runtime_allow,dict) or runtime_allow!=payload_allow or runtime_allow.get('domains')!=ML_EXPLORER_SCOPE['domains']:
+        raise RuntimeError('ML Explorer runtime/payload allowlist mismatch')
+    return {'source':str(resolved),'read_only':True,
+            'bundle_sha256':bundle['sha256'],'bundle_bytes':bundle['bytes'],
+            'manifest_sha256':digest(manifest_path),'manifest_bytes':manifest_path.stat().st_size}
+def verify_ml_explorer_mount(runtime,info,app):
+    if not ml_explorer_enabled(app):return None
+    mounts=[mount for mount in info.get('Mounts',[]) if mount.get('Destination')==ML_EXPLORER_MOUNT]
+    if len(mounts)!=1:raise RuntimeError('Missing or duplicate ML Explorer asset mount')
+    mount=mounts[0]
+    if mount.get('Type')!='bind' or mount.get('RW'):
+        raise RuntimeError('ML Explorer asset mount must be read-only bind')
+    return validate_ml_explorer_assets(runtime,mount.get('Source',''))
 def fetch(runtime,sha):
     checkout=runtime/'releases'/sha
     if not checkout.exists():
@@ -81,6 +133,16 @@ def configuration(runtime,app,sha):
                 replacement=app/relative
                 if not replacement.exists():raise RuntimeError('Missing GitHub-controlled mount: '+str(relative))
                 volume['source']=str(replacement);volume['read_only']=True
+    private_assets=None
+    if ml_explorer_enabled(app):
+        backend_mounts=[volume for volume in cfg.get('services',{}).get('backend',{}).get('volumes',[]) if volume.get('target')==ML_EXPLORER_MOUNT]
+        if len(backend_mounts)!=1:
+            raise RuntimeError('Backend must mount ML Explorer assets exactly once')
+        mount=backend_mounts[0]
+        if mount.get('type')!='bind' or not mount.get('read_only'):
+            raise RuntimeError('ML Explorer asset mount must be read-only bind')
+        private_assets=validate_ml_explorer_assets(runtime,mount.get('source',''))
+    cfg['_litai_private_assets']=private_assets
     return cfg
 def verify_release_mounts(name,info,app):
     expected=RELEASE_MOUNTS[name]
@@ -104,6 +166,7 @@ def verify(runtime,sha):
     app=application_root(runtime/'releases'/sha)
     for name,info in infos.items():
         verify_release_mounts(name,info,app)
+    verify_ml_explorer_mount(runtime,infos['backend'],app)
     result=json.loads(run(['docker','exec','literature-ai-backend-1','python','-c',"import json,urllib.request; print(urllib.request.urlopen('http://127.0.0.1:8000/api/health').read().decode())"]))
     if result.get('git_commit')!=sha:raise RuntimeError('Backend health revision mismatch')
     return result
@@ -135,11 +198,13 @@ def main():
     if args.action=='verify':print(json.dumps(verify(runtime,sha)));return
     app=fetch(runtime,sha);state=private_directory(runtime/'deploy-state'/sha)
     cfg=configuration(runtime,app,sha)
+    private_assets=cfg.pop('_litai_private_assets',None)
     raw=json.dumps(cfg,sort_keys=True,indent=2)+'\n'
     config_hash=hashlib.sha256(raw.encode()).hexdigest()
     plan={'commit':sha,'remote':REMOTE,'code_root':str(app),'services_to_recreate':SERVICES,
           'durable_data_root':str(runtime/'data'),'credential_file':str(runtime/'.env'),
           'compose_sha256':config_hash,'database_services_recreated':[],
+          'private_assets':private_assets,
           'code_mounts':{s:[v for v in cfg['services'][s].get('volumes',[]) if v.get('source','').startswith(str(app))] for s in SERVICES}}
     plan_raw=json.dumps(plan,sort_keys=True,indent=2)+'\n';plan_hash=hashlib.sha256(plan_raw.encode()).hexdigest()
     plan_file=state/'plan.json';config_file=state/'compose.private.json'

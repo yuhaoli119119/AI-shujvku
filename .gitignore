@@ -31,6 +31,12 @@ storage/docling_cache/
 **/data/
 **/docling_cache/
 
+# ML Explorer keeps only its mount-point placeholder in Git. Runtime JSON is a
+# private release asset delivered from the durable data directory.
+!/frontend/pages/ml_explorer/data/
+/frontend/pages/ml_explorer/data/*
+!/frontend/pages/ml_explorer/data/.gitkeep
+
 # Document parsing and metadata files
 *.pdf
 *.docling.json

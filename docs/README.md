@@ -24,6 +24,7 @@
 | [`BATCH_COORDINATION.md`](BATCH_COORDINATION.md) | 文献持续调度入口；职责只引用 AGENTS.md 第2节 |
 | [`CODEX_WEB_DISPATCH.md`](CODEX_WEB_DISPATCH.md) | 原生文献任务派发入口；旧脚本说明已删除 |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | 现行系统结构：运行位置、服务、数据资产、访问与鉴权 |
+| [`ML_EXPLORER.md`](ML_EXPLORER.md) | 锂硫单库 ML 数据探索页的范围、私有数据资产交付、验证与回退 |
 | [`MCP_ACCESS.md`](MCP_ACCESS.md) | MCP 外部接入现状（端点、鉴权、能力分层、key 位置） |
 | [`auth/WORKBENCH_LOGIN.md`](auth/WORKBENCH_LOGIN.md) | 工作台真实登录（2026-09-21 上线）；**现行且保持不动** |
 

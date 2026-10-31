@@ -8,6 +8,8 @@ backend/scratch/
 frontend/node_modules/
 frontend/test-results/
 frontend/playwright-report/
+frontend/pages/ml_explorer/data/*
+!frontend/pages/ml_explorer/data/.gitkeep
 data/
 outputs/
 test-results/

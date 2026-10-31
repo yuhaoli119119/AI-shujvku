@@ -147,6 +147,7 @@ services:
     volumes:
       - ./backend:/app
       - ./frontend:/frontend
+      - ${LITAI_ML_EXPLORER_ASSET_DIR:?Set LITAI_ML_EXPLORER_ASSET_DIR in .env}:/frontend/pages/ml_explorer/data:ro
       - ./prompts:/prompts:ro
       - ./data:/data
       - ./data/docling_cache:/home/litai/.cache/docling
