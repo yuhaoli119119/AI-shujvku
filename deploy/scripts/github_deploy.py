@@ -334,29 +334,48 @@ def finish_failed_attempt(runtime,transaction,error,rolled_back):
     record={**transaction,'phase':'rolled_back','error':str(error),'rolled_back':rolled_back,
             'finished_at_utc':datetime.now(timezone.utc).isoformat()}
     write_private(state/(transaction['deployment_id']+'.json'),json.dumps(record,sort_keys=True,indent=2)+'\n')
-def cas_pointer(runtime,allowed_current,target,*,writer=write_private):
+def cas_pointer(runtime,expected_snapshot,target,*,writer=write_private):
     current=current_snapshot(runtime)
-    if current['commit']==target:return current
-    if current['commit'] not in allowed_current:
-        raise RuntimeError(f'Pointer CAS rejected: current {current["commit"]} is not in {sorted(x or "missing" for x in allowed_current)}')
+    if current!=expected_snapshot:
+        raise RuntimeError(f'Pointer CAS rejected: expected {expected_snapshot}, found {current}')
     writer(runtime/'DEPLOYED_GITHUB_COMMIT',target+'\n')
     updated=current_snapshot(runtime)
     if updated['commit']!=target:raise RuntimeError('Pointer CAS did not activate the target commit')
     return updated
-def rollback_to_expected(runtime,expected,target,runner,container_verifier,verifier):
+def rollback_to_expected(runtime,expected,target,plan_hash,compose_hash,deployment_id,
+                         runner,container_verifier,verifier):
     runtime=Path(runtime)
     state=runtime/'deploy-state'/expected['commit']
     compose_file=resolve_plan_compose(state,expected['plan_sha256'])
     if not compose_file.is_file() or digest(compose_file)!=expected['compose_sha256']:
         raise RuntimeError('Rollback compose configuration is missing or changed')
     current=current_snapshot(runtime)
-    if current['commit'] not in {expected['commit'],target}:
+    target_current=False
+    if current['commit']==expected['commit']:
+        if current!=expected:
+            raise RuntimeError('Expected-current snapshot changed before rollback')
+        pointer_expected=expected
+    elif current['commit']==target:
+        try:transaction=json.loads(transaction_path(runtime).read_text())
+        except Exception as exc:raise RuntimeError('Deployment transaction is unavailable for target rollback') from exc
+        if (transaction.get('deployment_id')!=deployment_id or transaction.get('target_commit')!=target
+                or transaction.get('plan_sha256')!=plan_hash or transaction.get('compose_sha256')!=compose_hash):
+            raise RuntimeError('Target rollback identity does not match transaction')
+        receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+        if transaction.get('target_receipt_sha256')!=digest(receipt):
+            raise RuntimeError('Target receipt changed before rollback')
+        if current['plan_sha256']!=plan_hash or current['compose_sha256']!=compose_hash:
+            raise RuntimeError('Target plan or compose changed before rollback')
+        pointer_expected=current
+        target_current=True
+    else:
         raise RuntimeError('Deployment pointer moved to an unrelated commit during rollback')
     compose=['docker','compose','-p','literature-ai','--project-directory',str(runtime),'-f',str(compose_file)]
     runner([*compose,'build','backend','worker','worker-pdf'],check=True)
     runner([*compose,'up','-d','--no-deps','--force-recreate','--wait','--wait-timeout','180',*SERVICES],check=True)
     container_verifier(runtime,expected['commit'])
-    cas_pointer(runtime,{expected['commit'],target},expected['commit'])
+    if target_current:cas_pointer(runtime,pointer_expected,expected['commit'])
+    else:assert_current(runtime,expected)
     assert_current(runtime,expected)
     verifier(runtime,expected['commit'])
 def record_deployment(runtime,sha,plan_hash,verified,expected_current,deployment_id,*,writer=write_private):
@@ -366,11 +385,26 @@ def record_deployment(runtime,sha,plan_hash,verified,expected_current,deployment
     target_compose=resolve_plan_compose(runtime/'deploy-state'/sha,plan_hash)
     if not target_plan.is_file() or not target_compose.is_file() or digest(target_plan)!=plan_hash:
         raise RuntimeError('Target plan is missing or changed before pointer CAS')
+    target_receipt=state/'deployment-receipt.json'
+    if target_receipt.is_file():
+        try:previous_receipt=json.loads(target_receipt.read_text())
+        except Exception as exc:raise RuntimeError('Target receipt is invalid; preserve it for inspection') from exc
+        previous_id=previous_receipt.get('deployment_id')
+        if previous_id and previous_id!=deployment_id:
+            raise RuntimeError('Target receipt belongs to another deployment; refusing to overwrite it')
     receipt={'commit':sha,'previous_commit':expected_current['commit'],'remote':REMOTE,
              'plan_sha256':plan_hash,'deployment_id':deployment_id,'verified_health':verified}
-    writer(state/'deployment-receipt.json',json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+    writer(target_receipt,json.dumps(receipt,sort_keys=True,indent=2)+'\n')
     assert_current(runtime,expected_current)
-    cas_pointer(runtime,{expected_current['commit']},sha,writer=writer)
+    journal=runtime/'deploy-state'/'.deployment-transaction.json'
+    if journal.is_file():
+        try:transaction=json.loads(journal.read_text())
+        except Exception as exc:raise RuntimeError('Deployment transaction is invalid before pointer CAS') from exc
+        if transaction.get('deployment_id')!=deployment_id:
+            raise RuntimeError('Deployment transaction identity changed before pointer CAS')
+        transaction['target_receipt_sha256']=digest(target_receipt)
+        write_private(journal,json.dumps(transaction,sort_keys=True,indent=2)+'\n')
+    cas_pointer(runtime,expected_current,sha,writer=writer)
     return receipt
 def apply_release(runtime,sha,plan_hash,compose,expected_current,compose_hash,*,runner=None,
                   container_verifier=None,post_verifier=None,recorder=None,lock=True):
@@ -398,6 +432,7 @@ def apply_release(runtime,sha,plan_hash,compose,expected_current,compose_hash,*,
             transaction=update_transaction(runtime,transaction,'target_verified')
             assert_current(runtime,expected_current)
             receipt=recorder(runtime,sha,plan_hash,preverified,expected_current,transaction['deployment_id'])
+            transaction=json.loads(transaction_path(runtime).read_text())
             transaction=update_transaction(runtime,transaction,'committed')
             post_verifier(runtime,sha)
             transaction_path(runtime).unlink()
@@ -410,7 +445,8 @@ def apply_release(runtime,sha,plan_hash,compose,expected_current,compose_hash,*,
             try:
                 try:update_transaction(runtime,transaction,'rolling_back')
                 except Exception:pass
-                rollback_to_expected(runtime,expected_current,sha,runner,container_verifier,post_verifier)
+                rollback_to_expected(runtime,expected_current,sha,plan_hash,compose_hash,
+                                     transaction['deployment_id'],runner,container_verifier,post_verifier)
                 finish_failed_attempt(runtime,transaction,exc,True)
                 try:transaction_path(runtime).unlink()
                 except FileNotFoundError:pass

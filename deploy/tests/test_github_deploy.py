@@ -715,6 +715,60 @@ class DeploymentBoundaryTests(unittest.TestCase):
                 deploy.record_deployment(runtime,target,target_plan,{'status':'ok'},expected,'d'*32,writer=writer)
             self.assertEqual(deploy.current_snapshot(runtime),expected)
 
+    def test_record_never_overwrites_another_deployments_target_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,_=self._seed_state(runtime,target,'3'*64,'4'*64)
+            receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+            existing=json.loads(receipt.read_text());existing['deployment_id']='other-writer'
+            receipt.write_text(json.dumps(existing))
+            before=receipt.read_bytes()
+            with self.assertRaisesRegex(RuntimeError,'belongs to another deployment'):
+                deploy.record_deployment(runtime,target,target_plan,{'status':'ok'},expected,'new-writer')
+            self.assertEqual(receipt.read_bytes(),before)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),old)
+
+    def test_final_pointer_cas_rejects_same_commit_receipt_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+            original=deploy.cas_pointer
+            def racing_cas(racing_runtime,expected_snapshot,cas_target,**kwargs):
+                receipt=racing_runtime/'deploy-state'/old/'deployment-receipt.json'
+                data=json.loads(receipt.read_text());data['verified_health']={'status':'other-writer'}
+                receipt.write_text(json.dumps(data))
+                return original(racing_runtime,expected_snapshot,cas_target,**kwargs)
+            with patch.object(deploy,'cas_pointer',side_effect=racing_cas):
+                with self.assertRaisesRegex(RuntimeError,'Pointer CAS rejected'):
+                    deploy.record_deployment(runtime,target,target_plan,{'status':'ok'},expected,'d'*32)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),old)
+
+    def test_rollback_final_cas_rejects_target_receipt_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+            original=deploy.cas_pointer;calls=[]
+            def racing_cas(racing_runtime,expected_snapshot,cas_target,**kwargs):
+                calls.append(expected_snapshot['commit'])
+                if len(calls)==2:
+                    receipt=racing_runtime/'deploy-state'/target/'deployment-receipt.json'
+                    data=json.loads(receipt.read_text());data['verified_health']={'status':'other-writer'}
+                    receipt.write_text(json.dumps(data))
+                return original(racing_runtime,expected_snapshot,cas_target,**kwargs)
+            def post_verifier(*args):raise RuntimeError('post verify failed')
+            with patch.object(deploy,'cas_pointer',side_effect=racing_cas):
+                with self.assertRaisesRegex(RuntimeError,'rollback was not verified'):
+                    deploy.apply_release(runtime,target,target_plan,['mock-compose'],expected,target_compose,
+                                         runner=lambda *args,**kwargs:None,container_verifier=lambda *args:{'status':'ok'},
+                                         post_verifier=post_verifier)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),target)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
+            self.assertEqual(calls,[old,target])
+
     def test_verify_failure_cannot_record_receipt_or_pointer(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime=Path(directory);old='a'*40;target='b'*40

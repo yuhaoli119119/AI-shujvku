@@ -18,7 +18,7 @@ GitHub 根目录直接包含 backend、frontend、prompts、docker-compose.yml �
 
 plan schema v2 在独占锁内记录当前版本的五元快照：pointer SHA、当前 receipt、当前 plan 和当前 compose 的 SHA-256。apply 全程持有 `<runtime>/deploy-state/deployment.lock`，在 build 前、up 前后、回执写入前后分别复核该快照；另一个进程持有锁时立即拒绝，不能继续使用旧 plan。
 
-apply 使用 `.deployment-transaction.json` 记录 `prepared → built → up → target_verified → committed` 阶段。目标 receipt 先持久化，pointer 最后由锁内 CAS 原子推进，随后再次核验六服务、mount、health、pointer 和 receipt。up、verify 或 pointer 阶段失败时，部署器尝试用 expected-current 的已审阅 compose 回滚并再次 verify；恢复失败则保留 `recovery_required`，阻止后续 plan/apply。`verify` 在存在未完成 transaction 时也 fail closed，不再把“容器当前看似正常”误报为部署完成。
+apply 使用 `.deployment-transaction.json` 记录 `prepared → built → up → target_verified → committed` 阶段。目标 receipt 先持久化，pointer 最后由锁内 CAS 原子推进；CAS 必须与 plan 的完整五元 expected-current 精确相等，同一 commit 的 receipt 漂移也会拒绝。提交后再次核验六服务、mount、health、pointer 和 receipt。up、verify 或 pointer 阶段失败时，部署器尝试用 expected-current 的已审阅 compose 回滚；回滚 pointer 切换同样核对 transaction target 的 commit、pointer、receipt、plan 和 compose，无法精确匹配时不得覆盖其他 writer。恢复失败则保留 `recovery_required`，阻止后续 plan/apply。`verify` 在存在未完成 transaction 时也 fail closed，不再把“容器当前看似正常”误报为部署完成。
 
 中断后先保持现场，再运行显式恢复：
 
