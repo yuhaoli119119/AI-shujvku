@@ -128,7 +128,6 @@ def test_all_lis_binding_species_word_orders_and_condition_variants(species, pre
     ('ml_predicted_li2s4_binding_energy_ev', 'Li2S4'),
     ('lips_binding_energy_ev', 'LiPS'),
     ('binding_energy_eV', None),
-    ('binding_energy_ev', None),
     ('polysulfide_binding_energy_ev', None),
     ('polysulfide_binding_energy_ev', 'LiPS'),
     ('li2s_averaged_binding_energy_ev', 'Li2S'),
@@ -172,6 +171,35 @@ def test_species_and_variant_axes_remain_separate_in_the_same_row():
     assert set(projected) == {
         'li2s4_binding_energy', 'li2s4_binding_energy_vdwsurf', 'li2s8_binding_energy',
     }
+
+
+def test_legacy_binding_energy_projection_is_duplicated_only_as_deprecated_compatibility():
+    record = cell('binding_energy_ev', -1.2, adsorbate='Li2S4')
+    projected = project_rows([record])['one']
+    assert set(projected) == {'binding_energy', 'li2s4_binding_energy'}
+    assert source_ids(projected['binding_energy']) == source_ids(projected['li2s4_binding_energy'])
+    unknown = project_rows([cell('binding_energy_ev', -1.2, adsorbate=None)])['one']
+    assert set(unknown) == {'binding_energy'}
+
+
+def test_legacy_binding_field_remains_explicitly_queryable_but_not_a_default_matrix_axis():
+    svc = AnalysisReadonlyService(MagicMock())
+    svc.records = [
+        cell('binding_energy_ev', -1.2, adsorbate='Li2S4'),
+        cell('d_band_center_ev', -0.4, adsorbate='Li2S4'),
+    ]
+    svc._loaded = ([], {}, {'total_dft_rows': 2})
+    fields = {field['key']: field for field in svc.field_registry()}
+    assert fields['binding_energy']['available_count'] == 1
+    assert fields['binding_energy']['deprecated'] is True
+    assert fields['binding_energy']['compatibility_only'] is True
+    assert fields['binding_energy']['default_matrix'] is False
+    result = svc.correlation(x_field='binding_energy', y_field='d_band_center', min_n=1)
+    assert result['n_catalysts'] == 1
+    assert result['points'][0]['x']['value'] == -1.2
+    matrix = svc.correlation_matrix()
+    assert 'binding_energy' in matrix['omitted_fields']
+    assert 'binding_energy' not in {field['key'] for field in matrix['variables']}
 
 
 def test_known_bader_transfer_is_not_duplicated_as_generic():

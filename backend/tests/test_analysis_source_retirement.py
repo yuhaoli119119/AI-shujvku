@@ -50,6 +50,61 @@ def test_default_and_explicit_new_source_select_dft_without_legacy_fallback(monk
     assert [args['filters']['data_type'] for args in captured] == ['dft', 'dft', 'experimental']
 
 
+def test_effective_csv_route_returns_profile_status_headers(monkeypatch):
+    class Projection:
+        def csv(self, **kwargs):
+            assert kwargs['dataset_profile'] == 'dac_lis_ml'
+            return 'record_id\n', {
+                'records': [],
+                'metadata': {
+                    'dataset_profile': 'dac_lis_ml',
+                    'exploratory_numeric_records': 23,
+                    'profile_included_count_before_limit': 0,
+                    'profile_excluded_count': 23,
+                },
+            }
+    monkeypatch.setattr(api, 'service', lambda args, session: Projection())
+    response = client().get('/api/papers/export/csv', params={
+        'source': 'rebuild',
+        'export_mode': 'exploratory',
+        'data_type': 'dft',
+        'library_name': '锂硫双原子',
+        'dataset_profile': 'dac_lis_ml',
+        'limit': 1,
+    })
+    assert response.status_code == 200
+    assert response.headers['x-d3-export-safety-gate'] == 'exploratory'
+    assert response.headers['x-d3-export-count'] == '0'
+    assert response.headers['x-d3-block-count'] == '0'
+    assert response.headers['x-d3-base-eligible-count'] == '23'
+    assert response.headers['x-d3-profile-included-count'] == '0'
+    assert response.headers['x-d3-profile-excluded-count'] == '23'
+    assert response.headers['x-d3-dataset-profile'] == 'dac_lis_ml'
+
+
+def test_analysis_readonly_csv_route_precedes_retired_aggregate_route():
+    from app.main import app
+    routes = [route for route in app.routes if getattr(route, 'path', None) == '/api/papers/export/csv']
+    assert routes
+    assert routes[0].endpoint.__module__ == 'app.api.analysis_readonly'
+
+
+def test_profile_counts_precede_offset_and_limit():
+    svc = AnalysisReadonlyService(MagicMock())
+    records = [{
+        'record_id': f'record-{index}', 'paper_id': 'paper-1', 'sources': [],
+        'library_name': '锂硫双原子', 'catalyst_type': 'dual_atom', 'reaction': 'SRR',
+        'exploratory_eligible': True,
+    } for index in range(3)]
+    svc.records = records
+    svc._loaded = ([], {}, {})
+    payload = svc.observation_dataset(limit=1, offset=0, dataset_profile='dac_lis_ml')
+    assert payload['metadata']['exploratory_numeric_records'] == 3
+    assert payload['metadata']['profile_included_count_before_limit'] == 3
+    assert payload['metadata']['profile_excluded_count'] == 0
+    assert payload['metadata']['exported_count_after_limit'] == 1
+
+
 def test_experimental_rows_do_not_enter_default_dft_projection():
     svc = AnalysisReadonlyService(MagicMock(), filters={'data_type': 'dft'})
     assert svc.source == 'rebuild'

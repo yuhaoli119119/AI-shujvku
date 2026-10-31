@@ -62,6 +62,12 @@ FIELDS.append(('li2sn_binding_energy', 'Li₂Sₙ 类别结合能（n 未注明�
 DEFINITIONS = {key: {'key': key, 'field': key, 'label': label, 'label_zh': label,
                      'unit': unit, 'type': 'number', 'category': 'numeric'}
                for key, label, unit, _ in FIELDS}
+COMPATIBILITY_ONLY_FIELDS = {'binding_energy'}
+for compatibility_field in COMPATIBILITY_ONLY_FIELDS:
+    DEFINITIONS[compatibility_field].update(
+        deprecated=True, compatibility_only=True, default_matrix=False,
+        selection_rule='Legacy exact aliases; explicit callers only; separate species and condition axes remain authoritative',
+    )
 ALIASES = {alias: key for key, _, _, aliases in FIELDS for alias in (key, *aliases)}
 PRESET_FIELDS = {'li2s_adsorption_energy', 'li2s_dissociation_barrier',
                  'li2s_bader_charge_transfer', 'li_s_bond_max', 'd_band_center', 'rds_delta_g'}
@@ -94,6 +100,7 @@ GENERIC_LI2SN_BINDING_FIELDS = {
 LI2SN_FAMILY_BINDING_FIELDS = {
     'li2sn_binding_energy_ev': 'li2sn_binding_energy',
 }
+LEGACY_BINDING_FIELDS = {'binding_energy', 'binding_energy_ev'}
 EXPLICIT_LI2SN_BINDING_FIELDS = (
     re.compile(r'^(li2s(?:2|4|6|8)?)_binding_energy(?:_(vdwsurf|spin_polarized))?_ev$'),
     re.compile(r'^binding_energy_(li2s(?:2|4|6|8)?)(?:_(vdwsurf|spin_polarized))?_ev$'),
@@ -168,6 +175,9 @@ def project_rows(records):
             species = declared_species(record)
             binding_field = lis_binding_energy_field(record)
             field = binding_field or ALIASES.get(raw)
+            projected_fields = [binding_field] if binding_field else []
+            if raw in LEGACY_BINDING_FIELDS:
+                projected_fields.append('binding_energy')
             if binding_field is None and 'binding_energy' in raw.casefold():
                 field = None
             if raw in {'li1_s_bond_length_angstrom', 'li2_s_bond_length_angstrom'} and species not in KNOWN_SPECIES:
@@ -180,8 +190,10 @@ def project_rows(records):
                     field = species_field
             if raw in {'bader_charge_transfer_e', 'bader_charge_transfer'} and species == 'Li2S':
                 field = 'li2s_bader_charge_transfer'
-            if field:
-                candidates[field].append(record)
+            if field and not projected_fields:
+                projected_fields.append(field)
+            for projected_field in dict.fromkeys(projected_fields):
+                candidates[projected_field].append(record)
         fields = {key: merge(cells, key) for key, cells in candidates.items()}
         # A maximum is defined only when both explicitly indexed bonds are
         # recorded in this same row, never from another material/configuration.

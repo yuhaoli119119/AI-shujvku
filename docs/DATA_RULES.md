@@ -101,6 +101,7 @@
 
 - `dac_lis_ml`、`dac_lis` 和 `sac_lis_ml` 只在规范化文献库为“锂硫双原子”、反应为 `SRR`、催化剂类型与目标范围一致时适用。其他文献库中的同名反应不得因 `SRR` 自动混入；`bimetallic_lis_ml` 当前保留为双原子范围的历史兼容别名，不宣称已证明两个金属中心不同。
 - 明确 Li₂S/Li₂S₂/Li₂S₄/Li₂S₆/Li₂S₈ 字段同时兼容 `li2s*_binding_energy_ev` 与 `binding_energy_li2s*_ev` 词序。`vdwsurf` 和 `spin_polarized` 使用独立分析字段，不并入普通结合能。
+- 旧的派生字段 `binding_energy` 保留为 `deprecated / compatibility_only` 兼容视图，严格沿用旧版 `binding_energy`、`binding_energy_ev` 精确别名，用于既有显式查询和书签。它不是新的权威合并字段，不计入默认相关矩阵；新按物种和条件拆分的字段仍是主合同。
 - 通用 `binding_energy` 名称只有在同一行声明了具体 Li₂Sₙ 吸附物时才进入对应物种字段；`li2sn_binding_energy_ev` 作为 n 未注明的独立类别字段。
 - 金属支撑、金属纳米簇、金属、相对或偏移结合能、XPS 元素峰、定义/趋势/范围、逐原子或逐面积归一值、平均值及机器学习预测值不进入 Li₂Sₙ 结合能投影。
 - 同一物种、词序别名和值一致时可合并来源；值不同则标记冲突并保留全部原值、单位和来源。不同物种或不同计算条件不合并。

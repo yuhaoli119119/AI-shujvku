@@ -480,7 +480,8 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         self._load_rows()
         coverage=Counter(key for fields in self._rebuild_fields().values() for key, cell in fields.items() if cell['exploratory_eligible'])
         return [{**definition, 'available_count':coverage[key], 'available':bool(coverage[key]),
-                 'selection_policy':POLICY, 'selection_rule':'Exact physical aliases; same rebuild row; source and compatible unit required'}
+                 'selection_policy':POLICY,
+                 'selection_rule':definition.get('selection_rule','Exact physical aliases; same rebuild row; source and compatible unit required')}
                 for key,definition in DEFINITIONS.items() if coverage[key] or key in PRESET_FIELDS]
 
     def _rebuild_fields(self):
@@ -493,7 +494,7 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         if self.source == 'rebuild':
             self._load_rows()
             definitions=self.field_registry()
-            fields=[f['key'] for f in definitions]
+            fields=[f['key'] for f in definitions if not f.get('compatibility_only')]
             grouped=defaultdict(list)
             for record in self.records:
                 grouped[record['rebuild_row_id']].append(record)
@@ -584,7 +585,8 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             # Generic adsorption/charge fields have unresolved species. They
             # remain available as observations, but are not independent matrix
             # axes beside the resolved species-specific variables.
-            matrix_fields = [f for f in available if f not in {'adsorption_energy', 'bader_charge_transfer'}] if self.source=='rebuild' else available
+            matrix_fields = [f for f in available if f not in {'adsorption_energy', 'bader_charge_transfer'}
+                             and not definitions[f].get('compatibility_only')] if self.source=='rebuild' else available
             fields=sorted(matrix_fields,key=lambda k:(-counts[k],k)) if self.source=='rebuild' else matrix_fields
         if not set(fields)<=set(available):
             raise ValueError('unknown matrix field')

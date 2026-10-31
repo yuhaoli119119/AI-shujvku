@@ -113,10 +113,26 @@ def export_csv(export_mode: str='exploratory',limit: int | None=Query(None,ge=1,
         data,payload=service(args,session).csv(limit=limit,offset=offset,dataset_profile=dataset_profile)
     except ValueError as exc:
         raise HTTPException(422,detail=str(exc)) from exc
+    metadata=payload.get('metadata') or {}
+    profile=str(metadata.get('dataset_profile') or '')
+    base_eligible=str(metadata.get('exploratory_numeric_records', 0))
+    profile_included=metadata.get('profile_included_count_before_limit')
+    profile_excluded=metadata.get('profile_excluded_count')
+    exported=len(payload.get('records') or [])
+    profile_headers={
+        'X-D3-Export-Safety-Gate':'exploratory',
+        'X-D3-Export-Count':str(exported),
+        'X-D3-Block-Count':'0',
+        'X-D3-Base-Eligible-Count':base_eligible,
+        'X-D3-Profile-Included-Count':'' if profile_included is None else str(profile_included),
+        'X-D3-Profile-Excluded-Count':'' if profile_excluded is None else str(profile_excluded),
+        'X-D3-Dataset-Profile':profile,
+    }
     return Response(data,media_type='text/csv; charset=utf-8',headers={
         'Content-Disposition':'attachment; filename="dft_exploratory.csv"',
         'X-Analysis-Mode':'exploratory','X-Approval-Assessment':'not_evaluated',
-        'X-Source-Family':args['source'],'X-Exploratory-Row-Count':str(len(payload['records']))})
+        'X-Source-Family':args['source'],'X-Exploratory-Row-Count':str(exported),
+        **profile_headers})
 
 
 @router.get('/dft/catalyst-dataset')
