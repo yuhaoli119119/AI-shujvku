@@ -89,6 +89,8 @@ def test_known_adsorption_has_only_one_species_variable(species, field):
     ('li2s2_binding_energy_ev', 'Li2S2', 'li2s2_binding_energy'),
     ('binding_energy_li2s8_ev', 'Li2S8', 'li2s8_binding_energy'),
     ('binding_energy_li2s4_vdwsurf_ev', 'Li2S4', 'li2s4_binding_energy_vdwsurf'),
+    ('li2s4_binding_energy_spin_polarized_ev', 'Li2S4', 'li2s4_binding_energy_spin_polarized'),
+    ('binding_energy_li2s4_spin_polarized_ev', 'Li2S4', 'li2s4_binding_energy_spin_polarized'),
     ('binding_energy_eV', 'Li2S6*', 'li2s6_binding_energy'),
     ('binding_energy_eb_ev', 'Li2S8', 'li2s8_binding_energy'),
     ('polysulfide_binding_energy_ev', 'Li2S4', 'li2s4_binding_energy'),
@@ -102,11 +104,11 @@ def test_lis_binding_aliases_preserve_word_order_species_and_conditions(raw, ads
 
 @pytest.mark.parametrize('species', ['li2s', 'li2s2', 'li2s4', 'li2s6', 'li2s8'])
 @pytest.mark.parametrize('prefix_order', [True, False])
-@pytest.mark.parametrize('variant', ['', 'vdwsurf'])
-def test_all_lis_binding_species_word_orders_and_vdw_variants(species, prefix_order, variant):
+@pytest.mark.parametrize('variant', ['', 'vdwsurf', 'spin_polarized'])
+def test_all_lis_binding_species_word_orders_and_condition_variants(species, prefix_order, variant):
     variant_part = variant + '_' if variant else ''
     raw = f'binding_energy_{species}_{variant_part}ev' if prefix_order else f'{species}_binding_energy_{variant_part}ev'
-    canonical = species + '_binding_energy' + ('_vdwsurf' if variant else '')
+    canonical = species + '_binding_energy' + (('_' + variant) if variant else '')
     projected = project_rows([cell(raw, -1.2, adsorbate=species.replace('li2s', 'Li2S').upper())])['one']
     assert set(projected) == {canonical}
 
@@ -157,6 +159,7 @@ def test_binding_alias_word_order_merges_sources_only_when_value_agrees():
     conflict = project_rows([suffix, dict(prefix, target=dict(normalized_value=-1.3, normalized_unit='eV'))])['one']['li2s8_binding_energy']
     assert not conflict['exploratory_eligible']
     assert conflict['exclusion_reason'] == 'conflicting_field_aliases'
+    assert conflict['raw_evidence'] == [suffix, dict(prefix, target=dict(normalized_value=-1.3, normalized_unit='eV'))]
 
 
 def test_species_and_variant_axes_remain_separate_in_the_same_row():

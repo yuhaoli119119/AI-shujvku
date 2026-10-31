@@ -95,8 +95,8 @@ LI2SN_FAMILY_BINDING_FIELDS = {
     'li2sn_binding_energy_ev': 'li2sn_binding_energy',
 }
 EXPLICIT_LI2SN_BINDING_FIELDS = (
-    re.compile(r'^(li2s(?:2|4|6|8)?)_binding_energy(?:_(vdwsurf))?_ev$'),
-    re.compile(r'^binding_energy_(li2s(?:2|4|6|8)?)(?:_(vdwsurf))?_ev$'),
+    re.compile(r'^(li2s(?:2|4|6|8)?)_binding_energy(?:_(vdwsurf|spin_polarized))?_ev$'),
+    re.compile(r'^binding_energy_(li2s(?:2|4|6|8)?)(?:_(vdwsurf|spin_polarized))?_ev$'),
 )
 
 
@@ -116,7 +116,7 @@ def lis_binding_energy_field(record):
         match = pattern.fullmatch(raw)
         if match:
             species_key = match.group(1)
-            variant = '_vdwsurf' if match.group(2) else ''
+            variant = '_' + match.group(2) if match.group(2) else ''
             break
     if species_key is None and raw in GENERIC_LI2SN_BINDING_FIELDS:
         declared = declared_species(record)
@@ -150,6 +150,8 @@ def merge(cells, field):
         reason = 'incompatible_analysis_unit'
     if not reason and any(not isclose(c['target']['normalized_value'], cells[0]['target']['normalized_value'], rel_tol=1e-9, abs_tol=1e-9) for c in cells[1:]):
         reason = 'conflicting_field_aliases'
+    if reason:
+        result['raw_evidence'] = deepcopy(cells)
     result.update(exclusion_reason=reason, exploratory_eligible=reason is None)
     return result
 

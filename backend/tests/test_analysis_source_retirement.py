@@ -121,8 +121,12 @@ def test_lis_dataset_profile_is_strict_to_library_reaction_and_catalyst_type(pro
 
 def correlation_fixture(contexts):
     points = [{'x': {'value': float(i)}, 'y': {'value': float(i) * 2},
-               'semantic_context': {'data_type': 'dft', 'reaction_type': 'SRR',
-                                    'condition_key': context}}
+               'semantic_context': {
+                   'data_type': 'dft', 'reaction_type': 'SRR',
+                   'x_method': {}, 'y_method': {},
+                   'x_condition': {'pressure': context}, 'y_condition': {'pressure': context},
+                   'x_unit': 'eV', 'y_unit': 'eV',
+               }}
               for i, context in enumerate(contexts)]
     stats = dict(pearson=1., pearson_r=1., spearman=1., spearman_rho=1., r_squared=1., r2=1., slope=2., intercept=0., ready=True)
     return {'points': points, 'warnings': [], 'statistics': dict(stats), **stats}

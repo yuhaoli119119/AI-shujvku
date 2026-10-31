@@ -551,7 +551,11 @@ class AnalysisReadonlyService(CatalystAnalysisService):
             context=point['semantic_context']
             # Individual catalyst ids/settings ids cannot identify cross-material
             # comparability; recorded method/reaction/condition dimensions do.
-            key=json.dumps({k:context.get(k) for k in ('paper_id','functional','dispersion_correction','reaction_type','data_type','condition_key','facet','coverage','termination','x_method','y_method','x_reaction_step','y_reaction_step','x_adsorbate','y_adsorbate','x_unit','y_unit')},sort_keys=True,ensure_ascii=False)
+            key=json.dumps({k:context.get(k) for k in (
+                'paper_id','reaction_type','data_type','x_method','y_method',
+                'x_condition','y_condition','x_reaction_step','y_reaction_step',
+                'x_adsorbate','y_adsorbate','x_unit','y_unit',
+            )},sort_keys=True,ensure_ascii=False)
             groups[key].append(point)
             point.update(source_family=self.source,assessment_status='not_evaluated',comparability_group=key,group_id=hashlib.sha256(key.encode()).hexdigest()[:12])
         payload['comparability_groups']=[{'group_id':hashlib.sha256(key.encode()).hexdigest()[:12],'label':f"{points[0].get('paper',{}).get('paper_code') or '文献'} · 条件组 {index+1}",'context':json.loads(key),'n':len(points),'statistics':_stats(points) if len(points)>=min_n else None} for index,(key,points) in enumerate(groups.items())]
