@@ -13,9 +13,10 @@ function summaryPayload() {
 }
 
 async function installApi(page, options = {}) {
-  const state = { summaryCalls: [], exportStarted: false };
+  const state = { summaryCalls: [], exportStarted: false, jsonExportStarted: false };
   if (options.holdSummary) state.summaryGate = new Promise(resolve => { state.releaseSummary = resolve; });
   if (options.holdExport) state.exportGate = new Promise(resolve => { state.releaseExport = resolve; });
+  if (options.holdJsonExport) state.jsonExportGate = new Promise(resolve => { state.releaseJsonExport = resolve; });
   await page.route('**/favicon.ico', route => route.fulfill({ status: 204, body: '' }));
   await page.route('**/api/**', async route => {
     const url = new URL(route.request().url());
@@ -70,6 +71,8 @@ async function installApi(page, options = {}) {
       });
     }
     if (pathname === '/api/papers/export/dft-dataset') {
+      state.jsonExportStarted = true;
+      if (state.jsonExportGate) await state.jsonExportGate;
       return route.fulfill({ json: {
         metadata: {
           safety_gate: 'exploratory',
@@ -115,6 +118,17 @@ test('superseded CSV response cannot overwrite changed-filter status', async ({ 
   await page.selectOption('#propertyType', 'binding_energy');
   await expect(page.locator('#exportSafetyStatus')).toContainText('筛选条件已变化');
   state.releaseExport();
+  await page.waitForTimeout(100);
+  await expect(page.locator('#exportSafetyStatus')).toContainText('筛选条件已变化');
+});
+
+test('superseded exploratory JSON response cannot overwrite changed-filter status', async ({ page }) => {
+  const state = await openPage(page, { holdJsonExport: true });
+  await page.locator('button[onclick="exportMLDataset()"]').click();
+  await expect.poll(() => state.jsonExportStarted).toBe(true);
+  await page.selectOption('#propertyType', 'binding_energy');
+  await expect(page.locator('#exportSafetyStatus')).toContainText('筛选条件已变化');
+  state.releaseJsonExport();
   await page.waitForTimeout(100);
   await expect(page.locator('#exportSafetyStatus')).toContainText('筛选条件已变化');
 });
