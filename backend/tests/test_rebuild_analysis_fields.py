@@ -180,6 +180,12 @@ def test_legacy_binding_energy_projection_is_duplicated_only_as_deprecated_compa
     assert source_ids(projected['binding_energy']) == source_ids(projected['li2s4_binding_energy'])
     unknown = project_rows([cell('binding_energy_ev', -1.2, adsorbate=None)])['one']
     assert set(unknown) == {'binding_energy'}
+    assert set(project_rows([cell('binding_energy_eV', -1.2, adsorbate='Li2S4')])['one']) == {
+        'li2s4_binding_energy',
+    }
+    assert set(project_rows([cell('binding_energy_eb_ev', -1.2, adsorbate='Li2S4')])['one']) == {
+        'li2s4_binding_energy',
+    }
 
 
 def test_legacy_binding_field_remains_explicitly_queryable_but_not_a_default_matrix_axis():
@@ -194,6 +200,8 @@ def test_legacy_binding_field_remains_explicitly_queryable_but_not_a_default_mat
     assert fields['binding_energy']['deprecated'] is True
     assert fields['binding_energy']['compatibility_only'] is True
     assert fields['binding_energy']['default_matrix'] is False
+    assert fields['binding_energy']['legacy_aliases'] == ['binding_energy', 'binding_energy_ev']
+    assert fields['binding_energy']['compatibility_schema'] == 'legacy_analysis_field_compat_v1'
     result = svc.correlation(x_field='binding_energy', y_field='d_band_center', min_n=1)
     assert result['n_catalysts'] == 1
     assert result['points'][0]['x']['value'] == -1.2

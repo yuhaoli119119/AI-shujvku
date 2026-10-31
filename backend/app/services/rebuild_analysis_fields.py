@@ -59,6 +59,8 @@ for species_key in LI2SN_BINDING_SPECIES:
                        'eV', ()))
 FIELDS.append(('li2sn_binding_energy', 'Li₂Sₙ 类别结合能（n 未注明）', 'eV', ('li2sn_binding_energy_ev',)))
 
+LEGACY_BINDING_FIELDS = {'binding_energy', 'binding_energy_ev'}
+
 DEFINITIONS = {key: {'key': key, 'field': key, 'label': label, 'label_zh': label,
                      'unit': unit, 'type': 'number', 'category': 'numeric'}
                for key, label, unit, _ in FIELDS}
@@ -66,6 +68,8 @@ COMPATIBILITY_ONLY_FIELDS = {'binding_energy'}
 for compatibility_field in COMPATIBILITY_ONLY_FIELDS:
     DEFINITIONS[compatibility_field].update(
         deprecated=True, compatibility_only=True, default_matrix=False,
+        legacy_aliases=sorted(LEGACY_BINDING_FIELDS),
+        compatibility_schema='legacy_analysis_field_compat_v1',
         selection_rule='Legacy exact aliases; explicit callers only; separate species and condition axes remain authoritative',
     )
 ALIASES = {alias: key for key, _, _, aliases in FIELDS for alias in (key, *aliases)}
@@ -100,7 +104,6 @@ GENERIC_LI2SN_BINDING_FIELDS = {
 LI2SN_FAMILY_BINDING_FIELDS = {
     'li2sn_binding_energy_ev': 'li2sn_binding_energy',
 }
-LEGACY_BINDING_FIELDS = {'binding_energy', 'binding_energy_ev'}
 EXPLICIT_LI2SN_BINDING_FIELDS = (
     re.compile(r'^(li2s(?:2|4|6|8)?)_binding_energy(?:_(vdwsurf|spin_polarized))?_ev$'),
     re.compile(r'^binding_energy_(li2s(?:2|4|6|8)?)(?:_(vdwsurf|spin_polarized))?_ev$'),
