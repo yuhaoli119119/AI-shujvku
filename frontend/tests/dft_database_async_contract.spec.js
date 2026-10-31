@@ -151,4 +151,13 @@ test('profile and exploratory JSON stay scoped and desktop/mobile layouts remain
     await expect(page.locator('#datasetProfile option[value="dac_lis_ml"]')).toBeDisabled();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await openPage(page);
+  await page.selectOption('#datasetProfile', 'dac_lis_ml');
+  const downloadPromise = page.waitForEvent('download');
+  await page.locator('button[onclick="exportMLDataset()"]').click();
+  await downloadPromise;
+  await expect(page.locator('#exportSafetyStatus')).toContainText('探索 JSON 导出规则');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
