@@ -263,6 +263,30 @@ class DeploymentBoundaryTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'receipt is missing'):
                 deploy.current_snapshot(runtime)
 
+    def test_current_snapshot_requires_canonical_pointer_bytes(self):
+        sha='a'*40
+        for suffix in (b'',b'\n\n',b' \n',b'\r\n',b'\nextra',b'\xff\n'):
+            with self.subTest(suffix=suffix),tempfile.TemporaryDirectory() as directory:
+                runtime=Path(directory)
+                self._seed_state(runtime,sha)
+                pointer=runtime/'DEPLOYED_GITHUB_COMMIT'
+                pointer.write_bytes(sha.encode()+suffix)
+                with self.assertRaisesRegex(RuntimeError,'commit pointer'):
+                    deploy.current_snapshot(runtime)
+
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory)
+            self._seed_state(runtime,sha)
+            pointer=runtime/'DEPLOYED_GITHUB_COMMIT'
+            pointer.write_bytes(sha.encode()+b'\n')
+            snapshot=deploy.current_snapshot(runtime)
+            state=runtime/'deploy-state'/sha
+            self.assertEqual(snapshot,{
+                'commit':sha,'pointer_sha256':hashlib.sha256(pointer.read_bytes()).hexdigest(),
+                'receipt_sha256':deploy.digest(state/'deployment-receipt.json'),
+                'plan_sha256':deploy.digest(state/'plan.json'),
+                'compose_sha256':deploy.digest(state/'compose.private.json')})
+
     def test_current_snapshot_rejects_receipt_plan_digest_mismatch(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime=Path(directory);sha='a'*40
@@ -450,6 +474,9 @@ class DeploymentBoundaryTests(unittest.TestCase):
             receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
             receipt_data=json.loads(receipt.read_text());receipt_data['deployment_id']=transaction['deployment_id']
             receipt.write_text(json.dumps(receipt_data))
+            transaction=json.loads(deploy.transaction_path(runtime).read_text())
+            transaction['target_receipt_sha256']=deploy.digest(receipt)
+            deploy.write_private(deploy.transaction_path(runtime),json.dumps(transaction))
             with patch.object(deploy,'verify_consistent',return_value={'status':'ok','git_commit':target}) as verifier:
                 result=deploy.recover(runtime,target)
             self.assertEqual(result['status'],'recovered')
@@ -466,8 +493,13 @@ class DeploymentBoundaryTests(unittest.TestCase):
                 transaction=deploy.begin_transaction(runtime,expected,target,target_snapshot['plan_sha256'],target_snapshot['compose_sha256'])
                 receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
                 receipt_data=json.loads(receipt.read_text());receipt_data['deployment_id']=transaction['deployment_id']
-                if changed=='deployment_id':receipt_data['deployment_id']='different-deployment'
                 receipt.write_text(json.dumps(receipt_data))
+                journal=json.loads(deploy.transaction_path(runtime).read_text())
+                journal['target_receipt_sha256']=deploy.digest(receipt)
+                deploy.write_private(deploy.transaction_path(runtime),json.dumps(journal))
+                if changed=='deployment_id':
+                    receipt_data['deployment_id']='different-deployment'
+                    receipt.write_text(json.dumps(receipt_data))
                 if changed=='plan':
                     journal=json.loads(deploy.transaction_path(runtime).read_text());journal['plan_sha256']='0'*64
                     deploy.write_private(deploy.transaction_path(runtime),json.dumps(journal))
@@ -479,6 +511,49 @@ class DeploymentBoundaryTests(unittest.TestCase):
                         deploy.recover(runtime,target)
                 journal=json.loads(deploy.transaction_path(runtime).read_text())
                 self.assertEqual(journal['phase'],'recovery_required')
+
+    def test_recover_rejects_target_receipt_hash_drift_with_same_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);current='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,current)
+            target_snapshot=self._seed_deployment(runtime,target,'3'*64,'4'*64)
+            transaction=deploy.begin_transaction(runtime,expected,target,target_snapshot['plan_sha256'],target_snapshot['compose_sha256'])
+            receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+            data=json.loads(receipt.read_text());data['deployment_id']=transaction['deployment_id']
+            receipt.write_text(json.dumps(data))
+            transaction=json.loads(deploy.transaction_path(runtime).read_text())
+            transaction['target_receipt_sha256']=deploy.digest(receipt)
+            deploy.write_private(deploy.transaction_path(runtime),json.dumps(transaction))
+            data['verified_health']={'status':'changed-after-target-publish'}
+            receipt.write_text(json.dumps(data))
+            with patch.object(deploy,'verify_consistent',return_value={'status':'ok','git_commit':target}):
+                with self.assertRaisesRegex(RuntimeError,'Target pointer, receipt, plan or compose changed'):
+                    deploy.recover(runtime,target)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
+
+    def test_recover_rejects_target_drift_during_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);current='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,current)
+            target_snapshot=self._seed_deployment(runtime,target,'3'*64,'4'*64)
+            transaction=deploy.begin_transaction(runtime,expected,target,target_snapshot['plan_sha256'],target_snapshot['compose_sha256'])
+            receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+            receipt_data=json.loads(receipt.read_text());receipt_data['deployment_id']=transaction['deployment_id']
+            receipt.write_text(json.dumps(receipt_data))
+            transaction=json.loads(deploy.transaction_path(runtime).read_text())
+            transaction['target_receipt_sha256']=deploy.digest(receipt)
+            deploy.write_private(deploy.transaction_path(runtime),json.dumps(transaction))
+            def verifier(_runtime,_sha):
+                receipt_data=json.loads(receipt.read_text())
+                receipt_data['verified_health']={'status':'change-during-recovery-verification'}
+                receipt.write_text(json.dumps(receipt_data))
+                return {'status':'ok','git_commit':target}
+            with patch.object(deploy,'verify_consistent',side_effect=verifier):
+                with self.assertRaisesRegex(RuntimeError,'changed during recovery verification'):
+                    deploy.recover(runtime,target)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
 
     def test_recover_failure_preserves_recovery_required_transaction(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -744,6 +819,105 @@ class DeploymentBoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'Pointer CAS rejected'):
                     deploy.record_deployment(runtime,target,target_plan,{'status':'ok'},expected,'d'*32)
             self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),old)
+
+    def test_pointer_cas_rejects_target_snapshot_drift(self):
+        for changed in ('receipt','plan','compose'):
+            with self.subTest(changed=changed),tempfile.TemporaryDirectory() as directory:
+                runtime=Path(directory);old='a'*40;target='b'*40
+                expected=self._seed_deployment(runtime,old)
+                _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+                state=runtime/'deploy-state'/target
+                compose_path=state/'compose.private.json'
+                receipt=state/'deployment-receipt.json'
+                def writer(path,data):
+                    if path.name=='DEPLOYED_GITHUB_COMMIT':
+                        if changed=='receipt':
+                            receipt_data=json.loads(receipt.read_text())
+                            receipt_data['verified_health']={'status':'concurrent-target-change'}
+                            receipt.write_text(json.dumps(receipt_data))
+                        elif changed=='plan':
+                            plan_data=json.loads((state/'plan.json').read_text())
+                            plan_data['plan_marker']='concurrent-target-change'
+                            (state/'plan.json').write_text(json.dumps(plan_data))
+                            receipt_data=json.loads(receipt.read_text())
+                            receipt_data['plan_sha256']=deploy.digest(state/'plan.json')
+                            receipt.write_text(json.dumps(receipt_data))
+                        else:
+                            compose_data=json.loads(compose_path.read_text())
+                            compose_data['compose_marker']='concurrent-target-change'
+                            compose_path.write_text(json.dumps(compose_data))
+                            plan_data=json.loads((state/'plan.json').read_text())
+                            plan_data['compose_sha256']=deploy.digest(compose_path)
+                            (state/'plan.json').write_text(json.dumps(plan_data))
+                            receipt_data=json.loads(receipt.read_text())
+                            receipt_data['plan_sha256']=deploy.digest(state/'plan.json')
+                            receipt.write_text(json.dumps(receipt_data))
+                    return deploy.write_private(path,data)
+                with self.assertRaisesRegex(RuntimeError,'reviewed target snapshot'):
+                    deploy.record_deployment(runtime,target,target_plan,{'status':'ok'},expected,'d'*32,writer=writer)
+                self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),target)
+
+    def test_target_snapshot_drift_after_pointer_keeps_recovery_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+            receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+            def writer(path,data):
+                if path.name=='DEPLOYED_GITHUB_COMMIT':
+                    receipt_data=json.loads(receipt.read_text())
+                    receipt_data['verified_health']={'status':'concurrent-target-change'}
+                    receipt.write_text(json.dumps(receipt_data))
+                return deploy.write_private(path,data)
+            def recorder(recording_runtime,sha,plan_hash,verified,current,deployment_id):
+                return deploy.record_deployment(recording_runtime,sha,plan_hash,verified,current,deployment_id,writer=writer)
+            with self.assertRaisesRegex(RuntimeError,'rollback was not verified'):
+                deploy.apply_release(runtime,target,target_plan,['mock-compose'],expected,target_compose,
+                                     runner=lambda *args,**kwargs:None,container_verifier=lambda *args:{'status':'ok'},
+                                     post_verifier=lambda *args:{'status':'ok'},recorder=recorder)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),target)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
+
+    def test_target_snapshot_drift_after_post_verify_keeps_recovery_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+            receipt=runtime/'deploy-state'/target/'deployment-receipt.json'
+            def post_verifier(_runtime,sha):
+                if sha==target:
+                    receipt_data=json.loads(receipt.read_text())
+                    receipt_data['verified_health']={'status':'change-after-post-verify'}
+                    receipt.write_text(json.dumps(receipt_data))
+                return {'status':'ok','git_commit':sha}
+            with self.assertRaisesRegex(RuntimeError,'rollback was not verified'):
+                deploy.apply_release(runtime,target,target_plan,['mock-compose'],expected,target_compose,
+                                     runner=lambda *args,**kwargs:None,container_verifier=lambda *args:{'status':'ok'},
+                                     post_verifier=post_verifier)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),target)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
+
+    def test_rollback_state_drift_during_final_verification_keeps_recovery_required(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime=Path(directory);old='a'*40;target='b'*40
+            expected=self._seed_deployment(runtime,old)
+            _,target_plan,target_compose=self._seed_state(runtime,target,'3'*64,'4'*64)
+            receipt=runtime/'deploy-state'/old/'deployment-receipt.json'
+            def post_verifier(_runtime,sha):
+                if sha==target:raise RuntimeError('force rollback')
+                receipt_data=json.loads(receipt.read_text())
+                receipt_data['verified_health']={'status':'change-during-rollback-verification'}
+                receipt.write_text(json.dumps(receipt_data))
+                return {'status':'ok','git_commit':sha}
+            with self.assertRaisesRegex(RuntimeError,'rollback was not verified'):
+                deploy.apply_release(runtime,target,target_plan,['mock-compose'],expected,target_compose,
+                                     runner=lambda *args,**kwargs:None,container_verifier=lambda *args:{'status':'ok'},
+                                     post_verifier=post_verifier)
+            self.assertEqual((runtime/'DEPLOYED_GITHUB_COMMIT').read_text().strip(),old)
+            journal=json.loads(deploy.transaction_path(runtime).read_text())
+            self.assertEqual(journal['phase'],'recovery_required')
 
     def test_rollback_final_cas_rejects_target_receipt_drift(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -60,28 +60,51 @@ def current_snapshot(runtime):
     if not pointer.is_file():
         return {'commit':None,'pointer_sha256':None,'receipt_sha256':None,
                 'plan_sha256':None,'compose_sha256':None}
-    commit=pointer.read_text().strip()
-    if not re.fullmatch('[0-9a-f]{40}',commit):
+    pointer_bytes=pointer.read_bytes()
+    stripped=pointer_bytes.strip(b' \t\r\n')
+    if not re.fullmatch(br'[0-9a-f]{40}',stripped):
         raise RuntimeError('Invalid deployed commit pointer')
+    if not re.fullmatch(br'[0-9a-f]{40}\n',pointer_bytes):
+        raise RuntimeError('Deployed commit pointer is not canonical')
+    commit=stripped.decode('ascii')
+    return snapshot_for_commit(runtime,commit,hashlib.sha256(pointer_bytes).hexdigest())
+def snapshot_for_commit(runtime,commit,pointer_sha256):
     receipt=runtime/'deploy-state'/commit/'deployment-receipt.json'
     if not receipt.is_file():raise RuntimeError('Current deployment receipt is missing')
     state=runtime/'deploy-state'/commit
     plan=state/'plan.json'
     if not plan.is_file():raise RuntimeError('Current deployment plan is missing')
-    try:receipt_data=json.loads(receipt.read_text())
+    receipt_bytes=receipt.read_bytes()
+    try:receipt_data=json.loads(receipt_bytes)
     except Exception as exc:raise RuntimeError('Current deployment receipt is invalid') from exc
     if receipt_data.get('commit')!=commit:raise RuntimeError('Current deployment receipt commit mismatch')
-    plan_sha=digest(plan)
+    plan_bytes=plan.read_bytes()
+    plan_sha=hashlib.sha256(plan_bytes).hexdigest()
     compose=resolve_plan_compose(state,plan_sha)
     if not compose.is_file():raise RuntimeError('Current deployment compose is missing')
-    compose_sha=digest(compose)
+    compose_sha=hashlib.sha256(compose.read_bytes()).hexdigest()
     if receipt_data.get('plan_sha256')!=plan_sha:raise RuntimeError('Current receipt plan digest mismatch')
-    try:plan_data=json.loads(plan.read_text())
+    try:plan_data=json.loads(plan_bytes)
     except Exception as exc:raise RuntimeError('Current deployment plan is invalid') from exc
     if plan_data.get('commit')!=commit or plan_data.get('compose_sha256')!=compose_sha:
         raise RuntimeError('Current plan commit or compose digest mismatch')
-    return {'commit':commit,'pointer_sha256':digest(pointer),'receipt_sha256':digest(receipt),
+    return {'commit':commit,'pointer_sha256':pointer_sha256,
+            'receipt_sha256':hashlib.sha256(receipt_bytes).hexdigest(),
             'plan_sha256':plan_sha,'compose_sha256':compose_sha}
+def target_snapshot_contract(transaction):
+    target=transaction.get('target_commit')
+    values=(transaction.get('target_receipt_sha256'),transaction.get('plan_sha256'),transaction.get('compose_sha256'))
+    if (not isinstance(target,str) or not re.fullmatch('[0-9a-f]{40}',target)
+            or not all(isinstance(value,str) and re.fullmatch('[0-9a-f]{64}',value) for value in values)):
+        raise RuntimeError('Deployment transaction lacks the exact target snapshot')
+    return {'commit':target,'pointer_sha256':hashlib.sha256((target+'\n').encode()).hexdigest(),
+            'receipt_sha256':values[0],'plan_sha256':values[1],'compose_sha256':values[2]}
+def assert_target_snapshot(runtime,transaction):
+    expected=target_snapshot_contract(transaction)
+    actual=current_snapshot(runtime)
+    if actual!=expected:
+        raise RuntimeError(f'Target pointer, receipt, plan or compose changed during transaction: expected {expected}, found {actual}')
+    return actual
 def assert_current(runtime,expected):
     actual=current_snapshot(runtime)
     if actual!=expected:
@@ -334,12 +357,14 @@ def finish_failed_attempt(runtime,transaction,error,rolled_back):
     record={**transaction,'phase':'rolled_back','error':str(error),'rolled_back':rolled_back,
             'finished_at_utc':datetime.now(timezone.utc).isoformat()}
     write_private(state/(transaction['deployment_id']+'.json'),json.dumps(record,sort_keys=True,indent=2)+'\n')
-def cas_pointer(runtime,expected_snapshot,target,*,writer=write_private):
+def cas_pointer(runtime,expected_snapshot,target,*,expected_target=None,writer=write_private):
     current=current_snapshot(runtime)
     if current!=expected_snapshot:
         raise RuntimeError(f'Pointer CAS rejected: expected {expected_snapshot}, found {current}')
     writer(runtime/'DEPLOYED_GITHUB_COMMIT',target+'\n')
     updated=current_snapshot(runtime)
+    if expected_target is not None and updated!=expected_target:
+        raise RuntimeError(f'Pointer CAS did not activate the reviewed target snapshot: expected {expected_target}, found {updated}')
     if updated['commit']!=target:raise RuntimeError('Pointer CAS did not activate the target commit')
     return updated
 def rollback_to_expected(runtime,expected,target,plan_hash,compose_hash,deployment_id,
@@ -374,10 +399,11 @@ def rollback_to_expected(runtime,expected,target,plan_hash,compose_hash,deployme
     runner([*compose,'build','backend','worker','worker-pdf'],check=True)
     runner([*compose,'up','-d','--no-deps','--force-recreate','--wait','--wait-timeout','180',*SERVICES],check=True)
     container_verifier(runtime,expected['commit'])
-    if target_current:cas_pointer(runtime,pointer_expected,expected['commit'])
+    if target_current:cas_pointer(runtime,pointer_expected,expected['commit'],expected_target=expected)
     else:assert_current(runtime,expected)
     assert_current(runtime,expected)
     verifier(runtime,expected['commit'])
+    assert_current(runtime,expected)
 def record_deployment(runtime,sha,plan_hash,verified,expected_current,deployment_id,*,writer=write_private):
     assert_current(runtime,expected_current)
     state=private_directory(runtime/'deploy-state'/sha)
@@ -395,6 +421,10 @@ def record_deployment(runtime,sha,plan_hash,verified,expected_current,deployment
     receipt={'commit':sha,'previous_commit':expected_current['commit'],'remote':REMOTE,
              'plan_sha256':plan_hash,'deployment_id':deployment_id,'verified_health':verified}
     writer(target_receipt,json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+    target_pointer_sha=hashlib.sha256((sha+'\n').encode()).hexdigest()
+    target_snapshot=snapshot_for_commit(runtime,sha,target_pointer_sha)
+    if target_snapshot['plan_sha256']!=plan_hash:
+        raise RuntimeError('Target plan changed before pointer CAS')
     assert_current(runtime,expected_current)
     journal=runtime/'deploy-state'/'.deployment-transaction.json'
     if journal.is_file():
@@ -402,9 +432,9 @@ def record_deployment(runtime,sha,plan_hash,verified,expected_current,deployment
         except Exception as exc:raise RuntimeError('Deployment transaction is invalid before pointer CAS') from exc
         if transaction.get('deployment_id')!=deployment_id:
             raise RuntimeError('Deployment transaction identity changed before pointer CAS')
-        transaction['target_receipt_sha256']=digest(target_receipt)
+        transaction['target_receipt_sha256']=target_snapshot['receipt_sha256']
         write_private(journal,json.dumps(transaction,sort_keys=True,indent=2)+'\n')
-    cas_pointer(runtime,expected_current,sha,writer=writer)
+    cas_pointer(runtime,expected_current,sha,expected_target=target_snapshot,writer=writer)
     return receipt
 def apply_release(runtime,sha,plan_hash,compose,expected_current,compose_hash,*,runner=None,
                   container_verifier=None,post_verifier=None,recorder=None,lock=True):
@@ -435,6 +465,7 @@ def apply_release(runtime,sha,plan_hash,compose,expected_current,compose_hash,*,
             transaction=json.loads(transaction_path(runtime).read_text())
             transaction=update_transaction(runtime,transaction,'committed')
             post_verifier(runtime,sha)
+            assert_target_snapshot(runtime,transaction)
             transaction_path(runtime).unlink()
             return receipt
         except Exception as exc:
@@ -477,13 +508,13 @@ def recover(runtime,sha):
             if current['commit']==expected['commit'] and current!=expected:
                 raise RuntimeError('Expected-current plan, compose, pointer or receipt changed during transaction')
             if current['commit']==sha:
-                if current['plan_sha256']!=transaction.get('plan_sha256') or current['compose_sha256']!=transaction.get('compose_sha256'):
-                    raise RuntimeError('Target plan or compose does not match transaction')
-                receipt=runtime/'deploy-state'/sha/'deployment-receipt.json'
-                receipt_data=json.loads(receipt.read_text())
-                if receipt_data.get('deployment_id')!=transaction.get('deployment_id'):
-                    raise RuntimeError('Target receipt deployment id does not match transaction')
+                expected_target=target_snapshot_contract(transaction)
+                if current!=expected_target:
+                    raise RuntimeError('Target pointer, receipt, plan or compose changed during transaction')
             verified=verify_consistent(runtime,current['commit'])
+            final_current=current_snapshot(runtime)
+            if final_current!=current:
+                raise RuntimeError('Deployment state changed during recovery verification')
         except Exception as exc:
             try:update_transaction(runtime,transaction,'recovery_required')
             except Exception:pass
@@ -492,7 +523,7 @@ def recover(runtime,sha):
         state=private_directory(runtime/'deploy-state'/sha/'recoveries')
         write_private(state/(transaction['deployment_id']+'.json'),json.dumps({
             'transaction':recovered,'result':'verified','verified':verified,
-            'current_snapshot':current,
+            'current_snapshot':final_current,
         },sort_keys=True,indent=2)+'\n')
         path.unlink()
         return {'status':'recovered','commit':current['commit'],'verified':verified}
