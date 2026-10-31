@@ -3,6 +3,13 @@ const { test, expect } = require("@playwright/test");
 const BASE_URL = process.env.TEST_BASE_URL || "http://127.0.0.1:4173";
 
 const fields = {
+  schema_version: "dft_catalyst_analysis_fields_v1",
+  export_policy: {
+    exports_enabled: false,
+    effective_exports_enabled: true,
+    owner_exception_policy: "existing_owner_authentication",
+    assessment_status: "not_evaluated",
+  },
   fields: [
     { key: "li2s_adsorption_energy", label: "Li2S 吸附能", type: "number" },
     { key: "li2s_dissociation_barrier", label: "Li2S 解离能垒", type: "number" },
@@ -51,21 +58,28 @@ function correlationPayload(url) {
       point("sample-ni-003", "Ni-SAC", "B0102", -1.2, 1.24),
     ];
   return {
+    schema_version: "rebuild_correlation_exploratory_v1",
     x_field: xField,
     y_field: yField,
     x_label: chargeBond ? "Li2S Bader 电荷转移" : "Li2S 吸附能",
     y_label: chargeBond ? "Li-S 最大键长" : "Li2S 解离能垒",
     min_n: minN,
     n: 3,
-    n_catalysts: insufficient ? 2 : 3,
-    n_papers: 2,
+    n_catalysts: 3,
+    n_papers: insufficient ? 1 : 2,
+    analysis_row_counts: {
+      total_dft_rows: 377,
+      numeric_records: 375,
+      exploratory_numeric_records: 320,
+      distinct_exploratory_catalysts: 42,
+      contributing_papers: 18,
+    },
     legacy_identity_point_count: 2,
     ready: !insufficient,
     statistics: insufficient
       ? { pearson_r: null, spearman_rho: null, r_squared: null, slope: null, intercept: null }
       : { pearson_r: -0.91, spearman_rho: -1, r_squared: 0.83, slope: -0.5, intercept: 2.1 },
-    insufficient_reason: insufficient ? "样本数 3 小于最少样本数 5，未绘制拟合线。" : null,
-    warnings: insufficient ? ["min_n_not_reached", "fewer_than_two_contributing_papers"] : [],
+    warnings: insufficient ? ["approval_not_evaluated", "min_n_not_reached", "fewer_than_two_contributing_papers"] : [],
     excluded_count: 12,
     excluded_reasons: { pair_analysis_target_not_normalized: 8, missing_catalyst_sample_id: 5, context_mismatch: 12 },
     points,
@@ -104,6 +118,13 @@ async function installVisualMocks(page, correlationRequests) {
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(correlationPayload(url)) });
   });
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/visuals/data-revision*", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify({ source: "rebuild", revision: "fixture-revision-1", record_count: 377 }),
+  }));
+});
 
 test("shows the server-rendered plot while compact interaction data is loading", async ({ page }) => {
   let releaseCorrelation;
@@ -197,7 +218,7 @@ test.describe("DFT 数据可视化迁移", () => {
       if (request.url().includes("correlation-pairs")) oldRequests.push(request.url());
     });
     await installVisualMocks(page, correlationRequests);
-    await page.goto(BASE_URL + "/pages/visuals/index.html?library_name=Selected%20Library");
+    await page.goto(BASE_URL + "/pages/visuals/index.html?library_name=Selected%20Library&x=li2s_adsorption_energy&y=li2s_dissociation_barrier&min_n=3");
 
     await expect(page.locator("#metrics")).toContainText("DFT 总记录");
     await expect(page.locator("#metricDftTotal")).toHaveText("377");
@@ -214,8 +235,6 @@ test.describe("DFT 数据可视化迁移", () => {
     expect(correlationRequests[0].searchParams.get("x_field")).toBe("li2s_adsorption_energy");
     expect(correlationRequests[0].searchParams.get("y_field")).toBe("li2s_dissociation_barrier");
     expect(correlationRequests[0].searchParams.get("library_name")).toBe("Selected Library");
-    await expect.poll(() => visualRequests.filter((url) => url.pathname === "/api/visuals/overview").length).toBe(1);
-    expect(visualRequests.find((url) => url.pathname === "/api/visuals/overview").searchParams.get("library_name")).toBe("Selected Library");
     expect(visualRequests.find((url) => url.pathname === "/api/visuals/analysis-fields").searchParams.get("library_name")).toBe("Selected Library");
     expect(oldRequests).toEqual([]);
     await expect(page.locator(".correlation-cell")).toHaveCount(0);
@@ -234,10 +253,11 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(page.locator("#technicalDiagnostics")).not.toHaveAttribute("open", "");
     await page.locator("#technicalDiagnostics summary").click();
     await expect(page.locator("#excludedBox")).toContainText("数值或单位无法安全标准化：8 次");
-    await expect(page.locator("#excludedBox")).toContainText("记录未明确绑定催化剂样品：5 次");
+    await expect(page.locator("#excludedBox")).toContainText("记录未明确绑定催化剂样品（可选元数据）：5 次");
     await expect(page.locator("#excludedBox")).toContainText("计算设置、位点或构型不兼容：12 次");
     await expect(page.locator("#technicalDiagnostics")).toContainText("同一记录可能同时命中多个原因");
 
+    await page.locator("#pairDetails > summary").click();
     const second = page.locator("#detailsBody tr").nth(1);
     await expect(second).toContainText("sample-co-002");
     await expect(second).toContainText("B0078");
@@ -249,7 +269,7 @@ test.describe("DFT 数据可视化迁移", () => {
     await expect(second).toContainText("path B：1.02");
     await expect(second.locator(".candidate-badge")).toHaveText("用于汇总/回归");
 
-    await page.getByRole("button", { name: "快捷关系：Li2S Bader 电荷转移 vs Li-S 最大键长" }).click();
+    await page.locator("#quickChargeBond").click();
     await expect.poll(() => correlationRequests.length).toBe(2);
     expect(correlationRequests[1].searchParams.get("x_field")).toBe("li2s_bader_charge_transfer");
     expect(correlationRequests[1].searchParams.get("y_field")).toBe("li_s_bond_max");
@@ -273,10 +293,10 @@ test.describe("DFT 数据可视化迁移", () => {
     await page.locator("#minN").dispatchEvent("change");
     await expect.poll(() => correlationRequests.length).toBe(3);
     await expect(page.locator(".fit-line")).toHaveCount(0);
-    await expect(page.locator("#fitNotice")).toContainText("样本数 3 小于最少样本数 5");
+    await expect(page.locator("#fitNotice")).toHaveText("有效配对不足或数值无法拟合。");
     await expect(page.locator("#statPearson")).toHaveText("—");
     await expect(page.locator("#statR2")).toHaveText("—");
-    await expect(page.locator("#diagnosticTitle")).toHaveText("当前数据不足，暂不进行拟合");
+    await expect(page.locator("#diagnosticTitle")).toHaveText("有效配对不足或数值无法拟合。");
     await expect(page.locator("#diagnosticMessage")).toContainText("至少需要 5 个");
     await page.locator("#technicalDiagnostics summary").click();
     await expect(page.locator("#warningsBox")).toContainText("有效配对未达到最少样本数");
@@ -358,12 +378,23 @@ test.describe("DFT 数据可视化迁移", () => {
     const positions = await page.locator(".plot-point").evaluateAll((nodes) => nodes.map((node) => ({
       x: Number(node.getAttribute("cx")),
       y: Number(node.getAttribute("cy")),
+      r: Number(node.getAttribute("r")),
     })));
+    const bounds = await page.locator("#plotClip rect").evaluate((node) => {
+      const left = Number(node.getAttribute("x"));
+      const top = Number(node.getAttribute("y"));
+      return {
+        left,
+        top,
+        right: left + Number(node.getAttribute("width")),
+        bottom: top + Number(node.getAttribute("height")),
+      };
+    });
     for (const position of positions) {
-      expect(position.x).toBeGreaterThanOrEqual(65);
-      expect(position.x).toBeLessThanOrEqual(599);
-      expect(position.y).toBeGreaterThanOrEqual(49);
-      expect(position.y).toBeLessThanOrEqual(327);
+      expect(position.x - position.r).toBeGreaterThanOrEqual(bounds.left);
+      expect(position.x + position.r).toBeLessThanOrEqual(bounds.right);
+      expect(position.y - position.r).toBeGreaterThanOrEqual(bounds.top);
+      expect(position.y + position.r).toBeLessThanOrEqual(bounds.bottom);
     }
 
     await expect(page.locator(".plot-point-label")).toHaveCount(0);
@@ -375,6 +406,7 @@ test.describe("DFT 数据可视化迁移", () => {
     const overflowingHeaders = await page.locator("thead th").evaluateAll((nodes) => nodes.filter((node) => node.scrollWidth > node.clientWidth + 1).map((node) => node.textContent));
     expect(overflowingHeaders).toEqual([]);
 
+    await page.locator("#pairDetails > summary").click();
     const targetPoint = page.locator(".plot-point").nth(4);
     await targetPoint.scrollIntoViewIfNeeded();
     const beforeClickScroll = await page.evaluate(() => window.scrollY);

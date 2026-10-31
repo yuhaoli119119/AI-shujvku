@@ -4,9 +4,9 @@
 
 ## 日常操作
 
-在项目目录修改 backend、frontend、prompts 等源码，检查 git status 后只暂存本次改动，提交并 git push origin master。用户授权发布时运行 `./update.sh`，脚本自动选择该目录 HEAD、从 GitHub 获取确切提交、生成计划并按计划部署。只有 GitHub 可获取的提交能发布，手工修改不会直接覆盖线上代码。
+在项目目录修改 backend、frontend、prompts 等源码，检查 git status 后只暂存本次改动，提交并 git push origin master。`./update.sh` 无参数时只验证当前版本或生成部署计划，不再隐式 apply；只有 GitHub 可获取的提交能发布，手工修改不会直接覆盖线上代码。
 
-需要单独核对计划时仍可用 `./update.sh plan <完整40位commit>`、`./update.sh apply <commit> --plan-sha256 <计划摘要>`、`./update.sh verify <commit>`。常规流程无需在多个开发目录间切换。
+审阅计划后显式运行 `./update.sh apply <完整40位commit> --plan-sha256 <计划摘要>`；只读核验使用 `./update.sh verify <commit>`。apply 不接受分支名、短 SHA 或未精确匹配的 plan。
 
 ## 内部运行方式
 
@@ -16,7 +16,31 @@ GitHub 根目录直接包含 backend、frontend、prompts、docker-compose.yml �
 
 `verify` 按服务逐项核对候选 release 挂载：backend 的 `/app,/frontend,/prompts`，两个 worker 的 `/app,/prompts`，以及 owner/share/public gateway 的 Nginx 配置模板与 `conf.d` 文件。每项必须是候选 release 中精确路径的只读 bind mount；路径错误、旧 release 来源或可写挂载都会使发布失败。
 
-回执和 `DEPLOYED_GITHUB_COMMIT` 使用同目录临时文件、文件 fsync 和原子替换。apply 在容器重建及 verify 成功后才写回执，回执成功后才推进指针；回执写入失败不会推进指针。已存在的同提交回执可安全原子替换，因此连续发布、回滚到已有回执的版本、再重新发布均可重复执行。
+plan schema v2 在独占锁内记录当前版本的五元快照：pointer SHA、当前 receipt、当前 plan 和当前 compose 的 SHA-256。apply 全程持有 `<runtime>/deploy-state/deployment.lock`，在 build 前、up 前后、回执写入前后分别复核该快照；另一个进程持有锁时立即拒绝，不能继续使用旧 plan。
+
+apply 使用 `.deployment-transaction.json` 记录 `prepared → built → up → target_verified → committed` 阶段。目标 receipt 先持久化，pointer 最后由锁内 CAS 原子推进，随后再次核验六服务、mount、health、pointer 和 receipt。up、verify 或 pointer 阶段失败时，部署器尝试用 expected-current 的已审阅 compose 回滚并再次 verify；恢复失败则保留 `recovery_required`，阻止后续 plan/apply。`verify` 在存在未完成 transaction 时也 fail closed，不再把“容器当前看似正常”误报为部署完成。
+
+中断后先保持现场，再运行显式恢复：
+
+```bash
+./update.sh recover <transaction-target-commit>
+```
+
+recover 只会把实际 pointer 收敛到 transaction 的 expected-current 或 target。若对应版本、六服务、mount、health、pointer、receipt、plan 和 compose 全部通过验证，则记录 recovery receipt 并清除 transaction；任何不一致继续保留 `recovery_required`，不覆盖未知 pointer。
+
+旧格式 plan 或与当前五元快照不同的 plan 不会被静默覆盖。确需重建同一提交的计划时，必须显式给出 rotation reason 和旧 plan 的精确 SHA-256：
+
+```bash
+./update.sh plan <完整commit> \
+  --rotate-plan-reason "说明为何需要新 schema 或新回退上下文" \
+  --expected-old-plan-sha256 <旧 plan 的 SHA-256>
+```
+
+旧 `plan.json` 与其内容寻址的 compose 会原样归档到 `deploy-state/<commit>/plan-history/<old-plan-sha>/` 并写 rotation receipt。新 compose 先写入 `compose.<new-plan-sha>.json`，`plan.json` 最后作为提交点；中断重试只会复用同一旧/新摘要，不改第一次 rotation 时间证据。
+
+禁止对当前 active commit 直接原地 rotation，因为这会改变现行 receipt 引用的 plan。active commit 的紧急回退继续使用保留的父版 helper/plan；常规可验证回退是：候选脚本为父提交生成 schema v2 plan，记录当前候选为 expected-current，审阅 exact plan 后再 apply。
+
+`--runtime` 可以为兼容旧调用保留，但必须 realpath 到唯一生产根 `/opt/AI-shujvku/literature-ai`；任意其它 `/opt/*`、隔离 worktree 或 `/home` 路径均在 fetch、加锁和 plan 写入前拒绝。
 
 ## 服务器内容
 
@@ -69,3 +93,5 @@ docker exec literature-ai-postgres-1 psql -X -U literature_ai -d literature_ai -
 发布计划必须核对私有 mount 为只读、manifest 内 bundle hash/bytes 与宿主文件一致；未登录 owner 页面和数据请求仍须走 `/login`，公开只读站继续返回 404。不得用 `git add -f` 绕过忽略规则，也不得把 JSON 复制进 `releases/<commit>` 形成 dirty checkout。
 
 首次 plan/apply 必须从包含本次部署校验的候选 checkout 执行 `update.sh`，或先单独发布并核实增强部署辅助脚本；旧生产工作树中的部署器不会因页面提交上线而自动获得这些新增校验。
+
+发布候选的旧成果兼容验收沿用独立验收窗口维护的 preflight 执行包，不在应用仓库复制第二套清单。执行时必须重新固定精确 commit、隔离生产快照、writer 静默窗口、全库/文件指纹、真实 HTTP/MCP 和五项 visuals 证据；模板、默认 dry-run 或合成检查均不能写成兼容 PASS。

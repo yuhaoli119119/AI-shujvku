@@ -3,6 +3,13 @@ const { test, expect } = require("@playwright/test");
 const BASE_URL = process.env.TEST_BASE_URL || "http://127.0.0.1:4173";
 
 const mockFields = {
+  schema_version: "dft_catalyst_analysis_fields_v1",
+  export_policy: {
+    exports_enabled: false,
+    effective_exports_enabled: true,
+    owner_exception_policy: "existing_owner_authentication",
+    assessment_status: "not_evaluated",
+  },
   fields: [
     { key: "li2s_adsorption_energy", label: "Li2S 吸附能", type: "number", unit: "eV" },
     { key: "li2s_dissociation_barrier", label: "Li2S 解离能垒", type: "number", unit: "eV" },
@@ -14,10 +21,16 @@ const mockFields = {
 };
 
 const mockOverview = {
+  catalyst_analysis_meta: {
+    distinct_exploratory_catalysts: 42,
+    contributing_papers: 18,
+  },
   summary: {
     total_dft_rows: 377,
     exportable_dft_rows: 375,
     v2_row_ready_numeric_rows: 320,
+    numeric_records: 375,
+    exploratory_numeric_records: 320,
     distinct_exportable_catalysts: 42,
     contributing_papers: 18,
   },
@@ -92,6 +105,11 @@ const mockCatalystDataset = {
 
 test.describe("DFT 数据分析 3-Tab 工作台交互测试", () => {
   test.beforeEach(async ({ page }) => {
+    await page.route("**/api/visuals/data-revision*", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ source: "rebuild", revision: "fixture-revision-1", record_count: 377 }),
+    }));
+
     await page.route("**/api/libraries", (route) => route.fulfill({
       contentType: "application/json",
       body: JSON.stringify([

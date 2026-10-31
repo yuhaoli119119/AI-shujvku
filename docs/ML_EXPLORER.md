@@ -24,6 +24,7 @@ frontend/pages/visuals/index.html       # 仅入口链接
 docker-compose.yml                     # 仅 backend 私有数据只读 mount
 deploy/scripts/github_deploy.py        # 私有 mount、来源、scope 与 hash 校验
 deploy/tests/test_github_deploy.py     # 部署门禁正反向测试
+update.sh                              # 无参数只生成计划，不隐式 apply
 docs/README.md
 docs/GITHUB_DEPLOYMENT.md
 docs/ML_EXPLORER.md
@@ -66,7 +67,8 @@ outputs/ml-explorer-web-candidate/
 - OOF 是历史 `dummy_median` 诊断；当前 RDS、Step I/II 和完整路径没有目标模型。
 - SHAP 只解释 F1/F2 RandomForest `material_descriptor_cv` 六吸附任务，不是因果、外部验证或材料排名。
 - history RDS 89/72 与当前 RDS 68/64/0 分开；旧 barrier 缺来源组/fold 时保持未知。
+- 浏览器先以字节读取 `manifest.json` 和 `app_data.json`，解析 JSON 后再计算 bundle hash 并运行 schema/scope/allowlist 校验；解析失败或 hash 不符时阻止页面渲染。该完整性校验不承担访问控制，owner 门禁仍由服务器执行。
 
 ## 验证与回退
 
-发布前运行静态契约、页面交互、移动端、鉴权、bundle hash、旧页面与代表性文献成果回归。回退到先前应用 commit 即可移除入口和页面；私有资产目录和数据库成果保留，不执行整库恢复或重解析。
+发布前运行静态契约、页面交互、移动端、鉴权、bundle hash、旧页面与代表性文献成果回归。隔离运行时验收使用独立验收窗口维护的 preflight 执行包，验证只读生产快照上的全库/文件指纹、父/候选 HTTP、真实 MCP 和图片；不得用隔离 worktree 冒充 runtime，也不得写入生产数据库。回退时用新版部署器为先前应用 commit 生成并审阅 schema v2 plan，保留私有资产目录、数据库成果和期间新增写入，不执行整库恢复或重解析。

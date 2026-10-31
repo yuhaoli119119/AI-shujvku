@@ -9,5 +9,5 @@ if [[ -f "$PROJECT_DIR/DEPLOYED_GITHUB_COMMIT" ]] && [[ "$(cat "$PROJECT_DIR/DEP
   exec python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" verify "$COMMIT"
 fi
 PLAN="$(python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" plan "$COMMIT")"
-PLAN_SHA="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["plan_sha256"])' <<< "$PLAN")"
-exec python3 "$PROJECT_DIR/deploy/scripts/github_deploy.py" apply "$COMMIT" --plan-sha256 "$PLAN_SHA"
+printf '%s\n' "$PLAN"
+printf 'Plan generated only. Review the exact plan and run apply explicitly with the printed plan_sha256 after all release gates pass.\n'

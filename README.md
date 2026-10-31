@@ -7,6 +7,7 @@
 - 新增：锂硫双原子单库“ML 数据探索”页面，可查看数据用途、材料分布、当前目标 readiness、历史 dummy OOF 和 F1/F2 SHAP。
 - 优化：当前 RDS 与历史 RDS 分层展示，Li₂S Step I/II/完整路径状态、模型可用性和数据来源可追溯。
 - 修复：数据页明确区分统计单元、数据行、训练目标行和模型解释次数，避免把跨域成员或重复模型视图当作独立样本。
+- 修复：部署计划记录当前版本与回退资产，apply 使用独占锁、expected-current 复核、pointer CAS 和失败恢复，避免并发发布造成容器与发布指针不一致。
 
 [完整更新记录](docs/releases/release-notes.md)
 
@@ -22,10 +23,12 @@ git status
 git add <本次修改的代码文件>
 git commit -m "说明改了什么"
 git push origin master
-./update.sh
+./update.sh                         # 仅生成部署计划
+./update.sh apply <完整commit> --plan-sha256 <已审阅计划摘要>
+./update.sh recover <transaction-target-commit>
 ```
 
-`./update.sh` 从 GitHub 获取当前已提交版本并部署。未上传的代码不会被当作线上版本。服务器数据、PDF、图片、产物、配置和凭据不会上传 GitHub；PostgreSQL 仍是业务数据真源。
+`./update.sh` 从 GitHub 获取当前已提交版本，但无参数时只生成计划。审阅 exact plan、当前版本和回退路径后，再显式运行 apply。未上传的代码不会被当作线上版本。服务器数据、PDF、图片、产物、配置和凭据不会上传 GitHub；PostgreSQL 仍是业务数据真源。
 
 前端、后端和提示词直接位于 `frontend/`、`backend/`、`prompts/`，不再套一层 literature-ai 源码目录。`releases/` 与 `deploy-state/` 是脚本管理的内部发布产物，日常无需操作。
 
