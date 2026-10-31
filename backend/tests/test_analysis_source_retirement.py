@@ -186,20 +186,27 @@ def test_constant_x_never_claims_fit_ready(monkeypatch):
 ])
 def test_new_projection_keeps_evidence_history_but_excludes_actual_conflicts(status, eligible):
     from uuid import uuid4
-    from app.db.models import Paper, RebuildDataRow, RebuildDataValue, RebuildValueSource
     pid, rid, vid = uuid4(), uuid4(), uuid4()
-    paper = Paper(id=pid, library_name='test', title='Evidence-backed DFT')
-    row = RebuildDataRow(id=rid, paper_id=pid, row_key='Fe', reaction='SRR',
-                         material='Fe-N4', active_site_type='single_atom', data_type='dft',
-                         condition={}, properties={})
-    value = RebuildDataValue(id=vid, row_id=rid, paper_id=pid,
-                            field_name='adsorption_energy_ev', numeric_value=-1., unit='eV',
-                            value_type='explicit', is_estimated=False,
-                            conflict={'status': status, 'candidates': [{'numeric_value': -1.}]})
-    source = RebuildValueSource(id=uuid4(), row_id=rid, value_id=vid, paper_id=pid,
-                               source_kind='table', page_number=2, quote='Fe-N4 -1.0 eV')
+    paper = {'id': pid, 'library_name': 'test', 'paper_code': 'T1',
+             'title': 'Evidence-backed DFT', 'doi': None, 'journal': None, 'year': None}
+    row = {'id': rid, 'paper_id': pid, 'configuration': 'synthetic', 'properties': {},
+           'condition': {}, 'reaction': 'SRR', 'material': 'Fe-N4',
+           'active_site_type': 'single_atom', 'active_site': 'Fe', 'support': 'NC',
+           'material_family': None, 'data_type': 'dft'}
+    value = {'id': vid, 'row_id': rid, 'paper_id': pid, 'field_name': 'adsorption_energy_ev',
+             'numeric_value': -1., 'raw_value': '-1.0', 'unit': 'eV', 'value_type': 'explicit',
+             'is_estimated': False,
+             'conflict': {'status': status, 'candidates': [{'numeric_value': -1.}]},
+             'missing_reason': None}
+    source = {'id': uuid4(), 'row_id': rid, 'value_id': vid, 'paper_id': pid,
+              'source_kind': 'table', 'page_number': 2, 'quote': 'Fe-N4 -1.0 eV'}
     session = MagicMock()
-    session.scalars.side_effect = [[paper], [row], [value], [source]]
+    results = []
+    for records in ([paper], [row], [value], [source]):
+        result = MagicMock()
+        result.mappings.return_value = records
+        results.append(result)
+    session.execute.side_effect = results
     svc = AnalysisReadonlyService(session, filters={'data_type': 'dft'})
     payload = svc.compare(offset=0, limit=25, sort='catalyst_group')
     assert payload['total'] == 1
@@ -207,5 +214,5 @@ def test_new_projection_keeps_evidence_history_but_excludes_actual_conflicts(sta
     assert svc.summary()['exploratory_numeric_records'] == int(eligible)
     assert any(f['available_count'] for f in svc.field_registry()) is eligible
     assert payload['items'][0]['sources'][0]['page_number'] == 2
-    assert session.scalars.call_count == 4  # No old catalyst or DFT-setting reads.
+    assert session.execute.call_count == 4  # No old catalyst or DFT-setting reads.
     session.commit.assert_not_called()
