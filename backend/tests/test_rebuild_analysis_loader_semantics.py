@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 
 from app.services.analysis_readonly import AnalysisReadonlyService
+from app.services.rebuild_analysis_fields import source_ids
 
 pytestmark = pytest.mark.no_test_database
 
@@ -86,3 +87,12 @@ def test_loader_preserves_matching_missing_unknown_objects_without_field_inferen
     correlation = service.correlation(x_field=projected, y_field='d_band_center')
     assert len(correlation['points']) == 1
     assert correlation['points'][0]['semantic_context']['x_adsorbate'] == adsorbate
+
+
+def test_loader_maps_reverse_order_binding_field_to_species_projection(loaded_service):
+    service, value, source = loaded_service('binding_energy_li2s8_ev', 'eV', 'Li2S8')
+    original = next(r for r in service.records if r['field_name'] == 'binding_energy_li2s8_ev')
+    result = service._rebuild_fields()[original['rebuild_row_id']]['li2s8_binding_energy']
+    assert result['exploratory_eligible']
+    assert result['raw_value'] == value['raw_value']
+    assert str(value['id']) in source_ids(result)

@@ -717,7 +717,7 @@
             <div class="filter-field"><label for="adsorbate" style="white-space: nowrap;">吸附物</label><input id="adsorbate" placeholder="Li2S4, Li2S8, H2O" oninput="handleDftFilterChange()"></div>
             <div class="filter-field"><label for="catalystName" style="white-space: nowrap;">催化剂</label><select id="catalystName" onchange="handleDftFilterChange()"><option value="">all</option></select></div>
             <div class="filter-field"><label for="minConfidence" style="white-space: nowrap;" title="默认不限；填写门槛后只保留有记录且达到门槛的置信度">最低置信度</label><input id="minConfidence" type="number" value="" placeholder="不限" min="0" max="1" step="0.05" onchange="handleDftFilterChange()"></div>
-            <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" onchange="markDftExportStale()" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子/双金属 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双金属 (bimetallic_lis_ml)</option></select></div>
+            <div class="filter-field"><label for="datasetProfile" style="white-space: nowrap;" title="仅影响导出文件，不影响当前表格查询">导出数据范围</label><select id="datasetProfile" onchange="markDftExportStale()" title="仅影响导出文件，不影响当前表格查询"><option value="">通用全部 (不限体系)</option><option value="dac_lis_ml">双原子 (dac_lis_ml)</option><option value="sac_lis_ml">单原子 (sac_lis_ml)</option><option value="bimetallic_lis_ml">双原子兼容范围 (bimetallic_lis_ml)</option></select></div>
           </div>
           <div class="export-panel dft-export-panel">
             <button class="btn btn-primary" onclick="exportCSV()">导出 CSV</button>
@@ -1148,6 +1148,16 @@
         select.value = current;
       }
     }
+    function syncDatasetProfileAvailability() {
+      const select = document.getElementById("datasetProfile");
+      if (!select) return;
+      const available = state.currentLibrary === "锂硫双原子";
+      Array.from(select.options).forEach(option => { if (option.value) option.disabled = !available; });
+      if (!available) select.value = "";
+      select.title = available
+        ? "仅影响导出文件；仅限锂硫双原子库，按双原子或单原子范围导出"
+        : "数据范围 profile 仅适用于锂硫双原子库";
+    }
     let catalystRequest = 0, overviewRequest = 0;
     async function loadCatalystFilterOptions() {
       const ticket = ++catalystRequest;
@@ -1202,6 +1212,7 @@
       state.catalystOptions = [];
       document.getElementById("catalystName").value = "";
       populateCatalystFilter();
+      syncDatasetProfileAvailability();
       loadCatalystFilterOptions();
       scheduleQueryDFT({ immediate: true });
       scheduleExportSafetyOverview();
@@ -2018,7 +2029,7 @@
       applyLibraryParam(params);
       let url = `/api/papers/export/dft-dataset?${params.toString()}`;
       const headers = {};
-      setExportSafetyStatus("正在生成 ML 数据集导出...");
+      setExportSafetyStatus("正在生成探索 JSON...");
       try {
         const resp = await fetch(url, { headers });
         const text = await resp.text();
@@ -2048,19 +2059,19 @@
 
         if (hasProfile) {
           if (exportedAfterLimit === 0) {
-            statusMessage = `ML 导出规则：${gateLabel(gate)} [${respProfile}]；基础候选 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 0 条。`;
-            toastMessage = `ML 数据集导出完成：0 条导出（范围排除 ${profileExcluded} 条）。`;
+            statusMessage = `探索 JSON 导出规则：${gateLabel(gate)} [${respProfile}]；基础候选 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 0 条。`;
+            toastMessage = `探索 JSON 导出完成：0 条导出（范围排除 ${profileExcluded} 条）。`;
           } else {
-            statusMessage = `ML 导出规则：${gateLabel(gate)} [${respProfile}]；基础候选 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 ${exportedAfterLimit} 条。`;
-            toastMessage = `ML 数据集导出完成：已导出 ${exportedAfterLimit} 条（范围排除 ${profileExcluded} 条）。`;
+            statusMessage = `探索 JSON 导出规则：${gateLabel(gate)} [${respProfile}]；基础候选 ${baseEligible} 条；范围符合 ${profileIncluded} 条；范围排除 ${profileExcluded} 条；实际导出 ${exportedAfterLimit} 条。`;
+            toastMessage = `探索 JSON 导出完成：已导出 ${exportedAfterLimit} 条（范围排除 ${profileExcluded} 条）。`;
           }
         } else {
           if (exportedAfterLimit === 0 && pending === 0 && rejected === 0) {
-            statusMessage = `ML 导出规则：${gateLabel(gate)}；没有当前筛选下的探索性记录。`;
+            statusMessage = `探索 JSON 导出规则：${gateLabel(gate)}；没有当前筛选下的探索性记录。`;
             toastMessage = "没有记录被导出。";
           } else {
-            statusMessage = `ML 导出规则：${gateLabel(gate)}；基础候选 ${baseEligible} 条；实际导出 ${exportedAfterLimit} 条；待处理 ${pending} 条；已拒绝 ${rejected} 条。`;
-            toastMessage = `ML 数据集导出完成：已导出 ${exportedAfterLimit} 条探索性数据。`;
+            statusMessage = `探索 JSON 导出规则：${gateLabel(gate)}；基础候选 ${baseEligible} 条；实际导出 ${exportedAfterLimit} 条；待处理 ${pending} 条；已拒绝 ${rejected} 条。`;
+            toastMessage = `探索 JSON 导出完成：已导出 ${exportedAfterLimit} 条探索性数据。`;
           }
         }
 
@@ -2078,8 +2089,8 @@
         URL.revokeObjectURL(downloadUrl);
         showToast(toastMessage);
       } catch (error) {
-        setExportSafetyStatus("ML 数据集导出失败：" + error.message);
-        showToast("ML 数据集导出失败：" + error.message);
+        setExportSafetyStatus("探索 JSON 导出失败：" + error.message);
+        showToast("探索 JSON 导出失败：" + error.message);
       }
     }
     document.addEventListener("DOMContentLoaded", () => {
@@ -2100,6 +2111,7 @@
         const catalyst = new URLSearchParams(location.search).get("catalyst");
         if (catalyst) { state.catalystOptions = [catalyst]; populateCatalystFilter(); }
         initDftViewState();
+        syncDatasetProfileAvailability();
         ViewState.bindDetailLinks("dft_database");
         queryDFT();
         loadCatalystFilterOptions();

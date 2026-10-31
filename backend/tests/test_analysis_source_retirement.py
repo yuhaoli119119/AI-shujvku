@@ -67,30 +67,50 @@ def test_binding_energy_filter_includes_species_specific_fields():
         'property_type': 'li2s8_binding_energy_ev',
         'canonical_property_type': 'li2s8_binding_energy_ev',
     })
+    assert svc._matches({
+        'property_type': 'binding_energy_li2s8_ev',
+        'canonical_property_type': 'binding_energy_li2s8_ev',
+    })
+    assert svc._matches({
+        'property_type': 'binding_energy_eV',
+        'canonical_property_type': 'binding_energy_eV',
+        'adsorbate': 'Li2S6*',
+    })
     assert not svc._matches({
         'property_type': 'adsorption_energy_ev',
         'canonical_property_type': 'adsorption_energy_ev',
     })
     assert property_filter_matches({'property_type': 'metal_support_binding_energy_eb'}, 'binding_energy') is False
+    assert property_filter_matches({'property_type': 'metal_support_binding_energy_ev'}, 'binding_energy') is False
+    assert property_filter_matches({'property_type': 'relative_binding_energy_ev'}, 'binding_energy') is False
+    assert property_filter_matches({'property_type': 'binding_energy'}, 'binding_energy') is False
+    assert property_filter_matches({'property_type': 'binding_energy_eV'}, 'binding_energy') is False
 
 
-@pytest.mark.parametrize('profile,catalyst_type,included', [
-    ('dac_lis_ml', 'dual_atom', True),
-    ('dac_lis_ml', 'single_atom', False),
-    ('sac_lis_ml', 'single_atom', True),
+@pytest.mark.parametrize('profile,catalyst_type,library,reaction,included', [
+    ('dac_lis_ml', 'dual_atom', '锂硫双原子', 'SRR', True),
+    ('dac_lis_ml', 'single_atom', '锂硫双原子', 'SRR', False),
+    ('dac_lis_ml', 'DAC', '锂硫双原子', 'srr', True),
+    ('dac_lis_ml', 'dual_atom_catalyst', '锂硫双原子', 'SRR', True),
+    ('dac_lis_ml', 'double_atom', '锂硫双原子', 'SRR', True),
+    ('bimetallic_lis_ml', 'bimetallic', '锂硫双原子', 'SRR', True),
+    ('dac_lis_ml', 'dual_atom', '硫中毒', 'SRR', False),
+    ('dac_lis_ml', 'dual_atom', '锂硫双原子', 'HER', False),
+    ('sac_lis_ml', 'single_atom', '锂硫双原子', 'SRR', True),
+    ('sac_lis_ml', 'SAC', '锂硫双原子', 'srr', True),
+    ('sac_lis_ml', 'single_atom_catalyst', '锂硫双原子', 'SRR', True),
 ])
-def test_lis_dataset_profile_uses_catalyst_type_and_library_scope(profile, catalyst_type, included):
-    record = {'catalyst_type': catalyst_type, 'library_name': '锂硫双原子', 'reaction': 'SRR'}
-    wanted = 'dual_atom' if profile == 'dac_lis_ml' else 'single_atom'
-    assert dataset_profile_matches(record, wanted) is included
+def test_lis_dataset_profile_is_strict_to_library_reaction_and_catalyst_type(profile, catalyst_type, library, reaction, included):
+    record = {'catalyst_type': catalyst_type, 'library_name': library, 'reaction': reaction}
+    assert dataset_profile_matches(record, profile) is included
     svc = AnalysisReadonlyService(MagicMock())
     svc.records = [{
         'record_id': 'record-1',
         'paper_id': 'paper-1',
         'sources': [],
-        'library_name': '锂硫双原子',
+        'library_name': library,
         'catalyst_type': catalyst_type,
-        'reaction': 'SRR',
+        'reaction': reaction,
         'exploratory_eligible': True,
     }]
     svc._loaded = ([], {}, {})

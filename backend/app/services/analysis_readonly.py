@@ -26,7 +26,9 @@ from app.db import models as m
 from app.normalizers.chemistry_normalizer import get_property_taxonomy
 from app.services.catalyst_analysis_service import CatalystAnalysisService, _ReadyRow, _candidate_groups, _stats
 from app.services.dft_ml_policy import analysis_entity_id
-from app.services.rebuild_analysis_fields import DEFINITIONS, PRESET_FIELDS, project_rows, source_ids
+from app.services.rebuild_analysis_fields import (
+    DEFINITIONS, PRESET_FIELDS, lis_binding_energy_field, project_rows, source_ids,
+)
 from app.services.rebuild_analysis_pairing import pair_rows, catalyst_entity_id, context as pair_context
 from app.utils.library_names import normalize_library_name
 
@@ -136,20 +138,36 @@ def property_filter_matches(record, needle):
     raw = str(record.get('property_type') or '').strip().casefold()
     canonical = str(record.get('canonical_property_type') or '').strip().casefold()
     wanted = str(_taxonomy(needle).get('canonical_property_type') or needle).strip().casefold()
+    if wanted == 'binding_energy':
+        return bool(lis_binding_energy_field(record))
     if canonical == wanted or raw == str(needle).strip().casefold():
         return True
-    if wanted == 'binding_energy':
-        return raw in {'binding_energy_ev', 'binding_energy'} or raw.endswith('_binding_energy_ev')
     return False
 
 
-def dataset_profile_matches(record, catalyst_type):
-    """Select Li-S catalyst profiles without merging other library scopes."""
-    if record.get('catalyst_type') != catalyst_type:
+PROFILE_CATALYST_TYPES = {
+    'single_atom': {'single_atom', 'single_atom_catalyst', 'sac'},
+    'dual_atom': {'dual_atom', 'dual_atom_catalyst', 'double_atom', 'dac', 'bimetallic'},
+}
+PROFILE_TARGET_TYPES = {
+    'dac_lis_ml': 'dual_atom',
+    # Legacy API alias: current stored projections cannot prove two distinct metals.
+    'bimetallic_lis_ml': 'dual_atom',
+    'dac_lis': 'dual_atom',
+    'sac_lis_ml': 'single_atom',
+}
+
+
+def dataset_profile_matches(record, profile):
+    """Match one strict lithium-sulfur profile without cross-library merging."""
+    target = PROFILE_TARGET_TYPES.get(profile)
+    if target is None:
         return False
     library = normalize_library_name(record.get('library_name'))
     reaction = str(record.get('reaction') or '').strip().casefold()
-    return library == '锂硫双原子' or reaction in {'li-s', 'lis', 'li_s', 'lithium_sulfur'}
+    catalyst_type = str(record.get('catalyst_type') or '').strip().casefold()
+    return library == '锂硫双原子' and reaction == 'srr' \
+        and catalyst_type in PROFILE_CATALYST_TYPES[target]
 
 
 class AnalysisReadonlyService(CatalystAnalysisService):
@@ -586,13 +604,11 @@ class AnalysisReadonlyService(CatalystAnalysisService):
         self._load_rows()
         rows=[r for r in self.records if r['exploratory_eligible']]
         before=len(rows)
-        profiles={'dac_lis_ml':'dual_atom','bimetallic_lis_ml':'dual_atom','dac_lis':'dual_atom','sac_lis_ml':'single_atom'}
+        profiles=PROFILE_TARGET_TYPES
         if dataset_profile:
             if dataset_profile not in profiles:
                 raise ValueError('unsupported dataset_profile')
-            wanted=profiles[dataset_profile]
-            allowed={'dual_atom','DAC','dac'} if wanted=='dual_atom' else {'single_atom','SAC','sac'}
-            rows=[r for r in rows if r['catalyst_type'] in allowed and dataset_profile_matches(r, wanted)]
+            rows=[r for r in rows if dataset_profile_matches(r, dataset_profile)]
         included=len(rows)
         rows=rows[offset:offset+limit] if limit is not None else rows[offset:]
         return self.decorate({'schema_version':'stored_dft_exploratory_v1','records':rows,'metadata':{'total_records':len(self.records),'exploratory_numeric_records':before,'approved_count':None,'assessment_status':'not_evaluated','safety_gate':'not_evaluated_exploratory_only','dataset_profile':dataset_profile,'profile_included_count_before_limit':included,'profile_excluded_count':before-included,'exported_count_after_limit':len(rows),'offset':offset,'limit':limit}})

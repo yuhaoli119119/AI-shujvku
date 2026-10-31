@@ -2550,7 +2550,7 @@ test.describe('Literature AI Front-end Smoke Tests', () => {
     await exportButton.click();
     await downloadPromise;
 
-    await expect(page.locator('#exportSafetyStatus')).toContainText('ML 导出规则');
+    await expect(page.locator('#exportSafetyStatus')).toContainText('探索 JSON 导出规则');
     await expect(page.locator('#exportSafetyStatus')).toContainText('基础候选 1 条');
     await expect(page.locator('#exportSafetyStatus')).toContainText('实际导出 1 条');
     await expect(page.locator('#exportSafetyStatus')).toContainText('待处理 2 条');

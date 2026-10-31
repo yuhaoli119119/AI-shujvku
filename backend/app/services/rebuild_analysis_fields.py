@@ -6,6 +6,7 @@ scores and method parameters are deliberately not catalyst descriptors here.
 from collections import defaultdict
 from math import isclose
 from copy import deepcopy
+import re
 
 from app.normalizers.chemistry_normalizer import ADSORBATE_MAP, canonicalize_adsorbate
 
@@ -36,6 +37,28 @@ for species in ('s8', 'li2s8', 'li2s6', 'li2s4', 'li2s2'):
     name = {'s8': 'S₈', 'li2s8': 'Li₂S₈', 'li2s6': 'Li₂S₆', 'li2s4': 'Li₂S₄', 'li2s2': 'Li₂S₂'}[species]
     FIELDS.append((species + '_adsorption_energy', name + ' 吸附能', 'eV', ('adsorption_energy_' + species + '_ev',)))
 
+LI2SN_BINDING_SPECIES = {
+    'li2s': 'Li2S',
+    'li2s2': 'Li2S2',
+    'li2s4': 'Li2S4',
+    'li2s6': 'Li2S6',
+    'li2s8': 'Li2S8',
+}
+LI2SN_BINDING_LABELS = {key: label for key, label in (
+    ('li2s', 'Li₂S'), ('li2s2', 'Li₂S₂'), ('li2s4', 'Li₂S₄'),
+    ('li2s6', 'Li₂S₆'), ('li2s8', 'Li₂S₈'))}
+LI2SN_BINDING_VARIANTS = {
+    '': '',
+    '_vdwsurf': '（vdWsurf）',
+    '_spin_polarized': '（自旋极化）',
+}
+for species_key in LI2SN_BINDING_SPECIES:
+    for variant, variant_label in LI2SN_BINDING_VARIANTS.items():
+        FIELDS.append((f'{species_key}_binding_energy{variant}',
+                       f'{LI2SN_BINDING_LABELS[species_key]} 结合能{variant_label}',
+                       'eV', ()))
+FIELDS.append(('li2sn_binding_energy', 'Li₂Sₙ 类别结合能（n 未注明）', 'eV', ('li2sn_binding_energy_ev',)))
+
 DEFINITIONS = {key: {'key': key, 'field': key, 'label': label, 'label_zh': label,
                      'unit': unit, 'type': 'number', 'category': 'numeric'}
                for key, label, unit, _ in FIELDS}
@@ -50,12 +73,59 @@ FIELD_SPECIES = {key: 'Li2S' for key in (
     'li2s_delithiation_barrier', 'li_s_bond_max', 'li1_s_bond_length', 'li2_s_bond_length')}
 FIELD_SPECIES.update({species.lower() + '_adsorption_energy': species
                       for species in ('S8', 'Li2S8', 'Li2S6', 'Li2S4', 'Li2S2')})
+FIELD_SPECIES.update({f'{species.lower()}_binding_energy{variant}': species
+                      for species in LI2SN_BINDING_SPECIES.values()
+                      for variant in LI2SN_BINDING_VARIANTS})
 KNOWN_SPECIES = set(ADSORBATE_MAP.values()) - {'LiPS'}
 
 
 def declared_species(record):
     text = record.get('adsorbate') or ''
     return canonicalize_adsorbate(text.translate(str.maketrans('₀₁₂₃₄₅₆₇₈₉', '0123456789')))
+
+
+GENERIC_LI2SN_BINDING_FIELDS = {
+    'binding_energy',
+    'binding_energy_ev',
+    'binding_energy_eb_ev',
+    'binding_energy_spin_polarized_ev',
+    'polysulfide_binding_energy_ev',
+}
+LI2SN_FAMILY_BINDING_FIELDS = {
+    'li2sn_binding_energy_ev': 'li2sn_binding_energy',
+}
+EXPLICIT_LI2SN_BINDING_FIELDS = (
+    re.compile(r'^(li2s(?:2|4|6|8)?)_binding_energy(?:_(vdwsurf))?_ev$'),
+    re.compile(r'^binding_energy_(li2s(?:2|4|6|8)?)(?:_(vdwsurf))?_ev$'),
+)
+
+
+def lis_binding_energy_field(record):
+    """Return a condition-preserving Li2Sn binding field, or ``None``.
+
+    Generic field names are accepted only when the row declares a concrete
+    Li2Sn adsorbate. Metal-support, relative, XPS, prediction, definition and
+    other unrelated quantities are intentionally outside this whitelist.
+    """
+    raw = str(record.get('field_name') or record.get('property_type') or '').strip().casefold()
+    if raw in LI2SN_FAMILY_BINDING_FIELDS:
+        return LI2SN_FAMILY_BINDING_FIELDS[raw]
+    variant = ''
+    species_key = None
+    for pattern in EXPLICIT_LI2SN_BINDING_FIELDS:
+        match = pattern.fullmatch(raw)
+        if match:
+            species_key = match.group(1)
+            variant = '_vdwsurf' if match.group(2) else ''
+            break
+    if species_key is None and raw in GENERIC_LI2SN_BINDING_FIELDS:
+        declared = declared_species(record)
+        species_key = next((key for key, name in LI2SN_BINDING_SPECIES.items()
+                            if declared == name), None)
+        variant = '_spin_polarized' if raw == 'binding_energy_spin_polarized_ev' else ''
+    if species_key not in LI2SN_BINDING_SPECIES:
+        return None
+    return species_key + '_binding_energy' + variant
 
 
 def source_ids(cell):
@@ -94,7 +164,10 @@ def project_rows(records):
         for record in row:
             raw = record['field_name']
             species = declared_species(record)
-            field = ALIASES.get(raw)
+            binding_field = lis_binding_energy_field(record)
+            field = binding_field or ALIASES.get(raw)
+            if binding_field is None and 'binding_energy' in raw.casefold():
+                field = None
             if raw in {'li1_s_bond_length_angstrom', 'li2_s_bond_length_angstrom'} and species not in KNOWN_SPECIES:
                 field = None
             # A known adsorbate gives one canonical variable, not both a

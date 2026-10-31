@@ -85,6 +85,92 @@ def test_known_adsorption_has_only_one_species_variable(species, field):
     assert original['field_name'] == 'adsorption_energy_ev'
 
 
+@pytest.mark.parametrize('raw,adsorbate,field', [
+    ('li2s2_binding_energy_ev', 'Li2S2', 'li2s2_binding_energy'),
+    ('binding_energy_li2s8_ev', 'Li2S8', 'li2s8_binding_energy'),
+    ('binding_energy_li2s4_vdwsurf_ev', 'Li2S4', 'li2s4_binding_energy_vdwsurf'),
+    ('binding_energy_eV', 'Li2S6*', 'li2s6_binding_energy'),
+    ('binding_energy_eb_ev', 'Li2S8', 'li2s8_binding_energy'),
+    ('polysulfide_binding_energy_ev', 'Li2S4', 'li2s4_binding_energy'),
+    ('binding_energy_spin_polarized_ev', 'Li2S', 'li2s_binding_energy_spin_polarized'),
+])
+def test_lis_binding_aliases_preserve_word_order_species_and_conditions(raw, adsorbate, field):
+    projected = project_rows([cell(raw, -1.2, adsorbate=adsorbate)])['one']
+    assert set(projected) == {field}
+    assert projected[field]['target']['normalized_value'] == -1.2
+
+
+@pytest.mark.parametrize('species', ['li2s', 'li2s2', 'li2s4', 'li2s6', 'li2s8'])
+@pytest.mark.parametrize('prefix_order', [True, False])
+@pytest.mark.parametrize('variant', ['', 'vdwsurf'])
+def test_all_lis_binding_species_word_orders_and_vdw_variants(species, prefix_order, variant):
+    variant_part = variant + '_' if variant else ''
+    raw = f'binding_energy_{species}_{variant_part}ev' if prefix_order else f'{species}_binding_energy_{variant_part}ev'
+    canonical = species + '_binding_energy' + ('_vdwsurf' if variant else '')
+    projected = project_rows([cell(raw, -1.2, adsorbate=species.replace('li2s', 'Li2S').upper())])['one']
+    assert set(projected) == {canonical}
+
+
+@pytest.mark.parametrize('raw,adsorbate', [
+    ('metal_support_binding_energy_ev', 'Li2S4'),
+    ('metal_nc_binding_energy_ev', 'Li2S4'),
+    ('metal_cluster_binding_energy_ev', 'Li2S4'),
+    ('metal_binding_energy_ev', 'Li2S4'),
+    ('relative_binding_energy_ev', 'Li2S4'),
+    ('binding_energy_shift_ev', 'Li2S4'),
+    ('xps_binding_energy_ev', 'Li2S4'),
+    ('binding_energy_definition', 'Li2S4'),
+    ('binding_energy_trend', 'Li2S4'),
+    ('binding_energy_li2s4_per_atom_ev', 'Li2S4'),
+    ('binding_energy_mev_a2', 'Li2S4'),
+    ('ml_predicted_li2s4_binding_energy_ev', 'Li2S4'),
+    ('lips_binding_energy_ev', 'LiPS'),
+    ('binding_energy_eV', None),
+    ('binding_energy_ev', None),
+    ('polysulfide_binding_energy_ev', None),
+    ('polysulfide_binding_energy_ev', 'LiPS'),
+    ('li2s_averaged_binding_energy_ev', 'Li2S'),
+])
+def test_non_target_or_ambiguous_binding_fields_do_not_enter_normalized_analysis(raw, adsorbate):
+    assert project_rows([cell(raw, -1.2, adsorbate=adsorbate)])['one'] == {}
+
+
+def test_explicit_lis_binding_field_conflict_preserves_original_evidence():
+    original = cell('binding_energy_li2s8_ev', -1.2, adsorbate='Li2S4')
+    result = project_rows([original])['one']['li2s8_binding_energy']
+    assert result['exclusion_reason'] == 'field_adsorbate_conflict'
+    assert result['raw_evidence'] == [original]
+
+
+def test_unspecified_li2sn_binding_keeps_a_separate_family_field():
+    projected = project_rows([cell('li2sn_binding_energy_ev', -1.1, adsorbate='Li2Sn')])['one']
+    assert set(projected) == {'li2sn_binding_energy'}
+    assert projected['li2sn_binding_energy']['target']['normalized_value'] == -1.1
+
+
+def test_binding_alias_word_order_merges_sources_only_when_value_agrees():
+    suffix = cell('binding_energy_li2s8_ev', -1.2, adsorbate='Li2S8')
+    prefix = cell('li2s8_binding_energy_ev', -1.2, adsorbate='Li2S8')
+    merged = project_rows([suffix, prefix])['one']['li2s8_binding_energy']
+    assert merged['exploratory_eligible']
+    assert source_ids(merged) == [suffix['record_id'], prefix['record_id']]
+    conflict = project_rows([suffix, dict(prefix, target=dict(normalized_value=-1.3, normalized_unit='eV'))])['one']['li2s8_binding_energy']
+    assert not conflict['exploratory_eligible']
+    assert conflict['exclusion_reason'] == 'conflicting_field_aliases'
+
+
+def test_species_and_variant_axes_remain_separate_in_the_same_row():
+    records = [
+        cell('binding_energy_li2s4_ev', -1.0, adsorbate='Li2S4'),
+        cell('binding_energy_li2s4_vdwsurf_ev', -1.1, adsorbate='Li2S4'),
+        cell('binding_energy_li2s8_ev', -1.2, adsorbate='Li2S8'),
+    ]
+    projected = project_rows(records)['one']
+    assert set(projected) == {
+        'li2s4_binding_energy', 'li2s4_binding_energy_vdwsurf', 'li2s8_binding_energy',
+    }
+
+
 def test_known_bader_transfer_is_not_duplicated_as_generic():
     projected = project_rows([cell('bader_charge_transfer_e', -.4, unit='e')])['one']
     assert set(projected) == {'li2s_bader_charge_transfer'}

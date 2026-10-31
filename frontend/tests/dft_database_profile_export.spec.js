@@ -4,6 +4,7 @@ const path = require('path');
 test.describe('DFT Database Profile Export Interaction', () => {
   test('datasetProfile selection does not reload table and carries correct param in CSV and ML exports', async ({ page }) => {
     let compareCount = 0;
+    let lastCompareParams = null;
     let lastCsvParams = null;
     let lastMlParams = null;
 
@@ -16,7 +17,10 @@ test.describe('DFT Database Profile Export Interaction', () => {
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
-          body: JSON.stringify([{ name: 'test_lib', is_active: true }]),
+          body: JSON.stringify([
+            { name: '锂硫双原子', is_active: true },
+            { name: '硫中毒', is_active: false },
+          ]),
         });
       }
       if (pathname === '/api/papers/aggregate') {
@@ -44,6 +48,7 @@ test.describe('DFT Database Profile Export Interaction', () => {
       }
       if (pathname === '/api/papers/compare') {
         compareCount++;
+        lastCompareParams = Object.fromEntries(url.searchParams.entries());
         return route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -122,7 +127,7 @@ test.describe('DFT Database Profile Export Interaction', () => {
     });
 
     const baseUrl = process.env.TEST_BASE_URL || 'http://127.0.0.1:4173';
-    await page.goto(`${baseUrl}/pages/dft_database/index.html`);
+    await page.goto(`${baseUrl}/pages/dft_database/index.html?library_name=${encodeURIComponent('锂硫双原子')}`);
 
     // Wait for initial load
     await expect(page.locator('#datasetProfile')).toBeVisible();
@@ -132,15 +137,21 @@ test.describe('DFT Database Profile Export Interaction', () => {
     // 1. Check label and title
     const label = page.locator('label[for="datasetProfile"]');
     await expect(label).toHaveText('导出数据范围');
-    await expect(page.locator('#datasetProfile')).toHaveAttribute('title', '仅影响导出文件，不影响当前表格查询');
+    await expect(page.locator('#datasetProfile')).toHaveAttribute('title', '仅影响导出文件；仅限锂硫双原子库，按双原子或单原子范围导出');
     await page.locator('.evidence-link').click();
     await expect(page.locator('#evidenceDetail')).toContainText('PDF 第 7 页');
     await page.keyboard.press('Escape');
 
+    await page.selectOption('#propertyType', 'binding_energy');
+    await expect.poll(() => lastCompareParams && lastCompareParams.property_type).toBe('binding_energy');
+    await page.selectOption('#propertyType', '');
+    await page.waitForTimeout(300);
+    const beforeProfileCompareCount = compareCount;
+
     // 2. Select dac_lis_ml: verify no /api/papers/compare or table reload occurs
     await page.selectOption('#datasetProfile', 'dac_lis_ml');
     await page.waitForTimeout(300);
-    expect(compareCount).toBe(initialCompareCount);
+    expect(compareCount).toBe(beforeProfileCompareCount);
 
     // 3. Test CSV Export with dac_lis_ml
     const csvButton = page.locator('button:has-text("导出 CSV")');
@@ -173,11 +184,17 @@ test.describe('DFT Database Profile Export Interaction', () => {
 
     // 5. Select sac_lis_ml: verify parameter changes to sac_lis_ml and no compare triggered
     await page.selectOption('#datasetProfile', 'sac_lis_ml');
-    expect(compareCount).toBe(initialCompareCount);
+    expect(compareCount).toBe(beforeProfileCompareCount);
     await expect(exportStatus).toContainText('筛选条件已变化');
 
     await csvButton.click();
     await page.waitForTimeout(300);
     expect(lastCsvParams.dataset_profile).toBe('sac_lis_ml');
+
+    // 7. Li-S profiles cannot carry into another library.
+    await page.selectOption('#libraryFilter', '硫中毒');
+    await expect(page.locator('#datasetProfile')).toHaveValue('');
+    await expect(page.locator('#datasetProfile option[value="dac_lis_ml"]')).toBeDisabled();
+    await expect(page.locator('#datasetProfile')).toHaveAttribute('title', '数据范围 profile 仅适用于锂硫双原子库');
   });
 });
